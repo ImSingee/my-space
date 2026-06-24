@@ -1,0 +1,54 @@
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+dist-ssr
+.output
+.nitro
+.vinxi
+
+# Development and cache
+.tanstack
+.wrangler
+*.local
+
+# Environment files
+.env
+.env.*
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Documentation and config
+.ai
+AGENTS.md
+CLAUDE.md
+README.md
+LICENSE
+
+# Test and coverage
+coverage
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+
+# Misc
+todos.json
+count.txt
