@@ -26,7 +26,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { SortableList, sortByIds } from '~components/app-shell/sortable-list';
-import { dashboardsQueryOptions } from '~queries/subapps';
+import { dashboardsQueryOptions } from '~queries/apps';
 import {
   createDashboard,
   type Dashboard,
@@ -34,7 +34,7 @@ import {
   renameDashboard,
   reorderDashboards,
   setDashboardPin,
-} from '~server/subapps';
+} from '~server/apps';
 
 export const Route = createFileRoute('/_app/dashboards')({
   loader: ({ context }) =>

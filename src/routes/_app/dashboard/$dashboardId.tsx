@@ -23,12 +23,12 @@ import {
   availableWidgetsQueryOptions,
   dashboardQueryOptions,
   dashboardsQueryOptions,
-} from '~queries/subapps';
+} from '~queries/apps';
 import {
   addDashboardWidget,
   removeDashboardWidget,
   updateDashboardLayout,
-} from '~server/subapps';
+} from '~server/apps';
 import classes from './dashboard.module.css';
 
 export const Route = createFileRoute('/_app/dashboard/$dashboardId')({
@@ -114,7 +114,7 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
             No widgets here yet
           </Text>
           <Text size="sm" c="dimmed" ta="center" maw={420}>
-            Widgets exposed by your subapps appear here. Build a subapp with the
+            Widgets exposed by your apps appear here. Build an app with the
             Agent, deploy it, then add its widgets with the button above.
           </Text>
         </Stack>
@@ -140,7 +140,7 @@ function AddWidgetMenu({ dashboardId }: { dashboardId: string }) {
   const { data: available } = useSuspenseQuery(availableWidgetsQueryOptions);
 
   const add = useMutation({
-    mutationFn: (input: { subappId: string; widgetId: string }) =>
+    mutationFn: (input: { appId: string; widgetId: string }) =>
       addDashboardWidget({ data: { dashboardId, ...input } }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -168,17 +168,17 @@ function AddWidgetMenu({ dashboardId }: { dashboardId: string }) {
         ) : (
           available.map((widget) => (
             <Menu.Item
-              key={`${widget.subappId}:${widget.widgetId}`}
+              key={`${widget.appId}:${widget.widgetId}`}
               onClick={() =>
                 add.mutate({
-                  subappId: widget.subappId,
+                  appId: widget.appId,
                   widgetId: widget.widgetId,
                 })
               }
             >
               <Text size="sm">{widget.name}</Text>
               <Text size="xs" c="dimmed">
-                {widget.subappName}
+                {widget.appName}
               </Text>
             </Menu.Item>
           ))

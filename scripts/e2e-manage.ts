@@ -1,5 +1,5 @@
 /**
- * End-to-end test of subapp management: versioned deploys, rollback, archive,
+ * End-to-end test of app management: versioned deploys, rollback, archive,
  * and delete — through the real platform modules.
  *
  * Run: set -a && . ./.env.local && set +a && pnpm exec tsx scripts/e2e-manage.ts
@@ -7,22 +7,18 @@
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
-import {
-  subappBuildDir,
-  subappSrcDir,
-  subappVersionsDir,
-} from '../src/agent/paths';
+import { appBuildDir, appSrcDir, appVersionsDir } from '../src/agent/paths';
 import { db, schema } from '../src/db';
-import { deploySubapp } from '../src/server/subapps/deploy';
+import { deployApp } from '../src/server/apps/deploy';
 import {
-  deleteSubapp,
+  deleteApp,
   listDeployments,
-  rollbackSubapp,
-  setSubappArchived,
-} from '../src/server/subapps/manage';
-import { dropSubappDatabase } from '../src/server/subapps/provision';
-import { stopSubapp } from '../src/server/subapps/runtime';
-import { createSubapp } from '../src/server/subapps/scaffold';
+  rollbackApp,
+  setAppArchived,
+} from '../src/server/apps/manage';
+import { dropAppDatabase } from '../src/server/apps/provision';
+import { stopApp } from '../src/server/apps/runtime';
+import { createApp } from '../src/server/apps/scaffold';
 
 const ID = 'mgmt-test';
 
@@ -35,23 +31,23 @@ function assert(cond: boolean, msg: string) {
 }
 
 async function cleanup() {
-  stopSubapp(ID);
-  await db.delete(schema.subapps).where(eq(schema.subapps.id, ID));
-  await fs.rm(subappSrcDir(ID), { recursive: true, force: true });
-  await fs.rm(subappBuildDir(ID), { recursive: true, force: true });
-  await fs.rm(subappVersionsDir(ID), { recursive: true, force: true });
-  await dropSubappDatabase(ID);
+  stopApp(ID);
+  await db.delete(schema.apps).where(eq(schema.apps.id, ID));
+  await fs.rm(appSrcDir(ID), { recursive: true, force: true });
+  await fs.rm(appBuildDir(ID), { recursive: true, force: true });
+  await fs.rm(appVersionsDir(ID), { recursive: true, force: true });
+  await dropAppDatabase(ID);
 }
 
 async function setManifestName(name: string) {
-  const file = path.join(subappSrcDir(ID), 'manifest.json');
+  const file = path.join(appSrcDir(ID), 'manifest.json');
   const manifest = JSON.parse(await fs.readFile(file, 'utf8'));
   manifest.name = name;
   await fs.writeFile(file, JSON.stringify(manifest, null, 2), 'utf8');
 }
 
 async function currentName(): Promise<string | undefined> {
-  const row = await db.query.subapps.findFirst({
+  const row = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, ID),
   });
   return row?.name;
@@ -62,13 +58,13 @@ async function main() {
   await cleanup();
 
   log('create + deploy v1 (name "Mgmt V1")');
-  await createSubapp({ id: ID, name: 'Mgmt V1', description: 'mgmt test' });
-  const v1 = await deploySubapp(ID);
+  await createApp({ id: ID, name: 'Mgmt V1', description: 'mgmt test' });
+  const v1 = await deployApp(ID);
   console.log('  v1 deploymentId', v1.deploymentId, 'version', v1.version);
 
   log('edit name -> deploy v2 (name "Mgmt V2")');
   await setManifestName('Mgmt V2');
-  const v2 = await deploySubapp(ID);
+  const v2 = await deployApp(ID);
   console.log('  v2 deploymentId', v2.deploymentId, 'version', v2.version);
   assert((await currentName()) === 'Mgmt V2', 'current name should be Mgmt V2');
 
@@ -88,14 +84,14 @@ async function main() {
   assert(prev.version === 1 && prev.canRollback, 'v1 should be rollback-able');
 
   log('rollback to v1');
-  const rb = await rollbackSubapp(ID, prev.id);
+  const rb = await rollbackApp(ID, prev.id);
   console.log('  restored version', rb.version);
   assert(rb.version === 1, 'rolled back to v1');
   assert((await currentName()) === 'Mgmt V1', 'name should revert to Mgmt V1');
 
   const liveManifest = JSON.parse(
     await fs.readFile(
-      path.join(subappBuildDir(ID), 'manifest.normalized.json'),
+      path.join(appBuildDir(ID), 'manifest.normalized.json'),
       'utf8',
     ),
   );
@@ -108,21 +104,21 @@ async function main() {
   );
 
   log('archive');
-  const arch = await setSubappArchived(ID, true);
+  const arch = await setAppArchived(ID, true);
   assert(arch.status === 'archived', 'status archived');
   log('unarchive');
-  const unarch = await setSubappArchived(ID, false);
+  const unarch = await setAppArchived(ID, false);
   assert(unarch.status === 'deployed', 'status back to deployed');
 
   log('delete');
-  await deleteSubapp(ID);
-  const gone = await db.query.subapps.findFirst({
+  await deleteApp(ID);
+  const gone = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, ID),
   });
-  assert(!gone, 'subapp row removed');
-  assert(!existsSync(subappSrcDir(ID)), 'source dir removed');
-  assert(!existsSync(subappBuildDir(ID)), 'build dir removed');
-  assert(!existsSync(subappVersionsDir(ID)), 'versions dir removed');
+  assert(!gone, 'app row removed');
+  assert(!existsSync(appSrcDir(ID)), 'source dir removed');
+  assert(!existsSync(appBuildDir(ID)), 'build dir removed');
+  assert(!existsSync(appVersionsDir(ID)), 'versions dir removed');
 
   log('PASS: versioned deploy + rollback + archive + delete all work');
   process.exit(0);

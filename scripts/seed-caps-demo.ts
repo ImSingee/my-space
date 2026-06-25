@@ -1,5 +1,5 @@
 /**
- * Seed a persistent demo subapp that exercises storage + cron + webhook +
+ * Seed a persistent demo app that exercises storage + cron + webhook +
  * long-running, so the platform UI and the public webhook route have real data.
  *
  * Run: set -a && . ./.env.local && set +a && pnpm exec tsx scripts/seed-caps-demo.ts
@@ -8,16 +8,16 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
-  subappBuildDir,
-  subappSrcDir,
-  subappStorageDir,
-  subappVersionsDir,
+  appBuildDir,
+  appSrcDir,
+  appStorageDir,
+  appVersionsDir,
 } from '../src/agent/paths';
 import { db, schema } from '../src/db';
-import { deploySubapp } from '../src/server/subapps/deploy';
-import { dropSubappDatabase } from '../src/server/subapps/provision';
-import { stopSubapp } from '../src/server/subapps/runtime';
-import { createSubapp } from '../src/server/subapps/scaffold';
+import { deployApp } from '../src/server/apps/deploy';
+import { dropAppDatabase } from '../src/server/apps/provision';
+import { stopApp } from '../src/server/apps/runtime';
+import { createApp } from '../src/server/apps/scaffold';
 
 const ID = 'caps-demo';
 
@@ -102,20 +102,20 @@ http
 
 async function main() {
   // Reset any prior copy.
-  stopSubapp(ID);
-  await db.delete(schema.subapps).where(eq(schema.subapps.id, ID));
-  await fs.rm(subappSrcDir(ID), { recursive: true, force: true });
-  await fs.rm(subappBuildDir(ID), { recursive: true, force: true });
-  await fs.rm(subappVersionsDir(ID), { recursive: true, force: true });
-  await fs.rm(subappStorageDir(ID), { recursive: true, force: true });
-  await dropSubappDatabase(ID).catch(() => {});
+  stopApp(ID);
+  await db.delete(schema.apps).where(eq(schema.apps.id, ID));
+  await fs.rm(appSrcDir(ID), { recursive: true, force: true });
+  await fs.rm(appBuildDir(ID), { recursive: true, force: true });
+  await fs.rm(appVersionsDir(ID), { recursive: true, force: true });
+  await fs.rm(appStorageDir(ID), { recursive: true, force: true });
+  await dropAppDatabase(ID).catch(() => {});
 
-  await createSubapp({
+  await createApp({
     id: ID,
     name: 'Capabilities Demo',
     description: 'demo',
   });
-  const dir = subappSrcDir(ID);
+  const dir = appSrcDir(ID);
   await fs.writeFile(
     path.join(dir, 'manifest.json'),
     JSON.stringify(MANIFEST, null, 2),
@@ -123,8 +123,8 @@ async function main() {
   );
   await fs.writeFile(path.join(dir, 'backend', 'main.ts'), BACKEND, 'utf8');
 
-  const dep = await deploySubapp(ID);
-  const row = await db.query.subapps.findFirst({
+  const dep = await deployApp(ID);
+  const row = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, ID),
   });
   console.log('deployed', ID, 'v' + dep.version);
@@ -132,7 +132,7 @@ async function main() {
   console.log('webhook URL', `/api/hooks/${ID}?secret=${row?.webhookSecret}`);
   // Stop the warm backend started in THIS process; the dev server will lazily
   // boot + keep it alive on first request / scheduled tick.
-  stopSubapp(ID);
+  stopApp(ID);
   process.exit(0);
 }
 

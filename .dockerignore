@@ -8,8 +8,8 @@ dist-ssr
 .nitro
 .vinxi
 
-# Agent-authored subapps + build artifacts (provided by a volume at runtime)
-workspace/subapps
+# Agent-authored apps + build artifacts (provided by a volume at runtime)
+workspace/apps
 workspace/builds
 workspace/versions
 workspace/storage

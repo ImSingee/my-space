@@ -32,7 +32,7 @@ import type { StreamState } from './use-agent-stream';
 import {
   type AssistantBlock,
   type ChatMessage,
-  deployedSubappIds,
+  deployedAppIds,
   partsToImages,
   partsToText,
   toolDetail,
@@ -53,7 +53,7 @@ function Markdownish({ text }: { text: string }) {
   );
 }
 
-function SubappActions({ ids }: { ids: string[] }) {
+function AppActions({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;
   return (
     <Group gap="xs" mt={6}>
@@ -77,8 +77,8 @@ function SubappActions({ ids }: { ids: string[] }) {
             leftSection={<IconLayoutGrid size={14} />}
             renderRoot={(props) => (
               <Link
-                to="/subapps/$subappId"
-                params={{ subappId: id }}
+                to="/apps/$appId/manage"
+                params={{ appId: id }}
                 {...props}
               />
             )}
@@ -258,7 +258,7 @@ export function MessageView({ message }: { message: ChatMessage }) {
   return (
     <Box className={classes.assistantRow}>
       <AssistantBlocks blocks={message.content} />
-      <SubappActions ids={deployedSubappIds(message.content)} />
+      <AppActions ids={deployedAppIds(message.content)} />
     </Box>
   );
 }

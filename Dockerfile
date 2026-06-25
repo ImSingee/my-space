@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# --- Deno binary (used to run each subapp's backend) -------------------------
+# --- Deno binary (used to run each app's backend) -------------------------
 FROM denoland/deno:bin-2.8.3 AS deno
 
 # --- Base image with pnpm ----------------------------------------------------
@@ -13,7 +13,7 @@ RUN corepack enable
 # --- Dependencies ------------------------------------------------------------
 # Install ALL deps (including dev) and DO run install scripts: the platform
 # needs `buf` + `protoc-gen-es` (codegen) and `esbuild` (bundling) at runtime
-# when it builds subapps, and those packages fetch native binaries on install.
+# when it builds apps, and those packages fetch native binaries on install.
 FROM base AS deps
 # pnpm-workspace.yaml carries `onlyBuiltDependencies` (incl. esbuild) — required
 # so pnpm runs esbuild's install script and fetches its native binary.
@@ -40,7 +40,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Deno runs the subapp backends the platform spawns.
+# Deno runs the app backends the platform spawns.
 COPY --from=deno /deno /usr/local/bin/deno
 
 # Runtime needs: the built server, the full dependency tree (esbuild bundling +
@@ -53,7 +53,7 @@ COPY migrations ./migrations
 COPY templates ./templates
 COPY skills ./skills
 
-# The agent authors subapps under /app/workspace; mount a volume to persist it.
+# The agent authors apps under /app/workspace; mount a volume to persist it.
 RUN mkdir -p /app/workspace /app/.deno
 
 EXPOSE 3700

@@ -16,20 +16,20 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
-import { Route as AppSubappsIndexRouteImport } from './routes/_app/subapps/index'
 import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
-import { Route as AppSubappIdSplatRouteImport } from './routes/app/$subappId/$'
+import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
+import { Route as AppAppIdSplatRouteImport } from './routes/app/$appId/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiAgentStreamRouteImport } from './routes/api/agent/stream'
 import { Route as ApiAgentAnswerRouteImport } from './routes/api/agent/answer'
-import { Route as AppSubappsSubappIdRouteImport } from './routes/_app/subapps/$subappId'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
-import { Route as AppAppsSubappIdRouteImport } from './routes/_app/apps/$subappId'
-import { Route as ApiHooksSubappIdSplatRouteImport } from './routes/api/hooks/$subappId/$'
-import { Route as ApiSubappsSubappIdWidgetWidgetIdRouteImport } from './routes/api/subapps/$subappId/widget/$widgetId'
-import { Route as ApiSubappsSubappIdStorageSplatRouteImport } from './routes/api/subapps/$subappId/storage/$'
-import { Route as ApiSubappsSubappIdRpcSplatRouteImport } from './routes/api/subapps/$subappId/rpc/$'
-import { Route as ApiSubappsSubappIdAppSplatRouteImport } from './routes/api/subapps/$subappId/app/$'
+import { Route as AppAppsAppIdIndexRouteImport } from './routes/_app/apps/$appId/index'
+import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
+import { Route as AppAppsAppIdManageRouteImport } from './routes/_app/apps/$appId/manage'
+import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
+import { Route as ApiAppsAppIdStorageSplatRouteImport } from './routes/api/apps/$appId/storage/$'
+import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
+import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$appId/app/$'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -65,19 +65,19 @@ const AppAgentRoute = AppAgentRouteImport.update({
   path: '/agent',
   getParentRoute: () => AppRoute,
 } as any)
-const AppSubappsIndexRoute = AppSubappsIndexRouteImport.update({
-  id: '/subapps/',
-  path: '/subapps/',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
   id: '/dashboard/',
   path: '/dashboard/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppSubappIdSplatRoute = AppSubappIdSplatRouteImport.update({
-  id: '/app/$subappId/$',
-  path: '/app/$subappId/$',
+const AppAppsIndexRoute = AppAppsIndexRouteImport.update({
+  id: '/apps/',
+  path: '/apps/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAppIdSplatRoute = AppAppIdSplatRouteImport.update({
+  id: '/app/$appId/$',
+  path: '/app/$appId/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -95,50 +95,48 @@ const ApiAgentAnswerRoute = ApiAgentAnswerRouteImport.update({
   path: '/api/agent/answer',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppSubappsSubappIdRoute = AppSubappsSubappIdRouteImport.update({
-  id: '/subapps/$subappId',
-  path: '/subapps/$subappId',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
   id: '/dashboard/$dashboardId',
   path: '/dashboard/$dashboardId',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAppsSubappIdRoute = AppAppsSubappIdRouteImport.update({
-  id: '/apps/$subappId',
-  path: '/apps/$subappId',
+const AppAppsAppIdIndexRoute = AppAppsAppIdIndexRouteImport.update({
+  id: '/apps/$appId/',
+  path: '/apps/$appId/',
   getParentRoute: () => AppRoute,
 } as any)
-const ApiHooksSubappIdSplatRoute = ApiHooksSubappIdSplatRouteImport.update({
-  id: '/api/hooks/$subappId/$',
-  path: '/api/hooks/$subappId/$',
+const ApiHooksAppIdSplatRoute = ApiHooksAppIdSplatRouteImport.update({
+  id: '/api/hooks/$appId/$',
+  path: '/api/hooks/$appId/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSubappsSubappIdWidgetWidgetIdRoute =
-  ApiSubappsSubappIdWidgetWidgetIdRouteImport.update({
-    id: '/api/subapps/$subappId/widget/$widgetId',
-    path: '/api/subapps/$subappId/widget/$widgetId',
+const AppAppsAppIdManageRoute = AppAppsAppIdManageRouteImport.update({
+  id: '/apps/$appId/manage',
+  path: '/apps/$appId/manage',
+  getParentRoute: () => AppRoute,
+} as any)
+const ApiAppsAppIdWidgetWidgetIdRoute =
+  ApiAppsAppIdWidgetWidgetIdRouteImport.update({
+    id: '/api/apps/$appId/widget/$widgetId',
+    path: '/api/apps/$appId/widget/$widgetId',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiSubappsSubappIdStorageSplatRoute =
-  ApiSubappsSubappIdStorageSplatRouteImport.update({
-    id: '/api/subapps/$subappId/storage/$',
-    path: '/api/subapps/$subappId/storage/$',
+const ApiAppsAppIdStorageSplatRoute =
+  ApiAppsAppIdStorageSplatRouteImport.update({
+    id: '/api/apps/$appId/storage/$',
+    path: '/api/apps/$appId/storage/$',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiSubappsSubappIdRpcSplatRoute =
-  ApiSubappsSubappIdRpcSplatRouteImport.update({
-    id: '/api/subapps/$subappId/rpc/$',
-    path: '/api/subapps/$subappId/rpc/$',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiSubappsSubappIdAppSplatRoute =
-  ApiSubappsSubappIdAppSplatRouteImport.update({
-    id: '/api/subapps/$subappId/app/$',
-    path: '/api/subapps/$subappId/app/$',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const ApiAppsAppIdRpcSplatRoute = ApiAppsAppIdRpcSplatRouteImport.update({
+  id: '/api/apps/$appId/rpc/$',
+  path: '/api/apps/$appId/rpc/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppsAppIdAppSplatRoute = ApiAppsAppIdAppSplatRouteImport.update({
+  id: '/api/apps/$appId/app/$',
+  path: '/api/apps/$appId/app/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -147,20 +145,20 @@ export interface FileRoutesByFullPath {
   '/agent': typeof AppAgentRoute
   '/dashboards': typeof AppDashboardsRoute
   '/settings': typeof AppSettingsRoute
-  '/apps/$subappId': typeof AppAppsSubappIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
-  '/subapps/$subappId': typeof AppSubappsSubappIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/app/$subappId/$': typeof AppSubappIdSplatRoute
+  '/app/$appId/$': typeof AppAppIdSplatRoute
+  '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
-  '/subapps/': typeof AppSubappsIndexRoute
-  '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
-  '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
-  '/api/subapps/$subappId/rpc/$': typeof ApiSubappsSubappIdRpcSplatRoute
-  '/api/subapps/$subappId/storage/$': typeof ApiSubappsSubappIdStorageSplatRoute
-  '/api/subapps/$subappId/widget/$widgetId': typeof ApiSubappsSubappIdWidgetWidgetIdRoute
+  '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
+  '/apps/$appId/': typeof AppAppsAppIdIndexRoute
+  '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
+  '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
+  '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
+  '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -169,20 +167,20 @@ export interface FileRoutesByTo {
   '/agent': typeof AppAgentRoute
   '/dashboards': typeof AppDashboardsRoute
   '/settings': typeof AppSettingsRoute
-  '/apps/$subappId': typeof AppAppsSubappIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
-  '/subapps/$subappId': typeof AppSubappsSubappIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/app/$subappId/$': typeof AppSubappIdSplatRoute
+  '/app/$appId/$': typeof AppAppIdSplatRoute
+  '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
-  '/subapps': typeof AppSubappsIndexRoute
-  '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
-  '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
-  '/api/subapps/$subappId/rpc/$': typeof ApiSubappsSubappIdRpcSplatRoute
-  '/api/subapps/$subappId/storage/$': typeof ApiSubappsSubappIdStorageSplatRoute
-  '/api/subapps/$subappId/widget/$widgetId': typeof ApiSubappsSubappIdWidgetWidgetIdRoute
+  '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
+  '/apps/$appId': typeof AppAppsAppIdIndexRoute
+  '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
+  '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
+  '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
+  '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -193,20 +191,20 @@ export interface FileRoutesById {
   '/_app/agent': typeof AppAgentRoute
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/settings': typeof AppSettingsRoute
-  '/_app/apps/$subappId': typeof AppAppsSubappIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
-  '/_app/subapps/$subappId': typeof AppSubappsSubappIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/app/$subappId/$': typeof AppSubappIdSplatRoute
+  '/app/$appId/$': typeof AppAppIdSplatRoute
+  '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
-  '/_app/subapps/': typeof AppSubappsIndexRoute
-  '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
-  '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
-  '/api/subapps/$subappId/rpc/$': typeof ApiSubappsSubappIdRpcSplatRoute
-  '/api/subapps/$subappId/storage/$': typeof ApiSubappsSubappIdStorageSplatRoute
-  '/api/subapps/$subappId/widget/$widgetId': typeof ApiSubappsSubappIdWidgetWidgetIdRoute
+  '/_app/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
+  '/_app/apps/$appId/': typeof AppAppsAppIdIndexRoute
+  '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
+  '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
+  '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
+  '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -217,20 +215,20 @@ export interface FileRouteTypes {
     | '/agent'
     | '/dashboards'
     | '/settings'
-    | '/apps/$subappId'
     | '/dashboard/$dashboardId'
-    | '/subapps/$subappId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
-    | '/app/$subappId/$'
+    | '/app/$appId/$'
+    | '/apps/'
     | '/dashboard/'
-    | '/subapps/'
-    | '/api/hooks/$subappId/$'
-    | '/api/subapps/$subappId/app/$'
-    | '/api/subapps/$subappId/rpc/$'
-    | '/api/subapps/$subappId/storage/$'
-    | '/api/subapps/$subappId/widget/$widgetId'
+    | '/apps/$appId/manage'
+    | '/api/hooks/$appId/$'
+    | '/apps/$appId/'
+    | '/api/apps/$appId/app/$'
+    | '/api/apps/$appId/rpc/$'
+    | '/api/apps/$appId/storage/$'
+    | '/api/apps/$appId/widget/$widgetId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -239,20 +237,20 @@ export interface FileRouteTypes {
     | '/agent'
     | '/dashboards'
     | '/settings'
-    | '/apps/$subappId'
     | '/dashboard/$dashboardId'
-    | '/subapps/$subappId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
-    | '/app/$subappId/$'
+    | '/app/$appId/$'
+    | '/apps'
     | '/dashboard'
-    | '/subapps'
-    | '/api/hooks/$subappId/$'
-    | '/api/subapps/$subappId/app/$'
-    | '/api/subapps/$subappId/rpc/$'
-    | '/api/subapps/$subappId/storage/$'
-    | '/api/subapps/$subappId/widget/$widgetId'
+    | '/apps/$appId/manage'
+    | '/api/hooks/$appId/$'
+    | '/apps/$appId'
+    | '/api/apps/$appId/app/$'
+    | '/api/apps/$appId/rpc/$'
+    | '/api/apps/$appId/storage/$'
+    | '/api/apps/$appId/widget/$widgetId'
   id:
     | '__root__'
     | '/'
@@ -262,20 +260,20 @@ export interface FileRouteTypes {
     | '/_app/agent'
     | '/_app/dashboards'
     | '/_app/settings'
-    | '/_app/apps/$subappId'
     | '/_app/dashboard/$dashboardId'
-    | '/_app/subapps/$subappId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
-    | '/app/$subappId/$'
+    | '/app/$appId/$'
+    | '/_app/apps/'
     | '/_app/dashboard/'
-    | '/_app/subapps/'
-    | '/api/hooks/$subappId/$'
-    | '/api/subapps/$subappId/app/$'
-    | '/api/subapps/$subappId/rpc/$'
-    | '/api/subapps/$subappId/storage/$'
-    | '/api/subapps/$subappId/widget/$widgetId'
+    | '/_app/apps/$appId/manage'
+    | '/api/hooks/$appId/$'
+    | '/_app/apps/$appId/'
+    | '/api/apps/$appId/app/$'
+    | '/api/apps/$appId/rpc/$'
+    | '/api/apps/$appId/storage/$'
+    | '/api/apps/$appId/widget/$widgetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -286,12 +284,12 @@ export interface RootRouteChildren {
   ApiAgentAnswerRoute: typeof ApiAgentAnswerRoute
   ApiAgentStreamRoute: typeof ApiAgentStreamRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  AppSubappIdSplatRoute: typeof AppSubappIdSplatRoute
-  ApiHooksSubappIdSplatRoute: typeof ApiHooksSubappIdSplatRoute
-  ApiSubappsSubappIdAppSplatRoute: typeof ApiSubappsSubappIdAppSplatRoute
-  ApiSubappsSubappIdRpcSplatRoute: typeof ApiSubappsSubappIdRpcSplatRoute
-  ApiSubappsSubappIdStorageSplatRoute: typeof ApiSubappsSubappIdStorageSplatRoute
-  ApiSubappsSubappIdWidgetWidgetIdRoute: typeof ApiSubappsSubappIdWidgetWidgetIdRoute
+  AppAppIdSplatRoute: typeof AppAppIdSplatRoute
+  ApiHooksAppIdSplatRoute: typeof ApiHooksAppIdSplatRoute
+  ApiAppsAppIdAppSplatRoute: typeof ApiAppsAppIdAppSplatRoute
+  ApiAppsAppIdRpcSplatRoute: typeof ApiAppsAppIdRpcSplatRoute
+  ApiAppsAppIdStorageSplatRoute: typeof ApiAppsAppIdStorageSplatRoute
+  ApiAppsAppIdWidgetWidgetIdRoute: typeof ApiAppsAppIdWidgetWidgetIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -345,13 +343,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAgentRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/subapps/': {
-      id: '/_app/subapps/'
-      path: '/subapps'
-      fullPath: '/subapps/'
-      preLoaderRoute: typeof AppSubappsIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/dashboard/': {
       id: '/_app/dashboard/'
       path: '/dashboard'
@@ -359,11 +350,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/$subappId/$': {
-      id: '/app/$subappId/$'
-      path: '/app/$subappId/$'
-      fullPath: '/app/$subappId/$'
-      preLoaderRoute: typeof AppSubappIdSplatRouteImport
+    '/_app/apps/': {
+      id: '/_app/apps/'
+      path: '/apps'
+      fullPath: '/apps/'
+      preLoaderRoute: typeof AppAppsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/$appId/$': {
+      id: '/app/$appId/$'
+      path: '/app/$appId/$'
+      fullPath: '/app/$appId/$'
+      preLoaderRoute: typeof AppAppIdSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -387,13 +385,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAgentAnswerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/subapps/$subappId': {
-      id: '/_app/subapps/$subappId'
-      path: '/subapps/$subappId'
-      fullPath: '/subapps/$subappId'
-      preLoaderRoute: typeof AppSubappsSubappIdRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/dashboard/$dashboardId': {
       id: '/_app/dashboard/$dashboardId'
       path: '/dashboard/$dashboardId'
@@ -401,46 +392,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardDashboardIdRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/apps/$subappId': {
-      id: '/_app/apps/$subappId'
-      path: '/apps/$subappId'
-      fullPath: '/apps/$subappId'
-      preLoaderRoute: typeof AppAppsSubappIdRouteImport
+    '/_app/apps/$appId/': {
+      id: '/_app/apps/$appId/'
+      path: '/apps/$appId'
+      fullPath: '/apps/$appId/'
+      preLoaderRoute: typeof AppAppsAppIdIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/api/hooks/$subappId/$': {
-      id: '/api/hooks/$subappId/$'
-      path: '/api/hooks/$subappId/$'
-      fullPath: '/api/hooks/$subappId/$'
-      preLoaderRoute: typeof ApiHooksSubappIdSplatRouteImport
+    '/api/hooks/$appId/$': {
+      id: '/api/hooks/$appId/$'
+      path: '/api/hooks/$appId/$'
+      fullPath: '/api/hooks/$appId/$'
+      preLoaderRoute: typeof ApiHooksAppIdSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/subapps/$subappId/widget/$widgetId': {
-      id: '/api/subapps/$subappId/widget/$widgetId'
-      path: '/api/subapps/$subappId/widget/$widgetId'
-      fullPath: '/api/subapps/$subappId/widget/$widgetId'
-      preLoaderRoute: typeof ApiSubappsSubappIdWidgetWidgetIdRouteImport
+    '/_app/apps/$appId/manage': {
+      id: '/_app/apps/$appId/manage'
+      path: '/apps/$appId/manage'
+      fullPath: '/apps/$appId/manage'
+      preLoaderRoute: typeof AppAppsAppIdManageRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/apps/$appId/widget/$widgetId': {
+      id: '/api/apps/$appId/widget/$widgetId'
+      path: '/api/apps/$appId/widget/$widgetId'
+      fullPath: '/api/apps/$appId/widget/$widgetId'
+      preLoaderRoute: typeof ApiAppsAppIdWidgetWidgetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/subapps/$subappId/storage/$': {
-      id: '/api/subapps/$subappId/storage/$'
-      path: '/api/subapps/$subappId/storage/$'
-      fullPath: '/api/subapps/$subappId/storage/$'
-      preLoaderRoute: typeof ApiSubappsSubappIdStorageSplatRouteImport
+    '/api/apps/$appId/storage/$': {
+      id: '/api/apps/$appId/storage/$'
+      path: '/api/apps/$appId/storage/$'
+      fullPath: '/api/apps/$appId/storage/$'
+      preLoaderRoute: typeof ApiAppsAppIdStorageSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/subapps/$subappId/rpc/$': {
-      id: '/api/subapps/$subappId/rpc/$'
-      path: '/api/subapps/$subappId/rpc/$'
-      fullPath: '/api/subapps/$subappId/rpc/$'
-      preLoaderRoute: typeof ApiSubappsSubappIdRpcSplatRouteImport
+    '/api/apps/$appId/rpc/$': {
+      id: '/api/apps/$appId/rpc/$'
+      path: '/api/apps/$appId/rpc/$'
+      fullPath: '/api/apps/$appId/rpc/$'
+      preLoaderRoute: typeof ApiAppsAppIdRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/subapps/$subappId/app/$': {
-      id: '/api/subapps/$subappId/app/$'
-      path: '/api/subapps/$subappId/app/$'
-      fullPath: '/api/subapps/$subappId/app/$'
-      preLoaderRoute: typeof ApiSubappsSubappIdAppSplatRouteImport
+    '/api/apps/$appId/app/$': {
+      id: '/api/apps/$appId/app/$'
+      path: '/api/apps/$appId/app/$'
+      fullPath: '/api/apps/$appId/app/$'
+      preLoaderRoute: typeof ApiAppsAppIdAppSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -450,22 +448,22 @@ interface AppRouteChildren {
   AppAgentRoute: typeof AppAgentRoute
   AppDashboardsRoute: typeof AppDashboardsRoute
   AppSettingsRoute: typeof AppSettingsRoute
-  AppAppsSubappIdRoute: typeof AppAppsSubappIdRoute
   AppDashboardDashboardIdRoute: typeof AppDashboardDashboardIdRoute
-  AppSubappsSubappIdRoute: typeof AppSubappsSubappIdRoute
+  AppAppsIndexRoute: typeof AppAppsIndexRoute
   AppDashboardIndexRoute: typeof AppDashboardIndexRoute
-  AppSubappsIndexRoute: typeof AppSubappsIndexRoute
+  AppAppsAppIdManageRoute: typeof AppAppsAppIdManageRoute
+  AppAppsAppIdIndexRoute: typeof AppAppsAppIdIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAgentRoute: AppAgentRoute,
   AppDashboardsRoute: AppDashboardsRoute,
   AppSettingsRoute: AppSettingsRoute,
-  AppAppsSubappIdRoute: AppAppsSubappIdRoute,
   AppDashboardDashboardIdRoute: AppDashboardDashboardIdRoute,
-  AppSubappsSubappIdRoute: AppSubappsSubappIdRoute,
+  AppAppsIndexRoute: AppAppsIndexRoute,
   AppDashboardIndexRoute: AppDashboardIndexRoute,
-  AppSubappsIndexRoute: AppSubappsIndexRoute,
+  AppAppsAppIdManageRoute: AppAppsAppIdManageRoute,
+  AppAppsAppIdIndexRoute: AppAppsAppIdIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -478,12 +476,12 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAgentAnswerRoute: ApiAgentAnswerRoute,
   ApiAgentStreamRoute: ApiAgentStreamRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  AppSubappIdSplatRoute: AppSubappIdSplatRoute,
-  ApiHooksSubappIdSplatRoute: ApiHooksSubappIdSplatRoute,
-  ApiSubappsSubappIdAppSplatRoute: ApiSubappsSubappIdAppSplatRoute,
-  ApiSubappsSubappIdRpcSplatRoute: ApiSubappsSubappIdRpcSplatRoute,
-  ApiSubappsSubappIdStorageSplatRoute: ApiSubappsSubappIdStorageSplatRoute,
-  ApiSubappsSubappIdWidgetWidgetIdRoute: ApiSubappsSubappIdWidgetWidgetIdRoute,
+  AppAppIdSplatRoute: AppAppIdSplatRoute,
+  ApiHooksAppIdSplatRoute: ApiHooksAppIdSplatRoute,
+  ApiAppsAppIdAppSplatRoute: ApiAppsAppIdAppSplatRoute,
+  ApiAppsAppIdRpcSplatRoute: ApiAppsAppIdRpcSplatRoute,
+  ApiAppsAppIdStorageSplatRoute: ApiAppsAppIdStorageSplatRoute,
+  ApiAppsAppIdWidgetWidgetIdRoute: ApiAppsAppIdWidgetWidgetIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

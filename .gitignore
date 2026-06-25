@@ -16,7 +16,7 @@ __screenshots__
 .vitest
 todos.json
 
-# BYOD platform runtime data (subapp sources, build artifacts, temp)
+# BYOD platform runtime data (app sources, build artifacts, temp)
 /workspace
 # pi agent credential file (we inject keys explicitly instead)
 auth.json

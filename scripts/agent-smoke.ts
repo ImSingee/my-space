@@ -1,34 +1,34 @@
 /**
  * End-to-end smoke test of the *Agent* loop against the real LLM endpoint:
  * seed providers -> create a session -> run one natural-language turn that asks
- * the agent to scaffold and deploy a subapp -> assert the tools fired and the
- * subapp ended up deployed.
+ * the agent to scaffold and deploy an app -> assert the tools fired and the
+ * app ended up deployed.
  *
  * Run with: set -a && . ./.env.local && set +a && pnpm exec tsx scripts/agent-smoke.ts
  */
 import { eq } from 'drizzle-orm';
-import { subappBuildDir, subappSrcDir } from '../src/agent/paths';
+import { appBuildDir, appSrcDir } from '../src/agent/paths';
 import { runAgentTurn } from '../src/agent/runtime';
 import { seedDefaultProviders } from '../src/agent/seed-providers';
 import { db, schema } from '../src/db';
-import { dropSubappDatabase } from '../src/server/subapps/provision';
-import { stopSubapp } from '../src/server/subapps/runtime';
+import { dropAppDatabase } from '../src/server/apps/provision';
+import { stopApp } from '../src/server/apps/runtime';
 import { promises as fs } from 'node:fs';
 
 const ID = process.env.SMOKE_ID ?? 'agent-demo';
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 240_000);
 const PROMPT =
   process.env.SMOKE_PROMPT ??
-  `Create a new subapp with id "${ID}" and name "Agent Demo". ` +
+  `Create a new app with id "${ID}" and name "Agent Demo". ` +
     'The default counter template is fine as-is. ' +
     'Then deploy it and reply with the app URL. Keep it minimal.';
 
 async function cleanup() {
-  stopSubapp(ID);
-  await db.delete(schema.subapps).where(eq(schema.subapps.id, ID));
-  await fs.rm(subappSrcDir(ID), { recursive: true, force: true });
-  await fs.rm(subappBuildDir(ID), { recursive: true, force: true });
-  await dropSubappDatabase(ID);
+  stopApp(ID);
+  await db.delete(schema.apps).where(eq(schema.apps.id, ID));
+  await fs.rm(appSrcDir(ID), { recursive: true, force: true });
+  await fs.rm(appBuildDir(ID), { recursive: true, force: true });
+  await dropAppDatabase(ID);
 }
 
 async function main() {
@@ -92,28 +92,28 @@ async function main() {
 
   if (errored) throw new Error(`agent errored: ${errored}`);
 
-  const row = await db.query.subapps.findFirst({
+  const row = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, ID),
   });
-  console.log('\n[subapp row]', row && { id: row.id, status: row.status });
+  console.log('\n[app row]', row && { id: row.id, status: row.status });
 
-  if (!toolCalls.includes('create_subapp')) {
-    throw new Error('agent did not call create_subapp');
+  if (!toolCalls.includes('create_app')) {
+    throw new Error('agent did not call create_app');
   }
-  if (!toolCalls.includes('deploy_subapp')) {
-    throw new Error('agent did not call deploy_subapp');
+  if (!toolCalls.includes('deploy_app')) {
+    throw new Error('agent did not call deploy_app');
   }
   if (row?.status !== 'deployed') {
-    throw new Error(`subapp not deployed (status=${row?.status})`);
+    throw new Error(`app not deployed (status=${row?.status})`);
   }
 
-  console.log('\nPASS: agent scaffolded + deployed a subapp from NL.');
-  stopSubapp(ID);
+  console.log('\nPASS: agent scaffolded + deployed an app from NL.');
+  stopApp(ID);
   process.exit(0);
 }
 
 main().catch((e) => {
   console.error('\nAGENT SMOKE FAILED:', e);
-  stopSubapp(ID);
+  stopApp(ID);
   process.exit(1);
 });

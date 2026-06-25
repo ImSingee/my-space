@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
-import { dashboardsQueryOptions } from '~queries/subapps';
+import { dashboardsQueryOptions } from '~queries/apps';
 
 export const Route = createFileRoute('/_app/dashboard/')({
   loader: async ({ context }) => {

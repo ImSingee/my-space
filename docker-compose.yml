@@ -1,6 +1,6 @@
 # Hatch — one-command deploy: `docker compose up --build`
 # Brings up Postgres + the platform. The platform image bundles Node, Deno,
-# buf and esbuild, so it can build and run AI-generated subapps on its own.
+# buf and esbuild, so it can build and run AI-generated apps on its own.
 
 services:
   db:
@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_DB: postgres
       # Passwordless local access (the platform connects as postgres@db without a
-      # password and provisions a database per subapp). This DB is not published
+      # password and provisions a database per app). This DB is not published
       # to the host by default; uncomment the ports mapping below to inspect it.
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
@@ -34,9 +34,9 @@ services:
     environment:
       # Platform database.
       DATABASE_URL: postgres://postgres@db:5432/postgres
-      # Admin connection used to create/drop a database per subapp.
+      # Admin connection used to create/drop a database per app.
       PLATFORM_PG_ADMIN_URL: postgres://postgres@db:5432/postgres
-      # Host/port injected into each subapp backend's DATABASE_URL.
+      # Host/port injected into each app backend's DATABASE_URL.
       PLATFORM_PG_HOST: db
       PLATFORM_PG_PORT: '5432'
       PORT: '3700'
@@ -49,9 +49,9 @@ services:
       # Host port is configurable (HATCH_PORT) to avoid clashing with a local dev server.
       - '${HATCH_PORT:-3700}:3700'
     volumes:
-      # Persist agent-authored subapp source, builds, versions and storage.
+      # Persist agent-authored app source, builds, versions and storage.
       - hatch_workspace:/app/workspace
-      # Persist Deno's npm cache so subapp backends start fast after the first run.
+      # Persist Deno's npm cache so app backends start fast after the first run.
       - hatch_deno:/app/.deno
 
 volumes:

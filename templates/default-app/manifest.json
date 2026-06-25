@@ -1,0 +1,36 @@
+{
+  "id": "__APP_ID__",
+  "name": "__APP_NAME__",
+  "description": "__APP_DESCRIPTION__",
+  "version": 1,
+  "capabilities": {
+    "database": true,
+    "frontend": true,
+    "widgets": true,
+    "backend": true,
+    "cron": false,
+    "webhook": false,
+    "storage": false,
+    "workflow": false
+  },
+  "backendMode": "serverless",
+  "rpc": {
+    "proto": "proto/service.proto",
+    "service": "app.v1.CounterService"
+  },
+  "backend": {
+    "entry": "backend/main.ts"
+  },
+  "app": {
+    "entry": "app/main.tsx",
+    "html": "app/index.html"
+  },
+  "widgets": [
+    {
+      "id": "counter",
+      "name": "Counter",
+      "entry": "widgets/counter.tsx",
+      "defaultSize": { "w": 4, "h": 3 }
+    }
+  ]
+}

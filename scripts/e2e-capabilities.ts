@@ -1,5 +1,5 @@
 /**
- * End-to-end test of subapp capabilities: storage, cron scheduling, inbound
+ * End-to-end test of app capabilities: storage, cron scheduling, inbound
  * webhooks, and long-running (kept-warm) backends — through real platform
  * modules. A plain node:http Deno backend is staged that uses STORAGE_DIR.
  *
@@ -9,31 +9,28 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
-  subappBuildDir,
-  subappSrcDir,
-  subappStorageDir,
-  subappVersionsDir,
+  appBuildDir,
+  appSrcDir,
+  appStorageDir,
+  appVersionsDir,
 } from '../src/agent/paths';
 import { db, schema } from '../src/db';
-import { nextRun, parseCron } from '../src/server/subapps/cron-expr';
-import { deploySubapp } from '../src/server/subapps/deploy';
-import { dropSubappDatabase } from '../src/server/subapps/provision';
+import { nextRun, parseCron } from '../src/server/apps/cron-expr';
+import { deployApp } from '../src/server/apps/deploy';
+import { dropAppDatabase } from '../src/server/apps/provision';
 import {
-  callSubappBackend,
-  isSubappRunning,
-  stopSubapp,
-} from '../src/server/subapps/runtime';
-import {
-  reloadScheduler,
-  runCronJobNow,
-} from '../src/server/subapps/scheduler';
-import { createSubapp } from '../src/server/subapps/scaffold';
+  callAppBackend,
+  isAppRunning,
+  stopApp,
+} from '../src/server/apps/runtime';
+import { reloadScheduler, runCronJobNow } from '../src/server/apps/scheduler';
+import { createApp } from '../src/server/apps/scaffold';
 import {
   deleteObject,
   getObject,
   listObjects,
   putObject,
-} from '../src/server/subapps/storage';
+} from '../src/server/apps/storage';
 
 const ID = 'caps-test';
 
@@ -130,17 +127,17 @@ http
 `;
 
 async function cleanup() {
-  stopSubapp(ID);
-  await db.delete(schema.subapps).where(eq(schema.subapps.id, ID));
-  await fs.rm(subappSrcDir(ID), { recursive: true, force: true });
-  await fs.rm(subappBuildDir(ID), { recursive: true, force: true });
-  await fs.rm(subappVersionsDir(ID), { recursive: true, force: true });
-  await fs.rm(subappStorageDir(ID), { recursive: true, force: true });
-  await dropSubappDatabase(ID);
+  stopApp(ID);
+  await db.delete(schema.apps).where(eq(schema.apps.id, ID));
+  await fs.rm(appSrcDir(ID), { recursive: true, force: true });
+  await fs.rm(appBuildDir(ID), { recursive: true, force: true });
+  await fs.rm(appVersionsDir(ID), { recursive: true, force: true });
+  await fs.rm(appStorageDir(ID), { recursive: true, force: true });
+  await dropAppDatabase(ID);
 }
 
 async function stageSource() {
-  const dir = subappSrcDir(ID);
+  const dir = appSrcDir(ID);
   await fs.writeFile(
     path.join(dir, 'manifest.json'),
     JSON.stringify(MANIFEST, null, 2),
@@ -182,7 +179,7 @@ async function main() {
   console.log('  cron parsing + nextRun OK');
 
   log('scaffold + stage capability backend');
-  await createSubapp({
+  await createApp({
     id: ID,
     name: 'Capabilities Test',
     description: 'caps',
@@ -190,13 +187,13 @@ async function main() {
   await stageSource();
 
   log('deploy (long-running, warm start)');
-  const dep = await deploySubapp(ID);
+  const dep = await deployApp(ID);
   console.log('  deployed v', dep.version, 'cron jobs:', dep.normalized.cron);
   assert(dep.normalized.cron.length === 1, 'normalized cron has 1 job');
   assert(!!dep.normalized.webhook, 'normalized webhook present');
   assert(!!dep.normalized.storage, 'normalized storage present');
 
-  const row = await db.query.subapps.findFirst({
+  const row = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, ID),
   });
   assert(row?.status === 'deployed', 'status deployed');
@@ -207,7 +204,7 @@ async function main() {
   log('long-running: backend warm-started by deploy');
   // Give the warm-start a brief moment in case it is still booting.
   await new Promise((r) => setTimeout(r, 500));
-  assert(isSubappRunning(ID), 'backend should be running after deploy');
+  assert(isAppRunning(ID), 'backend should be running after deploy');
 
   log('storage: module roundtrip');
   await putObject(
@@ -248,7 +245,7 @@ async function main() {
   console.log('  cron fired twice, persisted via STORAGE_DIR');
 
   log('webhook: backend handler delivers + persists');
-  const wh = await callSubappBackend(ID, '/__webhook', {
+  const wh = await callAppBackend(ID, '/__webhook', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ event: 'ping', n: 42 }),
@@ -262,7 +259,7 @@ async function main() {
   console.log('  webhook delivered:', wh.body);
 
   // Stop keep-alive before cleanup so it is not auto-restarted.
-  stopSubapp(ID);
+  stopApp(ID);
   await reloadScheduler();
 
   log('cleanup');
@@ -274,7 +271,7 @@ async function main() {
 
 main().catch(async (e) => {
   console.error('\nCAPABILITIES E2E FAILED:', e);
-  stopSubapp(ID);
+  stopApp(ID);
   await cleanup().catch(() => {});
   process.exit(1);
 });

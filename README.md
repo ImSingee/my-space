@@ -1,7 +1,7 @@
 # My Space
 
 My Space is an AI-native personal app platform for creating, running, and
-debugging custom subapps from natural-language instructions.
+debugging custom apps from natural-language instructions.
 
 ## ✨ Features
 
@@ -256,7 +256,7 @@ pnpm exec playwright install chromium
 ### Docker (one command)
 
 The whole platform — including everything it needs to build and run AI-generated
-subapps (Node, Deno, buf and esbuild) — ships as a single image alongside
+apps (Node, Deno, buf and esbuild) — ships as a single image alongside
 Postgres. Bring it all up with:
 
 ```bash
@@ -268,15 +268,15 @@ Then open [http://localhost:3700](http://localhost:3700).
 What the compose stack provides:
 
 - **`db`** — Postgres 17 (passwordless `trust` auth on the internal network).
-  The platform creates a dedicated database per subapp here.
+  The platform creates a dedicated database per app here.
 - **`app`** — the platform image. It runs database migrations on startup, serves
-  on port `3700`, and spawns each subapp's Deno backend in-container.
+  on port `3700`, and spawns each app's Deno backend in-container.
 
 Persistent state lives in named volumes:
 
-- `hatch_pgdata` — platform + per-subapp databases
-- `hatch_workspace` — agent-authored subapp source, builds, versions, storage
-- `hatch_deno` — Deno's npm cache (faster subapp cold starts)
+- `hatch_pgdata` — platform + per-app databases
+- `hatch_workspace` — agent-authored app source, builds, versions, storage
+- `hatch_deno` — Deno's npm cache (faster app cold starts)
 
 Configure the LLM providers from **Settings** in the UI after first launch. For
 production, set a strong `BETTER_AUTH_SECRET` (env var or a `.env` file next to
@@ -287,7 +287,7 @@ BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up --build -d
 ```
 
 The image bundles dev dependencies on purpose: `buf` + `protoc-gen-es` (Connect
-codegen) and `esbuild` (bundling) run on every subapp deploy.
+codegen) and `esbuild` (bundling) run on every app deploy.
 
 ### Build for Production (without Docker)
 
@@ -298,7 +298,7 @@ pnpm build
 The Nitro node server is emitted to `.output/`. Run it with
 `node .output/server/index.mjs` on a host that also has `deno` on its `PATH` and
 the project's `node_modules` available (the platform shells out to `buf`,
-`protoc-gen-es` and `esbuild` when it deploys subapps). See the official
+`protoc-gen-es` and `esbuild` when it deploys apps). See the official
 [Hosting](https://tanstack.com/start/latest/docs/framework/react/guide/hosting)
 docs for other targets.
 

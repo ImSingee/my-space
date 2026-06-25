@@ -49,9 +49,9 @@ export const TOOL_LABELS: Record<string, string> = {
   read_file: 'Read file',
   write_file: 'Write file',
   run_command: 'Run command',
-  create_subapp: 'Create subapp',
-  deploy_subapp: 'Deploy subapp',
-  query_subapp_db: 'Query DB',
+  create_app: 'Create app',
+  deploy_app: 'Deploy app',
+  query_app_db: 'Query DB',
   ask: 'Ask the user',
 };
 
@@ -79,14 +79,14 @@ export function toolDetail(
 }
 
 /**
- * Subapp ids that an assistant message *deployed*, so we can offer "Open app"
- * links. Limited to deploy_subapp because that is when the app is actually live
- * (a freshly created-but-not-deployed subapp has nothing to open yet).
+ * App ids that an assistant message *deployed*, so we can offer "Open app"
+ * links. Limited to deploy_app because that is when the app is actually live
+ * (a freshly created-but-not-deployed app has nothing to open yet).
  */
-export function deployedSubappIds(blocks: AssistantBlock[]): string[] {
+export function deployedAppIds(blocks: AssistantBlock[]): string[] {
   const ids = new Set<string>();
   for (const block of blocks) {
-    if (block.type === 'toolCall' && block.name === 'deploy_subapp') {
+    if (block.type === 'toolCall' && block.name === 'deploy_app') {
       const id = block.arguments?.id;
       if (typeof id === 'string') ids.add(id);
     }

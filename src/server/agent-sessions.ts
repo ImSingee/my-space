@@ -7,7 +7,7 @@ import type { JsonValue } from '~/db/schema';
 export type SessionSummary = {
   id: string;
   title: string;
-  subappId: string | null;
+  appId: string | null;
   providerId: string | null;
   modelId: string | null;
   messageCount: number;
@@ -22,7 +22,7 @@ export const listSessions = createServerFn({ method: 'GET' }).handler(
     return rows.map((s) => ({
       id: s.id,
       title: s.title,
-      subappId: s.subappId,
+      appId: s.appId,
       providerId: s.providerId,
       modelId: s.modelId,
       messageCount: Array.isArray(s.messages) ? s.messages.length : 0,
@@ -34,7 +34,7 @@ export const listSessions = createServerFn({ method: 'GET' }).handler(
 export type SessionDetail = {
   id: string;
   title: string;
-  subappId: string | null;
+  appId: string | null;
   providerId: string | null;
   modelId: string | null;
   messages: JsonValue[];
@@ -50,7 +50,7 @@ export const getSession = createServerFn({ method: 'GET' })
     return {
       id: row.id,
       title: row.title,
-      subappId: row.subappId,
+      appId: row.appId,
       providerId: row.providerId,
       modelId: row.modelId,
       messages: row.messages,
@@ -59,7 +59,7 @@ export const getSession = createServerFn({ method: 'GET' })
 
 const createSchema = z.object({
   title: z.string().optional(),
-  subappId: z.string().nullish(),
+  appId: z.string().nullish(),
   providerId: z.string().nullish(),
   modelId: z.string().nullish(),
 });
@@ -71,7 +71,7 @@ export const createSession = createServerFn({ method: 'POST' })
       .insert(schema.agentSessions)
       .values({
         title: data.title?.trim() || 'New chat',
-        subappId: data.subappId ?? null,
+        appId: data.appId ?? null,
         providerId: data.providerId ?? null,
         modelId: data.modelId ?? null,
       })

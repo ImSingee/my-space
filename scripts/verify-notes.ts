@@ -5,19 +5,19 @@
  * Run with: set -a && . ./.env.local && set +a && pnpm exec tsx scripts/verify-notes.ts
  */
 import {
-  ensureSubappRunning,
-  proxySubappRequest,
-  stopSubapp,
-} from '../src/server/subapps/runtime';
+  ensureAppRunning,
+  proxyAppRequest,
+  stopApp,
+} from '../src/server/apps/runtime';
 
 const ID = 'notes';
-const base = `http://platform/api/subapps/${ID}/rpc`;
-const strip = `/api/subapps/${ID}/rpc`;
+const base = `http://platform/api/apps/${ID}/rpc`;
+const strip = `/api/apps/${ID}/rpc`;
 
 async function rpc(method: string, body: unknown) {
-  const res = await proxySubappRequest(
+  const res = await proxyAppRequest(
     ID,
-    new Request(`${base}/subapp.v1.NotesService/${method}`, {
+    new Request(`${base}/app.v1.NotesService/${method}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -32,7 +32,7 @@ async function rpc(method: string, body: unknown) {
 
 async function main() {
   console.log('[lazy start]');
-  const port = await ensureSubappRunning(ID);
+  const port = await ensureAppRunning(ID);
   console.log('  backend port', port);
 
   console.log('[AddNote]');
@@ -52,12 +52,12 @@ async function main() {
   }
 
   console.log('\nPASS: agent-generated Notes backend runs and persists.');
-  stopSubapp(ID);
+  stopApp(ID);
   process.exit(0);
 }
 
 main().catch((e) => {
   console.error('\nVERIFY FAILED:', e);
-  stopSubapp(ID);
+  stopApp(ID);
   process.exit(1);
 });

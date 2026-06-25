@@ -36,8 +36,8 @@ import { authClient } from '~auth/client';
 import {
   dashboardsQueryOptions,
   sidebarItemsQueryOptions,
-  subappsQueryOptions,
-} from '~queries/subapps';
+  appsQueryOptions,
+} from '~queries/apps';
 import {
   renameDashboard,
   renameSidebarItem,
@@ -45,7 +45,7 @@ import {
   reorderSidebarItems,
   setDashboardPin,
   setSidebarPin,
-} from '~server/subapps';
+} from '~server/apps';
 import { Brand } from './brand';
 import { SortableList, sortByIds } from './sortable-list';
 import classes from './sidebar.module.css';
@@ -377,7 +377,7 @@ function PinnedApps() {
   const isActive = useIsActive();
   const queryClient = useQueryClient();
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
-  const { data: subapps } = useQuery(subappsQueryOptions);
+  const { data: apps } = useQuery(appsQueryOptions);
   const [renameTarget, setRenameTarget] = useState<{
     id: string;
     label: string;
@@ -390,7 +390,7 @@ function PinnedApps() {
     });
 
   const setPin = useMutation({
-    mutationFn: (input: { subappId: string; pinned: boolean }) =>
+    mutationFn: (input: { appId: string; pinned: boolean }) =>
       setSidebarPin({ data: input }),
     onSuccess: (_res, input) => {
       void invalidate();
@@ -422,9 +422,9 @@ function PinnedApps() {
     onSettled: () => void invalidate(),
   });
 
-  const pinnedIds = new Set((pins ?? []).map((p) => p.subappId));
+  const pinnedIds = new Set((pins ?? []).map((p) => p.appId));
   // Only deployed apps with a frontend can be opened from the sidebar.
-  const candidates = (subapps ?? []).filter(
+  const candidates = (apps ?? []).filter(
     (s) =>
       s.status === 'deployed' &&
       Boolean(s.capabilities?.frontend) &&
@@ -441,11 +441,7 @@ function PinnedApps() {
 
   return (
     <>
-      <SectionHeading
-        label="Apps"
-        manageTo="/subapps"
-        manageLabel="Manage apps"
-      />
+      <SectionHeading label="Apps" manageTo="/apps" manageLabel="Manage apps" />
       <Stack gap={2} px="xs">
         <SortableList
           items={pins ?? []}
@@ -456,22 +452,20 @@ function PinnedApps() {
                 setRenameTarget({ id: pin.id, label: pin.label });
                 setRenameValue(pin.label);
               }}
-              onUnpin={() =>
-                setPin.mutate({ subappId: pin.subappId, pinned: false })
-              }
+              onUnpin={() => setPin.mutate({ appId: pin.appId, pinned: false })}
             >
               <NavLink
                 renderRoot={(props) => (
                   <Link
-                    to="/apps/$subappId"
-                    params={{ subappId: pin.subappId }}
+                    to="/apps/$appId"
+                    params={{ appId: pin.appId }}
                     draggable={false}
                     {...props}
                   />
                 )}
                 label={pin.label}
                 leftSection={<IconAppWindow size={18} stroke={1.6} />}
-                active={isActive(`/apps/${pin.subappId}`)}
+                active={isActive(`/apps/${pin.appId}`)}
                 variant="light"
                 pr={32}
               />
@@ -495,9 +489,7 @@ function PinnedApps() {
                   key={s.id}
                   leftSection={<IconAppWindow size={16} stroke={1.6} />}
                   disabled={setPin.isPending}
-                  onClick={() =>
-                    setPin.mutate({ subappId: s.id, pinned: true })
-                  }
+                  onClick={() => setPin.mutate({ appId: s.id, pinned: true })}
                 >
                   <Text size="sm" truncate>
                     {s.name}

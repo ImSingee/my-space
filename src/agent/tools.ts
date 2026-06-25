@@ -146,11 +146,11 @@ export function createTools(
     },
   });
 
-  const createSubappTool = tool({
-    name: 'create_subapp',
-    label: 'Create subapp',
+  const createAppTool = tool({
+    name: 'create_app',
+    label: 'Create app',
     description:
-      'Scaffold a new subapp from the platform template. Creates subapps/<id>/ ' +
+      'Scaffold a new app from the platform template. Creates apps/<id>/ ' +
       'with manifest, proto, Deno backend, React app, and a sample widget.',
     parameters: Type.Object({
       id: Type.String({
@@ -162,29 +162,29 @@ export function createTools(
       ),
     }),
     execute: async (_id, params) => {
-      const { createSubapp } = await import('~server/subapps/scaffold');
-      const res = await createSubapp(params);
+      const { createApp } = await import('~server/apps/scaffold');
+      const res = await createApp(params);
       return text(
-        `Created subapp "${res.id}". Source is at subapps/${res.id}/.\n` +
+        `Created app "${res.id}". Source is at apps/${res.id}/.\n` +
           'Read the scaffolded files, edit proto/backend/app/widgets, then ' +
-          'call deploy_subapp.',
+          'call deploy_app.',
         res,
       );
     },
   });
 
-  const deploySubappTool = tool({
-    name: 'deploy_subapp',
-    label: 'Deploy subapp',
+  const deployAppTool = tool({
+    name: 'deploy_app',
+    label: 'Deploy app',
     description:
       'Build (Connect codegen + bundle app/widgets + stage Deno backend) and ' +
-      'deploy a subapp so it becomes live. Reports the app/widget/RPC URLs.',
+      'deploy an app so it becomes live. Reports the app/widget/RPC URLs.',
     parameters: Type.Object({
-      id: Type.String({ description: 'Subapp id to deploy.' }),
+      id: Type.String({ description: 'App id to deploy.' }),
     }),
     execute: async (_id, params) => {
-      const { deploySubapp } = await import('~server/subapps/deploy');
-      const res = await deploySubapp(params.id);
+      const { deployApp } = await import('~server/apps/deploy');
+      const res = await deployApp(params.id);
       const lines = [
         `Deployed "${params.id}" (v${res.version}).`,
         res.normalized.app ? `App (iframe): ${res.normalized.app.url}` : null,
@@ -197,21 +197,20 @@ export function createTools(
     },
   });
 
-  const querySubappDb = tool({
-    name: 'query_subapp_db',
-    label: 'Query subapp DB',
+  const queryAppDb = tool({
+    name: 'query_app_db',
+    label: 'Query app DB',
     description:
-      "Run SQL against a subapp's own Postgres database (provisioned on first " +
+      "Run SQL against an app's own Postgres database (provisioned on first " +
       'use). Use to create tables and inspect data. Returns up to 100 rows.',
     parameters: Type.Object({
-      id: Type.String({ description: 'Subapp id.' }),
+      id: Type.String({ description: 'App id.' }),
       sql: Type.String({ description: 'SQL statement to execute.' }),
     }),
     execute: async (_id, params) => {
-      const { ensureSubappDatabase } =
-        await import('~server/subapps/provision');
+      const { ensureAppDatabase } = await import('~server/apps/provision');
       const postgres = (await import('postgres')).default;
-      const url = await ensureSubappDatabase(params.id);
+      const url = await ensureAppDatabase(params.id);
       const sql = postgres(url, { max: 1 });
       try {
         const rows = await sql.unsafe(params.sql);
@@ -283,9 +282,9 @@ export function createTools(
     readFile,
     writeFile,
     runCommand,
-    createSubappTool,
-    deploySubappTool,
-    querySubappDb,
+    createAppTool,
+    deployAppTool,
+    queryAppDb,
   ];
   if (askBridge) tools.push(askUser);
   return tools;

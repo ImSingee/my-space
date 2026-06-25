@@ -49,7 +49,7 @@ const updatedAt = timestamp('updated_at')
 
 /** ================== platform domain types ================== */
 
-export type SubappCapabilities = {
+export type AppCapabilities = {
   database: boolean;
   frontend: boolean;
   widgets: boolean;
@@ -60,7 +60,7 @@ export type SubappCapabilities = {
   workflow: boolean;
 };
 
-export type SubappStatus =
+export type AppStatus =
   | 'draft'
   | 'building'
   | 'deployed'
@@ -75,22 +75,22 @@ export type ProviderApiType =
   | 'openai-completions'
   | 'anthropic-messages';
 
-/** ================== subapps ================== */
+/** ================== apps ================== */
 
 /**
- * A subapp is the unit AI Agent creates / maintains. `id` is the human readable
- * slug used in manifest.id and in deployed paths (`/subapps/<id>/`).
+ * An app is the unit AI Agent creates / maintains. `id` is the human readable
+ * slug used in manifest.id and in deployed paths (`/apps/<id>/`).
  */
-export const subapps = pgTable('subapps', {
+export const apps = pgTable('apps', {
   id: text().primaryKey(),
   name: text().notNull(),
   description: text(),
-  status: text().$type<SubappStatus>().notNull().default('draft'),
-  capabilities: jsonb().$type<SubappCapabilities>(),
+  status: text().$type<AppStatus>().notNull().default('draft'),
+  capabilities: jsonb().$type<AppCapabilities>(),
   /** Latest source manifest.json (as authored by the Agent). */
   manifest: jsonb().$type<JsonObject>(),
   backendMode: text().$type<'serverless' | 'long-running'>(),
-  /** Provisioned per-subapp Postgres database name, when database capability is on. */
+  /** Provisioned per-app Postgres database name, when database capability is on. */
   dbName: text(),
   /** Shared secret for verifying inbound webhook calls (webhook capability). */
   webhookSecret: text(),
@@ -103,9 +103,9 @@ export const subapps = pgTable('subapps', {
 
 export const deployments = pgTable('deployments', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
-  subappId: text()
+  appId: text()
     .notNull()
-    .references(() => subapps.id, { onDelete: 'cascade' }),
+    .references(() => apps.id, { onDelete: 'cascade' }),
   version: integer().notNull().default(1),
   status: text().$type<DeploymentStatus>().notNull().default('building'),
   /** Normalized manifest produced by the builder (deployed URLs etc). */
@@ -156,8 +156,8 @@ export const agentModels = pgTable('agent_models', {
 export const agentSessions = pgTable('agent_sessions', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   title: text().notNull().default('New chat'),
-  /** Optional subapp this conversation is scoped to. */
-  subappId: text().references(() => subapps.id, { onDelete: 'set null' }),
+  /** Optional app this conversation is scoped to. */
+  appId: text().references(() => apps.id, { onDelete: 'set null' }),
   providerId: ulid(),
   modelId: text(),
   /** Persisted pi `AgentMessage[]` (stored as JSON). */
@@ -187,10 +187,10 @@ export const dashboardWidgets = pgTable('dashboard_widgets', {
   dashboardId: text()
     .notNull()
     .references(() => dashboards.id, { onDelete: 'cascade' }),
-  subappId: text()
+  appId: text()
     .notNull()
-    .references(() => subapps.id, { onDelete: 'cascade' }),
-  /** Widget id as declared in the subapp manifest. */
+    .references(() => apps.id, { onDelete: 'cascade' }),
+  /** Widget id as declared in the app manifest. */
   widgetId: text().notNull(),
   x: integer().notNull().default(0),
   y: integer().notNull().default(0),
@@ -203,9 +203,9 @@ export const dashboardWidgets = pgTable('dashboard_widgets', {
 
 export const sidebarItems = pgTable('sidebar_items', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
-  subappId: text()
+  appId: text()
     .notNull()
-    .references(() => subapps.id, { onDelete: 'cascade' }),
+    .references(() => apps.id, { onDelete: 'cascade' }),
   label: text().notNull(),
   icon: text(),
   sortOrder: integer().notNull().default(0),
@@ -224,7 +224,7 @@ export type LogSource =
 
 export const logs = pgTable('logs', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
-  subappId: text(),
+  appId: text(),
   source: text().$type<LogSource>().notNull(),
   level: text()
     .$type<'debug' | 'info' | 'warn' | 'error'>()

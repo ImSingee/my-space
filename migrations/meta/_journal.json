@@ -29,6 +29,13 @@
       "when": 1782401594734,
       "tag": "0003_green_alice",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782489600000,
+      "tag": "0004_rename_subapps_to_apps",
+      "breakpoints": true
     }
   ]
 }

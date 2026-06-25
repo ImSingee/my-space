@@ -1,7 +1,7 @@
 import { Center, Loader } from '@mantine/core';
 import { useEffect, useMemo, useState } from 'react';
 import GridLayout, { type Layout, WidthProvider } from 'react-grid-layout';
-import type { DashboardItem } from '~server/subapps';
+import type { DashboardItem } from '~server/apps';
 import { WidgetCard } from './widget-card';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';

@@ -1,7 +1,7 @@
 import { ActionIcon, Card, Group, Loader, Text, Tooltip } from '@mantine/core';
 import { IconAppWindow, IconGripVertical, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
-import type { DashboardItem } from '~server/subapps';
+import type { DashboardItem } from '~server/apps';
 
 type WidgetModule = {
   mount: (element: HTMLElement, props?: unknown) => (() => void) | void;
@@ -84,7 +84,7 @@ export function WidgetCard({
             {item.name}
           </Text>
           <Text size="xs" c="dimmed" truncate>
-            {item.subappName}
+            {item.appName}
           </Text>
         </Group>
         <Group gap={2} wrap="nowrap" className="widget-no-drag">
@@ -94,7 +94,7 @@ export function WidgetCard({
               color="gray"
               size="sm"
               component="a"
-              href={`/app/${item.subappId}/`}
+              href={`/app/${item.appId}/`}
               target="_blank"
               rel="noreferrer"
               aria-label="Open app"
@@ -132,7 +132,7 @@ export function WidgetCard({
       ) : null}
       {status === 'error' ? (
         <Text size="xs" c="red" py="sm">
-          Failed to load widget. Try redeploying the subapp.
+          Failed to load widget. Try redeploying the app.
         </Text>
       ) : null}
     </Card>
