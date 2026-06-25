@@ -2,10 +2,8 @@ import {
   Button,
   Card,
   Center,
-  Group,
   Loader,
   Menu,
-  SimpleGrid,
   Stack,
   Text,
   ThemeIcon,
@@ -15,15 +13,8 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
-import { Link, createFileRoute } from '@tanstack/react-router';
-import {
-  IconArrowRight,
-  IconLayoutGrid,
-  IconPlus,
-  IconSettings,
-  IconSparkles,
-  IconStack2,
-} from '@tabler/icons-react';
+import { createFileRoute } from '@tanstack/react-router';
+import { IconLayoutGrid, IconPlus } from '@tabler/icons-react';
 import { Suspense } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
@@ -49,28 +40,6 @@ export const Route = createFileRoute('/_app/dashboard')({
   component: DashboardPage,
 });
 
-const QUICK_ACTIONS = [
-  {
-    to: '/agent' as const,
-    title: 'Build with the Agent',
-    description:
-      'Describe an app in plain language and let the Agent build it.',
-    icon: IconSparkles,
-  },
-  {
-    to: '/subapps' as const,
-    title: 'Manage subapps',
-    description: 'Browse, open, and inspect everything you have created.',
-    icon: IconStack2,
-  },
-  {
-    to: '/settings' as const,
-    title: 'Configure models',
-    description: 'Add LLM providers and pick which models the Agent can use.',
-    icon: IconSettings,
-  },
-];
-
 function DashboardPage() {
   return (
     <Page
@@ -82,47 +51,15 @@ function DashboardPage() {
         </Suspense>
       }
     >
-      <Stack gap="xl">
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-          {QUICK_ACTIONS.map((action) => (
-            <Card
-              key={action.to}
-              component={Link}
-              to={action.to}
-              withBorder
-              padding="lg"
-              className={classes.actionCard}
-            >
-              <Group justify="space-between" align="flex-start" wrap="nowrap">
-                <ThemeIcon size={40} radius="md" variant="light" color="violet">
-                  <action.icon size={22} stroke={1.6} />
-                </ThemeIcon>
-                <IconArrowRight
-                  size={18}
-                  className={classes.arrow}
-                  stroke={1.6}
-                />
-              </Group>
-              <Text fw={600} mt="md">
-                {action.title}
-              </Text>
-              <Text size="sm" c="dimmed" mt={4}>
-                {action.description}
-              </Text>
-            </Card>
-          ))}
-        </SimpleGrid>
-
-        <Suspense
-          fallback={
-            <Center py={64}>
-              <Loader />
-            </Center>
-          }
-        >
-          <DashboardWidgets />
-        </Suspense>
-      </Stack>
+      <Suspense
+        fallback={
+          <Center py={64}>
+            <Loader />
+          </Center>
+        }
+      >
+        <DashboardWidgets />
+      </Suspense>
     </Page>
   );
 }
