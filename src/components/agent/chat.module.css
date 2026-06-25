@@ -18,8 +18,17 @@
      Do NOT set max-width here: a percentage would resolve against the
      shrink-wrapped Stack, creating a feedback loop that collapses the bubble
      and wraps short messages mid-word (e.g. "hello"). */
-  background-color: var(--mantine-color-ember-light);
-  color: var(--mantine-color-ember-light-color);
+  /* Keep the bubble understated: a faint warm wash (a few percent of the
+     warm-ink text color) rather than a solid gray block, so it reads as a
+     gentle container, not a heavy chip. No border, and override the theme's
+     default Paper shadow so the bubble stays flat. */
+  background-color: light-dark(
+    color-mix(in srgb, var(--mantine-color-text) 4%, transparent),
+    color-mix(in srgb, var(--mantine-color-text) 8%, transparent)
+  );
+  color: var(--mantine-color-text);
+  border: none;
+  box-shadow: none;
 }
 
 .messageImage {

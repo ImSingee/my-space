@@ -313,7 +313,7 @@ export function MessageView({
             </Group>
           ) : null}
           {text ? (
-            <Paper className={classes.userBubble} radius="lg" px="md" py="xs">
+            <Paper className={classes.userBubble} radius="md" px="sm" py={6}>
               <Text className={classes.messageText}>{text}</Text>
             </Paper>
           ) : null}
