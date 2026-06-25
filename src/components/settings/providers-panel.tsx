@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Avatar,
   Badge,
   Button,
   Card,
@@ -11,7 +12,6 @@ import {
   Select,
   Stack,
   Switch,
-  Table,
   Text,
   TextInput,
   ThemeIcon,
@@ -41,6 +41,7 @@ import {
   updateProvider,
   type ProviderWithModels,
 } from '~server/providers';
+import classes from './providers-panel.module.css';
 
 const API_TYPE_OPTIONS = [
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
@@ -300,21 +301,28 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
   });
 
   return (
-    <Card withBorder padding="lg" radius="md">
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <Group wrap="nowrap" gap="sm">
-          <ThemeIcon variant="light" color="ember" size={38} radius="md">
-            <IconRobot size={20} stroke={1.6} />
-          </ThemeIcon>
-          <Stack gap={2}>
-            <Group gap="xs">
-              <Text fw={600}>{provider.name}</Text>
+    <Card radius="md">
+      <div className={classes.providerHead}>
+        <Group className={classes.providerInfo} wrap="nowrap" gap="sm">
+          <Avatar variant="light" color="ember" size={42} radius="md">
+            {provider.name.slice(0, 1).toUpperCase()}
+          </Avatar>
+          <Stack gap={3} style={{ minWidth: 0 }}>
+            <Group gap="xs" wrap="nowrap">
+              <Text fw={600} truncate>
+                {provider.name}
+              </Text>
               <Badge variant="light" size="sm" color="gray">
                 {API_TYPE_LABEL[provider.apiType] ?? provider.apiType}
               </Badge>
+              {provider.enabled ? null : (
+                <Badge variant="default" size="sm">
+                  Off
+                </Badge>
+              )}
             </Group>
-            <Text size="xs" c="dimmed">
-              <Code>{provider.baseUrl}</Code> · key {provider.apiKeyPreview}
+            <Text size="xs" c="dimmed" truncate>
+              {provider.baseUrl} · key {provider.apiKeyPreview}
             </Text>
           </Stack>
         </Group>
@@ -366,67 +374,50 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
             </Menu.Dropdown>
           </Menu>
         </Group>
-      </Group>
+      </div>
 
-      <Stack gap={4} mt="md">
+      <div className={classes.models}>
         {provider.models.length > 0 ? (
-          <Table verticalSpacing="xs" horizontalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Model</Table.Th>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Context</Table.Th>
-                <Table.Th w={48} />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {provider.models.map((m) => (
-                <Table.Tr key={m.id}>
-                  <Table.Td>
-                    <Group gap={6}>
-                      <Text size="sm" fw={500}>
-                        {m.name}
-                      </Text>
-                      {m.reasoning ? (
-                        <Badge size="xs" variant="light" color="ember">
-                          reasoning
-                        </Badge>
-                      ) : null}
-                    </Group>
-                  </Table.Td>
-                  <Table.Td>
-                    <Code>{m.modelId}</Code>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c="dimmed">
-                      {m.contextWindow.toLocaleString()}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      size="sm"
-                      aria-label="Remove model"
-                      onClick={() => removeModel.mutate(m.id)}
-                    >
-                      <IconTrash size={15} stroke={1.6} />
-                    </ActionIcon>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+          <Stack gap={2}>
+            {provider.models.map((m) => (
+              <div key={m.id} className={classes.modelRow}>
+                <Group className={classes.modelName} gap="xs" wrap="nowrap">
+                  <Text size="sm" fw={500} truncate>
+                    {m.name}
+                  </Text>
+                  {m.reasoning ? (
+                    <Badge size="xs" variant="light" color="ember">
+                      reasoning
+                    </Badge>
+                  ) : null}
+                </Group>
+                <Code visibleFrom="xs">{m.modelId}</Code>
+                <Text size="xs" c="dimmed" visibleFrom="sm">
+                  {m.contextWindow.toLocaleString()} ctx
+                </Text>
+                <ActionIcon
+                  className={classes.modelRemove}
+                  variant="subtle"
+                  color="red"
+                  size="sm"
+                  aria-label="Remove model"
+                  onClick={() => removeModel.mutate(m.id)}
+                >
+                  <IconTrash size={15} stroke={1.6} />
+                </ActionIcon>
+              </div>
+            ))}
+          </Stack>
         ) : (
-          <Text size="sm" c="dimmed" py="xs">
-            No models yet.
+          <Text size="sm" c="dimmed" className={classes.emptyModels}>
+            No models yet — add one to enable this provider.
           </Text>
         )}
-        <Group>
+        <Group mt="xs">
           <Button
             type="button"
             size="xs"
-            variant="light"
+            variant="subtle"
             color="gray"
             leftSection={<IconPlus size={14} stroke={2} />}
             onClick={modelHandlers.open}
@@ -434,7 +425,7 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
             Add model
           </Button>
         </Group>
-      </Stack>
+      </div>
 
       <ProviderFormModal
         opened={editOpen}

@@ -1,25 +1,18 @@
-import {
-  Button,
-  Card,
-  Center,
-  Loader,
-  Menu,
-  Stack,
-  Text,
-  ThemeIcon,
-} from '@mantine/core';
+import { Button, Center, Loader, Menu, Text } from '@mantine/core';
 import {
   useMutation,
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
 import { createFileRoute, redirect } from '@tanstack/react-router';
-import { IconLayoutGrid, IconPlus } from '@tabler/icons-react';
+import { IconPlus } from '@tabler/icons-react';
 import { Suspense } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { DashboardGrid } from '~components/dashboard/dashboard-grid';
+import { DashboardEmptyState } from '~components/dashboard/empty-state';
 import {
+  appsQueryOptions,
   availableWidgetsQueryOptions,
   dashboardQueryOptions,
   dashboardsQueryOptions,
@@ -29,7 +22,6 @@ import {
   removeDashboardWidget,
   updateDashboardLayout,
 } from '~server/apps';
-import classes from './dashboard.module.css';
 
 export const Route = createFileRoute('/_app/dashboard/$dashboardId')({
   loader: async ({ context, params }) => {
@@ -46,6 +38,7 @@ export const Route = createFileRoute('/_app/dashboard/$dashboardId')({
       }
     }
     await Promise.all([
+      context.queryClient.ensureQueryData(appsQueryOptions),
       context.queryClient.ensureQueryData(availableWidgetsQueryOptions),
       context.queryClient.ensureQueryData(
         dashboardQueryOptions(params.dashboardId),
@@ -84,6 +77,7 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
   const { data: widgets } = useSuspenseQuery(
     dashboardQueryOptions(dashboardId),
   );
+  const { data: apps } = useSuspenseQuery(appsQueryOptions);
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -104,22 +98,7 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
   });
 
   if (widgets.length === 0) {
-    return (
-      <Card withBorder padding={0} className={classes.canvas}>
-        <Stack align="center" gap="xs" py={64} px="md">
-          <ThemeIcon size={52} radius="xl" variant="light" color="gray">
-            <IconLayoutGrid size={26} stroke={1.5} />
-          </ThemeIcon>
-          <Text fw={600} mt="xs">
-            No widgets here yet
-          </Text>
-          <Text size="sm" c="dimmed" ta="center" maw={420}>
-            Widgets exposed by your apps appear here. Build an app with the
-            Agent, deploy it, then add its widgets with the button above.
-          </Text>
-        </Stack>
-      </Card>
-    );
+    return <DashboardEmptyState hasApps={apps.length > 0} />;
   }
 
   return (

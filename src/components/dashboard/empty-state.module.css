@@ -1,0 +1,17 @@
+.root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(var(--mantine-spacing-xl), 8vh, 96px) var(--mantine-spacing-md);
+}
+
+.inner {
+  width: 100%;
+  max-width: 520px;
+}
+
+.title {
+  text-align: center;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}

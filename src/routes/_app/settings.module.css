@@ -1,0 +1,73 @@
+.layout {
+  display: flex;
+  gap: var(--mantine-spacing-2xl);
+  align-items: flex-start;
+}
+
+.nav {
+  width: 196px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--mantine-radius-md);
+  color: var(--mantine-color-text);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 500;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.navItem:hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
+.navItemActive {
+  composes: navItem;
+  background-color: var(--mantine-color-ember-light);
+  color: var(--mantine-color-ember-light-color);
+}
+
+.navItemIcon {
+  flex-shrink: 0;
+}
+
+.section {
+  flex: 1;
+  min-width: 0;
+}
+
+.sectionHead {
+  margin-bottom: var(--mantine-spacing-lg);
+}
+
+@media (max-width: 48em) {
+  .layout {
+    flex-direction: column;
+    gap: var(--mantine-spacing-lg);
+  }
+
+  .nav {
+    flex-direction: row;
+    width: 100%;
+    position: static;
+    overflow-x: auto;
+  }
+
+  .navItem,
+  .navItemActive {
+    width: auto;
+    white-space: nowrap;
+  }
+}

@@ -119,13 +119,56 @@
   min-height: 0;
 }
 
+/* The panel fills whatever container holds it (desktop rail or mobile drawer). */
 .sessions {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Desktop-only fixed rail; on mobile the panel moves into a drawer. */
+.sessionsRail {
   width: 260px;
   flex-shrink: 0;
   border-right: 1px solid var(--mantine-color-default-border);
+  min-height: 0;
+}
+
+@media (max-width: 48em) {
+  .sessionsRail {
+    display: none;
+  }
+}
+
+.drawerBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+}
+
+.agentMain {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
+}
+
+/* Compact bar shown above the chat on mobile to reach chat history. */
+.mobileBar {
+  display: none;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+@media (max-width: 48em) {
+  .mobileBar {
+    display: flex;
+  }
 }
 
 .sessionsHead {
@@ -214,17 +257,112 @@
 }
 
 .composer {
-  border-top: 1px solid var(--mantine-color-default-border);
-  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md)
+  position: relative;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-md)
     var(--mantine-spacing-md);
+}
+
+/* Soft upward fade so the conversation dissolves into the composer instead of
+   being cut off by a hard divider line. */
+.composer::before {
+  content: '';
+  position: absolute;
+  inset: -28px 0 auto 0;
+  height: 28px;
+  background: linear-gradient(to top, var(--mantine-color-body), transparent);
+  pointer-events: none;
 }
 
 .composerInner {
   max-width: 760px;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--mantine-spacing-xs);
+}
+
+/* ---------- composer card (LobeHub / cursor-style) ---------- */
+
+.composerCard {
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-lg);
+  background-color: var(--mantine-color-default);
+  padding: 6px 8px 8px;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.composerCard:focus-within {
+  border-color: var(--mantine-color-ember-filled);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--mantine-color-ember-filled) 16%, transparent);
+}
+
+.composerCard[data-dragging] {
+  border-color: var(--mantine-color-ember-filled);
+  border-style: dashed;
+  background-color: var(--mantine-color-ember-light);
+}
+
+.composerCard[data-disabled] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.composerInput {
+  padding: 6px 6px 0;
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.55;
+}
+
+.composerBar {
+  margin-top: 6px;
+}
+
+.attachRow {
+  padding: 4px 4px 8px;
+}
+
+/* ---------- model picker pill ---------- */
+
+.modelPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 5px 10px;
+  border-radius: var(--mantine-radius-xl);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.modelPill:hover {
+  background-color: var(--mantine-color-default-hover);
+  color: var(--mantine-color-text);
+}
+
+.modelPill[data-disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.modelPillIcon {
+  flex-shrink: 0;
+}
+
+.modelPillLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: inherit;
+  line-height: 1.2;
+}
+
+.modelMenuScroll {
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .thumb {
@@ -259,6 +397,34 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* ---------- new-chat hero ---------- */
+
+.hero {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--mantine-spacing-xl) var(--mantine-spacing-md);
+}
+
+.heroInner {
+  width: 100%;
+  max-width: 640px;
+}
+
+.heroTitle {
+  text-align: center;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.guard {
+  width: 100%;
 }
 
 /* ---------- ask (human-in-the-loop) ---------- */

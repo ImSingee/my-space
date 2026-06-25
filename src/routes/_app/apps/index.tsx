@@ -6,9 +6,10 @@ import {
   Stack,
   Text,
   ThemeIcon,
+  Tooltip,
 } from '@mantine/core';
 import { Link, createFileRoute } from '@tanstack/react-router';
-import { IconPlus, IconStack2 } from '@tabler/icons-react';
+import { IconPlus, IconSettings, IconStack2 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { Page } from '~components/app-shell/page';
@@ -67,19 +68,7 @@ function AppsPage() {
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
           {apps.map((app) => (
-            <Card
-              key={app.id}
-              renderRoot={(props) => (
-                <Link
-                  to="/apps/$appId/manage"
-                  params={{ appId: app.id }}
-                  {...props}
-                />
-              )}
-              withBorder
-              padding="lg"
-              className={classes.card}
-            >
+            <Card key={app.id} withBorder padding="lg" className={classes.card}>
               <Group
                 justify="space-between"
                 wrap="nowrap"
@@ -88,7 +77,20 @@ function AppsPage() {
               >
                 <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
                   <AppGlyph name={app.name} seed={app.id} />
-                  <Text fw={600} truncate>
+                  <Text
+                    fw={600}
+                    truncate
+                    renderRoot={(props) => (
+                      <Link
+                        to="/apps/$appId"
+                        params={{ appId: app.id }}
+                        {...props}
+                        className={[props.className, classes.primaryLink]
+                          .filter(Boolean)
+                          .join(' ')}
+                      />
+                    )}
+                  >
                     {app.name}
                   </Text>
                 </Group>
@@ -97,9 +99,29 @@ function AppsPage() {
               <Text size="sm" c="dimmed" mt="sm" lineClamp={2}>
                 {app.description || 'No description yet.'}
               </Text>
-              <Text size="xs" c="dimmed" mt="auto" pt="md">
-                Updated {dayjs(app.updatedAt).fromNow()}
-              </Text>
+              <Group justify="space-between" align="center" mt="auto" pt="md">
+                <Text size="xs" c="dimmed">
+                  Updated {dayjs(app.updatedAt).fromNow()}
+                </Text>
+                <Tooltip label="Manage app" position="top" withArrow>
+                  <Button
+                    renderRoot={(props) => (
+                      <Link
+                        to="/apps/$appId/manage"
+                        params={{ appId: app.id }}
+                        {...props}
+                      />
+                    )}
+                    variant="subtle"
+                    color="gray"
+                    size="compact-sm"
+                    className={classes.cardAction}
+                    leftSection={<IconSettings size={15} stroke={1.7} />}
+                  >
+                    Manage
+                  </Button>
+                </Tooltip>
+              </Group>
             </Card>
           ))}
         </SimpleGrid>

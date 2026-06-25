@@ -1,4 +1,7 @@
 .card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   transition:
     transform 150ms ease,
     border-color 150ms ease,
@@ -9,6 +12,22 @@
   transform: translateY(-2px);
   border-color: var(--mantine-color-ember-outline);
   box-shadow: var(--mantine-shadow-md);
+}
+
+/*
+ * Stretched primary link: clicking anywhere on the card opens the app, while
+ * secondary controls (Manage) sit above this overlay via .cardAction.
+ */
+.primaryLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.cardAction {
+  position: relative;
+  z-index: 1;
 }
 
 .empty {

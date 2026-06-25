@@ -15,10 +15,9 @@ import {
   useSuspenseQuery,
 } from '@tanstack/react-query';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
-import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
-import { createSession, deleteSession } from '~server/agent-sessions';
+import { deleteSession } from '~server/agent-sessions';
 import classes from './chat.module.css';
 
 export function SessionsPanel({
@@ -31,23 +30,8 @@ export function SessionsPanel({
   const qc = useQueryClient();
   const { data: sessions } = useSuspenseQuery(sessionsQueryOptions);
 
-  useEffect(() => {
-    if (!selected && sessions.length > 0) {
-      onSelect(sessions[0].id);
-    }
-  }, [sessions, selected, onSelect]);
-
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
-
-  const create = useMutation({
-    mutationFn: () => createSession({ data: {} }),
-    onSuccess: async ({ id }) => {
-      await invalidate();
-      onSelect(id);
-    },
-    onError: () => toast.error('Could not create chat'),
-  });
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteSession({ data: { id } }),
@@ -63,10 +47,9 @@ export function SessionsPanel({
       <Box className={classes.sessionsHead}>
         <Button
           fullWidth
-          variant="light"
+          variant={selected === null ? 'light' : 'default'}
           leftSection={<IconPlus size={16} stroke={2} />}
-          onClick={() => create.mutate()}
-          loading={create.isPending}
+          onClick={() => onSelect(null)}
         >
           New chat
         </Button>
