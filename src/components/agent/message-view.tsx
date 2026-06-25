@@ -28,7 +28,10 @@ import {
   useEffect,
   useRef,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Options as MarkdownOptions } from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import type { AskAnswer } from '~agent/events';
 import { AskForm } from './ask-form';
 import type { StreamState, StreamTool } from './use-agent-stream';
@@ -51,11 +54,40 @@ function MarkdownLink(props: ComponentPropsWithoutRef<'a'>) {
   return <Anchor {...props} target="_blank" rel="noreferrer" />;
 }
 
+type PluginList = NonNullable<MarkdownOptions['rehypePlugins']>;
+const REMARK_PLUGINS: PluginList = [remarkMath];
+const REHYPE_PLUGINS: PluginList = [
+  [rehypeKatex, { throwOnError: false, strict: false }],
+];
+const MARKDOWN_COMPONENTS = { a: MarkdownLink };
+
+/**
+ * Normalize the `\( … \)` / `\[ … \]` math delimiters that LLMs emit into the
+ * `$ … $` / `$$ … $$` that remark-math understands. Display math is forced onto
+ * its own block (blank lines around `$$`) so adjacent equations on soft-wrapped
+ * lines can't have their `$$` pairs mismatched. Inner whitespace is trimmed
+ * because remark-math treats `$ x $` (space next to the dollar) as plain text.
+ */
+function normalizeMath(text: string): string {
+  return text
+    .replace(
+      /\\\[([\s\S]+?)\\\]/g,
+      (_m, expr: string) => `\n\n$$\n${expr.trim()}\n$$\n\n`,
+    )
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, expr: string) => `$${expr.trim()}$`);
+}
+
 function Markdownish({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
     <Typography className={classes.markdown}>
-      <ReactMarkdown components={{ a: MarkdownLink }}>{text}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
+      >
+        {normalizeMath(text)}
+      </ReactMarkdown>
     </Typography>
   );
 }
@@ -458,9 +490,15 @@ export function StreamingBubble({
   onAnswer: (askId: string, answers: AskAnswer[]) => void;
 }) {
   const ask = state.pendingAsk;
+  // Some providers (OpenAI reasoning summaries via the relay) stream only empty
+  // "\n\n" separator deltas during the entire reasoning phase and deliver the
+  // real summary in one chunk at the end. Treat whitespace-only thinking as
+  // "no content" so the live "Thinking…" indicator shows while reasoning,
+  // instead of a blank bubble.
+  const thinkingText = state.thinking.trim();
   const hasContent =
-    state.text || state.thinking || state.tools.length > 0 || Boolean(ask);
-  const hasSteps = Boolean(state.thinking) || state.tools.length > 0;
+    state.text || thinkingText || state.tools.length > 0 || Boolean(ask);
+  const hasSteps = Boolean(thinkingText) || state.tools.length > 0;
 
   return (
     <Box className={classes.assistantRow}>

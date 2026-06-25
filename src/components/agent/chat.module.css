@@ -1,6 +1,9 @@
 .messageText {
   white-space: pre-wrap;
-  word-break: break-word;
+  /* break-word (not anywhere/break-all) keeps the intrinsic min-content equal
+     to the longest word, so short bubbles don't collapse and wrap mid-word —
+     while still breaking genuinely long tokens (URLs, hashes). */
+  overflow-wrap: break-word;
   line-height: 1.6;
   font-size: var(--mantine-font-size-sm);
 }
@@ -11,7 +14,10 @@
 }
 
 .userBubble {
-  max-width: 78%;
+  /* Width is governed by the wrapping Stack (maw="80%", relative to the row).
+     Do NOT set max-width here: a percentage would resolve against the
+     shrink-wrapped Stack, creating a feedback loop that collapses the bubble
+     and wraps short messages mid-word (e.g. "hello"). */
   background-color: var(--mantine-color-ember-light);
   color: var(--mantine-color-ember-light-color);
 }
@@ -132,14 +138,61 @@ button.stepHeader:hover {
   margin-bottom: 0;
 }
 
-.markdown :where(h1, h2, h3, h4) {
+.markdown :where(h1, h2, h3, h4, h5, h6) {
   margin-top: 0.4em;
   margin-bottom: 0.4em;
   line-height: 1.3;
 }
 
+/* Mantine's Typography sizes headings for article bodies; in a chat bubble
+   those are oversized, so scale them down relative to the sm base. Element
+   selectors keep these ahead of Typography's :where() defaults. */
+.markdown h1 {
+  font-size: 1.35em;
+}
+
+.markdown h2 {
+  font-size: 1.2em;
+}
+
+.markdown h3 {
+  font-size: 1.08em;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+
+/* Render quotes as a simple left bar (no Mantine box/background): same text
+   size, dimmed color, a gray "|" rule down the start edge. */
+.markdown blockquote {
+  font-size: 1em;
+  line-height: 1.55;
+  color: var(--mantine-color-dimmed);
+  background: transparent;
+  border-radius: 0;
+  border-inline-start: 3px solid
+    color-mix(in srgb, var(--mantine-color-dimmed) 45%, transparent);
+  padding: 0.1em 0 0.1em 0.8em;
+  margin-inline: 0;
+}
+
 .markdown :where(li) {
   margin-bottom: 0.2em;
+}
+
+/* Keep KaTeX math proportional to the chat text rather than its 1.21em default,
+   and let long display math scroll instead of overflowing the bubble. */
+.markdown :where(.katex) {
+  font-size: 1.05em;
+}
+
+.markdown :where(.katex-display) {
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .markdown :where(pre) {
