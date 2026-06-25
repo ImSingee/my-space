@@ -36,6 +36,13 @@
       "when": 1782489600000,
       "tag": "0004_rename_subapps_to_apps",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782576000000,
+      "tag": "0005_rapid_talos",
+      "breakpoints": true
     }
   ]
 }

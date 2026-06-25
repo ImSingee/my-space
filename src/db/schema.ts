@@ -175,6 +175,8 @@ export const agentSessions = pgTable('agent_sessions', {
 export const dashboards = pgTable('dashboards', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   name: text().notNull(),
+  /** Optional free-form subtitle shown in the dashboard page header. */
+  description: text(),
   /** Whether this dashboard is pinned to the sidebar for quick access. */
   pinned: boolean().notNull().default(true),
   sortOrder: integer().notNull().default(0),

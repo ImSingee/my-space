@@ -177,6 +177,7 @@ export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
 export type Dashboard = {
   id: string;
   name: string;
+  description: string | null;
   pinned: boolean;
   sortOrder: number;
 };
@@ -200,6 +201,7 @@ export const listDashboards = createServerFn({ method: 'GET' }).handler(
     return rows.map((d) => ({
       id: d.id,
       name: d.name,
+      description: d.description,
       pinned: d.pinned,
       sortOrder: d.sortOrder,
     }));
@@ -218,6 +220,7 @@ export const createDashboard = createServerFn({ method: 'POST' })
     return {
       id: row.id,
       name: row.name,
+      description: row.description,
       pinned: row.pinned,
       sortOrder: row.sortOrder,
     };
@@ -241,6 +244,17 @@ export const renameDashboard = createServerFn({ method: 'POST' })
     await db
       .update(schema.dashboards)
       .set({ name })
+      .where(eq(schema.dashboards.id, data.id));
+    return { ok: true };
+  });
+
+export const setDashboardDescription = createServerFn({ method: 'POST' })
+  .validator((input: { id: string; description: string }) => input)
+  .handler(async ({ data }) => {
+    const description = data.description.trim();
+    await db
+      .update(schema.dashboards)
+      .set({ description: description || null })
       .where(eq(schema.dashboards.id, data.id));
     return { ok: true };
   });
