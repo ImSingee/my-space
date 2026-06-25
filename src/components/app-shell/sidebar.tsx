@@ -94,7 +94,15 @@ function UserMenu() {
   };
 
   return (
-    <Menu position="top-end" width={220} withArrow shadow="md">
+    <Menu
+      position="top-end"
+      width={220}
+      withArrow
+      shadow="md"
+      trigger="click-hover"
+      openDelay={100}
+      closeDelay={200}
+    >
       <Menu.Target>
         <ActionIcon
           variant="subtle"
@@ -113,6 +121,12 @@ function UserMenu() {
           </Text>
         </Menu.Label>
         <Menu.Divider />
+        <Menu.Item
+          leftSection={<IconSettings size={16} stroke={1.6} />}
+          renderRoot={(props) => <Link to="/settings" {...props} />}
+        >
+          Settings
+        </Menu.Item>
         <Menu.Item
           leftSection={<IconLogout size={16} stroke={1.6} />}
           onClick={signOut}
@@ -569,14 +583,6 @@ export function Sidebar() {
       </ScrollArea>
 
       <Box className={classes.footer}>
-        <NavLink
-          renderRoot={(props) => <Link to="/settings" {...props} />}
-          label="Settings"
-          leftSection={<IconSettings size={18} stroke={1.6} />}
-          active={isActive('/settings')}
-          variant="light"
-          mb="2xs"
-        />
         <Group justify="space-between" px="xs">
           <UserMenu />
           <ColorSchemeToggle />
