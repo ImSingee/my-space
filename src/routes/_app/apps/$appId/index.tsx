@@ -4,6 +4,7 @@ import {
   Button,
   Group,
   Loader,
+  Menu,
   Stack,
   Text,
   ThemeIcon,
@@ -11,6 +12,7 @@ import {
 } from '@mantine/core';
 import { Link, createFileRoute, notFound } from '@tanstack/react-router';
 import {
+  IconDots,
   IconExternalLink,
   IconRefresh,
   IconRocket,
@@ -163,33 +165,60 @@ function AppView() {
             {app.name}
           </Text>
         </Group>
-        {canOpen ? (
-          <Group gap={4} wrap="nowrap">
-            <Tooltip label="Reload" withArrow>
+        <Group gap={4} wrap="nowrap">
+          {canOpen ? (
+            <>
+              <Tooltip label="Reload" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label="Reload app"
+                  onClick={reload}
+                >
+                  <IconRefresh size={18} stroke={1.7} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Open in new tab" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  component="a"
+                  href={src}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Open in new tab"
+                >
+                  <IconExternalLink size={18} stroke={1.7} />
+                </ActionIcon>
+              </Tooltip>
+            </>
+          ) : null}
+          <Menu position="bottom-end" withArrow shadow="md" width={180}>
+            <Menu.Target>
               <ActionIcon
                 variant="subtle"
                 color="gray"
-                aria-label="Reload app"
-                onClick={reload}
+                aria-label="App options"
               >
-                <IconRefresh size={18} stroke={1.7} />
+                <IconDots size={18} stroke={1.7} />
               </ActionIcon>
-            </Tooltip>
-            <Tooltip label="Open in new tab" withArrow>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                component="a"
-                href={src}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Open in new tab"
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                leftSection={<IconSettings size={15} stroke={1.7} />}
+                renderRoot={(props) => (
+                  <Link
+                    to="/apps/$appId/manage"
+                    params={{ appId: app.id }}
+                    {...props}
+                  />
+                )}
               >
-                <IconExternalLink size={18} stroke={1.7} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-        ) : null}
+                Manage app
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
       </Box>
       {canOpen ? (
         <Box className={classes.frameWrap}>
