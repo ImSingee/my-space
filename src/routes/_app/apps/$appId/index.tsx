@@ -39,21 +39,114 @@ function AppView() {
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const canOpen = app.status === 'deployed' && hasFrontend;
 
-  // On a direct (SSR) page load the iframe can finish loading before React
-  // hydrates and attaches `onLoad`, so that event is missed and the overlay
-  // would hang forever. Detect an already-loaded same-origin frame on mount
-  // and clear the overlay; otherwise the later `onLoad` handles it.
+  // Mirror the embedded app's URL hash and document title out to the host page:
+  // the host URL stays shareable/refreshable (its hash deep-links into the app)
+  // and the browser tab reflects whichever page the user is on inside the app.
+  // Also clears the loading overlay — on a direct (SSR) load the iframe can
+  // finish before this effect runs, so the native `load` event would be missed;
+  // the already-complete check below handles that case.
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame) return;
-    try {
-      if (frame.contentDocument?.readyState === 'complete') {
-        setLoading(false);
+    if (!frame || !canOpen) return;
+
+    const hostTitle = document.title;
+    let win: Window | null = null;
+    let titleObserver: MutationObserver | null = null;
+
+    const syncTitle = () => {
+      try {
+        const inner = frame.contentDocument?.title;
+        if (inner && inner !== document.title) document.title = inner;
+      } catch {
+        // cross-origin frame
       }
+    };
+
+    const syncHashOut = () => {
+      try {
+        const hash = win?.location.hash ?? '';
+        if (hash !== window.location.hash) {
+          const { pathname, search } = window.location;
+          window.history.replaceState(
+            window.history.state,
+            '',
+            `${pathname}${search}${hash}`,
+          );
+        }
+      } catch {
+        // cross-origin frame
+      }
+    };
+
+    const onInnerChange = () => {
+      syncHashOut();
+      syncTitle();
+    };
+
+    const detach = () => {
+      try {
+        win?.removeEventListener('hashchange', onInnerChange);
+      } catch {
+        // window already torn down
+      }
+      titleObserver?.disconnect();
+      titleObserver = null;
+      win = null;
+    };
+
+    const onLoad = () => {
+      const next = frame.contentWindow;
+      if (!next) return;
+      try {
+        // Skip the iframe's transient initial `about:blank` document; the real
+        // load fires its own `load` event right after.
+        if (next.location.href === 'about:blank') return;
+      } catch {
+        // cross-origin: can't sync, but the app did load — clear the overlay.
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+      detach();
+      win = next;
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        // Deep-link: seed the freshly loaded app with the host's hash once,
+        // before listening, so it doesn't immediately echo back out.
+        const hostHash = window.location.hash;
+        if (hostHash && next.location.hash !== hostHash) {
+          next.location.hash = hostHash;
+        }
+        next.addEventListener('hashchange', onInnerChange);
+        const head = doc.head ?? doc.documentElement;
+        if (head) {
+          titleObserver = new MutationObserver(syncTitle);
+          titleObserver.observe(head, {
+            childList: true,
+            characterData: true,
+            subtree: true,
+          });
+        }
+        onInnerChange();
+      } catch {
+        // cross-origin frame
+      }
+    };
+
+    frame.addEventListener('load', onLoad);
+    try {
+      if (frame.contentDocument?.readyState === 'complete') onLoad();
     } catch {
-      // Cross-origin frame — nothing readable here; rely on onLoad.
+      // cross-origin frame
     }
-  }, []);
+
+    return () => {
+      frame.removeEventListener('load', onLoad);
+      detach();
+      document.title = hostTitle;
+    };
+  }, [canOpen, src]);
 
   const reload = () => {
     if (!frameRef.current) return;
@@ -105,7 +198,6 @@ function AppView() {
             src={src}
             title={app.name}
             className={classes.frame}
-            onLoad={() => setLoading(false)}
           />
           {loading ? (
             <Box className={classes.overlay}>
