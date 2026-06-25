@@ -3,7 +3,7 @@ import type { AppStatus } from '~/db/schema';
 
 export const statusMeta: Record<AppStatus, { label: string; color: string }> = {
   draft: { label: 'Draft', color: 'gray' },
-  building: { label: 'Building', color: 'violet' },
+  building: { label: 'Building', color: 'ember' },
   deployed: { label: 'Live', color: 'teal' },
   failed: { label: 'Failed', color: 'red' },
   archived: { label: 'Archived', color: 'gray' },

@@ -8,7 +8,6 @@ import {
   Menu,
   Modal,
   NumberInput,
-  Paper,
   Select,
   Stack,
   Switch,
@@ -32,7 +31,6 @@ import {
   IconRobot,
   IconTrash,
 } from '@tabler/icons-react';
-import { useState } from 'react';
 import { toast } from 'sonner';
 import { providersQueryOptions } from '~queries/agent';
 import {
@@ -74,7 +72,7 @@ type ProviderFormValues = {
   apiKey: string;
 };
 
-function ProviderFormModal({
+export function ProviderFormModal({
   opened,
   onClose,
   provider,
@@ -305,7 +303,7 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
     <Card withBorder padding="lg" radius="md">
       <Group justify="space-between" wrap="nowrap" align="flex-start">
         <Group wrap="nowrap" gap="sm">
-          <ThemeIcon variant="light" color="violet" size={38} radius="md">
+          <ThemeIcon variant="light" color="ember" size={38} radius="md">
             <IconRobot size={20} stroke={1.6} />
           </ThemeIcon>
           <Stack gap={2}>
@@ -390,7 +388,7 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
                         {m.name}
                       </Text>
                       {m.reasoning ? (
-                        <Badge size="xs" variant="light" color="violet">
+                        <Badge size="xs" variant="light" color="ember">
                           reasoning
                         </Badge>
                       ) : null}
@@ -452,46 +450,45 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
   );
 }
 
-export function ProvidersPanel() {
+export function ProvidersPanel({
+  onAddProvider,
+}: {
+  onAddProvider: () => void;
+}) {
   const { data: providers } = useSuspenseQuery(providersQueryOptions);
-  const [createOpen, setCreateOpen] = useState(false);
+
+  if (providers.length === 0) {
+    return (
+      <Card withBorder padding={0} radius="md">
+        <Stack align="center" gap="xs" py={64} px="md">
+          <ThemeIcon size={52} radius="xl" variant="light" color="ember">
+            <IconRobot size={26} stroke={1.5} />
+          </ThemeIcon>
+          <Text fw={600} mt="xs">
+            No providers yet
+          </Text>
+          <Text size="sm" c="dimmed" ta="center" maw={420}>
+            Add an LLM provider — Anthropic, OpenAI, or any compatible endpoint
+            — and its models so the Agent can start building apps.
+          </Text>
+          <Button
+            type="button"
+            mt="md"
+            leftSection={<IconPlus size={16} stroke={1.8} />}
+            onClick={onAddProvider}
+          >
+            Add provider
+          </Button>
+        </Stack>
+      </Card>
+    );
+  }
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="center">
-        <div>
-          <Text fw={600}>Agent providers</Text>
-          <Text size="sm" c="dimmed">
-            Configure LLM providers and the models the Agent can use.
-          </Text>
-        </div>
-        <Button
-          type="button"
-          leftSection={<IconPlus size={16} stroke={2} />}
-          onClick={() => setCreateOpen(true)}
-        >
-          Add provider
-        </Button>
-      </Group>
-
-      {providers.length === 0 ? (
-        <Paper withBorder p="xl" radius="md">
-          <Text size="sm" c="dimmed" ta="center">
-            No providers configured yet.
-          </Text>
-        </Paper>
-      ) : (
-        <Stack gap="md">
-          {providers.map((p) => (
-            <ProviderCard key={p.id} provider={p} />
-          ))}
-        </Stack>
-      )}
-
-      <ProviderFormModal
-        opened={createOpen}
-        onClose={() => setCreateOpen(false)}
-      />
+      {providers.map((p) => (
+        <ProviderCard key={p.id} provider={p} />
+      ))}
     </Stack>
   );
 }

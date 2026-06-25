@@ -8,8 +8,8 @@
 
 /* Drop placeholder shown while dragging/resizing. */
 .grid :global(.react-grid-placeholder) {
-  background-color: var(--mantine-color-violet-light);
-  border: 1px dashed var(--mantine-color-violet-filled);
+  background-color: var(--mantine-color-ember-light);
+  border: 1px dashed var(--mantine-color-ember-filled);
   border-radius: var(--mantine-radius-md);
   opacity: 0.5;
 }

@@ -128,7 +128,7 @@ export function CapabilitiesPanel({ appId }: { appId: string }) {
                 title="Backend"
                 right={
                   <Group gap={6}>
-                    <Badge size="sm" variant="light" radius="sm" color="grape">
+                    <Badge size="sm" variant="light" radius="sm" color="gray">
                       {ops.backend.mode ?? 'serverless'}
                     </Badge>
                     <Badge

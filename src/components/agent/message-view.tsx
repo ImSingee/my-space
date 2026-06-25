@@ -62,7 +62,7 @@ function AppActions({ ids }: { ids: string[] }) {
           <Button
             size="compact-sm"
             variant="light"
-            color="violet"
+            color="ember"
             leftSection={<IconExternalLink size={14} />}
             component="a"
             href={`/app/${id}/`}
@@ -128,13 +128,13 @@ export function ToolChip({
   done: boolean;
   isError?: boolean;
 }) {
-  const color = isError ? 'red' : done ? 'teal' : 'violet';
+  const color = isError ? 'red' : done ? 'teal' : 'ember';
   const icon = isError ? (
     <IconAlertTriangle size={12} />
   ) : done ? (
     <IconCheck size={12} />
   ) : (
-    <Loader size={10} color="violet" />
+    <Loader size={10} color="ember" />
   );
   return (
     <Badge

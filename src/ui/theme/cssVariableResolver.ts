@@ -93,6 +93,11 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
       'var(--mantine-color-amber-5)',
       0.9,
     ),
+    '--mantine-color-ember-filled': 'var(--mantine-color-ember-6)',
+    '--mantine-color-ember-filled-hover': alpha(
+      'var(--mantine-color-ember-6)',
+      0.9,
+    ),
     '--mantine-color-yellow-filled': 'var(--mantine-color-yellow-4)',
     '--mantine-color-yellow-filled-hover': alpha(
       'var(--mantine-color-yellow-4)',
@@ -217,6 +222,12 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
       0.8,
     ),
     '--mantine-color-amber-light-color': 'var(--mantine-color-amber-6)',
+    '--mantine-color-ember-light': alpha('var(--mantine-color-ember-4)', 0.1),
+    '--mantine-color-ember-light-hover': alpha(
+      'var(--mantine-color-ember-light)',
+      0.8,
+    ),
+    '--mantine-color-ember-light-color': 'var(--mantine-color-ember-6)',
     '--mantine-color-yellow-light': alpha('var(--mantine-color-yellow-4)', 0.1),
     '--mantine-color-yellow-light-hover': alpha(
       'var(--mantine-color-yellow-light)',
@@ -348,6 +359,11 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
       'var(--mantine-color-amber-4)',
       0.1,
     ),
+    '--mantine-color-ember-outline': 'var(--mantine-color-ember-6)',
+    '--mantine-color-ember-outline-hover': alpha(
+      'var(--mantine-color-ember-4)',
+      0.1,
+    ),
     '--mantine-color-yellow-outline': 'var(--mantine-color-yellow-4)',
     '--mantine-color-yellow-outline-hover': alpha(
       'var(--mantine-color-yellow-4)',
@@ -424,6 +440,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--mantine-color-rose-contrast': 'var(--mantine-color-rose-0)',
     '--mantine-color-orange-contrast': 'var(--mantine-color-stone-0)',
     '--mantine-color-amber-contrast': 'var(--mantine-color-amber-0)',
+    '--mantine-color-ember-contrast': 'var(--mantine-color-stone-0)',
     '--mantine-color-yellow-contrast': '#422006',
     '--mantine-color-lime-contrast': 'var(--mantine-color-lime-0)',
     '--mantine-color-green-contrast': 'var(--mantine-color-rose-0)',
@@ -516,6 +533,11 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--mantine-color-amber-filled': 'var(--mantine-color-amber-5)',
     '--mantine-color-amber-filled-hover': alpha(
       'var(--mantine-color-amber-5)',
+      0.9,
+    ),
+    '--mantine-color-ember-filled': 'var(--mantine-color-ember-6)',
+    '--mantine-color-ember-filled-hover': alpha(
+      'var(--mantine-color-ember-6)',
       0.9,
     ),
     '--mantine-color-yellow-filled': 'var(--mantine-color-yellow-4)',
@@ -645,6 +667,12 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
       0.8,
     ),
     '--mantine-color-amber-light-color': 'var(--mantine-color-amber-3)',
+    '--mantine-color-ember-light': alpha('var(--mantine-color-ember-4)', 0.15),
+    '--mantine-color-ember-light-hover': alpha(
+      'var(--mantine-color-ember-light)',
+      0.8,
+    ),
+    '--mantine-color-ember-light-color': 'var(--mantine-color-ember-3)',
     '--mantine-color-yellow-light': alpha(
       'var(--mantine-color-yellow-4)',
       0.15,
@@ -788,6 +816,11 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
       'var(--mantine-color-amber-4)',
       0.15,
     ),
+    '--mantine-color-ember-outline': 'var(--mantine-color-ember-5)',
+    '--mantine-color-ember-outline-hover': alpha(
+      'var(--mantine-color-ember-4)',
+      0.15,
+    ),
     '--mantine-color-yellow-outline': 'var(--mantine-color-yellow-4)',
     '--mantine-color-yellow-outline-hover': alpha(
       'var(--mantine-color-yellow-4)',
@@ -864,6 +897,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--mantine-color-rose-contrast': 'var(--mantine-color-rose-0)',
     '--mantine-color-orange-contrast': 'var(--mantine-color-stone-0)',
     '--mantine-color-amber-contrast': 'var(--mantine-color-stone-8)',
+    '--mantine-color-ember-contrast': 'var(--mantine-color-stone-0)',
     '--mantine-color-yellow-contrast': '#422006',
     '--mantine-color-lime-contrast': 'var(--mantine-color-stone-8)',
     '--mantine-color-green-contrast': 'var(--mantine-color-green-9)',

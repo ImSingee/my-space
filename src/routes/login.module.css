@@ -6,7 +6,7 @@
   background:
     radial-gradient(
       60% 50% at 50% 0%,
-      var(--mantine-color-violet-light) 0%,
+      var(--mantine-color-ember-light) 0%,
       transparent 70%
     ),
     var(--mantine-color-body);

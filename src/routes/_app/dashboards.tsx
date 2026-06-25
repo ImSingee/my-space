@@ -135,7 +135,7 @@ function DashboardsManagePage() {
       actions={
         <Button
           leftSection={<IconPlus size={16} stroke={1.8} />}
-          color="violet"
+          color="ember"
           loading={create.isPending}
           onClick={() => create.mutate()}
         >
@@ -161,7 +161,7 @@ function DashboardsManagePage() {
                   />
                   <ThemeIcon
                     variant="light"
-                    color="violet"
+                    color="ember"
                     radius="md"
                     size={34}
                   >
@@ -254,7 +254,7 @@ function DashboardsManagePage() {
           <Group justify="flex-end">
             <Button
               type="button"
-              color="violet"
+              color="ember"
               loading={rename.isPending}
               disabled={!renameValue.trim()}
               onClick={submitRename}

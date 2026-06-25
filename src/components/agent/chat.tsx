@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Box,
+  Button,
   Center,
   CloseButton,
   Group,
@@ -47,6 +48,13 @@ type Attachment = {
 
 const MAX_DIM = 1280;
 const MAX_ATTACHMENTS = 6;
+
+const EXAMPLE_PROMPTS = [
+  'A daily habit tracker',
+  'A personal bookmarks manager',
+  'A workout log with charts',
+  'A simple expense tracker',
+];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -123,6 +131,12 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const [pending, setPending] = useState<ChatMessage[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const pickExample = (text: string) => {
+    setInput(text);
+    textareaRef.current?.focus();
+  };
 
   const addFiles = async (files: FileList | File[] | null) => {
     if (!files) return;
@@ -203,7 +217,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     <Box className={classes.chat}>
       <Box className={classes.chatHead}>
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          <ThemeIcon variant="light" color="violet" radius="md" size="md">
+          <ThemeIcon variant="light" color="ember" radius="md" size="md">
             <IconSparkles size={16} stroke={1.7} />
           </ThemeIcon>
           <Text fw={600} truncate>
@@ -230,7 +244,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             </Center>
           ) : allMessages.length === 0 && !stream.state.active ? (
             <Stack align="center" gap={6} py={80}>
-              <ThemeIcon size={48} radius="xl" variant="light" color="violet">
+              <ThemeIcon size={48} radius="xl" variant="light" color="ember">
                 <IconSparkles size={24} stroke={1.5} />
               </ThemeIcon>
               <Text fw={600}>Describe an app to build</Text>
@@ -238,6 +252,19 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 Ask the Agent to create a tracker, a notes app, a dashboard —
                 anything. It will scaffold, build, and deploy it for you.
               </Text>
+              <Group gap="xs" justify="center" mt="md" maw={420}>
+                {EXAMPLE_PROMPTS.map((prompt) => (
+                  <Button
+                    key={prompt}
+                    variant="default"
+                    size="xs"
+                    radius="xl"
+                    onClick={() => pickExample(prompt)}
+                  >
+                    {prompt}
+                  </Button>
+                ))}
+              </Group>
             </Stack>
           ) : (
             <>
@@ -290,6 +317,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             }}
           />
           <Textarea
+            ref={textareaRef}
             placeholder="Message the Agent…  (Enter to send, Shift+Enter for newline)"
             autosize
             minRows={1}
@@ -339,7 +367,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
               ) : (
                 <ActionIcon
                   variant="filled"
-                  color="violet"
+                  color="ember"
                   radius="xl"
                   aria-label="Send"
                   disabled={

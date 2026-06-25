@@ -12,8 +12,18 @@
   min-width: 0;
 }
 
+.header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
 .title {
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
+}
+
+.description {
+  max-width: 60ch;
+  text-wrap: pretty;
 }
 
 .body {

@@ -1,7 +1,16 @@
-import { AppShell } from '@mantine/core';
-import { Outlet, createFileRoute, redirect } from '@tanstack/react-router';
+import { AppShell, Burger, Group } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import {
+  Outlet,
+  createFileRoute,
+  redirect,
+  useRouterState,
+} from '@tanstack/react-router';
+import { useEffect } from 'react';
+import { Brand } from '~components/app-shell/brand';
 import { Sidebar } from '~components/app-shell/sidebar';
 import { fetchSession } from '~server/auth';
+import classes from './_app.module.css';
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async () => {
@@ -15,8 +24,36 @@ export const Route = createFileRoute('/_app')({
 });
 
 function AppLayout() {
+  const [opened, { toggle, close }] = useDisclosure(false);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Collapse the mobile nav overlay whenever navigation occurs.
+  useEffect(() => {
+    close();
+  }, [pathname, close]);
+
   return (
-    <AppShell navbar={{ width: 272, breakpoint: 'sm' }} padding={0}>
+    <AppShell
+      className={classes.shell}
+      padding={0}
+      navbar={{
+        width: 272,
+        breakpoint: 'sm',
+        collapsed: { mobile: !opened, desktop: false },
+      }}
+      header={{ height: 56 }}
+    >
+      <AppShell.Header withBorder className={classes.header}>
+        <Group h="100%" px="sm" gap="sm" wrap="nowrap">
+          <Burger
+            opened={opened}
+            onClick={toggle}
+            size="sm"
+            aria-label="Toggle navigation"
+          />
+          <Brand />
+        </Group>
+      </AppShell.Header>
       <AppShell.Navbar withBorder>
         <Sidebar />
       </AppShell.Navbar>

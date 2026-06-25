@@ -46,6 +46,7 @@ import {
   setDashboardPin,
   setSidebarPin,
 } from '~server/apps';
+import { AppGlyph } from '~components/apps/app-glyph';
 import { Brand } from './brand';
 import { SortableList, sortByIds } from './sortable-list';
 import classes from './sidebar.module.css';
@@ -102,7 +103,7 @@ function UserMenu() {
           radius="md"
           aria-label="Account menu"
         >
-          <Avatar size={28} radius="xl" name={name} color="violet" />
+          <Avatar size={28} radius="xl" name={name} />
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
@@ -186,9 +187,7 @@ function SectionHeading({
 }) {
   return (
     <Group justify="space-between" wrap="nowrap" px="sm" mt="md" mb={4} gap={4}>
-      <Text size="xs" fw={600} c="dimmed">
-        {label}
-      </Text>
+      <Text className={classes.sectionLabel}>{label}</Text>
       {manageTo ? (
         <Tooltip label={manageLabel} position="right" withArrow>
           <ActionIcon
@@ -359,7 +358,6 @@ function PinnedDashboards() {
           <Group justify="flex-end">
             <Button
               type="button"
-              color="violet"
               loading={rename.isPending}
               disabled={!renameValue.trim()}
               onClick={submitRename}
@@ -464,7 +462,9 @@ function PinnedApps() {
                   />
                 )}
                 label={pin.label}
-                leftSection={<IconAppWindow size={18} stroke={1.6} />}
+                leftSection={
+                  <AppGlyph name={pin.label} seed={pin.appId} size="sm" />
+                }
                 active={isActive(`/apps/${pin.appId}`)}
                 variant="light"
                 pr={32}
@@ -523,7 +523,6 @@ function PinnedApps() {
           <Group justify="flex-end">
             <Button
               type="button"
-              color="violet"
               loading={rename.isPending}
               disabled={!renameValue.trim()}
               onClick={submitRename}

@@ -67,7 +67,7 @@ export function AskForm({
     <Paper className={classes.askCard} radius="md" p="md" withBorder>
       <Group gap={6} mb="xs">
         <IconHelpCircle size={16} className={classes.askIcon} />
-        <Text size="xs" fw={600} c="violet" tt="uppercase">
+        <Text size="xs" fw={600} c="ember" tt="uppercase">
           Agent needs your input
         </Text>
       </Group>
@@ -120,7 +120,7 @@ export function AskForm({
           <Button
             type="button"
             size="sm"
-            color="violet"
+            color="ember"
             disabled={!complete || disabled}
             onClick={submit}
           >

@@ -1,0 +1,32 @@
+.glyph {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--glyph-bg);
+  color: var(--glyph-fg);
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+}
+
+.glyph[data-size='lg'] {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 21px;
+}
+
+.glyph[data-size='md'] {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 18px;
+}
+
+.glyph[data-size='sm'] {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 12px;
+}

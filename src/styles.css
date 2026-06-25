@@ -8,6 +8,7 @@
 @import '@mantine/nprogress/styles.css';
 
 @import './ui/theme/style.css';
+@import './ui/ember-theme/style.css';
 
 html {
   scroll-behavior: smooth;

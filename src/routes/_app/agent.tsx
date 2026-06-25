@@ -35,7 +35,7 @@ function AgentPage() {
         ) : (
           <Box className={classes.empty}>
             <Stack align="center" gap={6}>
-              <ThemeIcon size={52} radius="xl" variant="light" color="violet">
+              <ThemeIcon size={52} radius="xl" variant="light" color="ember">
                 <IconSparkles size={26} stroke={1.5} />
               </ThemeIcon>
               <Text fw={600}>Start a new chat</Text>

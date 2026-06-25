@@ -1,6 +1,15 @@
-import { ActionIcon, Card, Group, Loader, Text, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Card,
+  Group,
+  Skeleton,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
 import { IconAppWindow, IconGripVertical, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
+import { AppGlyph } from '~components/apps/app-glyph';
 import type { DashboardItem } from '~server/apps';
 
 type WidgetModule = {
@@ -78,13 +87,11 @@ export function WidgetCard({
         className="widget-drag-handle"
         style={{ cursor: 'grab', userSelect: 'none', WebkitUserSelect: 'none' }}
       >
-        <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
           <IconGripVertical size={15} stroke={1.6} opacity={0.4} />
+          <AppGlyph name={item.appName} seed={item.appId} size="sm" />
           <Text size="sm" fw={600} truncate>
             {item.name}
-          </Text>
-          <Text size="xs" c="dimmed" truncate>
-            {item.appName}
           </Text>
         </Group>
         <Group gap={2} wrap="nowrap" className="widget-no-drag">
@@ -126,9 +133,11 @@ export function WidgetCard({
         }}
       />
       {status === 'loading' ? (
-        <Group justify="center" py="lg" style={{ flex: 1 }}>
-          <Loader size="sm" />
-        </Group>
+        <Stack gap="xs" px={4} py={2} style={{ flex: 1 }}>
+          <Skeleton height={26} width="55%" radius="sm" />
+          <Skeleton height={11} radius="sm" />
+          <Skeleton height={11} width="80%" radius="sm" />
+        </Stack>
       ) : null}
       {status === 'error' ? (
         <Text size="xs" c="red" py="sm">

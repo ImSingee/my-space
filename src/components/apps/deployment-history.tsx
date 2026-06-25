@@ -30,7 +30,7 @@ import { rollbackAppFn } from '~server/apps';
 dayjs.extend(relativeTime);
 
 const STATUS_COLOR: Record<DeploymentSummary['status'], string> = {
-  building: 'violet',
+  building: 'ember',
   deployed: 'teal',
   failed: 'red',
 };
@@ -75,7 +75,7 @@ function DeploymentRow({
           <Button
             size="compact-sm"
             variant="light"
-            color="violet"
+            color="ember"
             leftSection={<IconRestore size={14} />}
             loading={rolling}
             onClick={() => onRollback(deployment.id)}

@@ -33,6 +33,7 @@ import {
 import dayjs from 'dayjs';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
+import { AppGlyph } from '~components/apps/app-glyph';
 import { CapabilitiesPanel } from '~components/apps/capabilities-panel';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { StatusBadge } from '~components/apps/status-badge';
@@ -142,7 +143,8 @@ function AppDetailPage() {
   return (
     <Page
       title={
-        <Group gap="sm" align="center">
+        <Group gap="sm" align="center" wrap="nowrap">
+          <AppGlyph name={app.name} seed={app.id} size="md" />
           {app.name}
           <StatusBadge status={app.status} />
         </Group>

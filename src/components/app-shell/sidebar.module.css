@@ -2,11 +2,11 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--mantine-color-body);
+  background: var(--surface-panel, var(--mantine-color-body));
 }
 
 .head {
-  padding: 18px 18px 14px;
+  padding: 20px 18px 14px;
 }
 
 .nav {
@@ -14,8 +14,21 @@
   min-height: 0;
 }
 
+/* Rounded hover/active background for every sidebar nav row (pill style). */
+.root :global(.mantine-NavLink-root) {
+  border-radius: var(--mantine-radius-md);
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mantine-color-dimmed);
+}
+
 .footer {
-  padding: 10px 6px 12px;
+  padding: 12px 6px 14px;
   border-top: 1px solid var(--mantine-color-default-border);
 }
 

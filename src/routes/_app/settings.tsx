@@ -1,8 +1,12 @@
-import { Center, Loader } from '@mantine/core';
+import { Button, Center, Loader } from '@mantine/core';
 import { createFileRoute } from '@tanstack/react-router';
-import { Suspense } from 'react';
+import { IconPlus } from '@tabler/icons-react';
+import { Suspense, useState } from 'react';
 import { Page } from '~components/app-shell/page';
-import { ProvidersPanel } from '~components/settings/providers-panel';
+import {
+  ProviderFormModal,
+  ProvidersPanel,
+} from '~components/settings/providers-panel';
 import { providersQueryOptions } from '~queries/agent';
 
 export const Route = createFileRoute('/_app/settings')({
@@ -12,11 +16,21 @@ export const Route = createFileRoute('/_app/settings')({
 });
 
 function SettingsPage() {
+  const [createOpen, setCreateOpen] = useState(false);
+
   return (
     <Page
       title="Settings"
       description="Agent providers, models, and platform configuration."
       size={900}
+      actions={
+        <Button
+          leftSection={<IconPlus size={16} stroke={1.8} />}
+          onClick={() => setCreateOpen(true)}
+        >
+          Add provider
+        </Button>
+      }
     >
       <Suspense
         fallback={
@@ -25,8 +39,13 @@ function SettingsPage() {
           </Center>
         }
       >
-        <ProvidersPanel />
+        <ProvidersPanel onAddProvider={() => setCreateOpen(true)} />
       </Suspense>
+
+      <ProviderFormModal
+        opened={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
     </Page>
   );
 }

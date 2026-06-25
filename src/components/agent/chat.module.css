@@ -12,8 +12,8 @@
 
 .userBubble {
   max-width: 78%;
-  background-color: var(--mantine-color-violet-light);
-  color: var(--mantine-color-violet-light-color);
+  background-color: var(--mantine-color-ember-light);
+  color: var(--mantine-color-ember-light-color);
 }
 
 .messageImage {
@@ -115,7 +115,7 @@
 
 .root {
   display: flex;
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
 }
 
@@ -153,7 +153,7 @@
 
 .sessionItemActive {
   composes: sessionItem;
-  background-color: var(--mantine-color-violet-light);
+  background-color: var(--mantine-color-ember-light);
 }
 
 .sessionItemLabel {
@@ -265,10 +265,10 @@
 
 .askCard {
   background-color: var(--mantine-color-body);
-  border-color: var(--mantine-color-violet-light);
+  border-color: var(--mantine-color-ember-light);
   max-width: 520px;
 }
 
 .askIcon {
-  color: var(--mantine-color-violet-6);
+  color: var(--mantine-color-ember-6);
 }

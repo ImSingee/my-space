@@ -36,6 +36,19 @@ export const Route = createRootRouteWithContext<{
     ],
     links: [
       {
+        rel: 'preconnect',
+        href: 'https://fonts.googleapis.com',
+      },
+      {
+        rel: 'preconnect',
+        href: 'https://fonts.gstatic.com',
+        crossOrigin: 'anonymous',
+      },
+      {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..560&display=swap',
+      },
+      {
         rel: 'stylesheet',
         href: appCss,
       },
@@ -50,13 +63,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang="en" {...mantineHtmlProps}>
       <head>
         <HeadContent />
-        <ColorSchemeScript defaultColorScheme="light" />
+        <ColorSchemeScript defaultColorScheme="auto" />
       </head>
       <body>
         <MantineProvider
           theme={appTheme}
           cssVariablesResolver={appCssVariablesResolver}
-          defaultColorScheme="light"
+          defaultColorScheme="auto"
         >
           <ModalsProvider>{children}</ModalsProvider>
 

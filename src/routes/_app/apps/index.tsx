@@ -12,6 +12,7 @@ import { IconPlus, IconStack2 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { Page } from '~components/app-shell/page';
+import { AppGlyph } from '~components/apps/app-glyph';
 import { StatusBadge } from '~components/apps/status-badge';
 import { listApps } from '~server/apps';
 import classes from './apps.module.css';
@@ -43,7 +44,7 @@ function AppsPage() {
       {apps.length === 0 ? (
         <Card withBorder padding={0} className={classes.empty}>
           <Stack align="center" gap="xs" py={64} px="md">
-            <ThemeIcon size={52} radius="xl" variant="light" color="violet">
+            <ThemeIcon size={52} radius="xl" variant="light" color="ember">
               <IconStack2 size={26} stroke={1.5} />
             </ThemeIcon>
             <Text fw={600} mt="xs">
@@ -79,16 +80,24 @@ function AppsPage() {
               padding="lg"
               className={classes.card}
             >
-              <Group justify="space-between" wrap="nowrap" align="flex-start">
-                <Text fw={600} truncate>
-                  {app.name}
-                </Text>
+              <Group
+                justify="space-between"
+                wrap="nowrap"
+                align="flex-start"
+                gap="sm"
+              >
+                <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                  <AppGlyph name={app.name} seed={app.id} />
+                  <Text fw={600} truncate>
+                    {app.name}
+                  </Text>
+                </Group>
                 <StatusBadge status={app.status} />
               </Group>
-              <Text size="sm" c="dimmed" mt={6} lineClamp={2}>
+              <Text size="sm" c="dimmed" mt="sm" lineClamp={2}>
                 {app.description || 'No description yet.'}
               </Text>
-              <Text size="xs" c="dimmed" mt="md">
+              <Text size="xs" c="dimmed" mt="auto" pt="md">
                 Updated {dayjs(app.updatedAt).fromNow()}
               </Text>
             </Card>

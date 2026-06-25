@@ -21,18 +21,28 @@ export function Page({
   return (
     <Box className={classes.root}>
       <Box className={classes.inner} style={{ maxWidth: size }}>
-        <Group justify="space-between" align="flex-end" wrap="nowrap" gap="md">
-          <Stack gap={2} className={classes.titleBlock}>
-            <Title order={2} fw={650} className={classes.title}>
+        <Group
+          justify="space-between"
+          align="flex-end"
+          wrap="nowrap"
+          gap="md"
+          className={classes.header}
+        >
+          <Stack gap={4} className={classes.titleBlock}>
+            <Title order={2} className={classes.title}>
               {title}
             </Title>
             {description ? (
-              <Text c="dimmed" size="sm">
+              <Text c="dimmed" size="sm" className={classes.description}>
                 {description}
               </Text>
             ) : null}
           </Stack>
-          {actions ? <Group gap="xs">{actions}</Group> : null}
+          {actions ? (
+            <Group gap="xs" wrap="nowrap">
+              {actions}
+            </Group>
+          ) : null}
         </Group>
         <Box className={classes.body}>{children}</Box>
       </Box>

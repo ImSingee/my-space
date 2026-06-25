@@ -1,8 +1,24 @@
-import { ActionIcon, Box, Group, Text, Tooltip } from '@mantine/core';
-import { createFileRoute, notFound } from '@tanstack/react-router';
-import { IconExternalLink, IconRefresh } from '@tabler/icons-react';
-import { useRef } from 'react';
-import { StatusBadge } from '~components/apps/status-badge';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  Loader,
+  Stack,
+  Text,
+  ThemeIcon,
+  Tooltip,
+} from '@mantine/core';
+import { Link, createFileRoute, notFound } from '@tanstack/react-router';
+import {
+  IconExternalLink,
+  IconRefresh,
+  IconRocket,
+  IconServerBolt,
+  IconSettings,
+} from '@tabler/icons-react';
+import { useRef, useState } from 'react';
+import { AppGlyph } from '~components/apps/app-glyph';
 import { getApp } from '~server/apps';
 import classes from './app-view.module.css';
 
@@ -18,18 +34,25 @@ export const Route = createFileRoute('/_app/apps/$appId/')({
 function AppView() {
   const app = Route.useLoaderData();
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const [loading, setLoading] = useState(true);
   const src = `/app/${app.id}/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const canOpen = app.status === 'deployed' && hasFrontend;
+
+  const reload = () => {
+    if (!frameRef.current) return;
+    setLoading(true);
+    frameRef.current.src = src;
+  };
 
   return (
     <Box className={classes.root}>
       <Box className={classes.bar}>
         <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+          <AppGlyph name={app.name} seed={app.id} size="sm" />
           <Text fw={600} truncate>
             {app.name}
           </Text>
-          <StatusBadge status={app.status} />
         </Group>
         {canOpen ? (
           <Group gap={4} wrap="nowrap">
@@ -38,9 +61,7 @@ function AppView() {
                 variant="subtle"
                 color="gray"
                 aria-label="Reload app"
-                onClick={() => {
-                  if (frameRef.current) frameRef.current.src = src;
-                }}
+                onClick={reload}
               >
                 <IconRefresh size={18} stroke={1.7} />
               </ActionIcon>
@@ -62,19 +83,60 @@ function AppView() {
         ) : null}
       </Box>
       {canOpen ? (
-        <iframe
-          ref={frameRef}
-          src={src}
-          title={app.name}
-          className={classes.frame}
-        />
+        <Box className={classes.frameWrap}>
+          <iframe
+            ref={frameRef}
+            src={src}
+            title={app.name}
+            className={classes.frame}
+            onLoad={() => setLoading(false)}
+          />
+          {loading ? (
+            <Box className={classes.overlay}>
+              <Loader />
+            </Box>
+          ) : null}
+        </Box>
       ) : (
         <Box className={classes.empty}>
-          <Text c="dimmed">
-            {app.status !== 'deployed'
-              ? 'This app is not deployed yet. Deploy it to use it here.'
-              : 'This app has no frontend — it only runs a backend (cron, webhook, storage).'}
-          </Text>
+          <Stack align="center" gap="xs" maw={440} px="md">
+            <ThemeIcon
+              size={52}
+              radius="xl"
+              variant="light"
+              color={app.status === 'deployed' ? 'gray' : 'ember'}
+            >
+              {app.status === 'deployed' ? (
+                <IconServerBolt size={26} stroke={1.5} />
+              ) : (
+                <IconRocket size={26} stroke={1.5} />
+              )}
+            </ThemeIcon>
+            <Text fw={600} mt="xs">
+              {app.status === 'deployed'
+                ? 'Backend-only app'
+                : 'Not deployed yet'}
+            </Text>
+            <Text size="sm" c="dimmed" ta="center">
+              {app.status === 'deployed'
+                ? 'This app has no frontend — it runs a backend (cron, webhook, or storage). Open Manage to inspect its capabilities.'
+                : 'Deploy this app to use it here. You can build and deploy it from the Manage page.'}
+            </Text>
+            <Button
+              variant="default"
+              mt="sm"
+              leftSection={<IconSettings size={16} stroke={1.7} />}
+              renderRoot={(props) => (
+                <Link
+                  to="/apps/$appId/manage"
+                  params={{ appId: app.id }}
+                  {...props}
+                />
+              )}
+            >
+              Manage app
+            </Button>
+          </Stack>
         </Box>
       )}
     </Box>

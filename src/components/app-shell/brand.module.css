@@ -7,21 +7,22 @@
 .mark {
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 11px;
   color: #fff;
   background: linear-gradient(
     140deg,
-    var(--mantine-color-violet-5) 0%,
-    var(--mantine-color-violet-7) 100%
+    var(--mantine-color-ember-5) 0%,
+    var(--mantine-color-ember-7) 100%
   );
   box-shadow:
-    0 1px 2px rgba(91, 33, 182, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    0 1px 2px rgba(124, 45, 18, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .word {
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
   line-height: 1;
   color: var(--mantine-color-text);
 }
