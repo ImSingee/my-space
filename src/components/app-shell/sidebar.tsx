@@ -16,7 +16,12 @@ import {
   useMantineColorScheme,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useRouter, useRouterState } from '@tanstack/react-router';
+import {
+  Link,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from '@tanstack/react-router';
 import {
   IconAppWindow,
   IconDots,
@@ -39,6 +44,8 @@ import {
   appsQueryOptions,
 } from '~queries/apps';
 import {
+  type Dashboard,
+  createDashboard,
   renameDashboard,
   renameSidebarItem,
   reorderDashboards,
@@ -192,10 +199,12 @@ function PinnedRow({
 /** Small dimmed section header used to label sidebar groups. */
 function SectionHeading({
   label,
+  addControl,
   manageTo,
   manageLabel,
 }: {
   label: string;
+  addControl?: ReactNode;
   manageTo?: string;
   manageLabel?: string;
 }) {
@@ -210,21 +219,26 @@ function SectionHeading({
       gap={4}
     >
       <Text className={classes.sectionLabel}>{label}</Text>
-      {manageTo ? (
-        <Tooltip label={manageLabel} position="right" withArrow>
-          <ActionIcon
-            className={classes.manageButton}
-            component={Link}
-            to={manageTo}
-            variant="subtle"
-            color="gray"
-            size="xs"
-            radius="sm"
-            aria-label={manageLabel}
-          >
-            <IconSettings size={14} stroke={1.7} />
-          </ActionIcon>
-        </Tooltip>
+      {addControl || manageTo ? (
+        <Group gap={2} wrap="nowrap">
+          {addControl}
+          {manageTo ? (
+            <Tooltip label={manageLabel} position="top" withArrow>
+              <ActionIcon
+                className={classes.actionButton}
+                component={Link}
+                to={manageTo}
+                variant="subtle"
+                color="gray"
+                size="xs"
+                radius="sm"
+                aria-label={manageLabel}
+              >
+                <IconSettings size={14} stroke={1.7} />
+              </ActionIcon>
+            </Tooltip>
+          ) : null}
+        </Group>
       ) : null}
     </Group>
   );
@@ -232,6 +246,7 @@ function SectionHeading({
 
 function PinnedDashboards() {
   const isActive = useIsActive();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: dashboards } = useQuery(dashboardsQueryOptions);
   const [renameTarget, setRenameTarget] = useState<{
@@ -259,6 +274,23 @@ function PinnedDashboards() {
       void invalidate();
       setRenameTarget(null);
       toast.success('Dashboard renamed');
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  const create = useMutation({
+    mutationFn: () => createDashboard({ data: { name: 'New dashboard' } }),
+    onSuccess: (d: Dashboard) => {
+      queryClient.setQueryData<Dashboard[]>(
+        dashboardsQueryOptions.queryKey,
+        (old) => (old ? [...old, d] : [d]),
+      );
+      void invalidate();
+      toast.success('Dashboard created');
+      void navigate({
+        to: '/dashboard/$dashboardId',
+        params: { dashboardId: d.id },
+      });
     },
     onError: (error) => toast.error((error as Error).message),
   });
@@ -293,10 +325,72 @@ function PinnedDashboards() {
     }
   };
 
+  const addBtnClass =
+    pinned.length === 0
+      ? `${classes.actionButton} ${classes.actionButtonStatic}`
+      : classes.actionButton;
+
+  const addControl =
+    unpinned.length > 0 ? (
+      <Menu position="right-start" withArrow shadow="md" width={240}>
+        <Menu.Target>
+          <ActionIcon
+            className={addBtnClass}
+            variant="subtle"
+            color="gray"
+            size="xs"
+            radius="sm"
+            aria-label="Add dashboard"
+          >
+            <IconPlus size={14} stroke={1.8} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>Pin a dashboard</Menu.Label>
+          {unpinned.map((d) => (
+            <Menu.Item
+              key={d.id}
+              leftSection={<IconLayoutDashboard size={16} stroke={1.6} />}
+              disabled={setPin.isPending}
+              onClick={() => setPin.mutate({ id: d.id, pinned: true })}
+            >
+              <Text size="sm" truncate>
+                {d.name}
+              </Text>
+            </Menu.Item>
+          ))}
+          <Menu.Divider />
+          <Menu.Item
+            leftSection={<IconPlus size={16} stroke={1.6} />}
+            disabled={create.isPending}
+            onClick={() => create.mutate()}
+          >
+            New dashboard
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+    ) : (
+      <Tooltip label="New dashboard" position="top" withArrow>
+        <ActionIcon
+          className={addBtnClass}
+          variant="subtle"
+          color="gray"
+          size="xs"
+          radius="sm"
+          aria-label="New dashboard"
+          loading={create.isPending}
+          onClick={() => create.mutate()}
+        >
+          <IconPlus size={14} stroke={1.8} />
+        </ActionIcon>
+      </Tooltip>
+    );
+
   return (
     <>
       <SectionHeading
         label="Dashboards"
+        addControl={addControl}
         manageTo="/dashboards"
         manageLabel="Manage dashboards"
       />
@@ -330,33 +424,6 @@ function PinnedDashboards() {
             </PinnedRow>
           )}
         />
-        {unpinned.length > 0 ? (
-          <Menu position="right-start" withArrow shadow="md" width={240}>
-            <Menu.Target>
-              <NavLink
-                component="button"
-                type="button"
-                label="Add dashboard"
-                leftSection={<IconPlus size={18} stroke={1.6} />}
-              />
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>Pin a dashboard</Menu.Label>
-              {unpinned.map((d) => (
-                <Menu.Item
-                  key={d.id}
-                  leftSection={<IconLayoutDashboard size={16} stroke={1.6} />}
-                  disabled={setPin.isPending}
-                  onClick={() => setPin.mutate({ id: d.id, pinned: true })}
-                >
-                  <Text size="sm" truncate>
-                    {d.name}
-                  </Text>
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        ) : null}
       </Stack>
 
       <Modal
@@ -396,6 +463,7 @@ function PinnedDashboards() {
 
 function PinnedApps() {
   const isActive = useIsActive();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
   const { data: apps } = useQuery(appsQueryOptions);
@@ -452,17 +520,84 @@ function PinnedApps() {
       !pinnedIds.has(s.id),
   );
 
-  if ((pins?.length ?? 0) === 0 && candidates.length === 0) return null;
-
   const submitRename = () => {
     if (renameTarget && renameValue.trim()) {
       rename.mutate({ id: renameTarget.id, label: renameValue.trim() });
     }
   };
 
+  const goCreateApp = () => {
+    toast.info('Create a new app by chatting with the Agent');
+    void navigate({ to: '/agent' });
+  };
+
+  const addBtnClass =
+    (pins?.length ?? 0) === 0
+      ? `${classes.actionButton} ${classes.actionButtonStatic}`
+      : classes.actionButton;
+
+  const addControl =
+    candidates.length > 0 ? (
+      <Menu position="right-start" withArrow shadow="md" width={240}>
+        <Menu.Target>
+          <ActionIcon
+            className={addBtnClass}
+            variant="subtle"
+            color="gray"
+            size="xs"
+            radius="sm"
+            aria-label="Add app"
+          >
+            <IconPlus size={14} stroke={1.8} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>Pin a deployed app</Menu.Label>
+          {candidates.map((s) => (
+            <Menu.Item
+              key={s.id}
+              leftSection={<IconAppWindow size={16} stroke={1.6} />}
+              disabled={setPin.isPending}
+              onClick={() => setPin.mutate({ appId: s.id, pinned: true })}
+            >
+              <Text size="sm" truncate>
+                {s.name}
+              </Text>
+            </Menu.Item>
+          ))}
+          <Menu.Divider />
+          <Menu.Item
+            leftSection={<IconSparkles size={16} stroke={1.6} />}
+            onClick={goCreateApp}
+          >
+            New app with Agent
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+    ) : (
+      <Tooltip label="Create an app with the Agent" position="top" withArrow>
+        <ActionIcon
+          className={addBtnClass}
+          variant="subtle"
+          color="gray"
+          size="xs"
+          radius="sm"
+          aria-label="Create an app with the Agent"
+          onClick={goCreateApp}
+        >
+          <IconPlus size={14} stroke={1.8} />
+        </ActionIcon>
+      </Tooltip>
+    );
+
   return (
     <>
-      <SectionHeading label="Apps" manageTo="/apps" manageLabel="Manage apps" />
+      <SectionHeading
+        label="Apps"
+        addControl={addControl}
+        manageTo="/apps"
+        manageLabel="Manage apps"
+      />
       <Stack gap={2} px="xs">
         <SortableList
           items={pins ?? []}
@@ -495,33 +630,6 @@ function PinnedApps() {
             </PinnedRow>
           )}
         />
-        {candidates.length > 0 ? (
-          <Menu position="right-start" withArrow shadow="md" width={240}>
-            <Menu.Target>
-              <NavLink
-                component="button"
-                type="button"
-                label="Add app"
-                leftSection={<IconPlus size={18} stroke={1.6} />}
-              />
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>Pin a deployed app</Menu.Label>
-              {candidates.map((s) => (
-                <Menu.Item
-                  key={s.id}
-                  leftSection={<IconAppWindow size={16} stroke={1.6} />}
-                  disabled={setPin.isPending}
-                  onClick={() => setPin.mutate({ appId: s.id, pinned: true })}
-                >
-                  <Text size="sm" truncate>
-                    {s.name}
-                  </Text>
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        ) : null}
       </Stack>
 
       <Modal

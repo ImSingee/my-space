@@ -27,19 +27,28 @@
   color: var(--mantine-color-dimmed);
 }
 
-/* Reveal the section's manage button only on hover (or keyboard focus). */
-.manageButton {
+/* Reveal a section's header actions (add / manage) only on hover, keyboard
+   focus, or while the add menu is open — keeping the headers clean at rest. */
+.actionButton {
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
-.sectionHeader:hover .manageButton,
-.manageButton:focus-visible {
+.sectionHeader:hover .actionButton,
+.actionButton:focus-visible,
+.actionButton[aria-expanded='true'],
+.actionButton[data-expanded] {
+  opacity: 1;
+}
+
+/* Always-visible variant: used when a section is empty so its create/pin call
+   to action stays discoverable without hovering. */
+.actionButtonStatic {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .manageButton {
+  .actionButton {
     opacity: 1;
   }
 }
