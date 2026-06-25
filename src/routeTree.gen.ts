@@ -14,14 +14,15 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
-import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
 import { Route as AppSubappsIndexRouteImport } from './routes/_app/subapps/index'
+import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
 import { Route as AppSubappIdSplatRouteImport } from './routes/app/$subappId/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiAgentStreamRouteImport } from './routes/api/agent/stream'
 import { Route as ApiAgentAnswerRouteImport } from './routes/api/agent/answer'
 import { Route as AppSubappsSubappIdRouteImport } from './routes/_app/subapps/$subappId'
+import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
 import { Route as AppAppsSubappIdRouteImport } from './routes/_app/apps/$subappId'
 import { Route as ApiHooksSubappIdSplatRouteImport } from './routes/api/hooks/$subappId/$'
 import { Route as ApiSubappsSubappIdWidgetWidgetIdRouteImport } from './routes/api/subapps/$subappId/widget/$widgetId'
@@ -53,11 +54,6 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppAgentRoute = AppAgentRouteImport.update({
   id: '/agent',
   path: '/agent',
@@ -66,6 +62,11 @@ const AppAgentRoute = AppAgentRouteImport.update({
 const AppSubappsIndexRoute = AppSubappsIndexRouteImport.update({
   id: '/subapps/',
   path: '/subapps/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
+  id: '/dashboard/',
+  path: '/dashboard/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSubappIdSplatRoute = AppSubappIdSplatRouteImport.update({
@@ -91,6 +92,11 @@ const ApiAgentAnswerRoute = ApiAgentAnswerRouteImport.update({
 const AppSubappsSubappIdRoute = AppSubappsSubappIdRouteImport.update({
   id: '/subapps/$subappId',
   path: '/subapps/$subappId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
+  id: '/dashboard/$dashboardId',
+  path: '/dashboard/$dashboardId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAppsSubappIdRoute = AppAppsSubappIdRouteImport.update({
@@ -133,14 +139,15 @@ export interface FileRoutesByFullPath {
   '/404': typeof R404Route
   '/login': typeof LoginRoute
   '/agent': typeof AppAgentRoute
-  '/dashboard': typeof AppDashboardRoute
   '/settings': typeof AppSettingsRoute
   '/apps/$subappId': typeof AppAppsSubappIdRoute
+  '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/subapps/$subappId': typeof AppSubappsSubappIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$subappId/$': typeof AppSubappIdSplatRoute
+  '/dashboard/': typeof AppDashboardIndexRoute
   '/subapps/': typeof AppSubappsIndexRoute
   '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
   '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
@@ -153,14 +160,15 @@ export interface FileRoutesByTo {
   '/404': typeof R404Route
   '/login': typeof LoginRoute
   '/agent': typeof AppAgentRoute
-  '/dashboard': typeof AppDashboardRoute
   '/settings': typeof AppSettingsRoute
   '/apps/$subappId': typeof AppAppsSubappIdRoute
+  '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/subapps/$subappId': typeof AppSubappsSubappIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$subappId/$': typeof AppSubappIdSplatRoute
+  '/dashboard': typeof AppDashboardIndexRoute
   '/subapps': typeof AppSubappsIndexRoute
   '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
   '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
@@ -175,14 +183,15 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/_app/agent': typeof AppAgentRoute
-  '/_app/dashboard': typeof AppDashboardRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/apps/$subappId': typeof AppAppsSubappIdRoute
+  '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/_app/subapps/$subappId': typeof AppSubappsSubappIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$subappId/$': typeof AppSubappIdSplatRoute
+  '/_app/dashboard/': typeof AppDashboardIndexRoute
   '/_app/subapps/': typeof AppSubappsIndexRoute
   '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
   '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
@@ -197,14 +206,15 @@ export interface FileRouteTypes {
     | '/404'
     | '/login'
     | '/agent'
-    | '/dashboard'
     | '/settings'
     | '/apps/$subappId'
+    | '/dashboard/$dashboardId'
     | '/subapps/$subappId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$subappId/$'
+    | '/dashboard/'
     | '/subapps/'
     | '/api/hooks/$subappId/$'
     | '/api/subapps/$subappId/app/$'
@@ -217,14 +227,15 @@ export interface FileRouteTypes {
     | '/404'
     | '/login'
     | '/agent'
-    | '/dashboard'
     | '/settings'
     | '/apps/$subappId'
+    | '/dashboard/$dashboardId'
     | '/subapps/$subappId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$subappId/$'
+    | '/dashboard'
     | '/subapps'
     | '/api/hooks/$subappId/$'
     | '/api/subapps/$subappId/app/$'
@@ -238,14 +249,15 @@ export interface FileRouteTypes {
     | '/_app'
     | '/login'
     | '/_app/agent'
-    | '/_app/dashboard'
     | '/_app/settings'
     | '/_app/apps/$subappId'
+    | '/_app/dashboard/$dashboardId'
     | '/_app/subapps/$subappId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$subappId/$'
+    | '/_app/dashboard/'
     | '/_app/subapps/'
     | '/api/hooks/$subappId/$'
     | '/api/subapps/$subappId/app/$'
@@ -307,13 +319,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/agent': {
       id: '/_app/agent'
       path: '/agent'
@@ -326,6 +331,13 @@ declare module '@tanstack/react-router' {
       path: '/subapps'
       fullPath: '/subapps/'
       preLoaderRoute: typeof AppSubappsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard/': {
+      id: '/_app/dashboard/'
+      path: '/dashboard'
+      fullPath: '/dashboard/'
+      preLoaderRoute: typeof AppDashboardIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/$subappId/$': {
@@ -361,6 +373,13 @@ declare module '@tanstack/react-router' {
       path: '/subapps/$subappId'
       fullPath: '/subapps/$subappId'
       preLoaderRoute: typeof AppSubappsSubappIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard/$dashboardId': {
+      id: '/_app/dashboard/$dashboardId'
+      path: '/dashboard/$dashboardId'
+      fullPath: '/dashboard/$dashboardId'
+      preLoaderRoute: typeof AppDashboardDashboardIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/apps/$subappId': {
@@ -410,19 +429,21 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAgentRoute: typeof AppAgentRoute
-  AppDashboardRoute: typeof AppDashboardRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppAppsSubappIdRoute: typeof AppAppsSubappIdRoute
+  AppDashboardDashboardIdRoute: typeof AppDashboardDashboardIdRoute
   AppSubappsSubappIdRoute: typeof AppSubappsSubappIdRoute
+  AppDashboardIndexRoute: typeof AppDashboardIndexRoute
   AppSubappsIndexRoute: typeof AppSubappsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAgentRoute: AppAgentRoute,
-  AppDashboardRoute: AppDashboardRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppAppsSubappIdRoute: AppAppsSubappIdRoute,
+  AppDashboardDashboardIdRoute: AppDashboardDashboardIdRoute,
   AppSubappsSubappIdRoute: AppSubappsSubappIdRoute,
+  AppDashboardIndexRoute: AppDashboardIndexRoute,
   AppSubappsIndexRoute: AppSubappsIndexRoute,
 }
 

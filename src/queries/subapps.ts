@@ -3,6 +3,7 @@ import {
   getDashboard,
   getSubappOps,
   listAvailableWidgets,
+  listDashboards,
   listDeployments,
   listSidebarItems,
   listSubapps,
@@ -13,10 +14,16 @@ export const subappsQueryOptions = queryOptions({
   queryFn: () => listSubapps(),
 });
 
-export const dashboardQueryOptions = queryOptions({
-  queryKey: ['dashboard', 'widgets'],
-  queryFn: () => getDashboard(),
+export const dashboardsQueryOptions = queryOptions({
+  queryKey: ['dashboards'],
+  queryFn: () => listDashboards(),
 });
+
+export const dashboardQueryOptions = (dashboardId: string) =>
+  queryOptions({
+    queryKey: ['dashboard', 'widgets', dashboardId],
+    queryFn: () => getDashboard({ data: dashboardId }),
+  });
 
 export const availableWidgetsQueryOptions = queryOptions({
   queryKey: ['dashboard', 'available-widgets'],

@@ -13,7 +13,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { IconLayoutGrid, IconPlus } from '@tabler/icons-react';
 import { Suspense } from 'react';
 import { toast } from 'sonner';
@@ -22,6 +22,7 @@ import { DashboardGrid } from '~components/dashboard/dashboard-grid';
 import {
   availableWidgetsQueryOptions,
   dashboardQueryOptions,
+  dashboardsQueryOptions,
 } from '~queries/subapps';
 import {
   addDashboardWidget,
@@ -30,26 +31,40 @@ import {
 } from '~server/subapps';
 import classes from './dashboard.module.css';
 
-export const Route = createFileRoute('/_app/dashboard')({
-  loader: async ({ context }) => {
+export const Route = createFileRoute('/_app/dashboard/$dashboardId')({
+  loader: async ({ context, params }) => {
+    const dashboards = await context.queryClient.ensureQueryData(
+      dashboardsQueryOptions,
+    );
+    if (!dashboards.some((d) => d.id === params.dashboardId)) {
+      const first = dashboards[0]?.id;
+      if (first) {
+        throw redirect({
+          to: '/dashboard/$dashboardId',
+          params: { dashboardId: first },
+        });
+      }
+    }
     await Promise.all([
-      context.queryClient.ensureQueryData(dashboardQueryOptions),
       context.queryClient.ensureQueryData(availableWidgetsQueryOptions),
+      context.queryClient.ensureQueryData(
+        dashboardQueryOptions(params.dashboardId),
+      ),
     ]);
   },
   component: DashboardPage,
 });
 
 function DashboardPage() {
+  const { dashboardId } = Route.useParams();
+  const { data: dashboards } = useSuspenseQuery(dashboardsQueryOptions);
+  const current = dashboards.find((d) => d.id === dashboardId);
+
   return (
     <Page
-      title="Dashboard"
+      title={current?.name ?? 'Dashboard'}
       description="A home for the widgets and apps you care about."
-      actions={
-        <Suspense fallback={null}>
-          <AddWidgetMenu />
-        </Suspense>
-      }
+      actions={<AddWidgetMenu dashboardId={dashboardId} />}
     >
       <Suspense
         fallback={
@@ -58,23 +73,26 @@ function DashboardPage() {
           </Center>
         }
       >
-        <DashboardWidgets />
+        <DashboardWidgets key={dashboardId} dashboardId={dashboardId} />
       </Suspense>
     </Page>
   );
 }
 
-function DashboardWidgets() {
+function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
   const queryClient = useQueryClient();
-  const { data: widgets } = useSuspenseQuery(dashboardQueryOptions);
+  const { data: widgets } = useSuspenseQuery(
+    dashboardQueryOptions(dashboardId),
+  );
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: dashboardQueryOptions(dashboardId).queryKey,
+    });
 
   const remove = useMutation({
     mutationFn: (id: string) => removeDashboardWidget({ data: id }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ['dashboard', 'widgets'],
-      });
-    },
+    onSuccess: () => void invalidate(),
     onError: (error) => toast.error((error as Error).message),
   });
 
@@ -93,7 +111,7 @@ function DashboardWidgets() {
             <IconLayoutGrid size={26} stroke={1.5} />
           </ThemeIcon>
           <Text fw={600} mt="xs">
-            No widgets pinned yet
+            No widgets here yet
           </Text>
           <Text size="sm" c="dimmed" ta="center" maw={420}>
             Widgets exposed by your subapps appear here. Build a subapp with the
@@ -117,16 +135,16 @@ function DashboardWidgets() {
   );
 }
 
-function AddWidgetMenu() {
+function AddWidgetMenu({ dashboardId }: { dashboardId: string }) {
   const queryClient = useQueryClient();
   const { data: available } = useSuspenseQuery(availableWidgetsQueryOptions);
 
   const add = useMutation({
     mutationFn: (input: { subappId: string; widgetId: string }) =>
-      addDashboardWidget({ data: input }),
+      addDashboardWidget({ data: { dashboardId, ...input } }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ['dashboard', 'widgets'],
+        queryKey: dashboardQueryOptions(dashboardId).queryKey,
       });
       toast.success('Widget added to dashboard');
     },

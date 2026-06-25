@@ -18,3 +18,33 @@
   padding: 10px 6px 12px;
   border-top: 1px solid var(--mantine-color-default-border);
 }
+
+/* Dashboard row: link fills the row, action button overlays on the right. */
+.item {
+  position: relative;
+}
+
+.itemActionWrap {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+/* Reveal the per-item action button only on hover (or while its menu is open). */
+.itemAction {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.item:hover .itemAction,
+.itemAction[data-open] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .itemAction {
+    opacity: 1;
+  }
+}

@@ -1,1 +1,1 @@
-ALTER TABLE "subapps" ADD COLUMN "webhook_secret" text;
+ALTER TABLE "subapps" ADD COLUMN IF NOT EXISTS "webhook_secret" text;

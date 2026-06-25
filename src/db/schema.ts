@@ -168,8 +168,23 @@ export const agentSessions = pgTable('agent_sessions', {
 
 /** ================== dashboard & sidebar ================== */
 
+/**
+ * A dashboard is a named board the user arranges widgets on. Users can create
+ * multiple dashboards; each owns its own set of widget placements.
+ */
+export const dashboards = pgTable('dashboards', {
+  id: ulid().$defaultFn(genUlid).primaryKey(),
+  name: text().notNull(),
+  sortOrder: integer().notNull().default(0),
+  createdAt,
+  updatedAt,
+});
+
 export const dashboardWidgets = pgTable('dashboard_widgets', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
+  dashboardId: text()
+    .notNull()
+    .references(() => dashboards.id, { onDelete: 'cascade' }),
   subappId: text()
     .notNull()
     .references(() => subapps.id, { onDelete: 'cascade' }),

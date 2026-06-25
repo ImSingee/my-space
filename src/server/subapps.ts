@@ -174,6 +174,83 @@ export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
     return { ok };
   });
 
+/** ================== dashboards ================== */
+
+export type Dashboard = { id: string; name: string; sortOrder: number };
+
+/** Make sure at least one dashboard always exists for the UI to land on. */
+async function ensureDefaultDashboard(): Promise<void> {
+  const existing = await db.query.dashboards.findFirst();
+  if (existing) return;
+  await db
+    .insert(schema.dashboards)
+    .values({ id: 'default', name: 'My Dashboard', sortOrder: 0 })
+    .onConflictDoNothing();
+}
+
+export const listDashboards = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<Dashboard[]> => {
+    await ensureDefaultDashboard();
+    const rows = await db.query.dashboards.findMany({
+      orderBy: (d, { asc }) => [asc(d.sortOrder), asc(d.createdAt)],
+    });
+    return rows.map((d) => ({
+      id: d.id,
+      name: d.name,
+      sortOrder: d.sortOrder,
+    }));
+  },
+);
+
+export const createDashboard = createServerFn({ method: 'POST' })
+  .validator((input: { name: string }) => input)
+  .handler(async ({ data }): Promise<Dashboard> => {
+    const name = data.name.trim() || 'Untitled';
+    const all = await db.query.dashboards.findMany();
+    const [row] = await db
+      .insert(schema.dashboards)
+      .values({ name, sortOrder: all.length })
+      .returning();
+    return { id: row.id, name: row.name, sortOrder: row.sortOrder };
+  });
+
+export const renameDashboard = createServerFn({ method: 'POST' })
+  .validator((input: { id: string; name: string }) => input)
+  .handler(async ({ data }) => {
+    const name = data.name.trim();
+    if (!name) throw new Error('Dashboard name cannot be empty.');
+    await db
+      .update(schema.dashboards)
+      .set({ name })
+      .where(eq(schema.dashboards.id, data.id));
+    return { ok: true };
+  });
+
+export const deleteDashboard = createServerFn({ method: 'POST' })
+  .validator((id: string) => id)
+  .handler(async ({ data: id }) => {
+    const all = await db.query.dashboards.findMany();
+    if (all.length <= 1) {
+      throw new Error('You must keep at least one dashboard.');
+    }
+    await db.delete(schema.dashboards).where(eq(schema.dashboards.id, id));
+    return { ok: true };
+  });
+
+export const reorderDashboards = createServerFn({ method: 'POST' })
+  .validator((orderedIds: string[]) => orderedIds)
+  .handler(async ({ data: orderedIds }) => {
+    await Promise.all(
+      orderedIds.map((id, index) =>
+        db
+          .update(schema.dashboards)
+          .set({ sortOrder: index })
+          .where(eq(schema.dashboards.id, id)),
+      ),
+    );
+    return { ok: true };
+  });
+
 /** ================== dashboard widgets ================== */
 
 export type DashboardItem = {
@@ -189,9 +266,11 @@ export type DashboardItem = {
   h: number;
 };
 
-export const getDashboard = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<DashboardItem[]> => {
+export const getDashboard = createServerFn({ method: 'GET' })
+  .validator((dashboardId: string) => dashboardId)
+  .handler(async ({ data: dashboardId }): Promise<DashboardItem[]> => {
     const placements = await db.query.dashboardWidgets.findMany({
+      where: (w, { eq: e }) => e(w.dashboardId, dashboardId),
       orderBy: (w, { asc }) => [asc(w.sortOrder), asc(w.createdAt)],
     });
     const manifests = new Map<string, NormalizedManifest | null>();
@@ -220,8 +299,7 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(
       });
     }
     return items;
-  },
-);
+  });
 
 export type AvailableWidget = {
   subappId: string;
@@ -257,7 +335,10 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' }).handler(
 );
 
 export const addDashboardWidget = createServerFn({ method: 'POST' })
-  .validator((input: { subappId: string; widgetId: string }) => input)
+  .validator(
+    (input: { dashboardId: string; subappId: string; widgetId: string }) =>
+      input,
+  )
   .handler(async ({ data }) => {
     const manifest = await normalizedManifestFor(data.subappId);
     const widget = manifest?.widgets.find((w) => w.id === data.widgetId);
@@ -266,13 +347,19 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
     }
     const existing = await db.query.dashboardWidgets.findFirst({
       where: (w, { eq: e }) =>
-        and(e(w.subappId, data.subappId), e(w.widgetId, data.widgetId)),
+        and(
+          e(w.dashboardId, data.dashboardId),
+          e(w.subappId, data.subappId),
+          e(w.widgetId, data.widgetId),
+        ),
     });
     if (existing) return existing;
 
     // Place the new widget in a tidy grid flow (12 cols) so multiple widgets
     // don't all pile up at (0,0) before the user arranges them.
-    const all = await db.query.dashboardWidgets.findMany();
+    const all = await db.query.dashboardWidgets.findMany({
+      where: (w, { eq: e }) => e(w.dashboardId, data.dashboardId),
+    });
     const w = widget.defaultSize.w;
     const h = widget.defaultSize.h;
     const perRow = Math.max(1, Math.floor(12 / w));
@@ -283,6 +370,7 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
     const [row] = await db
       .insert(schema.dashboardWidgets)
       .values({
+        dashboardId: data.dashboardId,
         subappId: data.subappId,
         widgetId: data.widgetId,
         x,
@@ -361,6 +449,20 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
     await db
       .delete(schema.sidebarItems)
       .where(eq(schema.sidebarItems.subappId, data.subappId));
+    return { ok: true };
+  });
+
+export const reorderSidebarItems = createServerFn({ method: 'POST' })
+  .validator((orderedIds: string[]) => orderedIds)
+  .handler(async ({ data: orderedIds }) => {
+    await Promise.all(
+      orderedIds.map((id, index) =>
+        db
+          .update(schema.sidebarItems)
+          .set({ sortOrder: index })
+          .where(eq(schema.sidebarItems.id, id)),
+      ),
+    );
     return { ok: true };
   });
 
