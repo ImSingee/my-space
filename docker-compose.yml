@@ -1,0 +1,60 @@
+# Hatch — one-command deploy: `docker compose up --build`
+# Brings up Postgres + the platform. The platform image bundles Node, Deno,
+# buf and esbuild, so it can build and run AI-generated subapps on its own.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      # Passwordless local access (the platform connects as postgres@db without a
+      # password and provisions a database per subapp). This DB is not published
+      # to the host by default; uncomment the ports mapping below to inspect it.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - hatch_pgdata:/var/lib/postgresql/data
+    # ports:
+    #   - "5544:5432" # optional: expose for debugging (avoid clashing with a local PG)
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Platform database.
+      DATABASE_URL: postgres://postgres@db:5432/postgres
+      # Admin connection used to create/drop a database per subapp.
+      PLATFORM_PG_ADMIN_URL: postgres://postgres@db:5432/postgres
+      # Host/port injected into each subapp backend's DATABASE_URL.
+      PLATFORM_PG_HOST: db
+      PLATFORM_PG_PORT: '5432'
+      PORT: '3700'
+      HOST: 0.0.0.0
+      NODE_ENV: production
+      DENO_DIR: /app/.deno
+      # CHANGE THIS in production: signs auth sessions.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-please-change-this-to-a-long-random-string}
+    ports:
+      # Host port is configurable (HATCH_PORT) to avoid clashing with a local dev server.
+      - '${HATCH_PORT:-3700}:3700'
+    volumes:
+      # Persist agent-authored subapp source, builds, versions and storage.
+      - hatch_workspace:/app/workspace
+      # Persist Deno's npm cache so subapp backends start fast after the first run.
+      - hatch_deno:/app/.deno
+
+volumes:
+  hatch_pgdata:
+  hatch_workspace:
+  hatch_deno:

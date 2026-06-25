@@ -1,0 +1,18 @@
+.root {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(
+      60% 50% at 50% 0%,
+      var(--mantine-color-violet-light) 0%,
+      transparent 70%
+    ),
+    var(--mantine-color-body);
+}
+
+.panel {
+  width: 100%;
+  max-width: 400px;
+}

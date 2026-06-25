@@ -9,14 +9,31 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as StaticRouteImport } from './routes/static'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppAgentRouteImport } from './routes/_app/agent'
+import { Route as AppSubappsIndexRouteImport } from './routes/_app/subapps/index'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiAgentStreamRouteImport } from './routes/api/agent/stream'
+import { Route as AppSubappsSubappIdRouteImport } from './routes/_app/subapps/$subappId'
+import { Route as AppAppsSubappIdRouteImport } from './routes/_app/apps/$subappId'
+import { Route as ApiHooksSubappIdSplatRouteImport } from './routes/api/hooks/$subappId/$'
+import { Route as ApiSubappsSubappIdWidgetWidgetIdRouteImport } from './routes/api/subapps/$subappId/widget/$widgetId'
+import { Route as ApiSubappsSubappIdStorageSplatRouteImport } from './routes/api/subapps/$subappId/storage/$'
+import { Route as ApiSubappsSubappIdRpcSplatRouteImport } from './routes/api/subapps/$subappId/rpc/$'
+import { Route as ApiSubappsSubappIdAppSplatRouteImport } from './routes/api/subapps/$subappId/app/$'
 
-const StaticRoute = StaticRouteImport.update({
-  id: '/static',
-  path: '/static',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const R404Route = R404RouteImport.update({
@@ -29,53 +46,218 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAgentRoute = AppAgentRouteImport.update({
+  id: '/agent',
+  path: '/agent',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSubappsIndexRoute = AppSubappsIndexRouteImport.update({
+  id: '/subapps/',
+  path: '/subapps/',
+  getParentRoute: () => AppRoute,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAgentStreamRoute = ApiAgentStreamRouteImport.update({
+  id: '/api/agent/stream',
+  path: '/api/agent/stream',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppSubappsSubappIdRoute = AppSubappsSubappIdRouteImport.update({
+  id: '/subapps/$subappId',
+  path: '/subapps/$subappId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAppsSubappIdRoute = AppAppsSubappIdRouteImport.update({
+  id: '/apps/$subappId',
+  path: '/apps/$subappId',
+  getParentRoute: () => AppRoute,
+} as any)
+const ApiHooksSubappIdSplatRoute = ApiHooksSubappIdSplatRouteImport.update({
+  id: '/api/hooks/$subappId/$',
+  path: '/api/hooks/$subappId/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSubappsSubappIdWidgetWidgetIdRoute =
+  ApiSubappsSubappIdWidgetWidgetIdRouteImport.update({
+    id: '/api/subapps/$subappId/widget/$widgetId',
+    path: '/api/subapps/$subappId/widget/$widgetId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiSubappsSubappIdStorageSplatRoute =
+  ApiSubappsSubappIdStorageSplatRouteImport.update({
+    id: '/api/subapps/$subappId/storage/$',
+    path: '/api/subapps/$subappId/storage/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiSubappsSubappIdRpcSplatRoute =
+  ApiSubappsSubappIdRpcSplatRouteImport.update({
+    id: '/api/subapps/$subappId/rpc/$',
+    path: '/api/subapps/$subappId/rpc/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiSubappsSubappIdAppSplatRoute =
+  ApiSubappsSubappIdAppSplatRouteImport.update({
+    id: '/api/subapps/$subappId/app/$',
+    path: '/api/subapps/$subappId/app/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/404': typeof R404Route
-  '/static': typeof StaticRoute
+  '/login': typeof LoginRoute
+  '/agent': typeof AppAgentRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/settings': typeof AppSettingsRoute
+  '/apps/$subappId': typeof AppAppsSubappIdRoute
+  '/subapps/$subappId': typeof AppSubappsSubappIdRoute
+  '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/subapps/': typeof AppSubappsIndexRoute
+  '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
+  '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
+  '/api/subapps/$subappId/rpc/$': typeof ApiSubappsSubappIdRpcSplatRoute
+  '/api/subapps/$subappId/storage/$': typeof ApiSubappsSubappIdStorageSplatRoute
+  '/api/subapps/$subappId/widget/$widgetId': typeof ApiSubappsSubappIdWidgetWidgetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
-  '/static': typeof StaticRoute
+  '/login': typeof LoginRoute
+  '/agent': typeof AppAgentRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/settings': typeof AppSettingsRoute
+  '/apps/$subappId': typeof AppAppsSubappIdRoute
+  '/subapps/$subappId': typeof AppSubappsSubappIdRoute
+  '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/subapps': typeof AppSubappsIndexRoute
+  '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
+  '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
+  '/api/subapps/$subappId/rpc/$': typeof ApiSubappsSubappIdRpcSplatRoute
+  '/api/subapps/$subappId/storage/$': typeof ApiSubappsSubappIdStorageSplatRoute
+  '/api/subapps/$subappId/widget/$widgetId': typeof ApiSubappsSubappIdWidgetWidgetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/404': typeof R404Route
-  '/static': typeof StaticRoute
+  '/_app': typeof AppRouteWithChildren
+  '/login': typeof LoginRoute
+  '/_app/agent': typeof AppAgentRoute
+  '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/settings': typeof AppSettingsRoute
+  '/_app/apps/$subappId': typeof AppAppsSubappIdRoute
+  '/_app/subapps/$subappId': typeof AppSubappsSubappIdRoute
+  '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/_app/subapps/': typeof AppSubappsIndexRoute
+  '/api/hooks/$subappId/$': typeof ApiHooksSubappIdSplatRoute
+  '/api/subapps/$subappId/app/$': typeof ApiSubappsSubappIdAppSplatRoute
+  '/api/subapps/$subappId/rpc/$': typeof ApiSubappsSubappIdRpcSplatRoute
+  '/api/subapps/$subappId/storage/$': typeof ApiSubappsSubappIdStorageSplatRoute
+  '/api/subapps/$subappId/widget/$widgetId': typeof ApiSubappsSubappIdWidgetWidgetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/404' | '/static' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/404'
+    | '/login'
+    | '/agent'
+    | '/dashboard'
+    | '/settings'
+    | '/apps/$subappId'
+    | '/subapps/$subappId'
+    | '/api/agent/stream'
+    | '/api/auth/$'
+    | '/subapps/'
+    | '/api/hooks/$subappId/$'
+    | '/api/subapps/$subappId/app/$'
+    | '/api/subapps/$subappId/rpc/$'
+    | '/api/subapps/$subappId/storage/$'
+    | '/api/subapps/$subappId/widget/$widgetId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/404' | '/static' | '/api/auth/$'
-  id: '__root__' | '/' | '/404' | '/static' | '/api/auth/$'
+  to:
+    | '/'
+    | '/404'
+    | '/login'
+    | '/agent'
+    | '/dashboard'
+    | '/settings'
+    | '/apps/$subappId'
+    | '/subapps/$subappId'
+    | '/api/agent/stream'
+    | '/api/auth/$'
+    | '/subapps'
+    | '/api/hooks/$subappId/$'
+    | '/api/subapps/$subappId/app/$'
+    | '/api/subapps/$subappId/rpc/$'
+    | '/api/subapps/$subappId/storage/$'
+    | '/api/subapps/$subappId/widget/$widgetId'
+  id:
+    | '__root__'
+    | '/'
+    | '/404'
+    | '/_app'
+    | '/login'
+    | '/_app/agent'
+    | '/_app/dashboard'
+    | '/_app/settings'
+    | '/_app/apps/$subappId'
+    | '/_app/subapps/$subappId'
+    | '/api/agent/stream'
+    | '/api/auth/$'
+    | '/_app/subapps/'
+    | '/api/hooks/$subappId/$'
+    | '/api/subapps/$subappId/app/$'
+    | '/api/subapps/$subappId/rpc/$'
+    | '/api/subapps/$subappId/storage/$'
+    | '/api/subapps/$subappId/widget/$widgetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   R404Route: typeof R404Route
-  StaticRoute: typeof StaticRoute
+  AppRoute: typeof AppRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  ApiAgentStreamRoute: typeof ApiAgentStreamRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiHooksSubappIdSplatRoute: typeof ApiHooksSubappIdSplatRoute
+  ApiSubappsSubappIdAppSplatRoute: typeof ApiSubappsSubappIdAppSplatRoute
+  ApiSubappsSubappIdRpcSplatRoute: typeof ApiSubappsSubappIdRpcSplatRoute
+  ApiSubappsSubappIdStorageSplatRoute: typeof ApiSubappsSubappIdStorageSplatRoute
+  ApiSubappsSubappIdWidgetWidgetIdRoute: typeof ApiSubappsSubappIdWidgetWidgetIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/static': {
-      id: '/static'
-      path: '/static'
-      fullPath: '/static'
-      preLoaderRoute: typeof StaticRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/404': {
@@ -92,6 +274,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/agent': {
+      id: '/_app/agent'
+      path: '/agent'
+      fullPath: '/agent'
+      preLoaderRoute: typeof AppAgentRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/subapps/': {
+      id: '/_app/subapps/'
+      path: '/subapps'
+      fullPath: '/subapps/'
+      preLoaderRoute: typeof AppSubappsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -99,14 +309,97 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/agent/stream': {
+      id: '/api/agent/stream'
+      path: '/api/agent/stream'
+      fullPath: '/api/agent/stream'
+      preLoaderRoute: typeof ApiAgentStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/subapps/$subappId': {
+      id: '/_app/subapps/$subappId'
+      path: '/subapps/$subappId'
+      fullPath: '/subapps/$subappId'
+      preLoaderRoute: typeof AppSubappsSubappIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/apps/$subappId': {
+      id: '/_app/apps/$subappId'
+      path: '/apps/$subappId'
+      fullPath: '/apps/$subappId'
+      preLoaderRoute: typeof AppAppsSubappIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/hooks/$subappId/$': {
+      id: '/api/hooks/$subappId/$'
+      path: '/api/hooks/$subappId/$'
+      fullPath: '/api/hooks/$subappId/$'
+      preLoaderRoute: typeof ApiHooksSubappIdSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/subapps/$subappId/widget/$widgetId': {
+      id: '/api/subapps/$subappId/widget/$widgetId'
+      path: '/api/subapps/$subappId/widget/$widgetId'
+      fullPath: '/api/subapps/$subappId/widget/$widgetId'
+      preLoaderRoute: typeof ApiSubappsSubappIdWidgetWidgetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/subapps/$subappId/storage/$': {
+      id: '/api/subapps/$subappId/storage/$'
+      path: '/api/subapps/$subappId/storage/$'
+      fullPath: '/api/subapps/$subappId/storage/$'
+      preLoaderRoute: typeof ApiSubappsSubappIdStorageSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/subapps/$subappId/rpc/$': {
+      id: '/api/subapps/$subappId/rpc/$'
+      path: '/api/subapps/$subappId/rpc/$'
+      fullPath: '/api/subapps/$subappId/rpc/$'
+      preLoaderRoute: typeof ApiSubappsSubappIdRpcSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/subapps/$subappId/app/$': {
+      id: '/api/subapps/$subappId/app/$'
+      path: '/api/subapps/$subappId/app/$'
+      fullPath: '/api/subapps/$subappId/app/$'
+      preLoaderRoute: typeof ApiSubappsSubappIdAppSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
+
+interface AppRouteChildren {
+  AppAgentRoute: typeof AppAgentRoute
+  AppDashboardRoute: typeof AppDashboardRoute
+  AppSettingsRoute: typeof AppSettingsRoute
+  AppAppsSubappIdRoute: typeof AppAppsSubappIdRoute
+  AppSubappsSubappIdRoute: typeof AppSubappsSubappIdRoute
+  AppSubappsIndexRoute: typeof AppSubappsIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppAgentRoute: AppAgentRoute,
+  AppDashboardRoute: AppDashboardRoute,
+  AppSettingsRoute: AppSettingsRoute,
+  AppAppsSubappIdRoute: AppAppsSubappIdRoute,
+  AppSubappsSubappIdRoute: AppSubappsSubappIdRoute,
+  AppSubappsIndexRoute: AppSubappsIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   R404Route: R404Route,
-  StaticRoute: StaticRoute,
+  AppRoute: AppRouteWithChildren,
+  LoginRoute: LoginRoute,
+  ApiAgentStreamRoute: ApiAgentStreamRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiHooksSubappIdSplatRoute: ApiHooksSubappIdSplatRoute,
+  ApiSubappsSubappIdAppSplatRoute: ApiSubappsSubappIdAppSplatRoute,
+  ApiSubappsSubappIdRpcSplatRoute: ApiSubappsSubappIdRpcSplatRoute,
+  ApiSubappsSubappIdStorageSplatRoute: ApiSubappsSubappIdStorageSplatRoute,
+  ApiSubappsSubappIdWidgetWidgetIdRoute: ApiSubappsSubappIdWidgetWidgetIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,0 +1,20 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--mantine-color-body);
+}
+
+.head {
+  padding: 18px 18px 14px;
+}
+
+.nav {
+  flex: 1;
+  min-height: 0;
+}
+
+.footer {
+  padding: 10px 6px 12px;
+  border-top: 1px solid var(--mantine-color-default-border);
+}

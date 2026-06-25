@@ -1,0 +1,53 @@
+.grid {
+  position: relative;
+}
+
+.cell {
+  height: 100%;
+}
+
+/* Drop placeholder shown while dragging/resizing. */
+.grid :global(.react-grid-placeholder) {
+  background-color: var(--mantine-color-violet-light);
+  border: 1px dashed var(--mantine-color-violet-filled);
+  border-radius: var(--mantine-radius-md);
+  opacity: 0.5;
+}
+
+/* Smooth movement for non-dragged items. */
+.grid :global(.react-grid-item.cssTransforms) {
+  transition: transform 180ms ease;
+}
+
+.grid :global(.react-grid-item.react-grid-item--resizing),
+.grid :global(.react-grid-item.react-draggable-dragging) {
+  transition: none;
+  z-index: 3;
+}
+
+/* Never select text while dragging/resizing a widget. */
+.grid :global(.react-grid-item.react-draggable-dragging),
+.grid :global(.react-grid-item.react-draggable-dragging *),
+.grid :global(.react-grid-item.react-grid-item--resizing),
+.grid :global(.react-grid-item.react-grid-item--resizing *) {
+  user-select: none;
+}
+
+/* Make the bottom-right resize handle visible and themed. */
+.grid :global(.react-resizable-handle) {
+  width: 18px;
+  height: 18px;
+  background-image: none;
+}
+
+.grid :global(.react-resizable-handle)::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--mantine-color-dimmed);
+  border-bottom: 2px solid var(--mantine-color-dimmed);
+  opacity: 0.6;
+}

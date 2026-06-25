@@ -8,6 +8,13 @@ dist-ssr
 .nitro
 .vinxi
 
+# Agent-authored subapps + build artifacts (provided by a volume at runtime)
+workspace/subapps
+workspace/builds
+workspace/versions
+workspace/storage
+.deno
+
 # Development and cache
 .tanstack
 .wrangler

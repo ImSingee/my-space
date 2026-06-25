@@ -1,98 +1,79 @@
-import { ulid as genUlid0 } from 'ulid';
 import { db, schema } from '../src/db';
 
-function genUlid() {
-  return genUlid0().toLowerCase();
-}
+const TEST_KEY = 'sk-e2f9188df87094bccc63a144cbd809d3';
 
-// // Small reproducible PRNG for deterministic sampling (M2M/random votes/random subscriptions)
-// function makePrng(seedNum = 42) {
-//   let s = seedNum >>> 0;
-//   return () => {
-//     // xorshift32
-//     s ^= s << 13;
-//     s ^= s >>> 17;
-//     s ^= s << 5;
-//     return (s >>> 0) / 0xffffffff;
-//   };
-// }
-
-// Clear the database in dependency-safe order
-async function clearDatabase() {
-  console.log('🧹 Clearing existing data...');
-
-  // Deletion order matters: remove child tables before parent tables
-  await db.delete(schema.demoThings);
-
-  console.log('✅ Database cleared');
-}
-
-const sampleDemoThings = [
+const DEFAULTS = [
   {
-    name: 'Widget Alpha',
-    description: 'A versatile component for dashboard layouts',
+    name: 'Singee Anthropic',
+    apiType: 'anthropic-messages' as const,
+    baseUrl: 'https://ai.singee.me/test',
+    apiKey: TEST_KEY,
+    sortOrder: 0,
+    models: [
+      {
+        modelId: 'claude-sonnet-4-6',
+        name: 'Claude Sonnet 4.6',
+        reasoning: true,
+        contextWindow: 200000,
+        maxTokens: 8192,
+      },
+    ],
   },
   {
-    name: 'Data Connector',
-    description: 'Bridges external APIs with internal systems',
-  },
-  {
-    name: 'Report Generator',
-    description: 'Creates automated PDF reports from templates',
-  },
-  {
-    name: 'Task Scheduler',
-    description: 'Manages recurring jobs and background processes',
-  },
-  {
-    name: 'Notification Hub',
-    description: 'Centralized service for push and email alerts',
-  },
-  {
-    name: 'File Processor',
-    description: 'Handles batch uploads and format conversions',
-  },
-  {
-    name: 'Analytics Engine',
-    description: 'Tracks user behavior and generates insights',
-  },
-  {
-    name: 'Cache Manager',
-    description: 'Optimizes data retrieval with smart caching',
-  },
-  {
-    name: 'Auth Gateway',
-    description: 'Provides SSO and token-based authentication',
-  },
-  {
-    name: 'Search Indexer',
-    description: 'Powers full-text search across all content',
+    name: 'Singee OpenAI',
+    apiType: 'openai-responses' as const,
+    baseUrl: 'https://ai.singee.me/test/v1',
+    apiKey: TEST_KEY,
+    sortOrder: 1,
+    models: [
+      {
+        modelId: 'gpt-5.5',
+        name: 'GPT-5.5',
+        reasoning: true,
+        contextWindow: 400000,
+        maxTokens: 16384,
+      },
+    ],
   },
 ];
 
-async function seedDemoThings() {
-  console.log('📦 Inserting demo things...');
-
-  const seededDemoThings = await db
-    .insert(schema.demoThings)
-    .values(
-      sampleDemoThings.map((thing) => ({
-        id: genUlid(),
-        name: thing.name,
-        description: thing.description,
-      })),
-    )
-    .returning({ id: schema.demoThings.id, name: schema.demoThings.name });
-
-  console.log(`✅ Seeded ${seededDemoThings.length} demo things`);
-}
-
 async function main() {
-  await clearDatabase();
+  const existing = await db.query.agentProviders.findFirst();
+  if (existing) {
+    console.log('Providers already exist, skipping seed.');
+    process.exit(0);
+  }
 
-  await seedDemoThings();
+  for (const def of DEFAULTS) {
+    const [provider] = await db
+      .insert(schema.agentProviders)
+      .values({
+        name: def.name,
+        apiType: def.apiType,
+        baseUrl: def.baseUrl,
+        apiKey: def.apiKey,
+        sortOrder: def.sortOrder,
+      })
+      .returning();
 
-  console.log('🎉 Finished seeding all apps!');
+    await db.insert(schema.agentModels).values(
+      def.models.map((m, index) => ({
+        providerId: provider.id,
+        modelId: m.modelId,
+        name: m.name,
+        reasoning: m.reasoning,
+        contextWindow: m.contextWindow,
+        maxTokens: m.maxTokens,
+        input: ['text'],
+        sortOrder: index,
+      })),
+    );
+    console.log(
+      `Seeded provider ${def.name} with ${def.models.length} model(s)`,
+    );
+  }
+
+  console.log('Finished seeding default providers.');
   process.exit(0);
 }
 

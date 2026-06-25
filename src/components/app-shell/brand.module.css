@@ -1,0 +1,27 @@
+.root {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #fff;
+  background: linear-gradient(
+    140deg,
+    var(--mantine-color-violet-5) 0%,
+    var(--mantine-color-violet-7) 100%
+  );
+  box-shadow:
+    0 1px 2px rgba(91, 33, 182, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.word {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--mantine-color-text);
+}

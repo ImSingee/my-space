@@ -1,0 +1,1 @@
+ALTER TABLE "subapps" ADD COLUMN "webhook_secret" text;

@@ -1,0 +1,292 @@
+/** Server-only: lazy Deno backend process manager + Connect reverse proxy. */
+import { type ChildProcess, spawn } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { subappBuildDir, subappStorageDir } from '~agent/paths';
+import { ensureSubappDatabase } from './provision';
+
+type RunningBackend = {
+  proc: ChildProcess;
+  port: number;
+  startedAt: number;
+  ready: Promise<void>;
+  getLog: () => string;
+};
+
+type RuntimeGlobal = typeof globalThis & {
+  __hatchSubappRuntime__?: Map<string, RunningBackend>;
+  __hatchSubappKeepAlive__?: Set<string>;
+  __hatchSubappCleanup__?: boolean;
+};
+
+function registry(): Map<string, RunningBackend> {
+  const g = globalThis as RuntimeGlobal;
+  g.__hatchSubappRuntime__ ??= new Map<string, RunningBackend>();
+  return g.__hatchSubappRuntime__;
+}
+
+function keepAliveSet(): Set<string> {
+  const g = globalThis as RuntimeGlobal;
+  g.__hatchSubappKeepAlive__ ??= new Set<string>();
+  return g.__hatchSubappKeepAlive__;
+}
+
+/**
+ * Mark a subapp's backend as long-running. While marked, the platform restarts
+ * it automatically if the process exits unexpectedly.
+ */
+export function setKeepAlive(id: string, on: boolean): void {
+  const set = keepAliveSet();
+  if (on) set.add(id);
+  else set.delete(id);
+}
+
+function installCleanup(): void {
+  const g = globalThis as RuntimeGlobal;
+  if (g.__hatchSubappCleanup__) return;
+  g.__hatchSubappCleanup__ = true;
+  const killAll = () => {
+    for (const backend of registry().values()) {
+      try {
+        backend.proc.kill('SIGKILL');
+      } catch {
+        /* best-effort */
+      }
+    }
+  };
+  process.on('exit', killAll);
+  process.once('SIGINT', () => {
+    killAll();
+    process.exit(0);
+  });
+  process.once('SIGTERM', () => {
+    killAll();
+    process.exit(0);
+  });
+}
+
+installCleanup();
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (addr && typeof addr === 'object') {
+        const { port } = addr;
+        server.close(() => resolve(port));
+      } else {
+        server.close(() => reject(new Error('could not allocate a port')));
+      }
+    });
+  });
+}
+
+function canConnect(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, '127.0.0.1');
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForPort(port: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await canConnect(port)) return;
+    await delay(150);
+  }
+  throw new Error(`backend did not become reachable on port ${port}`);
+}
+
+/** Start (or reuse) the Deno backend for a subapp and return its local port. */
+export async function ensureSubappRunning(id: string): Promise<number> {
+  const reg = registry();
+  const existing = reg.get(id);
+  if (existing) {
+    if (existing.proc.exitCode === null && !existing.proc.killed) {
+      await existing.ready;
+      return existing.port;
+    }
+    reg.delete(id);
+  }
+
+  const buildDir = subappBuildDir(id);
+  if (!existsSync(path.join(buildDir, 'backend', 'main.ts'))) {
+    throw new Error(`Subapp "${id}" has no built backend. Deploy it first.`);
+  }
+
+  const databaseUrl = await ensureSubappDatabase(id);
+  const port = await freePort();
+
+  const storageDir = subappStorageDir(id);
+  mkdirSync(storageDir, { recursive: true });
+
+  const proc = spawn(
+    'deno',
+    [
+      'run',
+      '--allow-net',
+      '--allow-env',
+      '--allow-read',
+      '--allow-write',
+      '--no-prompt',
+      'backend/main.ts',
+    ],
+    {
+      cwd: buildDir,
+      env: {
+        ...process.env,
+        PORT: String(port),
+        DATABASE_URL: databaseUrl,
+        STORAGE_DIR: storageDir,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+
+  let log = '';
+  const appendLog = (chunk: Buffer) => {
+    log = (log + chunk.toString()).slice(-4000);
+  };
+  proc.stdout?.on('data', appendLog);
+  proc.stderr?.on('data', appendLog);
+
+  const backend: RunningBackend = {
+    proc,
+    port,
+    startedAt: Date.now(),
+    ready: Promise.resolve(),
+    getLog: () => log,
+  };
+  backend.ready = waitForPort(port, 20000);
+  reg.set(id, backend);
+  proc.on('exit', () => {
+    if (reg.get(id) === backend) reg.delete(id);
+    // Long-running backends self-heal: if still marked keep-alive (i.e. not
+    // intentionally stopped), restart after a short backoff.
+    if (keepAliveSet().has(id)) {
+      setTimeout(() => {
+        if (keepAliveSet().has(id) && !registry().has(id)) {
+          void ensureSubappRunning(id).catch(() => {
+            /* will retry on next exit / request */
+          });
+        }
+      }, 1000);
+    }
+  });
+
+  try {
+    await backend.ready;
+  } catch (error) {
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* best-effort */
+    }
+    reg.delete(id);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to start subapp "${id}": ${message}\n${log}`);
+  }
+
+  return port;
+}
+
+/**
+ * Server-initiated call into a subapp backend (used by the cron scheduler).
+ * Lazily starts the backend, then issues a direct HTTP request to `pathAndQuery`.
+ */
+export async function callSubappBackend(
+  id: string,
+  pathAndQuery: string,
+  init?: RequestInit,
+): Promise<{ status: number; body: string }> {
+  const port = await ensureSubappRunning(id);
+  const path = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
+  const upstream = await fetch(`http://127.0.0.1:${port}${path}`, init);
+  const body = await upstream.text();
+  return { status: upstream.status, body };
+}
+
+/** Whether a subapp backend process is currently running. */
+export function isSubappRunning(id: string): boolean {
+  const backend = registry().get(id);
+  return Boolean(
+    backend && backend.proc.exitCode === null && !backend.proc.killed,
+  );
+}
+
+/**
+ * Stop a running subapp backend (no-op if not running). Clears the keep-alive
+ * mark so long-running backends are not auto-restarted by an intentional stop.
+ */
+export function stopSubapp(id: string): void {
+  keepAliveSet().delete(id);
+  const reg = registry();
+  const backend = reg.get(id);
+  if (!backend) return;
+  try {
+    backend.proc.kill('SIGKILL');
+  } catch {
+    /* best-effort */
+  }
+  reg.delete(id);
+}
+
+/**
+ * Reverse-proxy a platform request to the subapp's Deno backend.
+ * `stripPrefix` is removed from the pathname before forwarding (e.g. the
+ * `/api/subapps/<id>/rpc` Connect base path).
+ */
+export async function proxySubappRequest(
+  id: string,
+  request: Request,
+  stripPrefix: string,
+  prependPath = '',
+): Promise<Response> {
+  const port = await ensureSubappRunning(id);
+  const url = new URL(request.url);
+  const stripped = url.pathname.startsWith(stripPrefix)
+    ? url.pathname.slice(stripPrefix.length)
+    : url.pathname;
+  const rest = `${prependPath}${stripped}` || '/';
+  const target = `http://127.0.0.1:${port}${rest}${url.search}`;
+
+  const headers = new Headers(request.headers);
+  headers.delete('host');
+  headers.delete('connection');
+  headers.delete('content-length');
+
+  const init: RequestInit = { method: request.method, headers };
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    init.body = new Uint8Array(await request.arrayBuffer());
+  }
+
+  const upstream = await fetch(target, init);
+  const body = new Uint8Array(await upstream.arrayBuffer());
+  const responseHeaders = new Headers();
+  const contentType = upstream.headers.get('content-type');
+  if (contentType) responseHeaders.set('content-type', contentType);
+  for (const key of [
+    'grpc-status',
+    'grpc-message',
+    'connect-protocol-version',
+  ]) {
+    const value = upstream.headers.get(key);
+    if (value) responseHeaders.set(key, value);
+  }
+
+  return new Response(body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: responseHeaders,
+  });
+}

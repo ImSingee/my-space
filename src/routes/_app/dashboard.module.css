@@ -1,0 +1,40 @@
+.actionCard {
+  transition:
+    transform 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.actionCard:hover {
+  transform: translateY(-2px);
+  border-color: var(--mantine-color-violet-outline);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+.arrow {
+  color: var(--mantine-color-dimmed);
+  transition: transform 150ms ease;
+}
+
+.actionCard:hover .arrow {
+  transform: translateX(3px);
+  color: var(--mantine-color-violet-light-color);
+}
+
+.canvas {
+  background:
+    radial-gradient(
+      80% 60% at 50% 0%,
+      var(--mantine-color-default-hover) 0%,
+      transparent 70%
+    ),
+    var(--mantine-color-body);
+  border-style: dashed;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--mantine-spacing-md);
+  align-items: start;
+}
