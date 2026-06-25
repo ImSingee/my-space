@@ -496,9 +496,17 @@ export function StreamingBubble({
   // "no content" so the live "Thinking…" indicator shows while reasoning,
   // instead of a blank bubble.
   const thinkingText = state.thinking.trim();
-  const hasContent =
-    state.text || thinkingText || state.tools.length > 0 || Boolean(ask);
   const hasSteps = Boolean(thinkingText) || state.tools.length > 0;
+
+  // This bubble only mounts while the turn is live, so whenever nothing else is
+  // visibly in flight — between tool calls, after reasoning while the next step
+  // is chosen, or during whitespace-only reasoning — show a loading row so the
+  // agent never looks stalled. A running tool, an actively streaming thinking
+  // block, the answer text, or a pending ask each carry their own progress
+  // signal, so the row is suppressed in those states to avoid double spinners.
+  const anyToolRunning = state.tools.some((t) => !t.done);
+  const thinkingVisible = state.thinkingActive && Boolean(thinkingText);
+  const working = !ask && !state.text && !thinkingVisible && !anyToolRunning;
 
   return (
     <Box className={classes.assistantRow}>
@@ -521,7 +529,7 @@ export function StreamingBubble({
           onSubmit={(answers) => onAnswer(ask.askId, answers)}
         />
       ) : null}
-      {!hasContent ? (
+      {working ? (
         <Group gap={8} c="dimmed">
           <Loader size="xs" type="dots" />
           <Text size="sm" c="dimmed">
