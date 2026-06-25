@@ -307,21 +307,23 @@ button.stepHeader:hover {
   text-align: left;
 }
 
-/* Reveal the delete action only when the row is hovered or the button is
-   focused via keyboard, keeping the list clean at rest. */
-.sessionDelete {
+/* Reveal the row's actions menu only when the row is hovered, the trigger is
+   focused via keyboard, or its menu is open — keeping the list clean at rest. */
+.sessionAction {
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
-.sessionItem:hover .sessionDelete,
-.sessionDelete:focus-visible {
+.sessionItem:hover .sessionAction,
+.sessionAction:focus-visible,
+.sessionAction[aria-expanded='true'],
+.sessionAction[data-expanded] {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .sessionDelete {
+  .sessionAction {
     opacity: 1;
   }
 }
