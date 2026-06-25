@@ -18,7 +18,7 @@ export const Route = createFileRoute('/_app/apps/$subappId')({
 function AppView() {
   const subapp = Route.useLoaderData();
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const src = `/api/subapps/${subapp.id}/app/`;
+  const src = `/app/${subapp.id}/`;
   const hasFrontend = Boolean(subapp.capabilities?.frontend);
   const canOpen = subapp.status === 'deployed' && hasFrontend;
 

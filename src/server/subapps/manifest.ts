@@ -101,7 +101,7 @@ export function subappBasePath(id: string): string {
 }
 
 export function appUrl(id: string): string {
-  return `${subappBasePath(id)}/app/`;
+  return `/app/${id}/`;
 }
 
 export function widgetUrl(id: string, widgetId: string): string {

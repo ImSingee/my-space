@@ -94,7 +94,7 @@ export function WidgetCard({
               color="gray"
               size="sm"
               component="a"
-              href={`/api/subapps/${item.subappId}/app/`}
+              href={`/app/${item.subappId}/`}
               target="_blank"
               rel="noreferrer"
               aria-label="Open app"

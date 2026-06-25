@@ -8,14 +8,14 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     return new Response('Unauthorized', { status: 401 });
   }
   const url = new URL(request.url);
-  const match = url.pathname.match(/^\/api\/subapps\/([^/]+)\/app\/(.*)$/);
+  const match = url.pathname.match(/^\/app\/([^/]+)\/(.*)$/);
   if (!match) {
     return new Response('Not found', { status: 404 });
   }
   return serveSubappAppFile(match[1], match[2]);
 }
 
-export const Route = createFileRoute('/api/subapps/$subappId/app/$')({
+export const Route = createFileRoute('/app/$subappId/$')({
   server: {
     handlers: {
       GET: handle,

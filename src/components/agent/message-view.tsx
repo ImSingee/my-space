@@ -60,7 +60,7 @@ function SubappActions({ ids }: { ids: string[] }) {
             color="violet"
             leftSection={<IconExternalLink size={14} />}
             component="a"
-            href={`/api/subapps/${id}/app/`}
+            href={`/app/${id}/`}
             target="_blank"
             rel="noreferrer"
           >

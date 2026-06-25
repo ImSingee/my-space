@@ -169,7 +169,7 @@ function SubappDetailPage() {
           {hasFrontend ? (
             <Button
               component="a"
-              href={`/api/subapps/${subapp.id}/app/`}
+              href={`/app/${subapp.id}/`}
               target="_blank"
               rel="noreferrer"
               disabled={subapp.status !== 'deployed'}
