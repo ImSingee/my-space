@@ -186,11 +186,20 @@ function SectionHeading({
   manageLabel?: string;
 }) {
   return (
-    <Group justify="space-between" wrap="nowrap" px="sm" mt="md" mb={4} gap={4}>
+    <Group
+      className={classes.sectionHeader}
+      justify="space-between"
+      wrap="nowrap"
+      px="sm"
+      mt="md"
+      mb={4}
+      gap={4}
+    >
       <Text className={classes.sectionLabel}>{label}</Text>
       {manageTo ? (
         <Tooltip label={manageLabel} position="right" withArrow>
           <ActionIcon
+            className={classes.manageButton}
             component={Link}
             to={manageTo}
             variant="subtle"

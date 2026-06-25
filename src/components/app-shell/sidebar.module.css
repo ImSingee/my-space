@@ -27,6 +27,23 @@
   color: var(--mantine-color-dimmed);
 }
 
+/* Reveal the section's manage button only on hover (or keyboard focus). */
+.manageButton {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sectionHeader:hover .manageButton,
+.manageButton:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .manageButton {
+    opacity: 1;
+  }
+}
+
 .footer {
   padding: 12px 6px 14px;
   border-top: 1px solid var(--mantine-color-default-border);
