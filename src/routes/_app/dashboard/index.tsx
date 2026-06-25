@@ -6,10 +6,11 @@ export const Route = createFileRoute('/_app/dashboard/')({
     const dashboards = await context.queryClient.ensureQueryData(
       dashboardsQueryOptions,
     );
-    const first = dashboards[0]?.id ?? 'default';
+    const target =
+      dashboards.find((d) => d.pinned)?.id ?? dashboards[0]?.id ?? 'default';
     throw redirect({
       to: '/dashboard/$dashboardId',
-      params: { dashboardId: first },
+      params: { dashboardId: target },
     });
   },
 });

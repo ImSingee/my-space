@@ -39,7 +39,8 @@
 }
 
 .item:hover .itemAction,
-.itemAction[data-open] {
+.itemAction[aria-expanded='true'],
+.itemAction[data-expanded] {
   opacity: 1;
 }
 

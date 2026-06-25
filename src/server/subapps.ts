@@ -176,7 +176,12 @@ export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
 
 /** ================== dashboards ================== */
 
-export type Dashboard = { id: string; name: string; sortOrder: number };
+export type Dashboard = {
+  id: string;
+  name: string;
+  pinned: boolean;
+  sortOrder: number;
+};
 
 /** Make sure at least one dashboard always exists for the UI to land on. */
 async function ensureDefaultDashboard(): Promise<void> {
@@ -184,7 +189,7 @@ async function ensureDefaultDashboard(): Promise<void> {
   if (existing) return;
   await db
     .insert(schema.dashboards)
-    .values({ id: 'default', name: 'My Dashboard', sortOrder: 0 })
+    .values({ id: 'default', name: 'My Dashboard', pinned: true, sortOrder: 0 })
     .onConflictDoNothing();
 }
 
@@ -197,6 +202,7 @@ export const listDashboards = createServerFn({ method: 'GET' }).handler(
     return rows.map((d) => ({
       id: d.id,
       name: d.name,
+      pinned: d.pinned,
       sortOrder: d.sortOrder,
     }));
   },
@@ -209,9 +215,24 @@ export const createDashboard = createServerFn({ method: 'POST' })
     const all = await db.query.dashboards.findMany();
     const [row] = await db
       .insert(schema.dashboards)
-      .values({ name, sortOrder: all.length })
+      .values({ name, pinned: true, sortOrder: all.length })
       .returning();
-    return { id: row.id, name: row.name, sortOrder: row.sortOrder };
+    return {
+      id: row.id,
+      name: row.name,
+      pinned: row.pinned,
+      sortOrder: row.sortOrder,
+    };
+  });
+
+export const setDashboardPin = createServerFn({ method: 'POST' })
+  .validator((input: { id: string; pinned: boolean }) => input)
+  .handler(async ({ data }) => {
+    await db
+      .update(schema.dashboards)
+      .set({ pinned: data.pinned })
+      .where(eq(schema.dashboards.id, data.id));
+    return { ok: true };
   });
 
 export const renameDashboard = createServerFn({ method: 'POST' })
@@ -449,6 +470,18 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
     await db
       .delete(schema.sidebarItems)
       .where(eq(schema.sidebarItems.subappId, data.subappId));
+    return { ok: true };
+  });
+
+export const renameSidebarItem = createServerFn({ method: 'POST' })
+  .validator((input: { id: string; label: string }) => input)
+  .handler(async ({ data }) => {
+    const label = data.label.trim();
+    if (!label) throw new Error('Name cannot be empty.');
+    await db
+      .update(schema.sidebarItems)
+      .set({ label })
+      .where(eq(schema.sidebarItems.id, data.id));
     return { ok: true };
   });
 

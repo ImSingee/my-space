@@ -3,6 +3,24 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 type WithId = { id: string };
 
 /**
+ * Returns a new array ordered to match `orderedIds`. Useful for optimistically
+ * updating a cached list to a freshly-dragged order. Items whose id is missing
+ * from `orderedIds` are kept, ordered after the known ones.
+ */
+export function sortByIds<T extends WithId>(
+  items: T[] | undefined,
+  orderedIds: string[],
+): T[] | undefined {
+  if (!items) return items;
+  const rank = new Map(orderedIds.map((id, i) => [id, i]));
+  return [...items].sort(
+    (a, b) =>
+      (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+/**
  * Minimal dependency-free vertical sortable list using native HTML5 drag and
  * drop. Reorders optimistically while dragging and persists the final order via
  * `onReorder` once the drag ends.
@@ -22,14 +40,15 @@ export function SortableList<T extends WithId>({
   orderRef.current = order;
   const movedRef = useRef(false);
 
-  // Keep local order in sync when items are added/removed (but never mid-drag).
+  // Follow the incoming order whenever it changes (added/removed/reordered
+  // elsewhere), but never mid-drag so the optimistic move isn't disrupted.
   useEffect(() => {
     if (draggingId) return;
     const ids = items.map((i) => i.id);
     setOrder((prev) => {
-      const sameSet =
-        prev.length === ids.length && prev.every((id) => ids.includes(id));
-      return sameSet ? prev : ids;
+      const sameOrder =
+        prev.length === ids.length && prev.every((id, i) => id === ids[i]);
+      return sameOrder ? prev : ids;
     });
   }, [items, draggingId]);
 

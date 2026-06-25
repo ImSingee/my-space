@@ -15,14 +15,8 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core';
-import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Link,
-  useNavigate,
-  useRouter,
-  useRouterState,
-} from '@tanstack/react-router';
+import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import {
   IconAppWindow,
   IconDots,
@@ -30,14 +24,13 @@ import {
   IconLogout,
   IconMoon,
   IconPencil,
+  IconPinnedOff,
   IconPlus,
   IconSettings,
   IconSparkles,
-  IconStack2,
   IconSun,
-  IconTrash,
 } from '@tabler/icons-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
 import {
@@ -46,16 +39,15 @@ import {
   subappsQueryOptions,
 } from '~queries/subapps';
 import {
-  createDashboard,
-  type Dashboard,
-  deleteDashboard,
   renameDashboard,
+  renameSidebarItem,
   reorderDashboards,
   reorderSidebarItems,
+  setDashboardPin,
   setSidebarPin,
 } from '~server/subapps';
 import { Brand } from './brand';
-import { SortableList } from './sortable-list';
+import { SortableList, sortByIds } from './sortable-list';
 import classes from './sidebar.module.css';
 
 function useIsActive() {
@@ -131,45 +123,25 @@ function UserMenu() {
   );
 }
 
-function DashboardItem({
-  dashboard,
-  active,
-  canDelete,
+/**
+ * A pinned sidebar row: a full-width link with a kebab menu (revealed on hover)
+ * exposing Rename / Unpin. The menu lives as an absolutely-positioned sibling of
+ * the link so clicking it never triggers navigation.
+ */
+function PinnedRow({
+  children,
   onRename,
-  onDelete,
+  onUnpin,
 }: {
-  dashboard: Dashboard;
-  active: boolean;
-  canDelete: boolean;
-  onRename: (d: Dashboard) => void;
-  onDelete: (d: Dashboard) => void;
+  children: ReactNode;
+  onRename: () => void;
+  onUnpin: () => void;
 }) {
-  const [menuOpened, setMenuOpened] = useState(false);
   return (
     <Box className={classes.item}>
-      <NavLink
-        renderRoot={(props) => (
-          <Link
-            to="/dashboard/$dashboardId"
-            params={{ dashboardId: dashboard.id }}
-            draggable={false}
-            {...props}
-          />
-        )}
-        label={dashboard.name}
-        leftSection={<IconLayoutDashboard size={18} stroke={1.6} />}
-        active={active}
-        variant="light"
-        pr={32}
-      />
+      {children}
       <Box className={classes.itemActionWrap}>
-        <Menu
-          position="bottom-end"
-          withArrow
-          shadow="md"
-          width={150}
-          onChange={setMenuOpened}
-        >
+        <Menu position="bottom-end" withArrow shadow="md" width={160}>
           <Menu.Target>
             <ActionIcon
               variant="subtle"
@@ -177,26 +149,23 @@ function DashboardItem({
               size="sm"
               radius="sm"
               className={classes.itemAction}
-              data-open={menuOpened || undefined}
-              aria-label="Dashboard actions"
+              aria-label="Options"
             >
               <IconDots size={15} stroke={1.7} />
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown>
             <Menu.Item
-              leftSection={<IconPencil size={14} />}
-              onClick={() => onRename(dashboard)}
+              leftSection={<IconPencil size={15} stroke={1.7} />}
+              onClick={onRename}
             >
               Rename
             </Menu.Item>
             <Menu.Item
-              color="red"
-              leftSection={<IconTrash size={14} />}
-              disabled={!canDelete}
-              onClick={() => onDelete(dashboard)}
+              leftSection={<IconPinnedOff size={15} stroke={1.7} />}
+              onClick={onUnpin}
             >
-              Delete
+              Unpin
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
@@ -205,38 +174,59 @@ function DashboardItem({
   );
 }
 
-function DashboardsNav() {
+/** Small dimmed section header used to label sidebar groups. */
+function SectionHeading({
+  label,
+  manageTo,
+  manageLabel,
+}: {
+  label: string;
+  manageTo?: string;
+  manageLabel?: string;
+}) {
+  return (
+    <Group justify="space-between" wrap="nowrap" px="sm" mt="md" mb={4} gap={4}>
+      <Text size="xs" fw={600} c="dimmed">
+        {label}
+      </Text>
+      {manageTo ? (
+        <Tooltip label={manageLabel} position="right" withArrow>
+          <ActionIcon
+            component={Link}
+            to={manageTo}
+            variant="subtle"
+            color="gray"
+            size="xs"
+            radius="sm"
+            aria-label={manageLabel}
+          >
+            <IconSettings size={14} stroke={1.7} />
+          </ActionIcon>
+        </Tooltip>
+      ) : null}
+    </Group>
+  );
+}
+
+function PinnedDashboards() {
   const isActive = useIsActive();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: dashboards } = useQuery(dashboardsQueryOptions);
-
-  const [renameTarget, setRenameTarget] = useState<Dashboard | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  const create = useMutation({
-    mutationFn: () => createDashboard({ data: { name: 'New dashboard' } }),
-    onSuccess: (d) => {
-      queryClient.setQueryData<Dashboard[]>(
-        dashboardsQueryOptions.queryKey,
-        (old) => (old ? [...old, d] : [d]),
-      );
-      void queryClient.invalidateQueries({
-        queryKey: dashboardsQueryOptions.queryKey,
-      });
-      void navigate({
-        to: '/dashboard/$dashboardId',
-        params: { dashboardId: d.id },
-      });
-      toast.success('Dashboard created');
-    },
-    onError: (error) => toast.error((error as Error).message),
-  });
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: dashboardsQueryOptions.queryKey,
+    });
 
-  const reorder = useMutation({
-    mutationFn: (orderedIds: string[]) =>
-      reorderDashboards({ data: orderedIds }),
+  const setPin = useMutation({
+    mutationFn: (input: { id: string; pinned: boolean }) =>
+      setDashboardPin({ data: input }),
+    onSuccess: () => void invalidate(),
     onError: (error) => toast.error((error as Error).message),
   });
 
@@ -244,60 +234,35 @@ function DashboardsNav() {
     mutationFn: (input: { id: string; name: string }) =>
       renameDashboard({ data: input }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: dashboardsQueryOptions.queryKey,
-      });
+      void invalidate();
       setRenameTarget(null);
       toast.success('Dashboard renamed');
     },
     onError: (error) => toast.error((error as Error).message),
   });
 
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteDashboard({ data: id }),
-    onSuccess: (_res, id) => {
-      const remaining = (
-        queryClient.getQueryData<Dashboard[]>(
-          dashboardsQueryOptions.queryKey,
-        ) ?? []
-      ).filter((d) => d.id !== id);
-      queryClient.setQueryData<Dashboard[]>(
-        dashboardsQueryOptions.queryKey,
-        remaining,
+  const reorder = useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      reorderDashboards({ data: orderedIds }),
+    onMutate: (orderedIds) => {
+      queryClient.setQueryData(dashboardsQueryOptions.queryKey, (old) =>
+        sortByIds(old, orderedIds),
       );
-      void queryClient.invalidateQueries({
-        queryKey: dashboardsQueryOptions.queryKey,
-      });
-      if (pathname === `/dashboard/${id}`) {
-        const next = remaining[0]?.id;
-        void (next
-          ? navigate({
-              to: '/dashboard/$dashboardId',
-              params: { dashboardId: next },
-            })
-          : navigate({ to: '/dashboard' }));
-      }
-      toast.success('Dashboard deleted');
     },
     onError: (error) => toast.error((error as Error).message),
+    onSettled: () => void invalidate(),
   });
 
-  const confirmDelete = (d: Dashboard) =>
-    modals.openConfirmModal({
-      title: 'Delete dashboard',
-      children: (
-        <Text size="sm">
-          Delete “{d.name}” and all of its widgets? This can’t be undone.
-        </Text>
-      ),
-      labels: { confirm: 'Delete', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => remove.mutate(d.id),
-    });
+  const all = dashboards ?? [];
+  const pinned = all.filter((d) => d.pinned);
+  const unpinned = all.filter((d) => !d.pinned);
 
-  const openRename = (d: Dashboard) => {
-    setRenameTarget(d);
-    setRenameValue(d.name);
+  // Persist a sidebar reorder by mapping the new pinned order back into the
+  // full list, leaving unpinned dashboards in their existing slots.
+  const onReorder = (orderedPinnedIds: string[]) => {
+    let pi = 0;
+    const full = all.map((d) => (d.pinned ? orderedPinnedIds[pi++] : d.id));
+    reorder.mutate(full);
   };
 
   const submitRename = () => {
@@ -306,35 +271,70 @@ function DashboardsNav() {
     }
   };
 
-  const list = dashboards ?? [];
-
   return (
     <>
-      <Text size="xs" fw={600} c="dimmed" px="sm" mt="md" mb={4}>
-        Dashboards
-      </Text>
+      <SectionHeading
+        label="Dashboards"
+        manageTo="/dashboards"
+        manageLabel="Manage dashboards"
+      />
       <Stack gap={2} px="xs">
         <SortableList
-          items={list}
-          onReorder={(ids) => reorder.mutate(ids)}
+          items={pinned}
+          onReorder={onReorder}
           renderItem={(d) => (
-            <DashboardItem
-              dashboard={d}
-              active={isActive(`/dashboard/${d.id}`)}
-              canDelete={list.length > 1}
-              onRename={openRename}
-              onDelete={confirmDelete}
-            />
+            <PinnedRow
+              onRename={() => {
+                setRenameTarget({ id: d.id, name: d.name });
+                setRenameValue(d.name);
+              }}
+              onUnpin={() => setPin.mutate({ id: d.id, pinned: false })}
+            >
+              <NavLink
+                renderRoot={(props) => (
+                  <Link
+                    to="/dashboard/$dashboardId"
+                    params={{ dashboardId: d.id }}
+                    draggable={false}
+                    {...props}
+                  />
+                )}
+                label={d.name}
+                leftSection={<IconLayoutDashboard size={18} stroke={1.6} />}
+                active={isActive(`/dashboard/${d.id}`)}
+                variant="light"
+                pr={32}
+              />
+            </PinnedRow>
           )}
         />
-        <NavLink
-          component="button"
-          type="button"
-          label="Add dashboard"
-          leftSection={<IconPlus size={18} stroke={1.6} />}
-          disabled={create.isPending}
-          onClick={() => create.mutate()}
-        />
+        {unpinned.length > 0 ? (
+          <Menu position="right-start" withArrow shadow="md" width={240}>
+            <Menu.Target>
+              <NavLink
+                component="button"
+                type="button"
+                label="Add dashboard"
+                leftSection={<IconPlus size={18} stroke={1.6} />}
+              />
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>Pin a dashboard</Menu.Label>
+              {unpinned.map((d) => (
+                <Menu.Item
+                  key={d.id}
+                  leftSection={<IconLayoutDashboard size={16} stroke={1.6} />}
+                  disabled={setPin.isPending}
+                  onClick={() => setPin.mutate({ id: d.id, pinned: true })}
+                >
+                  <Text size="sm" truncate>
+                    {d.name}
+                  </Text>
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        ) : null}
       </Stack>
 
       <Modal
@@ -378,15 +378,34 @@ function PinnedApps() {
   const queryClient = useQueryClient();
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
   const { data: subapps } = useQuery(subappsQueryOptions);
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
-  const pinApp = useMutation({
-    mutationFn: (subappId: string) =>
-      setSidebarPin({ data: { subappId, pinned: true } }),
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: sidebarItemsQueryOptions.queryKey,
+    });
+
+  const setPin = useMutation({
+    mutationFn: (input: { subappId: string; pinned: boolean }) =>
+      setSidebarPin({ data: input }),
+    onSuccess: (_res, input) => {
+      void invalidate();
+      toast.success(input.pinned ? 'Pinned to sidebar' : 'Unpinned');
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  const rename = useMutation({
+    mutationFn: (input: { id: string; label: string }) =>
+      renameSidebarItem({ data: input }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: sidebarItemsQueryOptions.queryKey,
-      });
-      toast.success('Pinned to sidebar');
+      void invalidate();
+      setRenameTarget(null);
+      toast.success('Renamed');
     },
     onError: (error) => toast.error((error as Error).message),
   });
@@ -394,7 +413,13 @@ function PinnedApps() {
   const reorder = useMutation({
     mutationFn: (orderedIds: string[]) =>
       reorderSidebarItems({ data: orderedIds }),
+    onMutate: (orderedIds) => {
+      queryClient.setQueryData(sidebarItemsQueryOptions.queryKey, (old) =>
+        sortByIds(old, orderedIds),
+      );
+    },
     onError: (error) => toast.error((error as Error).message),
+    onSettled: () => void invalidate(),
   });
 
   const pinnedIds = new Set((pins ?? []).map((p) => p.subappId));
@@ -408,30 +433,49 @@ function PinnedApps() {
 
   if ((pins?.length ?? 0) === 0 && candidates.length === 0) return null;
 
+  const submitRename = () => {
+    if (renameTarget && renameValue.trim()) {
+      rename.mutate({ id: renameTarget.id, label: renameValue.trim() });
+    }
+  };
+
   return (
     <>
-      <Text size="xs" fw={600} c="dimmed" px="sm" mt="md" mb={4}>
-        Pinned apps
-      </Text>
+      <SectionHeading
+        label="Apps"
+        manageTo="/subapps"
+        manageLabel="Manage apps"
+      />
       <Stack gap={2} px="xs">
         <SortableList
           items={pins ?? []}
           onReorder={(ids) => reorder.mutate(ids)}
           renderItem={(pin) => (
-            <NavLink
-              renderRoot={(props) => (
-                <Link
-                  to="/apps/$subappId"
-                  params={{ subappId: pin.subappId }}
-                  draggable={false}
-                  {...props}
-                />
-              )}
-              label={pin.label}
-              leftSection={<IconAppWindow size={18} stroke={1.6} />}
-              active={isActive(`/apps/${pin.subappId}`)}
-              variant="light"
-            />
+            <PinnedRow
+              onRename={() => {
+                setRenameTarget({ id: pin.id, label: pin.label });
+                setRenameValue(pin.label);
+              }}
+              onUnpin={() =>
+                setPin.mutate({ subappId: pin.subappId, pinned: false })
+              }
+            >
+              <NavLink
+                renderRoot={(props) => (
+                  <Link
+                    to="/apps/$subappId"
+                    params={{ subappId: pin.subappId }}
+                    draggable={false}
+                    {...props}
+                  />
+                )}
+                label={pin.label}
+                leftSection={<IconAppWindow size={18} stroke={1.6} />}
+                active={isActive(`/apps/${pin.subappId}`)}
+                variant="light"
+                pr={32}
+              />
+            </PinnedRow>
           )}
         />
         {candidates.length > 0 ? (
@@ -450,8 +494,10 @@ function PinnedApps() {
                 <Menu.Item
                   key={s.id}
                   leftSection={<IconAppWindow size={16} stroke={1.6} />}
-                  disabled={pinApp.isPending}
-                  onClick={() => pinApp.mutate(s.id)}
+                  disabled={setPin.isPending}
+                  onClick={() =>
+                    setPin.mutate({ subappId: s.id, pinned: true })
+                  }
                 >
                   <Text size="sm" truncate>
                     {s.name}
@@ -462,6 +508,39 @@ function PinnedApps() {
           </Menu>
         ) : null}
       </Stack>
+
+      <Modal
+        opened={renameTarget !== null}
+        onClose={() => setRenameTarget(null)}
+        title="Rename app"
+        centered
+      >
+        <Stack gap="sm">
+          <TextInput
+            data-autofocus
+            label="Name"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitRename();
+              }
+            }}
+          />
+          <Group justify="flex-end">
+            <Button
+              type="button"
+              color="violet"
+              loading={rename.isPending}
+              disabled={!renameValue.trim()}
+              onClick={submitRename}
+            >
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   );
 }
@@ -478,13 +557,6 @@ export function Sidebar() {
       <ScrollArea className={classes.nav} type="scroll" scrollbarSize={6}>
         <Stack gap={2} px="xs" mt={4}>
           <NavLink
-            renderRoot={(props) => <Link to="/subapps" {...props} />}
-            label="Subapps"
-            leftSection={<IconStack2 size={18} stroke={1.6} />}
-            active={isActive('/subapps')}
-            variant="light"
-          />
-          <NavLink
             renderRoot={(props) => <Link to="/agent" {...props} />}
             label="Agent"
             leftSection={<IconSparkles size={18} stroke={1.6} />}
@@ -492,7 +564,7 @@ export function Sidebar() {
             variant="light"
           />
         </Stack>
-        <DashboardsNav />
+        <PinnedDashboards />
         <PinnedApps />
       </ScrollArea>
 
