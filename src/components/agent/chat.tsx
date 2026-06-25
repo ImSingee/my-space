@@ -245,7 +245,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 <MessageView key={i} message={m} />
               ))}
               {stream.state.active ? (
-                <StreamingBubble state={stream.state} />
+                <StreamingBubble
+                  state={stream.state}
+                  onAnswer={stream.answer}
+                />
               ) : null}
             </>
           )}

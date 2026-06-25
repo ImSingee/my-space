@@ -52,6 +52,7 @@ export const TOOL_LABELS: Record<string, string> = {
   create_subapp: 'Create subapp',
   deploy_subapp: 'Deploy subapp',
   query_subapp_db: 'Query DB',
+  ask: 'Ask the user',
 };
 
 export function toolLabel(name: string): string {

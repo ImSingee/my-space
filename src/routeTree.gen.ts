@@ -20,6 +20,7 @@ import { Route as AppSubappsIndexRouteImport } from './routes/_app/subapps/index
 import { Route as AppSubappIdSplatRouteImport } from './routes/app/$subappId/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiAgentStreamRouteImport } from './routes/api/agent/stream'
+import { Route as ApiAgentAnswerRouteImport } from './routes/api/agent/answer'
 import { Route as AppSubappsSubappIdRouteImport } from './routes/_app/subapps/$subappId'
 import { Route as AppAppsSubappIdRouteImport } from './routes/_app/apps/$subappId'
 import { Route as ApiHooksSubappIdSplatRouteImport } from './routes/api/hooks/$subappId/$'
@@ -82,6 +83,11 @@ const ApiAgentStreamRoute = ApiAgentStreamRouteImport.update({
   path: '/api/agent/stream',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAgentAnswerRoute = ApiAgentAnswerRouteImport.update({
+  id: '/api/agent/answer',
+  path: '/api/agent/answer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppSubappsSubappIdRoute = AppSubappsSubappIdRouteImport.update({
   id: '/subapps/$subappId',
   path: '/subapps/$subappId',
@@ -131,6 +137,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/apps/$subappId': typeof AppAppsSubappIdRoute
   '/subapps/$subappId': typeof AppSubappsSubappIdRoute
+  '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$subappId/$': typeof AppSubappIdSplatRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AppSettingsRoute
   '/apps/$subappId': typeof AppAppsSubappIdRoute
   '/subapps/$subappId': typeof AppSubappsSubappIdRoute
+  '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$subappId/$': typeof AppSubappIdSplatRoute
@@ -171,6 +179,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRoute
   '/_app/apps/$subappId': typeof AppAppsSubappIdRoute
   '/_app/subapps/$subappId': typeof AppSubappsSubappIdRoute
+  '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$subappId/$': typeof AppSubappIdSplatRoute
@@ -192,6 +201,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/$subappId'
     | '/subapps/$subappId'
+    | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$subappId/$'
@@ -211,6 +221,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/$subappId'
     | '/subapps/$subappId'
+    | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$subappId/$'
@@ -231,6 +242,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/apps/$subappId'
     | '/_app/subapps/$subappId'
+    | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$subappId/$'
@@ -247,6 +259,7 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiAgentAnswerRoute: typeof ApiAgentAnswerRoute
   ApiAgentStreamRoute: typeof ApiAgentStreamRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   AppSubappIdSplatRoute: typeof AppSubappIdSplatRoute
@@ -336,6 +349,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAgentStreamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/agent/answer': {
+      id: '/api/agent/answer'
+      path: '/api/agent/answer'
+      fullPath: '/api/agent/answer'
+      preLoaderRoute: typeof ApiAgentAnswerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/subapps/$subappId': {
       id: '/_app/subapps/$subappId'
       path: '/subapps/$subappId'
@@ -413,6 +433,7 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiAgentAnswerRoute: ApiAgentAnswerRoute,
   ApiAgentStreamRoute: ApiAgentStreamRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   AppSubappIdSplatRoute: AppSubappIdSplatRoute,

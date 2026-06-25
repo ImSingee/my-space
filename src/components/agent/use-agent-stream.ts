@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import type { AgentStreamEvent } from '~agent/events';
+import type { AgentStreamEvent, AskAnswer, AskQuestion } from '~agent/events';
 import type { ChatMessage } from './types';
 
 export type StreamTool = {
@@ -11,11 +11,17 @@ export type StreamTool = {
   isError?: boolean;
 };
 
+export type PendingAsk = {
+  askId: string;
+  questions: AskQuestion[];
+};
+
 export type StreamState = {
   active: boolean;
   text: string;
   thinking: string;
   tools: StreamTool[];
+  pendingAsk?: PendingAsk;
 };
 
 const IDLE: StreamState = {
@@ -23,6 +29,7 @@ const IDLE: StreamState = {
   text: '',
   thinking: '',
   tools: [],
+  pendingAsk: undefined,
 };
 
 type SendImage = { data: string; mimeType: string };
@@ -50,6 +57,12 @@ export function useAgentStream(
         break;
       case 'thinking':
         setState((p) => ({ ...p, thinking: p.thinking + (event.delta ?? '') }));
+        break;
+      case 'ask':
+        setState((p) => ({
+          ...p,
+          pendingAsk: { askId: event.askId, questions: event.questions },
+        }));
         break;
       case 'tool_start':
         setState((p) => ({
@@ -137,10 +150,26 @@ export function useAgentStream(
     [handleEvent],
   );
 
+  const answer = useCallback(async (askId: string, answers: AskAnswer[]) => {
+    setState((p) =>
+      p.pendingAsk?.askId === askId ? { ...p, pendingAsk: undefined } : p,
+    );
+    try {
+      const res = await fetch('/api/agent/answer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ askId, answers }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    } catch {
+      toast.error('Could not submit your answer. Try again.');
+    }
+  }, []);
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
     setState(IDLE);
   }, []);
 
-  return { state, send, stop };
+  return { state, send, stop, answer };
 }

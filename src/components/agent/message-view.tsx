@@ -26,6 +26,8 @@ import {
 } from '@tabler/icons-react';
 import type { ComponentPropsWithoutRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import type { AskAnswer } from '~agent/events';
+import { AskForm } from './ask-form';
 import type { StreamState } from './use-agent-stream';
 import {
   type AssistantBlock,
@@ -261,8 +263,16 @@ export function MessageView({ message }: { message: ChatMessage }) {
   );
 }
 
-export function StreamingBubble({ state }: { state: StreamState }) {
-  const hasContent = state.text || state.thinking || state.tools.length > 0;
+export function StreamingBubble({
+  state,
+  onAnswer,
+}: {
+  state: StreamState;
+  onAnswer: (askId: string, answers: AskAnswer[]) => void;
+}) {
+  const ask = state.pendingAsk;
+  const hasContent =
+    state.text || state.thinking || state.tools.length > 0 || Boolean(ask);
   return (
     <Box className={classes.assistantRow}>
       {state.thinking ? <ThinkingPanel text={state.thinking} /> : null}
@@ -280,6 +290,13 @@ export function StreamingBubble({ state }: { state: StreamState }) {
         </Group>
       ) : null}
       {state.text ? <Markdownish text={state.text} /> : null}
+      {ask ? (
+        <AskForm
+          key={ask.askId}
+          questions={ask.questions}
+          onSubmit={(answers) => onAnswer(ask.askId, answers)}
+        />
+      ) : null}
       {!hasContent ? (
         <Group gap={8} c="dimmed">
           <Loader size="xs" type="dots" />

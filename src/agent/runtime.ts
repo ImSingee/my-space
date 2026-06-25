@@ -9,6 +9,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
+import { waitForAnswer } from './ask-registry';
 import { loadAgentModels, pickModel } from './build-models';
 import type { AgentStreamEvent } from './events';
 import { SKILLS_DIR, WORKSPACE_ROOT } from './paths';
@@ -76,7 +77,13 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
   }
 
   const { skills } = await loadSkills(env, SKILLS_DIR);
-  const tools = createTools(env);
+  const tools = createTools(env, {
+    ask: async (questions, askSignal) => {
+      const askId = crypto.randomUUID();
+      emit({ type: 'ask', askId, questions });
+      return waitForAnswer(askId, askSignal ?? signal);
+    },
+  });
 
   const harness = new AgentHarness({
     env,

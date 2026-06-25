@@ -260,3 +260,15 @@
   align-items: center;
   justify-content: center;
 }
+
+/* ---------- ask (human-in-the-loop) ---------- */
+
+.askCard {
+  background-color: var(--mantine-color-body);
+  border-color: var(--mantine-color-violet-light);
+  max-width: 520px;
+}
+
+.askIcon {
+  color: var(--mantine-color-violet-6);
+}

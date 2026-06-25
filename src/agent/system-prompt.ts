@@ -70,6 +70,11 @@ subapps/<id>/
    error, fix the source, and deploy again.
 
 # Rules
+- When a decision is genuinely the user's to make — ambiguous requirements,
+  a real trade-off between approaches, or missing information you cannot infer —
+  use the \`ask\` tool to pose a concise multiple-choice question instead of
+  guessing. Don't use it for choices you can reasonably make yourself; prefer
+  sensible defaults and keep moving.
 - Prefer the smallest change that satisfies the request. Iterate.
 - Always keep \`manifest.json\` valid and consistent with the files. The widget
   \`id\` in the manifest is what the platform serves and pins to the dashboard.
