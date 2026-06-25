@@ -19,6 +19,8 @@ function AppView() {
   const subapp = Route.useLoaderData();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const src = `/api/subapps/${subapp.id}/app/`;
+  const hasFrontend = Boolean(subapp.capabilities?.frontend);
+  const canOpen = subapp.status === 'deployed' && hasFrontend;
 
   return (
     <Box className={classes.root}>
@@ -29,35 +31,37 @@ function AppView() {
           </Text>
           <StatusBadge status={subapp.status} />
         </Group>
-        <Group gap={4} wrap="nowrap">
-          <Tooltip label="Reload" withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label="Reload app"
-              onClick={() => {
-                if (frameRef.current) frameRef.current.src = src;
-              }}
-            >
-              <IconRefresh size={18} stroke={1.7} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Open in new tab" withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              component="a"
-              href={src}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open in new tab"
-            >
-              <IconExternalLink size={18} stroke={1.7} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
+        {canOpen ? (
+          <Group gap={4} wrap="nowrap">
+            <Tooltip label="Reload" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="Reload app"
+                onClick={() => {
+                  if (frameRef.current) frameRef.current.src = src;
+                }}
+              >
+                <IconRefresh size={18} stroke={1.7} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Open in new tab" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                component="a"
+                href={src}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open in new tab"
+              >
+                <IconExternalLink size={18} stroke={1.7} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        ) : null}
       </Box>
-      {subapp.status === 'deployed' ? (
+      {canOpen ? (
         <iframe
           ref={frameRef}
           src={src}
@@ -67,7 +71,9 @@ function AppView() {
       ) : (
         <Box className={classes.empty}>
           <Text c="dimmed">
-            This subapp is not deployed yet. Deploy it to use it here.
+            {subapp.status !== 'deployed'
+              ? 'This subapp is not deployed yet. Deploy it to use it here.'
+              : 'This subapp has no frontend — it only runs a backend (cron, webhook, storage).'}
           </Text>
         </Box>
       )}

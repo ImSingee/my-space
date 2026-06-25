@@ -76,6 +76,7 @@ function SubappDetailPage() {
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
   const isPinned = Boolean(pins?.some((p) => p.subappId === subapp.id));
   const capabilities = subapp.capabilities ?? null;
+  const hasFrontend = Boolean(capabilities?.frontend);
   const enabledCapabilities = capabilities
     ? (Object.keys(CAPABILITY_LABELS) as (keyof SubappCapabilities)[]).filter(
         (key) => capabilities[key],
@@ -165,16 +166,18 @@ function SubappDetailPage() {
           >
             {subapp.status === 'deployed' ? 'Redeploy' : 'Deploy'}
           </Button>
-          <Button
-            component="a"
-            href={`/api/subapps/${subapp.id}/app/`}
-            target="_blank"
-            rel="noreferrer"
-            disabled={subapp.status !== 'deployed'}
-            leftSection={<IconExternalLink size={16} stroke={1.8} />}
-          >
-            Open app
-          </Button>
+          {hasFrontend ? (
+            <Button
+              component="a"
+              href={`/api/subapps/${subapp.id}/app/`}
+              target="_blank"
+              rel="noreferrer"
+              disabled={subapp.status !== 'deployed'}
+              leftSection={<IconExternalLink size={16} stroke={1.8} />}
+            >
+              Open app
+            </Button>
+          ) : null}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <ActionIcon variant="default" size="lg" aria-label="More actions">
