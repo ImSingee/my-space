@@ -34,10 +34,19 @@ export type AgentStreamEvent =
       args: JsonValue;
     }
   | {
+      /** Incremental output for a still-running tool (e.g. live shell stdout). */
+      type: 'tool_update';
+      id: string;
+      name: string;
+      output: string;
+    }
+  | {
       type: 'tool_end';
       id: string;
       name: string;
       isError: boolean;
+      /** Final tool output text, streamed as soon as the tool finishes. */
+      output?: string;
       summary?: string;
     }
   | { type: 'turn_end' }

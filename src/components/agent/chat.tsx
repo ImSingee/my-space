@@ -23,7 +23,12 @@ import {
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
 import { MessageView, StreamingBubble } from './message-view';
-import type { ChatMessage, ContentPart } from './types';
+import {
+  type AssistantBlock,
+  type ChatMessage,
+  type ContentPart,
+  pairToolResults,
+} from './types';
 import { useAgentStream } from './use-agent-stream';
 import classes from './chat.module.css';
 
@@ -58,6 +63,38 @@ function buildParts(text: string, images: ComposerImage[]): ContentPart[] {
     parts.push({ type: 'image', data: img.data, mimeType: img.mimeType });
   }
   return parts;
+}
+
+type RenderTurn =
+  | { kind: 'user'; key: string; message: ChatMessage }
+  | { kind: 'assistant'; key: string; blocks: AssistantBlock[] };
+
+/**
+ * Collapse one agent reply — which the backend may split across several
+ * assistant + tool-result messages — into a single turn. This lets all of a
+ * reply's steps render as one evenly-spaced timeline instead of clusters with
+ * uneven gaps at each message boundary. Tool-result messages are dropped here
+ * because they are merged into their call rows via `pairToolResults`.
+ */
+function groupTurns(messages: ChatMessage[]): RenderTurn[] {
+  const turns: RenderTurn[] = [];
+  messages.forEach((message, index) => {
+    if (message.role === 'user') {
+      turns.push({ kind: 'user', key: `m${index}`, message });
+    } else if (message.role === 'assistant') {
+      const last = turns.at(-1);
+      if (last?.kind === 'assistant') {
+        last.blocks = [...last.blocks, ...message.content];
+      } else {
+        turns.push({
+          kind: 'assistant',
+          key: `m${index}`,
+          blocks: [...message.content],
+        });
+      }
+    }
+  });
+  return turns;
 }
 
 export function Chat({
@@ -96,6 +133,8 @@ export function Chat({
 
   const messages = (session?.messages ?? []) as unknown as ChatMessage[];
   const allMessages = [...messages, ...pending];
+  const toolResults = pairToolResults(allMessages);
+  const turns = groupTurns(allMessages);
 
   const send = (text: string, images: ComposerImage[], modelValue: string) => {
     if (stream.state.active) return;
@@ -169,8 +208,16 @@ export function Chat({
             </Stack>
           ) : (
             <>
-              {allMessages.map((m, i) => (
-                <MessageView key={i} message={m} />
+              {turns.map((turn) => (
+                <MessageView
+                  key={turn.key}
+                  message={
+                    turn.kind === 'user'
+                      ? turn.message
+                      : { role: 'assistant', content: turn.blocks }
+                  }
+                  toolResults={toolResults}
+                />
               ))}
               {stream.state.active ? (
                 <StreamingBubble

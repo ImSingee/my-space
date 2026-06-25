@@ -9,6 +9,8 @@ export type StreamTool = {
   args?: Record<string, unknown>;
   done: boolean;
   isError?: boolean;
+  /** Live (while running) or final (on completion) tool output text. */
+  output?: string;
 };
 
 export type PendingAsk = {
@@ -20,6 +22,8 @@ export type StreamState = {
   active: boolean;
   text: string;
   thinking: string;
+  /** True while thinking deltas are streaming, before text/tools take over. */
+  thinkingActive: boolean;
   tools: StreamTool[];
   pendingAsk?: PendingAsk;
 };
@@ -28,6 +32,7 @@ const IDLE: StreamState = {
   active: false,
   text: '',
   thinking: '',
+  thinkingActive: false,
   tools: [],
   pendingAsk: undefined,
 };
@@ -53,20 +58,30 @@ export function useAgentStream(
   const handleEvent = useCallback((event: AgentStreamEvent) => {
     switch (event.type) {
       case 'text':
-        setState((p) => ({ ...p, text: p.text + (event.delta ?? '') }));
+        setState((p) => ({
+          ...p,
+          text: p.text + (event.delta ?? ''),
+          thinkingActive: false,
+        }));
         break;
       case 'thinking':
-        setState((p) => ({ ...p, thinking: p.thinking + (event.delta ?? '') }));
+        setState((p) => ({
+          ...p,
+          thinking: p.thinking + (event.delta ?? ''),
+          thinkingActive: true,
+        }));
         break;
       case 'ask':
         setState((p) => ({
           ...p,
+          thinkingActive: false,
           pendingAsk: { askId: event.askId, questions: event.questions },
         }));
         break;
       case 'tool_start':
         setState((p) => ({
           ...p,
+          thinkingActive: false,
           tools: [
             ...p.tools,
             {
@@ -80,12 +95,25 @@ export function useAgentStream(
           ],
         }));
         break;
+      case 'tool_update':
+        setState((p) => ({
+          ...p,
+          tools: p.tools.map((t) =>
+            t.id === event.id ? { ...t, output: event.output } : t,
+          ),
+        }));
+        break;
       case 'tool_end':
         setState((p) => ({
           ...p,
           tools: p.tools.map((t) =>
             t.id === event.id
-              ? { ...t, done: true, isError: event.isError }
+              ? {
+                  ...t,
+                  done: true,
+                  isError: event.isError,
+                  output: event.output || t.output,
+                }
               : t,
           ),
         }));

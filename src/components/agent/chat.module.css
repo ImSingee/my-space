@@ -28,38 +28,93 @@
   max-width: 100%;
 }
 
-.thinking {
-  border-left: 2px solid var(--mantine-color-default-border);
-  padding-left: 10px;
+/* ---------- agent process steps (thinking / tool calls + results) ---------- */
+
+/* A connected run of quiet steps so tool calls + results read as one timeline
+   rather than scattered chips and boxes. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0;
 }
 
-.collapseToggle {
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--mantine-radius-sm);
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+
+button.stepHeader:hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
+.stepIcon {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 0;
-}
-
-.chevron {
-  transition: transform 150ms ease;
   color: var(--mantine-color-dimmed);
 }
 
-.chevronOpen {
-  composes: chevron;
+.stepIconError {
+  composes: stepIcon;
+  color: var(--mantine-color-red-light-color);
+}
+
+.stepLabel {
+  flex-shrink: 0;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  color: var(--mantine-color-text);
+}
+
+.stepDetail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.stepChevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--mantine-color-dimmed);
+  transition: transform 150ms ease;
+}
+
+.stepChevronOpen {
+  composes: stepChevron;
   transform: rotate(90deg);
 }
 
-.toolChip {
-  text-transform: none;
-  font-weight: 500;
+.stepBody {
+  margin: 2px 0 6px 15px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--mantine-color-default-border);
 }
 
-.toolChipDetail {
-  font-weight: 400;
-  opacity: 0.7;
+.stepBodyText {
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.6;
+  color: var(--mantine-color-dimmed);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.stepBodyCode {
+  composes: stepBodyText;
   font-family: var(--mantine-font-family-monospace);
-  font-size: 0.95em;
 }
 
 /* Markdown rendering for assistant messages: tighten the default
@@ -94,21 +149,6 @@
 
 .markdown :where(code) {
   font-size: 0.9em;
-}
-
-.toolResult {
-  border: 1px solid var(--mantine-color-default-border);
-  border-radius: var(--mantine-radius-sm);
-  padding: 6px 10px;
-  background-color: var(--mantine-color-body);
-}
-
-.toolResultBody {
-  margin-top: 6px;
-  max-height: 280px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* ---------- chat layout ---------- */

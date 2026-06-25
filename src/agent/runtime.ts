@@ -23,6 +23,36 @@ function deriveTitle(userText: string): string {
     : firstLine || 'New chat';
 }
 
+/** Keep streamed tool output small; the full result is persisted on `done`. */
+const MAX_STREAM_OUTPUT = 4000;
+
+function clip(text: string): string {
+  return text.length > MAX_STREAM_OUTPUT
+    ? `${text.slice(0, MAX_STREAM_OUTPUT)}\n… (truncated)`
+    : text;
+}
+
+/** Extract readable text from a tool result or a tool's partial update. */
+function extractToolText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  const content = (value as { content?: unknown }).content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) =>
+        part &&
+        typeof part === 'object' &&
+        (part as { type?: unknown }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string'
+          ? (part as { text: string }).text
+          : '',
+      )
+      .join('');
+  }
+  return '';
+}
+
 export type RunAgentTurnOptions = {
   sessionId: string;
   userText: string;
@@ -130,12 +160,25 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
         });
         break;
       }
+      case 'tool_execution_update': {
+        const output = extractToolText(event.partialResult);
+        if (output) {
+          emit({
+            type: 'tool_update',
+            id: event.toolCallId,
+            name: event.toolName,
+            output: clip(output),
+          });
+        }
+        break;
+      }
       case 'tool_execution_end': {
         emit({
           type: 'tool_end',
           id: event.toolCallId,
           name: event.toolName,
           isError: event.isError,
+          output: clip(extractToolText(event.result)),
         });
         break;
       }

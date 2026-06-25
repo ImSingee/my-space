@@ -30,6 +30,8 @@ function tool<S extends TSchema>(def: {
     id: string,
     params: Static<S>,
     signal?: AbortSignal,
+    /** Stream partial output while the tool is still running. */
+    onUpdate?: (partial: unknown) => void,
   ) => Promise<AgentToolResult<unknown>>;
 }): AgentTool {
   return def as unknown as AgentTool;
@@ -131,8 +133,18 @@ export function createTools(
     parameters: Type.Object({
       command: Type.String({ description: 'Shell command to run.' }),
     }),
-    execute: async (_id, params) => {
-      const res = await env.exec(params.command, { timeout: 120 });
+    execute: async (_id, params, signal, onUpdate) => {
+      let live = '';
+      const stream = (chunk: string) => {
+        live += chunk;
+        onUpdate?.(live);
+      };
+      const res = await env.exec(params.command, {
+        timeout: 120,
+        abortSignal: signal,
+        onStdout: stream,
+        onStderr: stream,
+      });
       if (!res.ok) throw new Error(res.error.message);
       const { stdout, stderr, exitCode } = res.value;
       const body = [

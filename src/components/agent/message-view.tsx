@@ -1,9 +1,7 @@
 import {
   Anchor,
-  Badge,
   Box,
   Button,
-  Code,
   Collapse,
   Group,
   Image,
@@ -18,20 +16,26 @@ import { useDisclosure } from '@mantine/hooks';
 import { Link } from '@tanstack/react-router';
 import {
   IconAlertTriangle,
-  IconChevronRight,
   IconCheck,
+  IconChevronRight,
   IconExternalLink,
   IconLayoutGrid,
-  IconTool,
+  IconSparkles,
 } from '@tabler/icons-react';
-import type { ComponentPropsWithoutRef } from 'react';
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useEffect,
+  useRef,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { AskAnswer } from '~agent/events';
 import { AskForm } from './ask-form';
-import type { StreamState } from './use-agent-stream';
+import type { StreamState, StreamTool } from './use-agent-stream';
 import {
   type AssistantBlock,
   type ChatMessage,
+  type ToolResultMessage,
   deployedAppIds,
   partsToImages,
   partsToText,
@@ -39,6 +43,9 @@ import {
   toolLabel,
 } from './types';
 import classes from './chat.module.css';
+
+type ToolResultMap = Map<string, ToolResultMessage>;
+type ToolStatus = 'running' | 'done' | 'error';
 
 function MarkdownLink(props: ComponentPropsWithoutRef<'a'>) {
   return <Anchor {...props} target="_blank" rel="noreferrer" />;
@@ -91,129 +98,167 @@ function AppActions({ ids }: { ids: string[] }) {
   );
 }
 
-function ThinkingPanel({ text }: { text: string }) {
+/**
+ * One quiet line in the agent's activity timeline. Used for thinking and tool
+ * calls/results alike so the whole "process" reads with a single visual
+ * language instead of mixed chips and boxes. Expands in place when it has a
+ * body (result or thinking text).
+ */
+function StepRow({
+  icon,
+  label,
+  detail,
+  error,
+  children,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  error?: boolean;
+  children?: ReactNode;
+}) {
   const [open, handlers] = useDisclosure(false);
-  if (!text.trim()) return null;
-  return (
-    <Box className={classes.thinking}>
-      <UnstyledButton
-        className={classes.collapseToggle}
-        onClick={handlers.toggle}
-      >
+  const expandable = Boolean(children);
+  const inner = (
+    <>
+      <span className={error ? classes.stepIconError : classes.stepIcon}>
+        {icon}
+      </span>
+      <span className={classes.stepLabel}>{label}</span>
+      {detail ? <span className={classes.stepDetail}>{detail}</span> : null}
+      {expandable ? (
         <IconChevronRight
           size={14}
-          className={open ? classes.chevronOpen : classes.chevron}
+          className={open ? classes.stepChevronOpen : classes.stepChevron}
         />
-        <Text size="xs" c="dimmed" fw={500}>
-          Thinking
-        </Text>
-      </UnstyledButton>
-      <Collapse expanded={open}>
-        <Text size="xs" c="dimmed" className={classes.messageText} mt={4}>
-          {text}
-        </Text>
-      </Collapse>
+      ) : null}
+    </>
+  );
+  return (
+    <Box>
+      {expandable ? (
+        <UnstyledButton
+          className={classes.stepHeader}
+          onClick={handlers.toggle}
+        >
+          {inner}
+        </UnstyledButton>
+      ) : (
+        <Box className={classes.stepHeader}>{inner}</Box>
+      )}
+      {expandable ? <Collapse expanded={open}>{children}</Collapse> : null}
     </Box>
   );
 }
 
-export function ToolChip({
+function ThinkingStep({ text }: { text: string }) {
+  if (!text.trim()) return null;
+  return (
+    <StepRow icon={<IconSparkles size={13} stroke={1.6} />} label="Thinking">
+      <Box className={classes.stepBody}>
+        <Box className={classes.stepBodyText}>{text}</Box>
+      </Box>
+    </StepRow>
+  );
+}
+
+function ToolStep({
   name,
   detail,
-  done,
-  isError,
+  status,
+  result,
 }: {
   name: string;
   detail?: string;
-  done: boolean;
-  isError?: boolean;
+  status: ToolStatus;
+  result?: { text: string; isError?: boolean };
 }) {
-  const color = isError ? 'red' : done ? 'teal' : 'ember';
-  const icon = isError ? (
-    <IconAlertTriangle size={12} />
-  ) : done ? (
-    <IconCheck size={12} />
-  ) : (
-    <Loader size={10} color="ember" />
-  );
+  const isError = status === 'error' || result?.isError === true;
+  const icon =
+    status === 'running' ? (
+      <Loader size={11} color="gray" />
+    ) : isError ? (
+      <IconAlertTriangle size={14} stroke={1.7} />
+    ) : (
+      <IconCheck size={14} stroke={2} />
+    );
   return (
-    <Badge
-      variant="light"
-      color={color}
-      radius="sm"
-      leftSection={icon}
-      className={classes.toolChip}
+    <StepRow
+      icon={icon}
+      label={toolLabel(name)}
+      detail={detail}
+      error={isError}
     >
-      {toolLabel(name)}
-      {detail ? (
-        <Text span className={classes.toolChipDetail}>
-          {' · '}
-          {detail}
-        </Text>
+      {result ? (
+        <Box className={classes.stepBody}>
+          <Box className={classes.stepBodyCode}>
+            {result.text || '(no output)'}
+          </Box>
+        </Box>
       ) : null}
-    </Badge>
+    </StepRow>
   );
 }
 
-function ToolResultPanel({
-  toolName,
-  text,
-  isError,
+/**
+ * Render assistant blocks, grouping consecutive thinking/tool steps into one
+ * connected timeline and keeping prose as clean standalone markdown.
+ */
+function AssistantBlocks({
+  blocks,
+  toolResults,
 }: {
-  toolName: string;
-  text: string;
-  isError?: boolean;
+  blocks: AssistantBlock[];
+  toolResults?: ToolResultMap;
 }) {
-  const [open, handlers] = useDisclosure(false);
-  return (
-    <Box className={classes.toolResult}>
-      <UnstyledButton
-        className={classes.collapseToggle}
-        onClick={handlers.toggle}
-      >
-        <IconChevronRight
-          size={14}
-          className={open ? classes.chevronOpen : classes.chevron}
-        />
-        <IconTool size={13} />
-        <Text size="xs" c={isError ? 'red' : 'dimmed'} fw={500}>
-          {toolLabel(toolName)} result
-        </Text>
-      </UnstyledButton>
-      <Collapse expanded={open}>
-        <Code block className={classes.toolResultBody}>
-          {text || '(no output)'}
-        </Code>
-      </Collapse>
-    </Box>
-  );
+  const out: ReactNode[] = [];
+  let steps: ReactNode[] = [];
+
+  const flush = () => {
+    if (steps.length === 0) return;
+    out.push(
+      <Box key={`steps-${out.length}`} className={classes.steps}>
+        {steps}
+      </Box>,
+    );
+    steps = [];
+  };
+
+  blocks.forEach((block, index) => {
+    if (block.type === 'text') {
+      flush();
+      out.push(<Markdownish key={index} text={block.text} />);
+    } else if (block.type === 'thinking') {
+      steps.push(<ThinkingStep key={index} text={block.thinking} />);
+    } else {
+      const result = toolResults?.get(block.id);
+      steps.push(
+        <ToolStep
+          key={index}
+          name={block.name}
+          detail={toolDetail(block.name, block.arguments)}
+          status="done"
+          result={
+            result
+              ? { text: partsToText(result.content), isError: result.isError }
+              : undefined
+          }
+        />,
+      );
+    }
+  });
+  flush();
+
+  return <>{out}</>;
 }
 
-function AssistantBlocks({ blocks }: { blocks: AssistantBlock[] }) {
-  return (
-    <>
-      {blocks.map((block, index) => {
-        if (block.type === 'text') {
-          return <Markdownish key={index} text={block.text} />;
-        }
-        if (block.type === 'thinking') {
-          return <ThinkingPanel key={index} text={block.thinking} />;
-        }
-        return (
-          <Group key={index} gap={6} my={2}>
-            <ToolChip
-              name={block.name}
-              detail={toolDetail(block.name, block.arguments)}
-              done
-            />
-          </Group>
-        );
-      })}
-    </>
-  );
-}
-
-export function MessageView({ message }: { message: ChatMessage }) {
+export function MessageView({
+  message,
+  toolResults,
+}: {
+  message: ChatMessage;
+  toolResults?: ToolResultMap;
+}) {
   if (message.role === 'user') {
     const text = partsToText(message.content);
     const images = partsToImages(message.content);
@@ -245,20 +290,162 @@ export function MessageView({ message }: { message: ChatMessage }) {
     );
   }
 
+  // Standalone tool results are normally merged into their call above; this is
+  // a fallback for any result we could not pair.
   if (message.role === 'toolResult') {
     return (
-      <ToolResultPanel
-        toolName={message.toolName}
-        text={partsToText(message.content)}
-        isError={message.isError}
-      />
+      <Box className={classes.steps}>
+        <ToolStep
+          name={message.toolName}
+          status={message.isError ? 'error' : 'done'}
+          result={{
+            text: partsToText(message.content),
+            isError: message.isError,
+          }}
+        />
+      </Box>
     );
   }
 
   return (
     <Box className={classes.assistantRow}>
-      <AssistantBlocks blocks={message.content} />
+      <AssistantBlocks blocks={message.content} toolResults={toolResults} />
       <AppActions ids={deployedAppIds(message.content)} />
+    </Box>
+  );
+}
+
+/**
+ * Thinking in the live stream. While the model is reasoning it shows the
+ * thinking text in real time (auto-scrolled); once it moves on to answering or
+ * tools, it collapses to a quiet, re-expandable "Thinking" row.
+ */
+function StreamingThinkingStep({
+  text,
+  active,
+}: {
+  text: string;
+  active: boolean;
+}) {
+  const [open, handlers] = useDisclosure(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (active && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [text, active]);
+
+  if (!text.trim()) return null;
+  const showBody = active || open;
+  const expandable = !active;
+  const header = (
+    <>
+      <span className={classes.stepIcon}>
+        {active ? (
+          <Loader size={11} color="gray" />
+        ) : (
+          <IconSparkles size={13} stroke={1.6} />
+        )}
+      </span>
+      <span className={classes.stepLabel}>
+        {active ? 'Thinking…' : 'Thinking'}
+      </span>
+      {expandable ? (
+        <IconChevronRight
+          size={14}
+          className={open ? classes.stepChevronOpen : classes.stepChevron}
+        />
+      ) : null}
+    </>
+  );
+
+  return (
+    <Box>
+      {expandable ? (
+        <UnstyledButton
+          className={classes.stepHeader}
+          onClick={handlers.toggle}
+        >
+          {header}
+        </UnstyledButton>
+      ) : (
+        <Box className={classes.stepHeader}>{header}</Box>
+      )}
+      {showBody ? (
+        <Box className={classes.stepBody}>
+          <Box ref={bodyRef} className={classes.stepBodyText}>
+            {text}
+          </Box>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+/**
+ * A tool step in the live stream. While running it follows the tool's output
+ * in real time (auto-scrolled); once finished it collapses to a quiet,
+ * re-expandable row, matching the persisted timeline.
+ */
+function StreamingToolStep({ tool }: { tool: StreamTool }) {
+  const [open, handlers] = useDisclosure(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const running = !tool.done;
+  const isError = tool.isError === true;
+  const hasOutput = Boolean(tool.output);
+  const showBody = running ? hasOutput : open && hasOutput;
+  const expandable = !running && hasOutput;
+
+  useEffect(() => {
+    if (running && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [tool.output, running]);
+
+  const icon = running ? (
+    <Loader size={11} color="gray" />
+  ) : isError ? (
+    <IconAlertTriangle size={14} stroke={1.7} />
+  ) : (
+    <IconCheck size={14} stroke={2} />
+  );
+  const detail = toolDetail(tool.name, tool.args);
+  const header = (
+    <>
+      <span className={isError ? classes.stepIconError : classes.stepIcon}>
+        {icon}
+      </span>
+      <span className={classes.stepLabel}>{toolLabel(tool.name)}</span>
+      {detail ? <span className={classes.stepDetail}>{detail}</span> : null}
+      {expandable ? (
+        <IconChevronRight
+          size={14}
+          className={open ? classes.stepChevronOpen : classes.stepChevron}
+        />
+      ) : null}
+    </>
+  );
+
+  return (
+    <Box>
+      {expandable ? (
+        <UnstyledButton
+          className={classes.stepHeader}
+          onClick={handlers.toggle}
+        >
+          {header}
+        </UnstyledButton>
+      ) : (
+        <Box className={classes.stepHeader}>{header}</Box>
+      )}
+      {showBody ? (
+        <Box className={classes.stepBody}>
+          <Box ref={bodyRef} className={classes.stepBodyCode}>
+            {tool.output}
+          </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -273,21 +460,20 @@ export function StreamingBubble({
   const ask = state.pendingAsk;
   const hasContent =
     state.text || state.thinking || state.tools.length > 0 || Boolean(ask);
+  const hasSteps = Boolean(state.thinking) || state.tools.length > 0;
+
   return (
     <Box className={classes.assistantRow}>
-      {state.thinking ? <ThinkingPanel text={state.thinking} /> : null}
-      {state.tools.length > 0 ? (
-        <Group gap={6} my={4}>
+      {hasSteps ? (
+        <Box className={classes.steps}>
+          <StreamingThinkingStep
+            text={state.thinking}
+            active={state.thinkingActive}
+          />
           {state.tools.map((t) => (
-            <ToolChip
-              key={t.id}
-              name={t.name}
-              detail={toolDetail(t.name, t.args)}
-              done={t.done}
-              isError={t.isError}
-            />
+            <StreamingToolStep key={t.id} tool={t} />
           ))}
-        </Group>
+        </Box>
       ) : null}
       {state.text ? <Markdownish text={state.text} /> : null}
       {ask ? (

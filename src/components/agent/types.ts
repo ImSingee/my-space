@@ -27,6 +27,37 @@ export type ChatMessage =
       isError?: boolean;
     };
 
+export type ToolResultMessage = Extract<ChatMessage, { role: 'toolResult' }>;
+
+/**
+ * Map each tool-call id to its result message so a call and its output can be
+ * rendered as a single collapsible step. Results arrive sequentially after
+ * their calls, so we match the oldest pending call of the same tool name.
+ */
+export function pairToolResults(
+  messages: ChatMessage[],
+): Map<string, ToolResultMessage> {
+  const map = new Map<string, ToolResultMessage>();
+  const pending: { id: string; name: string }[] = [];
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      for (const block of message.content) {
+        if (block.type === 'toolCall') {
+          pending.push({ id: block.id, name: block.name });
+        }
+      }
+    } else if (message.role === 'toolResult') {
+      let index = pending.findIndex((p) => p.name === message.toolName);
+      if (index < 0 && pending.length > 0) index = 0;
+      if (index >= 0) {
+        const [hit] = pending.splice(index, 1);
+        map.set(hit.id, message);
+      }
+    }
+  }
+  return map;
+}
+
 export function partsToText(content: string | ContentPart[]): string {
   if (typeof content === 'string') return content;
   return content
