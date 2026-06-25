@@ -131,6 +131,12 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
   };
   signal.addEventListener('abort', onAbort);
 
+  // Did the current thinking block stream any real text delta? Some providers
+  // (notably OpenAI reasoning summaries via the relay) stream empty
+  // `thinking_delta` events and only deliver the full summary text in the
+  // final `thinking_end`. We track this per block so we can backfill.
+  let sawThinkingDelta = false;
+
   const unsubscribe = harness.subscribe((event) => {
     switch (event.type) {
       case 'message_start': {
@@ -141,13 +147,23 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
       }
       case 'message_update': {
         const inner = event.assistantMessageEvent;
-        // Only forward real string deltas. Reasoning models with encrypted/
+        // Forward only real string deltas. Reasoning models with encrypted/
         // redacted thinking (e.g. OpenAI responses) emit thinking_delta events
         // whose `delta` is undefined; forwarding those would render "undefined".
         if (inner.type === 'text_delta' && inner.delta) {
           emit({ type: 'text', delta: inner.delta });
+        } else if (inner.type === 'thinking_start') {
+          sawThinkingDelta = false;
         } else if (inner.type === 'thinking_delta' && inner.delta) {
+          sawThinkingDelta = true;
           emit({ type: 'thinking', delta: inner.delta });
+        } else if (inner.type === 'thinking_end') {
+          // Relays that strip streaming summary deltas still send the full
+          // text here. Backfill it so the thinking is shown at least once.
+          const content = (inner as { content?: string }).content;
+          if (!sawThinkingDelta && content) {
+            emit({ type: 'thinking', delta: content });
+          }
         }
         break;
       }
