@@ -25,9 +25,12 @@ const IDLE: StreamState = {
   tools: [],
 };
 
+type SendImage = { data: string; mimeType: string };
+
 type SendParams = {
   sessionId: string;
   userText: string;
+  images?: SendImage[];
   providerId?: string | null;
   modelId?: string | null;
 };

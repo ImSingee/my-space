@@ -25,6 +25,7 @@ function deriveTitle(userText: string): string {
 export type RunAgentTurnOptions = {
   sessionId: string;
   userText: string;
+  images?: { data: string; mimeType: string }[];
   providerId?: string | null;
   modelId?: string | null;
   signal: AbortSignal;
@@ -140,8 +141,14 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
     }
   });
 
+  const images = (opts.images ?? []).map((i) => ({
+    type: 'image' as const,
+    data: i.data,
+    mimeType: i.mimeType,
+  }));
+
   try {
-    await harness.prompt(userText);
+    await harness.prompt(userText, images.length > 0 ? { images } : undefined);
   } catch (error) {
     emit({
       type: 'error',

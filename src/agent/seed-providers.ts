@@ -16,6 +16,7 @@ type SeedProvider = {
     modelId: string;
     name: string;
     reasoning: boolean;
+    input: Array<'text' | 'image'>;
     contextWindow: number;
     maxTokens: number;
   }>;
@@ -34,6 +35,7 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'claude-sonnet-4-6',
         name: 'Claude Sonnet 4.6',
         reasoning: true,
+        input: ['text', 'image'],
         contextWindow: 200000,
         maxTokens: 8192,
       },
@@ -51,6 +53,7 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'gpt-5.5',
         name: 'GPT-5.5',
         reasoning: true,
+        input: ['text', 'image'],
         contextWindow: 400000,
         maxTokens: 16384,
       },
@@ -83,7 +86,7 @@ export async function seedDefaultProviders(): Promise<boolean> {
         reasoning: m.reasoning,
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens,
-        input: ['text'],
+        input: m.input,
         sortOrder: index,
       })),
     );

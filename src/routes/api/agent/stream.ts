@@ -3,12 +3,24 @@ import { z } from 'zod';
 import type { AgentStreamEvent } from '~agent/events';
 import { auth } from '~auth/server';
 
-const bodySchema = z.object({
-  sessionId: z.string().min(1),
-  userText: z.string().min(1),
-  providerId: z.string().nullish(),
-  modelId: z.string().nullish(),
-});
+const bodySchema = z
+  .object({
+    sessionId: z.string().min(1),
+    userText: z.string().default(''),
+    providerId: z.string().nullish(),
+    modelId: z.string().nullish(),
+    images: z
+      .array(
+        z.object({
+          data: z.string().min(1),
+          mimeType: z.string().min(1),
+        }),
+      )
+      .optional(),
+  })
+  .refine((b) => b.userText.trim().length > 0 || (b.images?.length ?? 0) > 0, {
+    message: 'Message must include text or an image.',
+  });
 
 export const Route = createFileRoute('/api/agent/stream')({
   server: {
@@ -51,6 +63,7 @@ export const Route = createFileRoute('/api/agent/stream')({
             runAgentTurn({
               sessionId: parsed.sessionId,
               userText: parsed.userText,
+              images: parsed.images,
               providerId: parsed.providerId,
               modelId: parsed.modelId,
               signal: request.signal,

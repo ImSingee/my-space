@@ -10,7 +10,12 @@ export type ToolCallBlock = {
 };
 export type AssistantBlock = TextBlock | ThinkingBlock | ToolCallBlock;
 
-export type ContentPart = { type: string; text?: string };
+export type ContentPart = {
+  type: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+};
 
 export type ChatMessage =
   | { role: 'user'; content: string | ContentPart[] }
@@ -28,6 +33,14 @@ export function partsToText(content: string | ContentPart[]): string {
     .filter((p) => p.type === 'text' && typeof p.text === 'string')
     .map((p) => p.text)
     .join('');
+}
+
+/** Image attachments in a message, as ready-to-use data URLs. */
+export function partsToImages(content: string | ContentPart[]): string[] {
+  if (typeof content === 'string') return [];
+  return content
+    .filter((p) => p.type === 'image' && typeof p.data === 'string')
+    .map((p) => `data:${p.mimeType ?? 'image/png'};base64,${p.data}`);
 }
 
 /** Human-readable labels for tools the Agent can call. */

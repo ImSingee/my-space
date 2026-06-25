@@ -6,8 +6,10 @@ import {
   Code,
   Collapse,
   Group,
+  Image,
   Loader,
   Paper,
+  Stack,
   Text,
   Typography,
   UnstyledButton,
@@ -29,6 +31,7 @@ import {
   type AssistantBlock,
   type ChatMessage,
   deployedSubappIds,
+  partsToImages,
   partsToText,
   toolDetail,
   toolLabel,
@@ -210,13 +213,32 @@ function AssistantBlocks({ blocks }: { blocks: AssistantBlock[] }) {
 
 export function MessageView({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
+    const text = partsToText(message.content);
+    const images = partsToImages(message.content);
     return (
       <Box className={classes.userRow}>
-        <Paper className={classes.userBubble} radius="lg" px="md" py="xs">
-          <Text className={classes.messageText}>
-            {partsToText(message.content)}
-          </Text>
-        </Paper>
+        <Stack gap={6} align="flex-end" maw="80%">
+          {images.length > 0 ? (
+            <Group gap={6} justify="flex-end" wrap="wrap">
+              {images.map((src, i) => (
+                <Image
+                  key={i}
+                  src={src}
+                  alt="Attached image"
+                  radius="md"
+                  w="auto"
+                  mah={260}
+                  className={classes.messageImage}
+                />
+              ))}
+            </Group>
+          ) : null}
+          {text ? (
+            <Paper className={classes.userBubble} radius="lg" px="md" py="xs">
+              <Text className={classes.messageText}>{text}</Text>
+            </Paper>
+          ) : null}
+        </Stack>
       </Box>
     );
   }
