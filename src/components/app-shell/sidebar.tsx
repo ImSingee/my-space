@@ -12,12 +12,13 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import {
   IconAppWindow,
   IconLayoutDashboard,
   IconLogout,
+  IconPlus,
   IconSparkles,
   IconMoon,
   IconSettings,
@@ -26,7 +27,11 @@ import {
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
-import { sidebarItemsQueryOptions } from '~queries/subapps';
+import {
+  sidebarItemsQueryOptions,
+  subappsQueryOptions,
+} from '~queries/subapps';
+import { setSidebarPin } from '~server/subapps';
 import { Brand } from './brand';
 import classes from './sidebar.module.css';
 
@@ -105,15 +110,40 @@ function UserMenu() {
 
 function PinnedApps() {
   const isActive = useIsActive();
+  const queryClient = useQueryClient();
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
-  if (!pins || pins.length === 0) return null;
+  const { data: subapps } = useQuery(subappsQueryOptions);
+
+  const pinApp = useMutation({
+    mutationFn: (subappId: string) =>
+      setSidebarPin({ data: { subappId, pinned: true } }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: sidebarItemsQueryOptions.queryKey,
+      });
+      toast.success('Pinned to sidebar');
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  const pinnedIds = new Set((pins ?? []).map((p) => p.subappId));
+  // Only deployed apps with a frontend can be opened from the sidebar.
+  const candidates = (subapps ?? []).filter(
+    (s) =>
+      s.status === 'deployed' &&
+      Boolean(s.capabilities?.frontend) &&
+      !pinnedIds.has(s.id),
+  );
+
+  if ((pins?.length ?? 0) === 0 && candidates.length === 0) return null;
+
   return (
     <>
       <Text size="xs" fw={600} c="dimmed" px="sm" mt="md" mb={4}>
         Pinned apps
       </Text>
       <Stack gap={2} px="xs">
-        {pins.map((pin) => (
+        {(pins ?? []).map((pin) => (
           <NavLink
             key={pin.id}
             renderRoot={(props) => (
@@ -129,6 +159,33 @@ function PinnedApps() {
             variant="light"
           />
         ))}
+        {candidates.length > 0 ? (
+          <Menu position="right-start" withArrow shadow="md" width={240}>
+            <Menu.Target>
+              <NavLink
+                component="button"
+                type="button"
+                label="Add app"
+                leftSection={<IconPlus size={18} stroke={1.6} />}
+              />
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>Pin a deployed app</Menu.Label>
+              {candidates.map((s) => (
+                <Menu.Item
+                  key={s.id}
+                  leftSection={<IconAppWindow size={16} stroke={1.6} />}
+                  disabled={pinApp.isPending}
+                  onClick={() => pinApp.mutate(s.id)}
+                >
+                  <Text size="sm" truncate>
+                    {s.name}
+                  </Text>
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        ) : null}
       </Stack>
     </>
   );
