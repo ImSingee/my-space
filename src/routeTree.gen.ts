@@ -18,11 +18,13 @@ import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
 import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
 import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
+import { Route as AppAgentIndexRouteImport } from './routes/_app/agent/index'
 import { Route as AppAppIdSplatRouteImport } from './routes/app/$appId/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiAgentStreamRouteImport } from './routes/api/agent/stream'
 import { Route as ApiAgentAnswerRouteImport } from './routes/api/agent/answer'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
+import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
 import { Route as AppAppsAppIdIndexRouteImport } from './routes/_app/apps/$appId/index'
 import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
 import { Route as AppAppsAppIdManageRouteImport } from './routes/_app/apps/$appId/manage'
@@ -75,6 +77,11 @@ const AppAppsIndexRoute = AppAppsIndexRouteImport.update({
   path: '/apps/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAgentIndexRoute = AppAgentIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppAgentRoute,
+} as any)
 const AppAppIdSplatRoute = AppAppIdSplatRouteImport.update({
   id: '/app/$appId/$',
   path: '/app/$appId/$',
@@ -99,6 +106,11 @@ const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
   id: '/dashboard/$dashboardId',
   path: '/dashboard/$dashboardId',
   getParentRoute: () => AppRoute,
+} as any)
+const AppAgentThreadIdRoute = AppAgentThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => AppAgentRoute,
 } as any)
 const AppAppsAppIdIndexRoute = AppAppsAppIdIndexRouteImport.update({
   id: '/apps/$appId/',
@@ -142,14 +154,16 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
-  '/agent': typeof AppAgentRoute
+  '/agent': typeof AppAgentRouteWithChildren
   '/dashboards': typeof AppDashboardsRoute
   '/settings': typeof AppSettingsRoute
+  '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$appId/$': typeof AppAppIdSplatRoute
+  '/agent/': typeof AppAgentIndexRoute
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
@@ -164,14 +178,15 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
-  '/agent': typeof AppAgentRoute
   '/dashboards': typeof AppDashboardsRoute
   '/settings': typeof AppSettingsRoute
+  '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$appId/$': typeof AppAppIdSplatRoute
+  '/agent': typeof AppAgentIndexRoute
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
@@ -188,14 +203,16 @@ export interface FileRoutesById {
   '/404': typeof R404Route
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/_app/agent': typeof AppAgentRoute
+  '/_app/agent': typeof AppAgentRouteWithChildren
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/api/agent/answer': typeof ApiAgentAnswerRoute
   '/api/agent/stream': typeof ApiAgentStreamRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$appId/$': typeof AppAppIdSplatRoute
+  '/_app/agent/': typeof AppAgentIndexRoute
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
   '/_app/apps/$appId/manage': typeof AppAppsAppIdManageRoute
@@ -215,11 +232,13 @@ export interface FileRouteTypes {
     | '/agent'
     | '/dashboards'
     | '/settings'
+    | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$appId/$'
+    | '/agent/'
     | '/apps/'
     | '/dashboard/'
     | '/apps/$appId/manage'
@@ -234,14 +253,15 @@ export interface FileRouteTypes {
     | '/'
     | '/404'
     | '/login'
-    | '/agent'
     | '/dashboards'
     | '/settings'
+    | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$appId/$'
+    | '/agent'
     | '/apps'
     | '/dashboard'
     | '/apps/$appId/manage'
@@ -260,11 +280,13 @@ export interface FileRouteTypes {
     | '/_app/agent'
     | '/_app/dashboards'
     | '/_app/settings'
+    | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
     | '/api/agent/answer'
     | '/api/agent/stream'
     | '/api/auth/$'
     | '/app/$appId/$'
+    | '/_app/agent/'
     | '/_app/apps/'
     | '/_app/dashboard/'
     | '/_app/apps/$appId/manage'
@@ -357,6 +379,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAppsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/agent/': {
+      id: '/_app/agent/'
+      path: '/'
+      fullPath: '/agent/'
+      preLoaderRoute: typeof AppAgentIndexRouteImport
+      parentRoute: typeof AppAgentRoute
+    }
     '/app/$appId/$': {
       id: '/app/$appId/$'
       path: '/app/$appId/$'
@@ -391,6 +420,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/dashboard/$dashboardId'
       preLoaderRoute: typeof AppDashboardDashboardIdRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/_app/agent/$threadId': {
+      id: '/_app/agent/$threadId'
+      path: '/$threadId'
+      fullPath: '/agent/$threadId'
+      preLoaderRoute: typeof AppAgentThreadIdRouteImport
+      parentRoute: typeof AppAgentRoute
     }
     '/_app/apps/$appId/': {
       id: '/_app/apps/$appId/'
@@ -444,8 +480,22 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppAgentRouteChildren {
+  AppAgentThreadIdRoute: typeof AppAgentThreadIdRoute
+  AppAgentIndexRoute: typeof AppAgentIndexRoute
+}
+
+const AppAgentRouteChildren: AppAgentRouteChildren = {
+  AppAgentThreadIdRoute: AppAgentThreadIdRoute,
+  AppAgentIndexRoute: AppAgentIndexRoute,
+}
+
+const AppAgentRouteWithChildren = AppAgentRoute._addFileChildren(
+  AppAgentRouteChildren,
+)
+
 interface AppRouteChildren {
-  AppAgentRoute: typeof AppAgentRoute
+  AppAgentRoute: typeof AppAgentRouteWithChildren
   AppDashboardsRoute: typeof AppDashboardsRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppDashboardDashboardIdRoute: typeof AppDashboardDashboardIdRoute
@@ -456,7 +506,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAgentRoute: AppAgentRoute,
+  AppAgentRoute: AppAgentRouteWithChildren,
   AppDashboardsRoute: AppDashboardsRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppDashboardDashboardIdRoute: AppDashboardDashboardIdRoute,

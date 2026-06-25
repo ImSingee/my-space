@@ -1,40 +1,39 @@
 import { ActionIcon, Box, Center, Drawer, Loader, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { createFileRoute } from '@tanstack/react-router';
+import {
+  Outlet,
+  createFileRoute,
+  useNavigate,
+  useParams,
+} from '@tanstack/react-router';
 import { IconMessages } from '@tabler/icons-react';
-import { Suspense, useState } from 'react';
-import { Chat, type ChatDraft } from '~components/agent/chat';
-import { NewChat } from '~components/agent/new-chat';
+import { Suspense } from 'react';
 import { SessionsPanel } from '~components/agent/sessions-panel';
 import { providersQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import classes from '~components/agent/chat.module.css';
 
 export const Route = createFileRoute('/_app/agent')({
-  validateSearch: (search): { prompt?: string } => ({
-    prompt: typeof search.prompt === 'string' ? search.prompt : undefined,
-  }),
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(sessionsQueryOptions),
       context.queryClient.ensureQueryData(providersQueryOptions),
     ]);
   },
-  component: AgentPage,
+  component: AgentLayout,
 });
 
-function AgentPage() {
-  const { prompt } = Route.useSearch();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{
-    sessionId: string;
-    draft: ChatDraft;
-  } | null>(null);
+function AgentLayout() {
+  const navigate = useNavigate();
+  const { threadId } = useParams({ strict: false });
   const [drawerOpened, drawer] = useDisclosure(false);
 
-  const openSession = (id: string | null) => {
-    setSelected(id);
-    setDraft(null);
+  const select = (id: string | null) => {
     drawer.close();
+    if (id) {
+      void navigate({ to: '/agent/$threadId', params: { threadId: id } });
+    } else {
+      void navigate({ to: '/agent' });
+    }
   };
 
   return (
@@ -47,7 +46,7 @@ function AgentPage() {
         }
       >
         <Box className={classes.sessionsRail}>
-          <SessionsPanel selected={selected} onSelect={openSession} />
+          <SessionsPanel selected={threadId ?? null} onSelect={select} />
         </Box>
 
         <Drawer
@@ -59,7 +58,7 @@ function AgentPage() {
           padding="md"
           classNames={{ body: classes.drawerBody }}
         >
-          <SessionsPanel selected={selected} onSelect={openSession} />
+          <SessionsPanel selected={threadId ?? null} onSelect={select} />
         </Drawer>
 
         <Box className={classes.agentMain}>
@@ -73,27 +72,11 @@ function AgentPage() {
               <IconMessages size={18} stroke={1.6} />
             </ActionIcon>
             <Text fw={600} size="sm" truncate>
-              {selected ? 'Chat' : 'New chat'}
+              {threadId ? 'Chat' : 'New chat'}
             </Text>
           </Box>
 
-          {selected ? (
-            <Chat
-              key={selected}
-              sessionId={selected}
-              initialDraft={
-                draft?.sessionId === selected ? draft.draft : undefined
-              }
-            />
-          ) : (
-            <NewChat
-              initialPrompt={prompt}
-              onStart={(id, d) => {
-                setDraft({ sessionId: id, draft: d });
-                setSelected(id);
-              }}
-            />
-          )}
+          <Outlet />
         </Box>
       </Suspense>
     </Box>

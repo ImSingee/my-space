@@ -23,6 +23,7 @@ import {
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
 import { MessageView, StreamingBubble } from './message-view';
+import { takeDraft } from './pending-draft';
 import {
   type AssistantBlock,
   type ChatMessage,
@@ -97,13 +98,7 @@ function groupTurns(messages: ChatMessage[]): RenderTurn[] {
   return turns;
 }
 
-export function Chat({
-  sessionId,
-  initialDraft,
-}: {
-  sessionId: string;
-  initialDraft?: ChatDraft;
-}) {
+export function Chat({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const sessionQuery = useQuery(sessionQueryOptions(sessionId));
   const { groups, first } = useModelOptions();
@@ -111,7 +106,6 @@ export function Chat({
   const [model, setModel] = useState<string | null>(null);
   const [pending, setPending] = useState<ChatMessage[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const sentDraftRef = useRef(false);
 
   const stream = useAgentStream((messages) => {
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
@@ -160,14 +154,16 @@ export function Chat({
     send(text, images, effectiveModel);
   };
 
-  // Auto-send the draft message captured by the new-chat hero exactly once,
-  // so starting a build from the hero flows straight into a streaming reply.
+  // Auto-send the draft captured by the new-chat hero exactly once, so starting
+  // a build from the hero flows straight into a streaming reply. The draft is
+  // handed off in memory (keyed by session) and consumed here on mount; this
+  // component is keyed by session id, so the effect runs once per chat.
   useEffect(() => {
-    if (!initialDraft || sentDraftRef.current) return;
-    sentDraftRef.current = true;
-    const value = `${initialDraft.providerId}:${initialDraft.modelId}`;
+    const draft = takeDraft(sessionId);
+    if (!draft) return;
+    const value = `${draft.providerId}:${draft.modelId}`;
     setModel(value);
-    send(initialDraft.text, initialDraft.images, value);
+    send(draft.text, draft.images, value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
