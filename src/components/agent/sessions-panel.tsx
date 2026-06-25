@@ -106,6 +106,7 @@ export function SessionsPanel({
                   variant="subtle"
                   color="gray"
                   size="sm"
+                  className={classes.sessionDelete}
                   aria-label="Delete chat"
                   onClick={() =>
                     modals.openConfirmModal({
