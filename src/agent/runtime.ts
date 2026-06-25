@@ -155,7 +155,10 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
         } else if (inner.type === 'thinking_start') {
           sawThinkingDelta = false;
         } else if (inner.type === 'thinking_delta' && inner.delta) {
-          sawThinkingDelta = true;
+          // Only real (non-whitespace) text counts as "seen". Some relays emit
+          // a lone "\n\n" separator as the only delta while the actual summary
+          // arrives in thinking_end; that must not suppress the backfill below.
+          if (inner.delta.trim()) sawThinkingDelta = true;
           emit({ type: 'thinking', delta: inner.delta });
         } else if (inner.type === 'thinking_end') {
           // Relays that strip streaming summary deltas still send the full

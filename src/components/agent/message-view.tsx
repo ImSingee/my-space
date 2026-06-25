@@ -375,7 +375,7 @@ function StreamingThinkingStep({
       {showBody ? (
         <Box className={classes.stepBody}>
           <Box ref={bodyRef} className={classes.stepBodyText}>
-            {text}
+            {text.trimStart()}
           </Box>
         </Box>
       ) : null}
