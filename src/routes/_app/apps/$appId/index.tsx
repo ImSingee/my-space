@@ -17,7 +17,7 @@ import {
   IconServerBolt,
   IconSettings,
 } from '@tabler/icons-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { getApp } from '~server/apps';
 import classes from './app-view.module.css';
@@ -38,6 +38,22 @@ function AppView() {
   const src = `/app/${app.id}/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const canOpen = app.status === 'deployed' && hasFrontend;
+
+  // On a direct (SSR) page load the iframe can finish loading before React
+  // hydrates and attaches `onLoad`, so that event is missed and the overlay
+  // would hang forever. Detect an already-loaded same-origin frame on mount
+  // and clear the overlay; otherwise the later `onLoad` handles it.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    try {
+      if (frame.contentDocument?.readyState === 'complete') {
+        setLoading(false);
+      }
+    } catch {
+      // Cross-origin frame — nothing readable here; rely on onLoad.
+    }
+  }, []);
 
   const reload = () => {
     if (!frameRef.current) return;
