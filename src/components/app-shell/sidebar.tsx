@@ -129,11 +129,24 @@ function UserMenu() {
         </Menu.Label>
         <Menu.Divider />
         <Menu.Item
+          leftSection={<IconLayoutDashboard size={16} stroke={1.6} />}
+          renderRoot={(props) => <Link to="/dashboards" {...props} />}
+        >
+          Dashboards
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconAppWindow size={16} stroke={1.6} />}
+          renderRoot={(props) => <Link to="/apps" {...props} />}
+        >
+          Apps
+        </Menu.Item>
+        <Menu.Item
           leftSection={<IconSettings size={16} stroke={1.6} />}
           renderRoot={(props) => <Link to="/settings" {...props} />}
         >
           Settings
         </Menu.Item>
+        <Menu.Divider />
         <Menu.Item
           leftSection={<IconLogout size={16} stroke={1.6} />}
           onClick={signOut}
