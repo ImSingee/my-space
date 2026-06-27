@@ -9,6 +9,8 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,12 +33,13 @@ import {
   IconPinnedOff,
   IconTrash,
 } from '@tabler/icons-react';
+import copy from 'copy-to-clipboard';
 import dayjs from 'dayjs';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { CapabilitiesPanel } from '~components/apps/capabilities-panel';
 import { DeploymentHistory } from '~components/apps/deployment-history';
+import { OperationsPanel } from '~components/apps/operations-panel';
 import { StatusBadge } from '~components/apps/status-badge';
 import { sidebarItemsQueryOptions } from '~queries/apps';
 import type { AppCapabilities } from '~/db/schema';
@@ -229,6 +232,14 @@ function AppDetailPage() {
             </Text>
             <Stack gap="xs">
               <DetailRow label="Identifier" value={app.id} mono />
+              {app.currentSourceCommit ? (
+                <DetailRow
+                  label="Source commit"
+                  value={shortSha(app.currentSourceCommit)}
+                  mono
+                  copyValue={app.currentSourceCommit}
+                />
+              ) : null}
               <DetailRow
                 label="Backend mode"
                 value={app.backendMode ?? 'none'}
@@ -277,7 +288,7 @@ function AppDetailPage() {
           </Card>
         </SimpleGrid>
 
-        <CapabilitiesPanel appId={app.id} />
+        <OperationsPanel appId={app.id} />
 
         <DeploymentHistory appId={app.id} />
       </Stack>
@@ -285,23 +296,44 @@ function AppDetailPage() {
   );
 }
 
+const shortSha = (sha: string) => sha.slice(0, 7);
+
 function DetailRow({
   label,
   value,
   mono,
+  copyValue,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  /** When set, the value becomes a button that copies this text to clipboard. */
+  copyValue?: string;
 }) {
   return (
     <Group justify="space-between" gap="md" wrap="nowrap">
       <Text size="sm" c="dimmed">
         {label}
       </Text>
-      <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
-        {value}
-      </Text>
+      {copyValue ? (
+        <Tooltip label="Copy" withArrow position="top">
+          <UnstyledButton
+            onClick={() => {
+              copy(copyValue);
+              toast.success('Copied');
+            }}
+            style={{ minWidth: 0 }}
+          >
+            <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
+              {value}
+            </Text>
+          </UnstyledButton>
+        </Tooltip>
+      ) : (
+        <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
+          {value}
+        </Text>
+      )}
     </Group>
   );
 }

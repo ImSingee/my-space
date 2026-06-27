@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 import {
   getDashboard,
   getAppOps,
+  getDeploymentBuildLog,
   listAvailableWidgets,
   listDashboards,
   listDeployments,
@@ -34,6 +35,17 @@ export const deploymentsQueryOptions = (id: string) =>
   queryOptions({
     queryKey: ['apps', id, 'deployments'],
     queryFn: () => listDeployments({ data: id }),
+  });
+
+export const deploymentBuildLogQueryOptions = (
+  appId: string,
+  deploymentId: string,
+) =>
+  queryOptions({
+    queryKey: ['apps', appId, 'deployments', deploymentId, 'build-log'],
+    queryFn: () => getDeploymentBuildLog({ data: { id: appId, deploymentId } }),
+    // A deployment's build log is immutable, so never refetch once loaded.
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
 export const sidebarItemsQueryOptions = queryOptions({

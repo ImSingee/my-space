@@ -60,7 +60,7 @@ function SectionHeader({
   );
 }
 
-export function CapabilitiesPanel({ appId }: { appId: string }) {
+export function OperationsPanel({ appId }: { appId: string }) {
   const qc = useQueryClient();
   const query = useQuery(appOpsQueryOptions(appId));
 
@@ -112,12 +112,13 @@ export function CapabilitiesPanel({ appId }: { appId: string }) {
     <Card withBorder padding="lg">
       <Group gap="xs" mb="md">
         <IconBolt size={18} stroke={1.8} />
-        <Text fw={600}>Capabilities</Text>
+        <Text fw={600}>Operations</Text>
       </Group>
 
       {!anyEnabled ? (
         <Text size="sm" c="dimmed">
-          No extended capabilities are enabled for this app.
+          No backend, scheduled jobs, webhook, or storage to manage for this
+          app.
         </Text>
       ) : (
         <Stack gap="lg">

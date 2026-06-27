@@ -47,6 +47,13 @@ export const listDeployments = createServerFn({ method: 'GET' })
     return list(id);
   });
 
+export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
+  .validator((input: { id: string; deploymentId: string }) => input)
+  .handler(async ({ data }) => {
+    const { deploymentBuildLog } = await import('./apps/manage');
+    return deploymentBuildLog(data.id, data.deploymentId);
+  });
+
 export const rollbackAppFn = createServerFn({ method: 'POST' })
   .validator((input: { id: string; deploymentId: string }) => input)
   .handler(async ({ data }) => {

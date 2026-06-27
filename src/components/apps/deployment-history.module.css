@@ -1,0 +1,62 @@
+/* Subtle warm (brand) highlight box around the live deployment's content, so it
+   reads at a glance without a heavy full-bleed fill. */
+.currentItem {
+  background-color: color-mix(
+    in srgb,
+    var(--mantine-primary-color-light) 55%,
+    transparent
+  );
+  border: 1px solid var(--mantine-primary-color-light-hover);
+  border-radius: var(--mantine-radius-md);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  margin-left: calc(var(--mantine-spacing-sm) * -1);
+  margin-right: calc(var(--mantine-spacing-sm) * -1);
+}
+
+.version {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A muted icon+label chip used for tag / commit / artifact metadata. */
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--mantine-color-dimmed);
+  line-height: 1;
+}
+
+/* Interactive chips (copy commit, download artifact) brighten on hover. */
+a.metaItem:hover,
+button.metaItem:hover {
+  color: var(--mantine-color-text);
+}
+
+.metaDot {
+  color: var(--mantine-color-dimmed);
+}
+
+.logToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chevron {
+  color: var(--mantine-color-dimmed);
+  transition: transform 150ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.logCode {
+  max-height: 280px;
+  overflow: auto;
+  font-size: var(--mantine-font-size-xs);
+}
+
+.logError {
+  color: var(--mantine-color-red-6);
+}

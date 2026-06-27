@@ -33,10 +33,17 @@ export type DeploymentSummary = {
   status: schema.DeploymentStatus;
   message: string | null;
   error: string | null;
-  buildLog: string | null;
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  /** Commit on the app's `master` branch this version was built from. */
+  sourceCommit: string | null;
+  /** Immutable `deploy/v<version>` Git tag for this version. */
+  sourceTag: string | null;
+  /** Whether the build artifact still exists on disk (required to restore). */
+  hasArtifact: boolean;
+  /** Whether a build log exists; the log itself is fetched lazily on expand. */
+  hasBuildLog: boolean;
 };
 
 /** List an app's deployment history, newest first, with rollback hints. */
@@ -64,9 +71,12 @@ export async function listDeployments(
         status: d.status,
         message: d.message,
         error: d.error,
-        buildLog: d.buildLog,
         createdAt: d.createdAt.toISOString(),
         isCurrent,
+        sourceCommit: d.sourceCommit,
+        sourceTag: d.sourceTag,
+        hasArtifact,
+        hasBuildLog: Boolean(d.buildLog),
         canRollback:
           !isCurrent &&
           d.status === 'deployed' &&
@@ -75,6 +85,23 @@ export async function listDeployments(
       };
     }),
   );
+}
+
+/**
+ * Fetch a single deployment's build log on demand. Kept out of the
+ * {@link listDeployments} payload so opening the management page doesn't ship
+ * every (potentially large) build log up front — the UI fetches this only when
+ * a row's log is expanded.
+ */
+export async function deploymentBuildLog(
+  appId: string,
+  deploymentId: string,
+): Promise<string | null> {
+  const d = await db.query.deployments.findFirst({
+    where: (row, { eq: e, and: a }) =>
+      a(e(row.appId, appId), e(row.id, deploymentId)),
+  });
+  return d?.buildLog ?? null;
 }
 
 /** Archive (or unarchive) an app. Archiving stops its backend. */

@@ -1,10 +1,25 @@
 /** Server-only: produce downloadable archives of an app's Git-backed source. */
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { appRepoDir } from '~agent/paths';
+import {
+  appArtifactsDir,
+  appRepoDir,
+  appVersionsDir,
+  deploymentArtifactDir,
+  deploymentBuildDir,
+} from '~agent/paths';
 import { APP_SOURCE_BRANCH, appMasterCommit, ensureAppRepo } from './git';
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type AppArchive = {
   filename: string;
@@ -107,4 +122,40 @@ export async function buildAppRepoArchive(id: string): Promise<AppArchive> {
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/**
+ * A single deployment's built artifact as a gzipped tarball. The artifact is a
+ * plain directory snapshot (the exact files that were served), so we tar it
+ * directly — unlike source/repo it has no Git ref to `git archive`. Falls back
+ * to the legacy per-deployment snapshot dir for pre-artifact deployments.
+ */
+export async function buildDeploymentArtifactArchive(
+  id: string,
+  deploymentId: string,
+  version: number,
+): Promise<AppArchive> {
+  const useArtifact = await pathExists(deploymentArtifactDir(id, deploymentId));
+  const parent = useArtifact ? appArtifactsDir(id) : appVersionsDir(id);
+  const dir = useArtifact
+    ? deploymentArtifactDir(id, deploymentId)
+    : deploymentBuildDir(id, deploymentId);
+  if (!(await pathExists(dir))) {
+    throw new Error(`No artifact exists for v${version}.`);
+  }
+  const tar = await spawnCapture('tar', [
+    '-czf',
+    '-',
+    '-C',
+    parent,
+    deploymentId,
+  ]);
+  if (tar.code !== 0) {
+    throw new Error(`Failed to package artifact: ${tar.stderr.trim()}`);
+  }
+  return {
+    filename: `${id}-v${version}-artifact.tar.gz`,
+    contentType: 'application/gzip',
+    body: tar.stdout,
+  };
 }
