@@ -29,6 +29,7 @@ import {
   useRef,
 } from 'react';
 import ReactMarkdown, { type Options as MarkdownOptions } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
@@ -55,7 +56,7 @@ function MarkdownLink(props: ComponentPropsWithoutRef<'a'>) {
 }
 
 type PluginList = NonNullable<MarkdownOptions['rehypePlugins']>;
-const REMARK_PLUGINS: PluginList = [remarkMath];
+const REMARK_PLUGINS: PluginList = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS: PluginList = [
   [rehypeKatex, { throwOnError: false, strict: false }],
 ];

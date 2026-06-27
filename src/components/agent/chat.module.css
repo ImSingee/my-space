@@ -147,6 +147,14 @@ button.stepHeader:hover {
   margin-bottom: 0;
 }
 
+/* Let wide GFM tables scroll horizontally instead of overflowing the bubble. */
+.markdown :where(table) {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .markdown :where(h1, h2, h3, h4, h5, h6) {
   margin-top: 0.4em;
   margin-bottom: 0.4em;
