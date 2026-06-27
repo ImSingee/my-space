@@ -78,9 +78,9 @@ function DashboardPage() {
   const { dashboardId } = Route.useParams();
   const { data: dashboards } = useSuspenseQuery(dashboardsQueryOptions);
   const current = dashboards.find((d) => d.id === dashboardId);
-  const description = current?.description?.trim()
-    ? current.description
-    : DEFAULT_DASHBOARD_DESCRIPTION;
+  // Empty description is a valid state: render no subtitle rather than
+  // falling back to a canned default.
+  const description = current?.description?.trim() || undefined;
 
   return (
     <Page
