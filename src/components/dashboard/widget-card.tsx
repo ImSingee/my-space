@@ -8,6 +8,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { IconAppWindow, IconGripVertical, IconX } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
 import type { DashboardItem } from '~server/apps';
@@ -100,11 +101,14 @@ export function WidgetCard({
               variant="subtle"
               color="gray"
               size="sm"
-              component="a"
-              href={`/app/${item.appId}/`}
-              target="_blank"
-              rel="noreferrer"
               aria-label="Open app"
+              renderRoot={(props) => (
+                <Link
+                  to="/apps/$appId"
+                  params={{ appId: item.appId }}
+                  {...props}
+                />
+              )}
             >
               <IconAppWindow size={15} />
             </ActionIcon>
