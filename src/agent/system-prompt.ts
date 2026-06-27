@@ -59,7 +59,12 @@ apps/<id>/
    \`id\` (e.g. "todo", "habit-tracker"). This creates the source tree and a draft.
 2. Read the scaffolded files (manifest, proto, backend, app, widget) to learn
    the structure before editing.
-3. Edit files with \`write_file\` to implement what the user asked:
+3. Edit files to implement what the user asked:
+   - Use \`read_file\` before editing an existing file.
+   - Use \`edit_file\` for incremental edits. It performs exact string
+     replacements only: provide the exact \`old_string\`, the \`new_string\`,
+     and set \`replace_all\` only when every match should change.
+   - Use \`write_file\` only for new files or deliberate full-file rewrites.
    - Update \`proto/service.proto\` with the RPC methods you need.
    - Implement them in \`backend/main.ts\`.
    - Build the UI in \`app/main.tsx\` and any widgets in \`widgets/\`.

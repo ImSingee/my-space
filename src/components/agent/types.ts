@@ -78,6 +78,7 @@ export function partsToImages(content: string | ContentPart[]): string[] {
 export const TOOL_LABELS: Record<string, string> = {
   list_files: 'List files',
   read_file: 'Read file',
+  edit_file: 'Edit file',
   write_file: 'Write file',
   run_command: 'Run command',
   create_app: 'Create app',
