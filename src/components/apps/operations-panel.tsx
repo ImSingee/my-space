@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Badge,
   Box,
   Button,
   Center,
@@ -12,11 +11,14 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
+import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   IconClock,
   IconCopy,
+  IconDatabase,
   IconDatabaseCog,
+  IconDownload,
   IconPlayerPlay,
   IconServerBolt,
   IconTrash,
@@ -37,29 +39,59 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// Flat section header: the title's status / value flows inline right after the
+// label (as `meta`) instead of being pinned to the far right — there is no card
+// frame to anchor a right edge against anymore.
 function SectionHeader({
   icon,
   title,
-  right,
+  meta,
 }: {
   icon: React.ReactNode;
   title: string;
-  right?: React.ReactNode;
+  meta?: React.ReactNode;
 }) {
   return (
-    <Group justify="space-between" wrap="nowrap">
-      <Group gap={8} wrap="nowrap">
-        {icon}
-        <Text fw={600} size="sm">
-          {title}
-        </Text>
-      </Group>
-      {right}
+    <Group gap={8} wrap="nowrap">
+      {icon}
+      <Text fw={600} size="sm">
+        {title}
+      </Text>
+      {meta}
     </Group>
   );
 }
 
-export function OperationsPanel({ appId }: { appId: string }) {
+// A small, flat status indicator (not a pill badge): ember when active, muted
+// otherwise.
+function StatusDot({ active }: { active: boolean }) {
+  return (
+    <Box
+      aria-hidden
+      style={{
+        width: 7,
+        height: 7,
+        flex: 'none',
+        borderRadius: '50%',
+        backgroundColor: active
+          ? 'var(--mantine-color-ember-6)'
+          : 'var(--mantine-color-gray-4)',
+      }}
+    />
+  );
+}
+
+export function OperationsPanel({
+  appId,
+  dbName,
+  dbEnabled,
+}: {
+  appId: string;
+  /** Provisioned database name, or null when not yet provisioned. */
+  dbName?: string | null;
+  /** Whether this app declares/uses a database (controls the Database row). */
+  dbEnabled?: boolean;
+}) {
   const qc = useQueryClient();
   const query = useQuery(appOpsQueryOptions(appId));
 
@@ -86,6 +118,23 @@ export function OperationsPanel({ appId }: { appId: string }) {
     onError: (error) => toast.error((error as Error).message),
   });
 
+  const confirmDeleteObject = (key: string) =>
+    modals.openConfirmModal({
+      title: 'Delete object?',
+      children: (
+        <Text size="sm">
+          Permanently delete{' '}
+          <Text span fw={600} ff="monospace">
+            {key}
+          </Text>{' '}
+          from this app&apos;s storage? This cannot be undone.
+        </Text>
+      ),
+      labels: { confirm: 'Delete', cancel: 'Cancel' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => deleteObject.mutate(key),
+    });
+
   if (query.isLoading) {
     return (
       <Box component="section">
@@ -104,6 +153,7 @@ export function OperationsPanel({ appId }: { appId: string }) {
 
   const anyEnabled =
     ops.backend.capable ||
+    Boolean(dbEnabled) ||
     ops.cron.enabled ||
     ops.webhook.enabled ||
     ops.storage.enabled;
@@ -118,8 +168,8 @@ export function OperationsPanel({ appId }: { appId: string }) {
 
       {!anyEnabled ? (
         <Text size="sm" c="dimmed">
-          No backend, scheduled jobs, webhook, or storage to manage for this
-          app.
+          No database, backend, scheduled jobs, webhook, or storage to manage
+          for this app.
         </Text>
       ) : (
         <Stack gap="lg">
@@ -128,19 +178,13 @@ export function OperationsPanel({ appId }: { appId: string }) {
               <SectionHeader
                 icon={<IconServerBolt size={16} stroke={1.8} />}
                 title="Backend"
-                right={
-                  <Group gap={6}>
-                    <Badge size="sm" variant="light" radius="sm" color="gray">
+                meta={
+                  <Group gap={6} wrap="nowrap">
+                    <StatusDot active={ops.backend.running} />
+                    <Text size="xs" c="dimmed">
+                      {ops.backend.running ? 'Running' : 'Idle'} ·{' '}
                       {ops.backend.mode ?? 'serverless'}
-                    </Badge>
-                    <Badge
-                      size="sm"
-                      variant="dot"
-                      radius="sm"
-                      color={ops.backend.running ? 'ember' : 'gray'}
-                    >
-                      {ops.backend.running ? 'running' : 'idle'}
-                    </Badge>
+                    </Text>
                   </Group>
                 }
               />
@@ -148,6 +192,31 @@ export function OperationsPanel({ appId }: { appId: string }) {
                 {ops.backend.mode === 'long-running'
                   ? 'Kept warm by the platform and restarted automatically if it exits.'
                   : 'Booted on demand for each request, then idles down.'}
+              </Text>
+            </Stack>
+          ) : null}
+
+          {dbEnabled ? (
+            <Stack gap={6}>
+              <SectionHeader
+                icon={<IconDatabase size={16} stroke={1.8} />}
+                title="Database"
+                meta={
+                  dbName ? (
+                    <Text size="xs" c="dimmed" ff="monospace" truncate>
+                      {dbName}
+                    </Text>
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      not provisioned
+                    </Text>
+                  )
+                }
+              />
+              <Text size="xs" c="dimmed">
+                {dbName
+                  ? 'A dedicated Postgres database for this app.'
+                  : 'A Postgres database is provisioned automatically on first use.'}
               </Text>
             </Stack>
           ) : null}
@@ -163,40 +232,46 @@ export function OperationsPanel({ appId }: { appId: string }) {
                   No cron jobs declared in the manifest.
                 </Text>
               ) : (
-                <Stack gap={6}>
-                  {ops.cron.jobs.map((job) => (
-                    <Group
-                      key={job.name}
-                      justify="space-between"
-                      wrap="nowrap"
-                      gap="sm"
-                    >
-                      <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-                        <Text size="sm" fw={500}>
-                          {job.name}
-                        </Text>
-                        <Code>{job.schedule}</Code>
-                        <Text size="xs" c="dimmed" truncate>
-                          {job.path}
-                          {job.nextRun
-                            ? ` · next ${dayjs(job.nextRun).fromNow()}`
-                            : ''}
-                        </Text>
-                      </Group>
-                      <Button
-                        size="compact-sm"
-                        variant="light"
-                        leftSection={<IconPlayerPlay size={14} />}
-                        loading={
-                          runCron.isPending && runCron.variables === job.name
-                        }
-                        onClick={() => runCron.mutate(job.name)}
-                      >
-                        Run now
-                      </Button>
-                    </Group>
-                  ))}
-                </Stack>
+                <Table withTableBorder verticalSpacing={6} highlightOnHover>
+                  <Table.Tbody>
+                    {ops.cron.jobs.map((job) => (
+                      <Table.Tr key={job.name}>
+                        <Table.Td>
+                          <Text size="sm" fw={500}>
+                            {job.name}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td w={120}>
+                          <Text size="xs" c="dimmed" ff="monospace">
+                            {job.schedule}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed" truncate>
+                            {job.path}
+                            {job.nextRun
+                              ? ` · next ${dayjs(job.nextRun).fromNow()}`
+                              : ''}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td w={110}>
+                          <Button
+                            size="compact-sm"
+                            variant="light"
+                            leftSection={<IconPlayerPlay size={14} />}
+                            loading={
+                              runCron.isPending &&
+                              runCron.variables === job.name
+                            }
+                            onClick={() => runCron.mutate(job.name)}
+                          >
+                            Run now
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
               )}
             </Stack>
           ) : null}
@@ -206,27 +281,35 @@ export function OperationsPanel({ appId }: { appId: string }) {
               <SectionHeader
                 icon={<IconWebhook size={16} stroke={1.8} />}
                 title="Inbound webhook"
-                right={
-                  <Tooltip label="Copy URL with secret" withArrow>
-                    <ActionIcon
-                      variant="light"
-                      aria-label="Copy webhook URL"
-                      onClick={() => {
-                        const url = `${origin}${ops.webhook.url ?? ''}?secret=${
-                          ops.webhook.secret ?? ''
-                        }`;
-                        copy(url);
-                        toast.success('Webhook URL copied');
-                      }}
-                    >
-                      <IconCopy size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                }
               />
-              <Code block style={{ fontSize: 'var(--mantine-font-size-xs)' }}>
-                {`${ops.webhook.url ?? ''}?secret=${ops.webhook.secret ?? ''}`}
-              </Code>
+              <Group gap={8} wrap="nowrap" align="center">
+                <Code
+                  block
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: 'var(--mantine-font-size-xs)',
+                  }}
+                >
+                  {`${ops.webhook.url ?? ''}?secret=${ops.webhook.secret ?? ''}`}
+                </Code>
+                <Tooltip label="Copy URL with secret" withArrow position="left">
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    aria-label="Copy webhook URL"
+                    onClick={() => {
+                      const url = `${origin}${ops.webhook.url ?? ''}?secret=${
+                        ops.webhook.secret ?? ''
+                      }`;
+                      copy(url);
+                      toast.success('Webhook URL copied');
+                    }}
+                  >
+                    <IconCopy size={15} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
               <Text size="xs" c="dimmed">
                 POST here from external services. The platform verifies the
                 secret and forwards to your backend at <Code>/__webhook</Code>.
@@ -239,7 +322,7 @@ export function OperationsPanel({ appId }: { appId: string }) {
               <SectionHeader
                 icon={<IconDatabaseCog size={16} stroke={1.8} />}
                 title="Storage"
-                right={
+                meta={
                   <Text size="xs" c="dimmed">
                     {ops.storage.objects.length} object
                     {ops.storage.objects.length === 1 ? '' : 's'}
@@ -251,7 +334,7 @@ export function OperationsPanel({ appId }: { appId: string }) {
                   No objects stored yet.
                 </Text>
               ) : (
-                <Table verticalSpacing={6} highlightOnHover>
+                <Table withTableBorder verticalSpacing={6} highlightOnHover>
                   <Table.Tbody>
                     {ops.storage.objects.map((obj) => (
                       <Table.Tr key={obj.key}>
@@ -270,19 +353,37 @@ export function OperationsPanel({ appId }: { appId: string }) {
                             {dayjs(obj.updatedAt).fromNow()}
                           </Text>
                         </Table.Td>
-                        <Table.Td w={40}>
-                          <ActionIcon
-                            variant="subtle"
-                            color="red"
-                            aria-label={`Delete ${obj.key}`}
-                            loading={
-                              deleteObject.isPending &&
-                              deleteObject.variables === obj.key
-                            }
-                            onClick={() => deleteObject.mutate(obj.key)}
-                          >
-                            <IconTrash size={15} />
-                          </ActionIcon>
+                        <Table.Td w={76}>
+                          <Group gap={2} justify="flex-end" wrap="nowrap">
+                            <Tooltip label="Download" withArrow position="top">
+                              <ActionIcon
+                                component="a"
+                                href={`/api/apps/${appId}/storage/${encodeURIComponent(
+                                  obj.key,
+                                )}`}
+                                download
+                                variant="subtle"
+                                color="gray"
+                                aria-label={`Download ${obj.key}`}
+                              >
+                                <IconDownload size={15} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Delete" withArrow position="top">
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                aria-label={`Delete ${obj.key}`}
+                                loading={
+                                  deleteObject.isPending &&
+                                  deleteObject.variables === obj.key
+                                }
+                                onClick={() => confirmDeleteObject(obj.key)}
+                              >
+                                <IconTrash size={15} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
                         </Table.Td>
                       </Table.Tr>
                     ))}

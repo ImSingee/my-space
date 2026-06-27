@@ -105,9 +105,13 @@ function DeploymentItem({
               Live
             </Badge>
           ) : null}
-          <Text size="xs" c="dimmed">
-            {STATUS_META[deployment.status].label}
-          </Text>
+          {/* "Deployed" is the expected default; only surface the label for the
+              states that actually need calling out (building / failed). */}
+          {deployment.status !== 'deployed' ? (
+            <Text size="xs" c="dimmed">
+              {STATUS_META[deployment.status].label}
+            </Text>
+          ) : null}
           <MetaDot />
           <Text size="xs" c="dimmed" truncate>
             {dayjs(deployment.createdAt).fromNow()}
@@ -295,14 +299,14 @@ export function DeploymentHistory({ appId }: { appId: string }) {
 
   return (
     <Box component="section">
-      <Group gap="sm" mb="md" align="center">
+      <Group gap={8} mb="md" align="baseline">
         <Text fw={600} fz="lg">
           Deployment history
         </Text>
         {deployments.length > 0 ? (
-          <Badge size="sm" variant="default" radius="sm">
+          <Text size="sm" c="dimmed">
             {deployments.length}
-          </Badge>
+          </Text>
         ) : null}
       </Group>
 

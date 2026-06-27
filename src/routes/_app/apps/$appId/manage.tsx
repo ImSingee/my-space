@@ -1,13 +1,11 @@
 import {
   ActionIcon,
   Anchor,
-  Badge,
   Box,
   Button,
   Divider,
   Group,
   Menu,
-  SimpleGrid,
   Stack,
   Text,
   Tooltip,
@@ -43,7 +41,6 @@ import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
 import { StatusBadge } from '~components/apps/status-badge';
 import { sidebarItemsQueryOptions } from '~queries/apps';
-import type { AppCapabilities } from '~/db/schema';
 import { archiveAppFn, deleteAppFn, getApp, setSidebarPin } from '~server/apps';
 
 export const Route = createFileRoute('/_app/apps/$appId/manage')({
@@ -57,17 +54,6 @@ export const Route = createFileRoute('/_app/apps/$appId/manage')({
   component: AppDetailPage,
 });
 
-const CAPABILITY_LABELS: Record<keyof AppCapabilities, string> = {
-  frontend: 'Frontend',
-  widgets: 'Widgets',
-  backend: 'Backend',
-  database: 'Database',
-  cron: 'Cron',
-  webhook: 'Webhook',
-  storage: 'Storage',
-  workflow: 'Workflow',
-};
-
 function AppDetailPage() {
   const app = Route.useLoaderData();
   const router = useRouter();
@@ -77,11 +63,6 @@ function AppDetailPage() {
   const isPinned = Boolean(pins?.some((p) => p.appId === app.id));
   const capabilities = app.capabilities ?? null;
   const hasFrontend = Boolean(capabilities?.frontend);
-  const enabledCapabilities = capabilities
-    ? (Object.keys(CAPABILITY_LABELS) as (keyof AppCapabilities)[]).filter(
-        (key) => capabilities[key],
-      )
-    : [];
 
   const isArchived = app.status === 'archived';
   // Source only lands on `master` once an app has been deployed at least once.
@@ -154,10 +135,9 @@ function AppDetailPage() {
           </Button>
           {hasFrontend ? (
             <Button
-              component="a"
-              href={`/app/${app.id}/`}
-              target="_blank"
-              rel="noreferrer"
+              renderRoot={(props) => (
+                <Link to="/apps/$appId" params={{ appId: app.id }} {...props} />
+              )}
               disabled={app.status !== 'deployed'}
               leftSection={<IconExternalLink size={16} stroke={1.8} />}
             >
@@ -227,50 +207,17 @@ function AppDetailPage() {
     >
       <Stack gap="xl">
         <Box component="section">
-          <Group justify="space-between" align="center" mb="md" wrap="nowrap">
-            <Text fw={600} fz="lg">
-              Overview
-            </Text>
-            {enabledCapabilities.length > 0 ? (
-              <Group gap={6} wrap="wrap" justify="flex-end">
-                {enabledCapabilities.map((key) => (
-                  <Badge key={key} variant="light" radius="sm" color="gray">
-                    {CAPABILITY_LABELS[key]}
-                  </Badge>
-                ))}
-              </Group>
-            ) : null}
-          </Group>
+          <Text fw={600} fz="lg" mb="md">
+            Overview
+          </Text>
 
-          <SimpleGrid
-            cols={{ base: 2, sm: 3 }}
-            spacing="xl"
-            verticalSpacing="lg"
-          >
-            <Field label="Identifier" value={app.id} mono />
-            <Field label="Backend mode" value={app.backendMode ?? 'none'} />
-            <Field
-              label="Database"
-              value={app.dbName ?? 'not provisioned'}
-              mono={Boolean(app.dbName)}
-            />
-            {app.currentSourceCommit ? (
-              <Field
-                label="Source commit"
-                value={shortSha(app.currentSourceCommit)}
-                mono
-                copyValue={app.currentSourceCommit}
-              />
-            ) : null}
-            <Field
-              label="Created"
-              value={dayjs(app.createdAt).format('YYYY-MM-DD HH:mm')}
-            />
+          <Stack gap="sm">
+            <Field label="Identifier" value={app.id} mono copyValue={app.id} />
             <Field
               label="Updated"
               value={dayjs(app.updatedAt).format('YYYY-MM-DD HH:mm')}
             />
-          </SimpleGrid>
+          </Stack>
 
           <Text size="sm" c="dimmed" mt="lg">
             Continue editing this app from the{' '}
@@ -283,7 +230,11 @@ function AppDetailPage() {
 
         <Divider />
 
-        <OperationsPanel appId={app.id} />
+        <OperationsPanel
+          appId={app.id}
+          dbName={app.dbName ?? null}
+          dbEnabled={Boolean(capabilities?.database) || Boolean(app.dbName)}
+        />
 
         <Divider />
 
@@ -293,10 +244,8 @@ function AppDetailPage() {
   );
 }
 
-const shortSha = (sha: string) => sha.slice(0, 7);
-
-/** Stacked label/value pair: a small dimmed label above its value. Reads as a
- * clean definition grid without any box chrome. */
+/** One metadata row: a fixed-width dimmed label with its value alongside — one
+ * pair per line, no box chrome. */
 function Field({
   label,
   value,
@@ -309,9 +258,14 @@ function Field({
   /** When set, the value becomes a button that copies this text to clipboard. */
   copyValue?: string;
 }) {
+  const valueText = (
+    <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
+      {value}
+    </Text>
+  );
   return (
-    <Stack gap={3} style={{ minWidth: 0 }}>
-      <Text size="xs" c="dimmed">
+    <Group gap="md" wrap="nowrap" align="baseline">
+      <Text size="sm" c="dimmed" style={{ width: 96, flex: 'none' }}>
         {label}
       </Text>
       {copyValue ? (
@@ -323,16 +277,12 @@ function Field({
             }}
             style={{ minWidth: 0, maxWidth: 'fit-content' }}
           >
-            <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
-              {value}
-            </Text>
+            {valueText}
           </UnstyledButton>
         </Tooltip>
       ) : (
-        <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
-          {value}
-        </Text>
+        valueText
       )}
-    </Stack>
+    </Group>
   );
 }
