@@ -44,6 +44,9 @@ use native git locally:
 1. For a new app, first confirm the name and slug with the user via the `ask`
    tool — the name can be changed later, but the slug is permanent (it keys the
    app's URL, repo, and database). Only after they agree, call `create_app`.
+   Pass `pin: true` when the app will have a user-facing frontend (the default)
+   so it's pinned to the sidebar, or `pin: false` for backend-only /
+   widget-only apps.
 2. For an existing app, call `checkout_app`.
 3. Edit files under `<id>/`.
 4. Run `git status`, `git add ...`, and `git commit -m "message"` inside

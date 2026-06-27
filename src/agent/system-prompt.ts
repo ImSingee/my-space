@@ -71,8 +71,11 @@ Each app is an independent application with this source layout:
    - Make clear the name can be changed later but the slug is permanent — it
      keys the app's URL, repo, and database.
    Only after the user confirms both, call \`create_app\` with that \`id\` and
-   name (id must be kebab-case, e.g. "todo" or "habit-tracker"). This creates
-   the source tree and a draft. \`create_app\` scaffolds a runnable Counter
+   name (id must be kebab-case, e.g. "todo" or "habit-tracker"). Pass
+   \`pin: true\` when the app will have a user-facing frontend (the default) so
+   it shows in the sidebar, or \`pin: false\` for backend-only or widget-only
+   apps. This creates the source tree and a draft. \`create_app\` scaffolds a
+   runnable Counter
    example you then adapt — the exact files are \`manifest.json\` (rpc service
    \`app.v1.CounterService\`), \`proto/service.proto\`, \`backend/main.ts\`,
    \`app/index.html\`, \`app/main.tsx\`, \`deno.json\`, \`buf.yaml\`,

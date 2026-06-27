@@ -22,6 +22,13 @@ export type CreateAppInput = {
   id: string;
   name: string;
   description?: string;
+  /**
+   * Whether to pin the new app to the sidebar. Defaults to the scaffolded
+   * manifest's `frontend` capability. The template is always frontend-capable,
+   * so in practice frontend apps are pinned on creation and the Agent opts out
+   * (`pin: false`) for backend-only / widget-only apps.
+   */
+  pin?: boolean;
 };
 
 export type CreateAppOptions = {
@@ -86,6 +93,20 @@ export async function createApp(
     repoPath,
     backendMode: manifest.backendMode,
   });
+
+  // Pin frontend apps to the sidebar so a freshly created app is reachable
+  // immediately. The scaffold always declares a frontend, so the choice is
+  // really the Agent's: it passes `pin: false` for backend-only / widget-only
+  // apps. Mirrors the insert in `setSidebarPin`.
+  const shouldPin = input.pin ?? manifest.capabilities.frontend;
+  if (shouldPin) {
+    const pins = await db.query.sidebarItems.findMany();
+    await db.insert(schema.sidebarItems).values({
+      appId: id,
+      label: name,
+      sortOrder: pins.length,
+    });
+  }
 
   return { id, name };
 }

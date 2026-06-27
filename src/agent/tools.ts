@@ -485,6 +485,14 @@ export function createTools(
       description: Type.Optional(
         Type.String({ description: 'One-line description.' }),
       ),
+      pin: Type.Optional(
+        Type.Boolean({
+          description:
+            'Pin the app to the sidebar. Pass true when the app will have a ' +
+            'user-facing frontend (the default) so it is reachable right away, ' +
+            'and false for backend-only or widget-only apps.',
+        }),
+      ),
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
