@@ -1,4 +1,5 @@
 /** Server-only: run one Agent turn for a session and stream events out. */
+import { mkdirSync } from 'node:fs';
 import {
   AgentHarness,
   InMemorySessionRepo,
@@ -10,7 +11,7 @@ import type { Models } from '@earendil-works/pi-ai';
 import type { JsonValue } from '~/db/schema';
 import type { ResolvedModel } from './build-models';
 import type { AgentStreamEvent } from './events';
-import { SKILLS_DIR, WORKSPACE_ROOT } from './paths';
+import { agentWorkDir, SKILLS_DIR } from './paths';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge } from './tools';
 
@@ -67,8 +68,11 @@ export async function runAgentTurn(
   const { priorMessages, sessionId, userText, signal, emit, models, picked } =
     opts;
 
+  const cwd = agentWorkDir(sessionId);
+  mkdirSync(cwd, { recursive: true });
+
   const env = new NodeExecutionEnv({
-    cwd: WORKSPACE_ROOT,
+    cwd,
     shellEnv: process.env,
   });
 
@@ -79,7 +83,10 @@ export async function runAgentTurn(
   }
 
   const { skills } = await loadSkills(env, SKILLS_DIR);
-  const tools = createTools(env, opts.ask ? { ask: opts.ask } : {});
+  const tools = createTools(env, {
+    ...(opts.ask ? { ask: opts.ask } : {}),
+    sessionId,
+  });
 
   const harness = new AgentHarness({
     env,

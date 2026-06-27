@@ -46,6 +46,8 @@ type LiveRun = {
   subscribers: Set<Subscriber>;
   cancelled: boolean;
   pipeline?: EventPipeline;
+  /** Resolves once executeRun has persisted messages and finalized the run. */
+  finished: Promise<void>;
 };
 
 type AgentRunsGlobal = typeof globalThis & {
@@ -358,10 +360,13 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     controller: new AbortController(),
     subscribers: new Set(),
     cancelled: false,
+    finished: Promise.resolve(),
   };
   liveRuns().set(run.id, live);
 
-  void executeRun(run.id, live, {
+  // Hold the run's completion so cancel can wait for the partial reply to be
+  // persisted before returning (the client refetches right after cancelling).
+  live.finished = executeRun(run.id, live, {
     sessionId: input.sessionId,
     userText: input.userText,
     images,
@@ -369,7 +374,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     title,
     models,
     picked,
-  });
+  }).catch(() => {});
 
   return { runId: run.id };
 }
@@ -456,11 +461,10 @@ async function executeRun(
     });
     await pipeline.flush();
 
-    if (live.cancelled || live.controller.signal.aborted) {
-      await emitTerminal('cancelled', { type: 'cancelled' });
-      return;
-    }
-
+    // Persist whatever the turn produced — including a reply that was only
+    // partially streamed before the user stopped the run (or before it errored).
+    // runAgentTurn returns the messages accumulated so far on abort, so saving
+    // here keeps already-shown output in history instead of discarding it.
     await db
       .update(schema.agentSessions)
       .set({
@@ -470,6 +474,11 @@ async function executeRun(
         modelId: opts.picked.model.id,
       })
       .where(eq(schema.agentSessions.id, opts.sessionId));
+
+    if (live.cancelled || live.controller.signal.aborted) {
+      await emitTerminal('cancelled', { type: 'cancelled' });
+      return;
+    }
 
     if (result.error) {
       await emitTerminal(
@@ -535,6 +544,13 @@ export async function cancelAgentRun(runId: string): Promise<void> {
         await appendStandaloneEvent(runId, event);
       }
     }
+    // Wait for executeRun to persist the partial reply and clean up so the
+    // client's post-cancel refetch sees the streamed-so-far output. Cap the
+    // wait so a stuck abort can't hang the cancel request indefinitely.
+    await Promise.race([
+      live.finished,
+      new Promise<void>((resolve) => setTimeout(resolve, 15000)),
+    ]);
     return;
   }
 

@@ -99,6 +99,10 @@ export const apps = pgTable('apps', {
   capabilities: jsonb().$type<AppCapabilities>(),
   /** Latest source manifest.json (as authored by the Agent). */
   manifest: jsonb().$type<JsonObject>(),
+  /** Git bare repository path for this app's source. */
+  repoPath: text(),
+  /** Current commit of the authoritative master branch. */
+  currentSourceCommit: text(),
   backendMode: text().$type<'serverless' | 'long-running'>(),
   /** Provisioned per-app Postgres database name, when database capability is on. */
   dbName: text(),
@@ -118,8 +122,20 @@ export const deployments = pgTable('deployments', {
     .references(() => apps.id, { onDelete: 'cascade' }),
   version: integer().notNull().default(1),
   status: text().$type<DeploymentStatus>().notNull().default('building'),
+  /**
+   * Release note for this deployment. Required for new deploys (the Agent
+   * supplies it via deploy_app); nullable so pre-existing rows stay empty
+   * (not backfilled).
+   */
+  message: text(),
   /** Normalized manifest produced by the builder (deployed URLs etc). */
   manifestNormalized: jsonb().$type<JsonObject>(),
+  /** Commit deployed from the app's master branch. */
+  sourceCommit: text(),
+  /** Immutable deploy/v<version> Git tag for this deployment. */
+  sourceTag: text(),
+  /** Versioned filesystem artifact associated with sourceTag. */
+  artifactPath: text(),
   buildLog: text(),
   error: text(),
   createdAt,

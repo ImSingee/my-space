@@ -26,6 +26,7 @@ import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashb
 import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
 import { Route as AppAppsAppIdIndexRouteImport } from './routes/_app/apps/$appId/index'
 import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
+import { Route as ApiAppsAppIdDownloadRouteImport } from './routes/api/apps/$appId/download'
 import { Route as AppAppsAppIdManageRouteImport } from './routes/_app/apps/$appId/manage'
 import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
 import { Route as ApiAppsAppIdStorageSplatRouteImport } from './routes/api/apps/$appId/storage/$'
@@ -119,6 +120,11 @@ const ApiHooksAppIdSplatRoute = ApiHooksAppIdSplatRouteImport.update({
   path: '/api/hooks/$appId/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAppsAppIdDownloadRoute = ApiAppsAppIdDownloadRouteImport.update({
+  id: '/api/apps/$appId/download',
+  path: '/api/apps/$appId/download',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppAppsAppIdManageRoute = AppAppsAppIdManageRouteImport.update({
   id: '/apps/$appId/manage',
   path: '/apps/$appId/manage',
@@ -178,6 +184,7 @@ export interface FileRoutesByFullPath {
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/apps/$appId/': typeof AppAppsAppIdIndexRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
@@ -203,6 +210,7 @@ export interface FileRoutesByTo {
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/apps/$appId': typeof AppAppsAppIdIndexRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
@@ -231,6 +239,7 @@ export interface FileRoutesById {
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
   '/_app/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/_app/apps/$appId/': typeof AppAppsAppIdIndexRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
@@ -259,6 +268,7 @@ export interface FileRouteTypes {
     | '/apps/'
     | '/dashboard/'
     | '/apps/$appId/manage'
+    | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
     | '/apps/$appId/'
     | '/api/agent/runs/$runId/answer'
@@ -284,6 +294,7 @@ export interface FileRouteTypes {
     | '/apps'
     | '/dashboard'
     | '/apps/$appId/manage'
+    | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
     | '/apps/$appId'
     | '/api/agent/runs/$runId/answer'
@@ -311,6 +322,7 @@ export interface FileRouteTypes {
     | '/_app/apps/'
     | '/_app/dashboard/'
     | '/_app/apps/$appId/manage'
+    | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
     | '/_app/apps/$appId/'
     | '/api/agent/runs/$runId/answer'
@@ -330,6 +342,7 @@ export interface RootRouteChildren {
   ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   AppAppIdSplatRoute: typeof AppAppIdSplatRoute
+  ApiAppsAppIdDownloadRoute: typeof ApiAppsAppIdDownloadRoute
   ApiHooksAppIdSplatRoute: typeof ApiHooksAppIdSplatRoute
   ApiAppsAppIdAppSplatRoute: typeof ApiAppsAppIdAppSplatRoute
   ApiAppsAppIdRpcSplatRoute: typeof ApiAppsAppIdRpcSplatRoute
@@ -458,6 +471,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHooksAppIdSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/apps/$appId/download': {
+      id: '/api/apps/$appId/download'
+      path: '/api/apps/$appId/download'
+      fullPath: '/api/apps/$appId/download'
+      preLoaderRoute: typeof ApiAppsAppIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/apps/$appId/manage': {
       id: '/_app/apps/$appId/manage'
       path: '/apps/$appId/manage'
@@ -579,6 +599,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   AppAppIdSplatRoute: AppAppIdSplatRoute,
+  ApiAppsAppIdDownloadRoute: ApiAppsAppIdDownloadRoute,
   ApiHooksAppIdSplatRoute: ApiHooksAppIdSplatRoute,
   ApiAppsAppIdAppSplatRoute: ApiAppsAppIdAppSplatRoute,
   ApiAppsAppIdRpcSplatRoute: ApiAppsAppIdRpcSplatRoute,

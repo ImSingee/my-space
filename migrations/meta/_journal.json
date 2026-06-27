@@ -57,6 +57,20 @@
       "when": 1782576002000,
       "tag": "0007_fuzzy_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782576003000,
+      "tag": "0008_blue_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782576004000,
+      "tag": "0009_pretty_the_initiative",
+      "breakpoints": true
     }
   ]
 }

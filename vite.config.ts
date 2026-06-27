@@ -11,6 +11,18 @@ const config = defineConfig({
     },
     tsconfigPaths: true,
   },
+  server: {
+    watch: {
+      // The Agent constantly writes app source, build output, Git repos, and
+      // artifacts under workspace/ while scaffolding and deploying apps. Vite
+      // treats the generated app/index.html files as HTML entries and fires a
+      // full page reload on each write, which reloads the host page mid-run and
+      // interrupts the live agent stream (losing the half-streamed reply). These
+      // are runtime data, not source, so keep them out of the dev file watcher.
+      // (Vite appends this to its built-in ignores like node_modules and .git.)
+      ignored: ['**/workspace/**'],
+    },
+  },
   plugins: [
     devtools(),
     tanstackStart(),

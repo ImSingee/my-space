@@ -7,8 +7,13 @@ import {
   appSrcDir,
   appStorageDir,
   appVersionsDir,
+  appArtifactsDir,
+  appRepoDir,
+  AGENTS_DIR,
+  deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
+import { moveMasterToDeploymentTag } from './git';
 import { dropAppDatabase } from './provision';
 import { stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
@@ -26,6 +31,7 @@ export type DeploymentSummary = {
   id: string;
   version: number;
   status: schema.DeploymentStatus;
+  message: string | null;
   error: string | null;
   buildLog: string | null;
   createdAt: string;
@@ -48,16 +54,24 @@ export async function listDeployments(
   return Promise.all(
     rows.map(async (d) => {
       const isCurrent = d.id === current;
-      const hasSnapshot = await pathExists(deploymentBuildDir(id, d.id));
+      const hasArtifact =
+        (d.artifactPath
+          ? await pathExists(deploymentArtifactDir(id, d.id))
+          : false) || (await pathExists(deploymentBuildDir(id, d.id)));
       return {
         id: d.id,
         version: d.version,
         status: d.status,
+        message: d.message,
         error: d.error,
         buildLog: d.buildLog,
         createdAt: d.createdAt.toISOString(),
         isCurrent,
-        canRollback: !isCurrent && d.status === 'deployed' && hasSnapshot,
+        canRollback:
+          !isCurrent &&
+          d.status === 'deployed' &&
+          Boolean(d.sourceTag) &&
+          hasArtifact,
       };
     }),
   );
@@ -111,11 +125,19 @@ export async function rollbackApp(
     throw new Error('Only successful deployments can be restored.');
   }
 
-  const snapshot = deploymentBuildDir(id, deploymentId);
+  const artifact = deploymentArtifactDir(id, deploymentId);
+  const legacySnapshot = deploymentBuildDir(id, deploymentId);
+  const snapshot = (await pathExists(artifact)) ? artifact : legacySnapshot;
   if (!(await pathExists(snapshot))) {
     throw new Error(
-      `No build snapshot exists for v${deployment.version}. ` +
-        'Only deployments built with snapshot support can be restored.',
+      `No artifact exists for v${deployment.version}. ` +
+        'Only deployments built with artifact support can be restored.',
+    );
+  }
+  if (!deployment.sourceTag) {
+    throw new Error(
+      `Deployment v${deployment.version} has no source tag and cannot ` +
+        'restore source. Run the app Git migration first.',
     );
   }
 
@@ -123,6 +145,10 @@ export async function rollbackApp(
   await fs.rm(live, { recursive: true, force: true });
   await fs.mkdir(live, { recursive: true });
   await fs.cp(snapshot, live, { recursive: true });
+  const sourceCommit = await moveMasterToDeploymentTag(
+    id,
+    deployment.sourceTag,
+  );
 
   const manifest = deployment.manifestNormalized as { name?: string } | null;
   await db
@@ -130,6 +156,7 @@ export async function rollbackApp(
     .set({
       status: 'deployed',
       currentDeploymentId: deployment.id,
+      currentSourceCommit: sourceCommit,
       name: manifest?.name ?? app.name,
     })
     .where(eq(schema.apps.id, id));
@@ -139,6 +166,25 @@ export async function rollbackApp(
   // Reload schedules from the restored deployment's manifest.
   await reloadScheduler();
   return { version: deployment.version };
+}
+
+/**
+ * Roll back by user-facing version number (e.g. 4 → v4). Resolves the version
+ * to its deployment row, then defers to {@link rollbackApp}. This is what the
+ * Agent uses, since versions — not opaque deployment ids — are how deployments
+ * are referred to everywhere (UI, tags, get_app).
+ */
+export async function rollbackAppToVersion(
+  id: string,
+  version: number,
+): Promise<{ version: number }> {
+  const deployment = await db.query.deployments.findFirst({
+    where: (d, { eq: e, and: a }) => a(e(d.appId, id), e(d.version, version)),
+  });
+  if (!deployment) {
+    throw new Error(`App "${id}" has no deployment v${version}.`);
+  }
+  return rollbackApp(id, deployment.id);
 }
 
 /** Permanently delete an app: process, database, rows, and all artifacts. */
@@ -157,9 +203,27 @@ export async function deleteApp(id: string): Promise<{ ok: true }> {
     fs.rm(appSrcDir(id), { recursive: true, force: true }),
     fs.rm(appBuildDir(id), { recursive: true, force: true }),
     fs.rm(appVersionsDir(id), { recursive: true, force: true }),
+    fs.rm(appArtifactsDir(id), { recursive: true, force: true }),
+    fs.rm(appRepoDir(id), { recursive: true, force: true }),
     fs.rm(appStorageDir(id), { recursive: true, force: true }),
   ]);
+  await deleteAgentWorktrees(id);
   // Cancel any scheduled cron jobs for the removed app.
   await reloadScheduler();
   return { ok: true };
+}
+
+async function deleteAgentWorktrees(id: string): Promise<void> {
+  if (!(await pathExists(AGENTS_DIR))) return;
+  const sessions = await fs.readdir(AGENTS_DIR, { withFileTypes: true });
+  await Promise.all(
+    sessions
+      .filter((entry) => entry.isDirectory())
+      .map((entry) =>
+        fs.rm(`${AGENTS_DIR}/${entry.name}/work/${id}`, {
+          recursive: true,
+          force: true,
+        }),
+      ),
+  );
 }

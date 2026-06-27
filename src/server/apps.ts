@@ -40,18 +40,6 @@ export const getNormalizedManifest = createServerFn({ method: 'GET' })
   .validator((id: string) => id)
   .handler(async ({ data: id }) => normalizedManifestFor(id));
 
-export const deployAppFn = createServerFn({ method: 'POST' })
-  .validator((id: string) => id)
-  .handler(async ({ data: id }) => {
-    const { deployApp } = await import('./apps/deploy');
-    const result = await deployApp(id);
-    return {
-      deploymentId: result.deploymentId,
-      version: result.version,
-      log: result.log,
-    };
-  });
-
 export const listDeployments = createServerFn({ method: 'GET' })
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {

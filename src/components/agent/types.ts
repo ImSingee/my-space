@@ -81,8 +81,10 @@ export const TOOL_LABELS: Record<string, string> = {
   edit_file: 'Edit file',
   write_file: 'Write file',
   run_command: 'Run command',
+  checkout_app: 'Checkout app',
   create_app: 'Create app',
   deploy_app: 'Deploy app',
+  rollback_app: 'Rollback app',
   query_app_db: 'Query DB',
   ask: 'Ask the user',
 };

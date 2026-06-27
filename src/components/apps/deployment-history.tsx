@@ -85,6 +85,12 @@ function DeploymentRow({
         ) : null}
       </Group>
 
+      {deployment.message ? (
+        <Text size="sm" mt={6} style={{ whiteSpace: 'pre-wrap' }}>
+          {deployment.message}
+        </Text>
+      ) : null}
+
       {log ? (
         <Box mt={6}>
           <UnstyledButton

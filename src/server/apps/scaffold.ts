@@ -4,6 +4,7 @@ import path from 'node:path';
 import { TEMPLATES_DIR, appSrcDir } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
+import { checkoutAppForAgent, ensureAppRepo } from './git';
 import { parseSourceManifest } from './manifest';
 
 async function replaceInFile(
@@ -23,8 +24,13 @@ export type CreateAppInput = {
   description?: string;
 };
 
+export type CreateAppOptions = {
+  sessionId?: string;
+};
+
 export async function createApp(
   input: CreateAppInput,
+  options: CreateAppOptions = {},
 ): Promise<{ id: string; name: string }> {
   const { id } = input;
   if (!/^[a-z][a-z0-9-]*$/.test(id)) {
@@ -40,8 +46,12 @@ export async function createApp(
     throw new Error(`App "${id}" already exists.`);
   }
 
-  const src = appSrcDir(id);
-  if (existsSync(src)) {
+  const repoPath = await ensureAppRepo(id);
+  const checkout = options.sessionId
+    ? await checkoutAppForAgent(options.sessionId, id)
+    : null;
+  const src = checkout?.absolutePath ?? appSrcDir(id);
+  if (!checkout && existsSync(src)) {
     throw new Error(`Source directory apps/${id} already exists.`);
   }
 
@@ -73,6 +83,7 @@ export async function createApp(
     status: 'draft',
     capabilities: manifest.capabilities,
     manifest: manifest as unknown as JsonObject,
+    repoPath,
     backendMode: manifest.backendMode,
   });
 

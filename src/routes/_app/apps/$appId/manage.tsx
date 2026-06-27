@@ -25,9 +25,10 @@ import {
   IconArrowLeft,
   IconDotsVertical,
   IconExternalLink,
+  IconFileZip,
+  IconGitBranch,
   IconPin,
   IconPinnedOff,
-  IconRocket,
   IconTrash,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
@@ -39,13 +40,7 @@ import { DeploymentHistory } from '~components/apps/deployment-history';
 import { StatusBadge } from '~components/apps/status-badge';
 import { sidebarItemsQueryOptions } from '~queries/apps';
 import type { AppCapabilities } from '~/db/schema';
-import {
-  archiveAppFn,
-  deleteAppFn,
-  deployAppFn,
-  getApp,
-  setSidebarPin,
-} from '~server/apps';
+import { archiveAppFn, deleteAppFn, getApp, setSidebarPin } from '~server/apps';
 
 export const Route = createFileRoute('/_app/apps/$appId/manage')({
   loader: async ({ params }) => {
@@ -85,15 +80,8 @@ function AppDetailPage() {
     : [];
 
   const isArchived = app.status === 'archived';
-
-  const deploy = useMutation({
-    mutationFn: () => deployAppFn({ data: app.id }),
-    onSuccess: (result) => {
-      toast.success(`Deployed ${app.name} (v${result.version})`);
-      void router.invalidate();
-    },
-    onError: (error) => toast.error((error as Error).message),
-  });
+  // Source only lands on `master` once an app has been deployed at least once.
+  const hasSource = Boolean(app.currentSourceCommit);
 
   const archive = useMutation({
     mutationFn: (archived: boolean) =>
@@ -160,14 +148,6 @@ function AppDetailPage() {
           >
             Back
           </Button>
-          <Button
-            variant="default"
-            loading={deploy.isPending}
-            onClick={() => deploy.mutate()}
-            leftSection={<IconRocket size={16} stroke={1.8} />}
-          >
-            {app.status === 'deployed' ? 'Redeploy' : 'Deploy'}
-          </Button>
           {hasFrontend ? (
             <Button
               component="a"
@@ -187,6 +167,26 @@ function AppDetailPage() {
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
+              <Menu.Label>Download</Menu.Label>
+              <Menu.Item
+                leftSection={<IconFileZip size={16} />}
+                component="a"
+                href={`/api/apps/${app.id}/download?mode=source`}
+                download
+                disabled={!hasSource}
+              >
+                Latest source (.zip)
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconGitBranch size={16} />}
+                component="a"
+                href={`/api/apps/${app.id}/download?mode=repo`}
+                download
+                disabled={!hasSource}
+              >
+                Full repo (.tar.gz)
+              </Menu.Item>
+              <Menu.Divider />
               <Menu.Item
                 leftSection={
                   isPinned ? <IconPinnedOff size={16} /> : <IconPin size={16} />

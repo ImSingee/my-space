@@ -3,12 +3,22 @@ import path from 'node:path';
 
 export const REPO_ROOT = process.cwd();
 export const WORKSPACE_ROOT = path.resolve(REPO_ROOT, 'workspace');
-/** App source trees the Agent authors: workspace/apps/<id>. */
+/** Legacy app source trees used before Git-backed app repositories. */
 export const APPS_DIR = path.resolve(WORKSPACE_ROOT, 'apps');
 /** Built artifacts (live, served): workspace/builds/<id>/{app,widgets}. */
 export const BUILDS_DIR = path.resolve(WORKSPACE_ROOT, 'builds');
-/** Per-deployment build snapshots for rollback: workspace/versions/<id>/<deploymentId>. */
+/** Temporary build inputs copied from clean source worktrees. */
+export const BUILD_WORK_DIR = path.resolve(WORKSPACE_ROOT, 'build-work');
+/** Legacy per-deployment build snapshots used before artifact records. */
 export const VERSIONS_DIR = path.resolve(WORKSPACE_ROOT, 'versions');
+/** Git bare repositories: workspace/repos/<id>.git. */
+export const REPOS_DIR = path.resolve(WORKSPACE_ROOT, 'repos');
+/** Persistent Agent work roots: workspace/agents/<sessionId>/work/<appId>. */
+export const AGENTS_DIR = path.resolve(WORKSPACE_ROOT, 'agents');
+/** Server-managed source checkouts used for non-Agent deploys. */
+export const CHECKOUTS_DIR = path.resolve(WORKSPACE_ROOT, 'checkouts');
+/** Deploy artifacts, one dir per deployment id (tagged deploy/v<version>). */
+export const ARTIFACTS_DIR = path.resolve(WORKSPACE_ROOT, 'artifacts');
 /** Persistent per-app blob storage: workspace/storage/<id>/<key>. */
 export const STORAGE_DIR = path.resolve(WORKSPACE_ROOT, 'storage');
 /** Markdown skills available to the Agent. */
@@ -18,6 +28,22 @@ export const TEMPLATES_DIR = path.resolve(REPO_ROOT, 'templates');
 
 export function appSrcDir(id: string): string {
   return path.resolve(APPS_DIR, id);
+}
+
+export function appRepoDir(id: string): string {
+  return path.resolve(REPOS_DIR, `${id}.git`);
+}
+
+export function agentWorkDir(sessionId: string): string {
+  return path.resolve(AGENTS_DIR, sessionId, 'work');
+}
+
+export function agentAppWorkDir(sessionId: string, id: string): string {
+  return path.resolve(agentWorkDir(sessionId), id);
+}
+
+export function appDeployCheckoutDir(id: string): string {
+  return path.resolve(CHECKOUTS_DIR, id, 'deploy');
 }
 
 export function appBuildDir(id: string): string {
@@ -31,6 +57,17 @@ export function appVersionsDir(id: string): string {
 
 export function deploymentBuildDir(id: string, deploymentId: string): string {
   return path.resolve(VERSIONS_DIR, id, deploymentId);
+}
+
+export function appArtifactsDir(id: string): string {
+  return path.resolve(ARTIFACTS_DIR, id);
+}
+
+export function deploymentArtifactDir(
+  id: string,
+  deploymentId: string,
+): string {
+  return path.resolve(ARTIFACTS_DIR, id, deploymentId);
 }
 
 /** Persistent storage root for an app's blobs. */
