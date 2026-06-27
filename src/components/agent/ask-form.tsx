@@ -6,7 +6,7 @@ import {
   Radio,
   Stack,
   Text,
-  TextInput,
+  Textarea,
 } from '@mantine/core';
 import { IconHelpCircle } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -106,11 +106,24 @@ export function AskForm({
                 </Radio.Group>
               )}
               {showOther ? (
-                <TextInput
+                <Textarea
                   size="sm"
-                  placeholder="Type your answer"
+                  placeholder="Type your answer (Shift+Enter for a new line)"
+                  autosize
+                  minRows={1}
+                  maxRows={6}
                   value={st.other}
                   onChange={(e) => setOther(q.id, e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === 'Enter' &&
+                      !e.shiftKey &&
+                      !e.nativeEvent.isComposing
+                    ) {
+                      e.preventDefault();
+                      submit();
+                    }
+                  }}
                 />
               ) : null}
             </Stack>
