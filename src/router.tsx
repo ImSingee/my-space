@@ -5,6 +5,7 @@ import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query
 
 // Import the generated route tree
 import { routeTree } from './routeTree.gen';
+import { AppLoading } from '~components/system/app-loading.tsx';
 import { NotFoundElement } from '~components/system/not-found.tsx';
 
 // Create a new router instance
@@ -17,6 +18,7 @@ export const getRouter = () => {
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
     defaultPreload: 'intent',
+    defaultPendingComponent: AppLoading,
     defaultNotFoundComponent: NotFoundElement,
   });
 

@@ -25,7 +25,7 @@ const config = defineConfig({
   },
   plugins: [
     devtools(),
-    tanstackStart(),
+    tanstackStart({ spa: { enabled: true } }),
     nitro({ noExternals: true }),
     viteReact(),
   ],
