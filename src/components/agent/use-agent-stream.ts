@@ -23,42 +23,91 @@ export type PendingAsk = {
   questions: AskQuestion[];
 };
 
+export type StreamThinkingBlock = { kind: 'thinking'; text: string };
+export type StreamTextBlock = { kind: 'text'; text: string };
+export type StreamToolBlock = { kind: 'tool'; tool: StreamTool };
+
+/**
+ * An ordered piece of the in-flight assistant turn. Mirroring the persisted
+ * `AssistantBlock[]` shape (thinking / text / tool, in arrival order) lets the
+ * live bubble render multiple distinct thinking segments interleaved with tools
+ * and prose — exactly like the finished transcript — instead of collapsing all
+ * reasoning into a single block.
+ */
+export type StreamBlock =
+  | StreamThinkingBlock
+  | StreamTextBlock
+  | StreamToolBlock;
+
 export type StreamState = {
   active: boolean;
   runId?: string;
-  text: string;
-  thinking: string;
-  /** True while thinking deltas are streaming, before text/tools take over. */
+  blocks: StreamBlock[];
+  /** True while the latest thinking block is still streaming. */
   thinkingActive: boolean;
-  tools: StreamTool[];
   pendingAsk?: PendingAsk;
 };
 
 const IDLE: StreamState = {
   active: false,
   runId: undefined,
-  text: '',
-  thinking: '',
+  blocks: [],
   thinkingActive: false,
-  tools: [],
   pendingAsk: undefined,
 };
+
+/** Append `delta` to the last block when it matches `kind`, else start a new one. */
+function appendDelta(
+  blocks: StreamBlock[],
+  kind: 'thinking' | 'text',
+  delta: string,
+  continueLast: boolean,
+): StreamBlock[] {
+  const last = blocks.at(-1);
+  if (continueLast && last?.kind === kind) {
+    const next = blocks.slice(0, -1);
+    next.push({ kind, text: last.text + delta } as StreamBlock);
+    return next;
+  }
+  return [...blocks, { kind, text: delta } as StreamBlock];
+}
+
+function updateTool(
+  blocks: StreamBlock[],
+  id: string,
+  patch: (tool: StreamTool) => StreamTool,
+): StreamBlock[] {
+  return blocks.map((block) =>
+    block.kind === 'tool' && block.tool.id === id
+      ? { ...block, tool: patch(block.tool) }
+      : block,
+  );
+}
 
 export function reduceStreamState(
   state: StreamState,
   event: AgentStreamEvent,
 ): StreamState {
   switch (event.type) {
+    case 'assistant_start':
+      // A fresh assistant message: close any open thinking phase so the next
+      // reasoning delta starts its own block.
+      return { ...state, thinkingActive: false };
     case 'text':
       return {
         ...state,
-        text: state.text + (event.delta ?? ''),
+        blocks: appendDelta(state.blocks, 'text', event.delta ?? '', true),
         thinkingActive: false,
       };
     case 'thinking':
       return {
         ...state,
-        thinking: state.thinking + (event.delta ?? ''),
+        blocks: appendDelta(
+          state.blocks,
+          'thinking',
+          event.delta ?? '',
+          state.thinkingActive,
+        ),
         thinkingActive: true,
       };
     case 'ask':
@@ -75,38 +124,38 @@ export function reduceStreamState(
       return {
         ...state,
         thinkingActive: false,
-        tools: [
-          ...state.tools,
+        blocks: [
+          ...state.blocks,
           {
-            id: event.id,
-            name: event.name,
-            args: (event.args ?? undefined) as
-              | Record<string, unknown>
-              | undefined,
-            done: false,
+            kind: 'tool',
+            tool: {
+              id: event.id,
+              name: event.name,
+              args: (event.args ?? undefined) as
+                | Record<string, unknown>
+                | undefined,
+              done: false,
+            },
           },
         ],
       };
     case 'tool_update':
       return {
         ...state,
-        tools: state.tools.map((t) =>
-          t.id === event.id ? { ...t, output: event.output } : t,
-        ),
+        blocks: updateTool(state.blocks, event.id, (tool) => ({
+          ...tool,
+          output: event.output,
+        })),
       };
     case 'tool_end':
       return {
         ...state,
-        tools: state.tools.map((t) =>
-          t.id === event.id
-            ? {
-                ...t,
-                done: true,
-                isError: event.isError,
-                output: event.output || t.output,
-              }
-            : t,
-        ),
+        blocks: updateTool(state.blocks, event.id, (tool) => ({
+          ...tool,
+          done: true,
+          isError: event.isError,
+          output: event.output || tool.output,
+        })),
       };
     default:
       return state;
@@ -187,6 +236,7 @@ export function useAgentStream(
 
   const handleEvent = useCallback((event: AgentStreamEvent) => {
     switch (event.type) {
+      case 'assistant_start':
       case 'text':
       case 'thinking':
       case 'ask':
