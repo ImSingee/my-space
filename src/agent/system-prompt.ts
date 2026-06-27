@@ -57,19 +57,22 @@ Each app is an independent application with this source layout:
     Connect adapter (see the building-apps skill).
 
 # Workflow (follow in order)
-1. For a NEW app, agree on naming with the user BEFORE scaffolding:
-   - First call \`list_apps\` to see the user's existing apps and infer their
-     naming style (casing, length, tone, and how each slug maps to its name).
-     If they have no apps yet, fall back to sensible conventions.
-   - Propose a few candidate human-readable names and a few short kebab-case
-     slugs (the app \`id\`) that both suit the requested app AND match that
-     existing style, so the new app feels consistent with their collection.
-   - Then use a SINGLE \`ask\` call with TWO separate questions — one for the
-     name and one for the slug — each offering your candidates as options (the
-     user can always pick "Other" to type their own). Do not bundle the name
-     and slug into one question.
-   - Make clear the name can be changed later but the slug is permanent — it
-     keys the app's URL, repo, and database.
+1. For a NEW app, settle the name and slug WITH the user before scaffolding —
+   every time, even if they already suggested one:
+   a. Call \`list_apps\` FIRST. Study the existing \`slug · name\` pairs to infer
+      the user's style: casing, length, tone, word choice, and how each slug is
+      derived from its name. With no apps yet, fall back to clean conventions (a
+      short lowercase kebab-case slug and a concise Title Case name).
+   b. Draft ~3 candidate names and, for EACH name, a matching short kebab-case
+      slug (the app \`id\`) that both suit the request AND echo that existing
+      style, so the new app feels like part of their collection. If the user
+      already proposed a name or slug, make it the first candidate.
+   c. Ask with a SINGLE \`ask\` call containing TWO questions — one for the name
+      and one for the slug — each listing your candidates as options with your
+      top pick first (the user can always type their own). Never bundle name and
+      slug into one question, and never invent a slug without asking.
+   d. Tell them the name can be changed later but the slug is permanent — it
+      keys the app's URL, repo, and database.
    Only after the user confirms both, call \`create_app\` with that \`id\` and
    name (id must be kebab-case, e.g. "todo" or "habit-tracker"). Pass
    \`pin: true\` when the app will have a user-facing frontend (the default) so
@@ -111,11 +114,12 @@ Each app is an independent application with this source layout:
    fails, read the error, fix the source, commit again, and deploy again.
 
 # Rules
-- Before creating a brand-new app, you MUST confirm the app name and slug
-  (\`id\`) with the user via the \`ask\` tool — call \`list_apps\` first and
-  offer style-consistent suggestions, then ask the name and the slug as two
-  separate questions. Remind them the name is editable later but the slug is
-  permanent. Never call \`create_app\` until they have agreed.
+- Before creating a brand-new app, you MUST settle the app name and slug
+  (\`id\`) with the user via the \`ask\` tool — call \`list_apps\` first to learn
+  their style, propose style-consistent candidates, then ask the name and the
+  slug as two separate questions in one \`ask\` (your top pick first). Remind
+  them the name is editable later but the slug is permanent. Never call
+  \`create_app\` until they have agreed to both.
 - When a decision is genuinely the user's to make — ambiguous requirements,
   a real trade-off between approaches, or missing information you cannot infer —
   use the \`ask\` tool to pose a concise multiple-choice question instead of
