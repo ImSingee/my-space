@@ -25,6 +25,7 @@ import {
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
+  memo,
   useEffect,
   useRef,
 } from 'react';
@@ -78,7 +79,12 @@ function normalizeMath(text: string): string {
     .replace(/\\\(([\s\S]+?)\\\)/g, (_m, expr: string) => `$${expr.trim()}$`);
 }
 
-function Markdownish({ text }: { text: string }) {
+// Memoized on `text`: during streaming the live bubble re-renders every token,
+// but only the actively-growing text block's `text` changes. Completed blocks
+// (and the whole history) keep the same string, so React.memo skips the
+// expensive react-markdown + KaTeX parse for them — keeping per-token work O(1)
+// instead of O(blocks).
+const Markdownish = memo(function Markdownish({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
     <Typography className={classes.markdown}>
@@ -91,7 +97,7 @@ function Markdownish({ text }: { text: string }) {
       </ReactMarkdown>
     </Typography>
   );
-}
+});
 
 function AppActions({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;

@@ -159,10 +159,34 @@ export function Chat({ sessionId }: { sessionId: string }) {
       : null) ??
     first;
 
-  const messages = (session?.messages ?? []) as unknown as ChatMessage[];
-  const allMessages = messages;
-  const toolResults = pairToolResults(allMessages);
-  const turns = groupTurns(allMessages);
+  const messages = useMemo(
+    () => (session?.messages ?? []) as unknown as ChatMessage[],
+    [session?.messages],
+  );
+  // Memoize the rendered transcript so a streaming token — which only updates
+  // local `streamState` — doesn't re-run every past message's markdown/KaTeX
+  // parse. While a run streams, `session.messages` is stable, so `turns`,
+  // `toolResults`, and these elements stay referentially identical and React
+  // skips re-rendering the whole history; only the live `StreamingBubble` below
+  // re-renders per delta. (Re-rendering the entire transcript on every token
+  // was pegging the browser's main thread and freezing the UI mid-run.)
+  const toolResults = useMemo(() => pairToolResults(messages), [messages]);
+  const turns = useMemo(() => groupTurns(messages), [messages]);
+  const renderedTurns = useMemo(
+    () =>
+      turns.map((turn) => (
+        <MessageView
+          key={turn.key}
+          message={
+            turn.kind === 'user'
+              ? turn.message
+              : { role: 'assistant', content: turn.blocks }
+          }
+          toolResults={toolResults}
+        />
+      )),
+    [turns, toolResults],
+  );
   const busy = streamState.active || Boolean(session?.activeRun);
 
   const send = (text: string, images: ComposerImage[], modelValue: string) => {
@@ -225,7 +249,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     const el = viewportRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [allMessages.length, streamState]);
+  }, [messages.length, streamState]);
 
   return (
     <Box className={classes.chat}>
@@ -246,7 +270,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             <Center py="xl">
               <Loader />
             </Center>
-          ) : allMessages.length === 0 && !streamState.active ? (
+          ) : messages.length === 0 && !streamState.active ? (
             <Stack align="center" gap={6} py={80}>
               <ThemeIcon size={48} radius="xl" variant="light" color="ember">
                 <IconSparkles size={24} stroke={1.5} />
@@ -259,17 +283,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             </Stack>
           ) : (
             <>
-              {turns.map((turn) => (
-                <MessageView
-                  key={turn.key}
-                  message={
-                    turn.kind === 'user'
-                      ? turn.message
-                      : { role: 'assistant', content: turn.blocks }
-                  }
-                  toolResults={toolResults}
-                />
-              ))}
+              {renderedTurns}
               {streamState.active ? (
                 <StreamingBubble state={streamState} onAnswer={answer} />
               ) : null}
