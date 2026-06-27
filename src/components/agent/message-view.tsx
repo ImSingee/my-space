@@ -16,9 +16,9 @@ import { useDisclosure } from '@mantine/hooks';
 import { Link } from '@tanstack/react-router';
 import {
   IconAlertTriangle,
+  IconAppWindow,
   IconCheck,
   IconChevronRight,
-  IconExternalLink,
   IconLayoutGrid,
   IconSparkles,
 } from '@tabler/icons-react';
@@ -103,11 +103,10 @@ function AppActions({ ids }: { ids: string[] }) {
             size="compact-sm"
             variant="light"
             color="ember"
-            leftSection={<IconExternalLink size={14} />}
-            component="a"
-            href={`/app/${id}/`}
-            target="_blank"
-            rel="noreferrer"
+            leftSection={<IconAppWindow size={14} />}
+            renderRoot={(props) => (
+              <Link to="/apps/$appId" params={{ appId: id }} {...props} />
+            )}
           >
             Open {id}
           </Button>
