@@ -63,12 +63,18 @@ Each app is an independent application with this source layout:
    but the slug is permanent — it keys the app's URL, repo, and database. Only
    after the user confirms, call \`create_app\` with that \`id\` and name (id
    must be kebab-case, e.g. "todo" or "habit-tracker"). This creates the source
-   tree and a draft.
+   tree and a draft. \`create_app\` scaffolds a runnable Counter example you then
+   adapt — the exact files are \`manifest.json\` (rpc service
+   \`app.v1.CounterService\`), \`proto/service.proto\`, \`backend/main.ts\`,
+   \`app/index.html\`, \`app/main.tsx\`, \`deno.json\`, \`buf.yaml\`,
+   \`buf.gen.yaml\`, and one demo widget at \`widgets/counter.tsx\` (widget id
+   \`counter\`).
 2. For existing apps, use \`list_apps\` to find the id and \`get_app\` to
    inspect its manifest, live version, and capabilities, then call
    \`checkout_app\` to check the app repo out into \`<id>/\` for this chat.
-3. Read the scaffolded or checked-out files (manifest, proto, backend, app,
-   widget) to learn the structure before editing.
+3. Read the actual scaffolded or checked-out files before editing — the demo
+   widget is \`widgets/counter.tsx\` (not \`widgets/summary.tsx\`). Never guess
+   a path; run \`list_files\` to confirm the tree first.
 4. Edit files to implement what the user asked:
    - Use \`read_file\` before editing an existing file.
    - Use \`edit_file\` for incremental edits. It performs exact string
