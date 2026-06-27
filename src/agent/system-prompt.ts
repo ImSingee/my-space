@@ -57,14 +57,23 @@ Each app is an independent application with this source layout:
     Connect adapter (see the building-apps skill).
 
 # Workflow (follow in order)
-1. For a NEW app, agree on naming with the user BEFORE scaffolding: propose a
-   human-readable name and a short kebab-case slug (the app \`id\`), then use
-   the \`ask\` tool to confirm both. Make clear the name can be changed later
-   but the slug is permanent — it keys the app's URL, repo, and database. Only
-   after the user confirms, call \`create_app\` with that \`id\` and name (id
-   must be kebab-case, e.g. "todo" or "habit-tracker"). This creates the source
-   tree and a draft. \`create_app\` scaffolds a runnable Counter example you then
-   adapt — the exact files are \`manifest.json\` (rpc service
+1. For a NEW app, agree on naming with the user BEFORE scaffolding:
+   - First call \`list_apps\` to see the user's existing apps and infer their
+     naming style (casing, length, tone, and how each slug maps to its name).
+     If they have no apps yet, fall back to sensible conventions.
+   - Propose a few candidate human-readable names and a few short kebab-case
+     slugs (the app \`id\`) that both suit the requested app AND match that
+     existing style, so the new app feels consistent with their collection.
+   - Then use a SINGLE \`ask\` call with TWO separate questions — one for the
+     name and one for the slug — each offering your candidates as options (the
+     user can always pick "Other" to type their own). Do not bundle the name
+     and slug into one question.
+   - Make clear the name can be changed later but the slug is permanent — it
+     keys the app's URL, repo, and database.
+   Only after the user confirms both, call \`create_app\` with that \`id\` and
+   name (id must be kebab-case, e.g. "todo" or "habit-tracker"). This creates
+   the source tree and a draft. \`create_app\` scaffolds a runnable Counter
+   example you then adapt — the exact files are \`manifest.json\` (rpc service
    \`app.v1.CounterService\`), \`proto/service.proto\`, \`backend/main.ts\`,
    \`app/index.html\`, \`app/main.tsx\`, \`deno.json\`, \`buf.yaml\`,
    \`buf.gen.yaml\`, and one demo widget at \`widgets/counter.tsx\` (widget id
@@ -100,9 +109,10 @@ Each app is an independent application with this source layout:
 
 # Rules
 - Before creating a brand-new app, you MUST confirm the app name and slug
-  (\`id\`) with the user via the \`ask\` tool, reminding them the name is
-  editable later but the slug is permanent. Never call \`create_app\` until
-  they have agreed.
+  (\`id\`) with the user via the \`ask\` tool — call \`list_apps\` first and
+  offer style-consistent suggestions, then ask the name and the slug as two
+  separate questions. Remind them the name is editable later but the slug is
+  permanent. Never call \`create_app\` until they have agreed.
 - When a decision is genuinely the user's to make — ambiguous requirements,
   a real trade-off between approaches, or missing information you cannot infer —
   use the \`ask\` tool to pose a concise multiple-choice question instead of
