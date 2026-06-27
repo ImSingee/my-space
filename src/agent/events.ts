@@ -26,6 +26,7 @@ export type AgentStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
   | { type: 'ask'; askId: string; questions: AskQuestion[] }
+  | { type: 'ask_answered'; askId: string }
   | {
       type: 'tool_start';
       id: string;
@@ -50,5 +51,11 @@ export type AgentStreamEvent =
       summary?: string;
     }
   | { type: 'turn_end' }
+  | { type: 'cancelled' }
   | { type: 'done'; messages: JsonValue[]; title: string }
   | { type: 'error'; message: string };
+
+export type AgentRunStreamEvent = {
+  seq: number;
+  event: AgentStreamEvent;
+};

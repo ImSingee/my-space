@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { NewChat } from '~components/agent/new-chat';
-import { stashDraft } from '~components/agent/pending-draft';
 
 export const Route = createFileRoute('/_app/agent/')({
   validateSearch: (search): { prompt?: string } => ({
@@ -16,8 +15,7 @@ function AgentIndex() {
   return (
     <NewChat
       initialPrompt={prompt}
-      onStart={(id, draft) => {
-        stashDraft(id, draft);
+      onStart={(id) => {
         void navigate({ to: '/agent/$threadId', params: { threadId: id } });
       }}
     />

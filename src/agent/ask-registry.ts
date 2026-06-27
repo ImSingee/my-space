@@ -1,7 +1,7 @@
 /**
- * Server-only: in-process registry that lets an Agent `ask` tool (running inside
- * an open SSE turn) wait for the user's reply, which arrives over a separate
- * `/api/agent/answer` request. Keyed by a per-question `askId`.
+ * Server-only: in-process registry that lets an Agent `ask` tool wait for the
+ * user's reply, which arrives over a separate
+ * `/api/agent/runs/:runId/answer` request. Keyed by `runId` + `askId`.
  *
  * Single-process by design (matches the rest of the platform runtime). It is
  * not shared across multiple server instances.
@@ -15,11 +15,16 @@ type Waiter = {
 
 const waiters = new Map<string, Waiter>();
 
+function key(runId: string, askId: string): string {
+  return `${runId}:${askId}`;
+}
+
 /**
- * Wait for the user to answer the question identified by `askId`. Rejects if the
- * turn is aborted (e.g. the user navigates away or stops the stream).
+ * Wait for the user to answer the question identified by `askId`. Rejects if
+ * the run is explicitly cancelled or interrupted.
  */
 export function waitForAnswer(
+  runId: string,
   askId: string,
   signal?: AbortSignal,
 ): Promise<AskAnswer[]> {
@@ -29,11 +34,11 @@ export function waitForAnswer(
       return;
     }
     const onAbort = () => {
-      waiters.delete(askId);
+      waiters.delete(key(runId, askId));
       reject(new Error('Question cancelled.'));
     };
     const cleanup = () => signal?.removeEventListener('abort', onAbort);
-    waiters.set(askId, {
+    waiters.set(key(runId, askId), {
       resolve: (answers) => {
         cleanup();
         resolve(answers);
@@ -51,10 +56,14 @@ export function waitForAnswer(
  * Deliver the user's answer to a waiting `ask`. Returns false when there is no
  * matching pending question (already answered, expired, or wrong id).
  */
-export function submitAnswer(askId: string, answers: AskAnswer[]): boolean {
-  const waiter = waiters.get(askId);
+export function submitAnswer(
+  runId: string,
+  askId: string,
+  answers: AskAnswer[],
+): boolean {
+  const waiter = waiters.get(key(runId, askId));
   if (!waiter) return false;
-  waiters.delete(askId);
+  waiters.delete(key(runId, askId));
   waiter.resolve(answers);
   return true;
 }

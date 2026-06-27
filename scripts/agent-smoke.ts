@@ -8,9 +8,14 @@
  */
 import { eq } from 'drizzle-orm';
 import { appBuildDir, appSrcDir } from '../src/agent/paths';
-import { runAgentTurn } from '../src/agent/runtime';
 import { seedDefaultProviders } from '../src/agent/seed-providers';
 import { db, schema } from '../src/db';
+import {
+  cancelAgentRun,
+  getAgentRun,
+  listRunEventsAfter,
+  startAgentRun,
+} from '../src/server/agent-runs';
 import { dropAppDatabase } from '../src/server/apps/provision';
 import { stopApp } from '../src/server/apps/runtime';
 import { promises as fs } from 'node:fs';
@@ -31,6 +36,8 @@ async function cleanup() {
   await dropAppDatabase(ID);
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function main() {
   console.log('[seed providers]');
   const seeded = await seedDefaultProviders();
@@ -45,20 +52,25 @@ async function main() {
     .returning();
   console.log('[session]', session.id);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
   const toolCalls: string[] = [];
   let text = '';
   let errored: string | undefined;
+  let terminal = false;
+  let seq = 0;
 
   console.log('[prompt]', PROMPT, '\n');
 
-  await runAgentTurn({
+  const { runId } = await startAgentRun({
     sessionId: session.id,
     userText: PROMPT,
-    signal: controller.signal,
-    emit: (event) => {
+  });
+
+  const deadline = Date.now() + TIMEOUT_MS;
+  while (!terminal && Date.now() < deadline) {
+    const events = await listRunEventsAfter(runId, seq);
+    for (const envelope of events) {
+      seq = envelope.seq;
+      const event = envelope.event;
       switch (event.type) {
         case 'tool_start':
           toolCalls.push(event.name);
@@ -78,19 +90,32 @@ async function main() {
         case 'error':
           errored = event.message;
           console.error('  !! error:', event.message);
+          terminal = true;
+          break;
+        case 'done':
+        case 'cancelled':
+          terminal = true;
           break;
         default:
           break;
       }
-    },
-  });
+    }
+    if (!terminal) await delay(250);
+  }
 
-  clearTimeout(timer);
+  if (!terminal) {
+    await cancelAgentRun(runId);
+    throw new Error(`agent timed out after ${TIMEOUT_MS}ms`);
+  }
 
   console.log('\n[assistant text]\n', text.trim().slice(0, 1200));
   console.log('\n[tools used]', toolCalls.join(' -> ') || '(none)');
 
   if (errored) throw new Error(`agent errored: ${errored}`);
+  const run = await getAgentRun(runId);
+  if (run?.status !== 'completed') {
+    throw new Error(`agent run did not complete (status=${run?.status})`);
+  }
 
   const row = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, ID),

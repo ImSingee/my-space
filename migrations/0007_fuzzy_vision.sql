@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "agent_runs_active_session_idx" ON "agent_runs" USING btree ("session_id") WHERE "agent_runs"."status" in ('running', 'blocked');

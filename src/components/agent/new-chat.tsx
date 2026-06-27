@@ -15,9 +15,10 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
 import { createSession } from '~server/agent-sessions';
-import { useModelOptions, type ChatDraft } from './chat';
+import { useModelOptions } from './chat';
 import { Composer, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
+import { startAgentRunRequest } from './use-agent-stream';
 import classes from './chat.module.css';
 
 const EXAMPLE_PROMPTS = [
@@ -36,7 +37,7 @@ export function NewChat({
   onStart,
   initialPrompt,
 }: {
-  onStart: (sessionId: string, draft: ChatDraft) => void;
+  onStart: (sessionId: string) => void;
   initialPrompt?: string;
 }) {
   const qc = useQueryClient();
@@ -59,9 +60,16 @@ export function NewChat({
 
     setCreating(true);
     try {
-      const { id } = await createSession({ data: {} });
+      const { id } = await createSession({ data: { providerId, modelId } });
+      await startAgentRunRequest({
+        sessionId: id,
+        userText: text,
+        images,
+        providerId,
+        modelId,
+      });
       await qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
-      onStart(id, { text, images, providerId, modelId });
+      onStart(id);
     } catch {
       toast.error('Could not start the chat.');
       setCreating(false);

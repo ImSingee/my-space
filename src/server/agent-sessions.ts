@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
+import { getActiveAgentRun, type ActiveAgentRun } from './agent-runs';
 
 export type SessionSummary = {
   id: string;
@@ -38,6 +39,7 @@ export type SessionDetail = {
   providerId: string | null;
   modelId: string | null;
   messages: JsonValue[];
+  activeRun: ActiveAgentRun | null;
 };
 
 export const getSession = createServerFn({ method: 'GET' })
@@ -54,6 +56,7 @@ export const getSession = createServerFn({ method: 'GET' })
       providerId: row.providerId,
       modelId: row.modelId,
       messages: row.messages,
+      activeRun: await getActiveAgentRun(row.id),
     };
   });
 

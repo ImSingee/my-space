@@ -14,7 +14,7 @@ import {
   useSuspenseQuery,
 } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   providersQueryOptions,
   sessionQueryOptions,
@@ -23,22 +23,13 @@ import {
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
 import { MessageView, StreamingBubble } from './message-view';
-import { takeDraft } from './pending-draft';
 import {
   type AssistantBlock,
   type ChatMessage,
-  type ContentPart,
   pairToolResults,
 } from './types';
 import { useAgentStream } from './use-agent-stream';
 import classes from './chat.module.css';
-
-export type ChatDraft = {
-  text: string;
-  images: ComposerImage[];
-  providerId: string;
-  modelId: string;
-};
 
 export function useModelOptions() {
   const { data: providers } = useSuspenseQuery(providersQueryOptions);
@@ -55,15 +46,6 @@ export function useModelOptions() {
     const first = groups[0]?.items[0]?.value ?? null;
     return { groups, first };
   }, [providers]);
-}
-
-function buildParts(text: string, images: ComposerImage[]): ContentPart[] {
-  const parts: ContentPart[] = [];
-  if (text) parts.push({ type: 'text', text });
-  for (const img of images) {
-    parts.push({ type: 'image', data: img.data, mimeType: img.mimeType });
-  }
-  return parts;
 }
 
 type RenderTurn =
@@ -104,18 +86,79 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const { groups, first } = useModelOptions();
 
   const [model, setModel] = useState<string | null>(null);
-  const [pending, setPending] = useState<ChatMessage[]>([]);
+  const [reconnectToken, setReconnectToken] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const connectedRunRef = useRef<string | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const stream = useAgentStream((messages) => {
+  const clearReconnectTimer = useCallback(() => {
+    if (!reconnectTimerRef.current) return;
+    clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+  }, []);
+
+  const scheduleReconnect = useCallback(
+    (runId: string) => {
+      if (connectedRunRef.current === runId) {
+        connectedRunRef.current = null;
+      }
+      clearReconnectTimer();
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        setReconnectToken((value) => value + 1);
+      }, 750);
+    },
+    [clearReconnectTimer],
+  );
+
+  const revalidateSession = useCallback(() => {
+    void qc.invalidateQueries({
+      queryKey: sessionQueryOptions(sessionId).queryKey,
+    });
+    void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
+  }, [qc, sessionId]);
+
+  const clearActiveRun = () => {
+    clearReconnectTimer();
+    connectedRunRef.current = null;
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
       old
-        ? { ...old, messages: messages as unknown as typeof old.messages }
+        ? {
+            ...old,
+            activeRun: null,
+          }
         : old,
     );
-    setPending([]);
-    void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
-  });
+    revalidateSession();
+  };
+
+  const stream = useAgentStream(
+    (messages, title) => {
+      clearReconnectTimer();
+      connectedRunRef.current = null;
+      qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
+        old
+          ? {
+              ...old,
+              title,
+              activeRun: null,
+              messages: messages as unknown as typeof old.messages,
+            }
+          : old,
+      );
+      void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
+    },
+    clearActiveRun,
+    scheduleReconnect,
+    revalidateSession,
+  );
+  const {
+    state: streamState,
+    send: sendRun,
+    connect,
+    stop: stopRun,
+    answer,
+  } = stream;
 
   const session = sessionQuery.data;
   const effectiveModel =
@@ -126,26 +169,27 @@ export function Chat({ sessionId }: { sessionId: string }) {
     first;
 
   const messages = (session?.messages ?? []) as unknown as ChatMessage[];
-  const allMessages = [...messages, ...pending];
+  const allMessages = messages;
   const toolResults = pairToolResults(allMessages);
   const turns = groupTurns(allMessages);
+  const busy = streamState.active || Boolean(session?.activeRun);
 
   const send = (text: string, images: ComposerImage[], modelValue: string) => {
-    if (stream.state.active) return;
+    if (busy) return;
     if (!text && images.length === 0) return;
     const [providerId, modelId] = modelValue.split(':');
     if (!providerId || !modelId) return;
 
-    setPending((p) => [
-      ...p,
-      { role: 'user', content: buildParts(text, images) },
-    ]);
-    void stream.send({
+    void sendRun({
       sessionId,
       userText: text,
       images,
       providerId,
       modelId,
+    }).then((runId) => {
+      if (!runId) return;
+      connectedRunRef.current = runId;
+      revalidateSession();
     });
   };
 
@@ -154,23 +198,31 @@ export function Chat({ sessionId }: { sessionId: string }) {
     send(text, images, effectiveModel);
   };
 
-  // Auto-send the draft captured by the new-chat hero exactly once, so starting
-  // a build from the hero flows straight into a streaming reply. The draft is
-  // handed off in memory (keyed by session) and consumed here on mount; this
-  // component is keyed by session id, so the effect runs once per chat.
+  const stop = () => {
+    clearReconnectTimer();
+    void stopRun(session?.activeRun?.id).finally(() => {
+      connectedRunRef.current = null;
+      revalidateSession();
+    });
+  };
+
   useEffect(() => {
-    const draft = takeDraft(sessionId);
-    if (!draft) return;
-    const value = `${draft.providerId}:${draft.modelId}`;
-    setModel(value);
-    send(draft.text, draft.images, value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const activeRunId = session?.activeRun?.id ?? null;
+    if (!activeRunId) {
+      connectedRunRef.current = null;
+      return;
+    }
+    if (connectedRunRef.current === activeRunId) return;
+    connectedRunRef.current = activeRunId;
+    void connect(activeRunId);
+  }, [connect, reconnectToken, session?.activeRun?.id]);
+
+  useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
 
   useEffect(() => {
     const el = viewportRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [allMessages.length, stream.state]);
+  }, [allMessages.length, streamState]);
 
   return (
     <Box className={classes.chat}>
@@ -191,7 +243,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             <Center py="xl">
               <Loader />
             </Center>
-          ) : allMessages.length === 0 && !stream.state.active ? (
+          ) : allMessages.length === 0 && !streamState.active ? (
             <Stack align="center" gap={6} py={80}>
               <ThemeIcon size={48} radius="xl" variant="light" color="ember">
                 <IconSparkles size={24} stroke={1.5} />
@@ -215,11 +267,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
                   toolResults={toolResults}
                 />
               ))}
-              {stream.state.active ? (
-                <StreamingBubble
-                  state={stream.state}
-                  onAnswer={stream.answer}
-                />
+              {streamState.active ? (
+                <StreamingBubble state={streamState} onAnswer={answer} />
               ) : null}
             </>
           )}
@@ -230,8 +279,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
         <Box className={classes.composerInner}>
           <Composer
             onSubmit={onComposerSubmit}
-            busy={stream.state.active}
-            onStop={stream.stop}
+            busy={busy}
+            onStop={stop}
             disabled={!effectiveModel}
             modelControl={
               <ModelPicker

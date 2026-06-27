@@ -6,22 +6,13 @@ import {
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
-import { eq } from 'drizzle-orm';
-import { db, schema } from '~/db';
+import type { Models } from '@earendil-works/pi-ai';
 import type { JsonValue } from '~/db/schema';
-import { waitForAnswer } from './ask-registry';
-import { loadAgentModels, pickModel } from './build-models';
+import type { ResolvedModel } from './build-models';
 import type { AgentStreamEvent } from './events';
 import { SKILLS_DIR, WORKSPACE_ROOT } from './paths';
 import { buildSystemPrompt } from './system-prompt';
-import { createTools } from './tools';
-
-function deriveTitle(userText: string): string {
-  const firstLine = userText.trim().split('\n')[0] ?? '';
-  return firstLine.length > 48
-    ? `${firstLine.slice(0, 48)}…`
-    : firstLine || 'New chat';
-}
+import { createTools, type AskBridge } from './tools';
 
 /** Keep streamed tool output small; the full result is persisted on `done`. */
 const MAX_STREAM_OUTPUT = 4000;
@@ -54,44 +45,27 @@ function extractToolText(value: unknown): string {
 }
 
 export type RunAgentTurnOptions = {
+  priorMessages: AgentMessage[];
   sessionId: string;
   userText: string;
   images?: { data: string; mimeType: string }[];
-  providerId?: string | null;
-  modelId?: string | null;
+  models: Models;
+  picked: ResolvedModel;
   signal: AbortSignal;
+  ask?: AskBridge;
   emit: (event: AgentStreamEvent) => void;
 };
 
-export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
-  const { sessionId, userText, signal, emit } = opts;
+export type RunAgentTurnResult = {
+  messages: JsonValue[];
+  error?: string;
+};
 
-  const sessionRow = await db.query.agentSessions.findFirst({
-    where: (s, { eq: e }) => e(s.id, sessionId),
-  });
-  if (!sessionRow) {
-    emit({ type: 'error', message: 'Session not found.' });
-    return;
-  }
-
-  const { models, list } = await loadAgentModels();
-  if (list.length === 0) {
-    emit({
-      type: 'error',
-      message:
-        'No models configured. Add a provider and model in Settings first.',
-    });
-    return;
-  }
-  const picked = pickModel(
-    list,
-    opts.providerId ?? sessionRow.providerId,
-    opts.modelId ?? sessionRow.modelId,
-  );
-  if (!picked) {
-    emit({ type: 'error', message: 'Selected model is unavailable.' });
-    return;
-  }
+export async function runAgentTurn(
+  opts: RunAgentTurnOptions,
+): Promise<RunAgentTurnResult> {
+  const { priorMessages, sessionId, userText, signal, emit, models, picked } =
+    opts;
 
   const env = new NodeExecutionEnv({
     cwd: WORKSPACE_ROOT,
@@ -100,20 +74,12 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
 
   const repo = new InMemorySessionRepo();
   const session = await repo.create({ id: sessionId });
-  const priorMessages = (sessionRow.messages ??
-    []) as unknown as AgentMessage[];
   for (const message of priorMessages) {
     await session.appendMessage(message);
   }
 
   const { skills } = await loadSkills(env, SKILLS_DIR);
-  const tools = createTools(env, {
-    ask: async (questions, askSignal) => {
-      const askId = crypto.randomUUID();
-      emit({ type: 'ask', askId, questions });
-      return waitForAnswer(askId, askSignal ?? signal);
-    },
-  });
+  const tools = createTools(env, opts.ask ? { ask: opts.ask } : {});
 
   const harness = new AgentHarness({
     env,
@@ -130,6 +96,9 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
     void harness.abort();
   };
   signal.addEventListener('abort', onAbort);
+  if (signal.aborted) {
+    onAbort();
+  }
 
   // Did the current thinking block stream any real text delta? Some providers
   // (notably OpenAI reasoning summaries via the relay) stream empty
@@ -218,33 +187,18 @@ export async function runAgentTurn(opts: RunAgentTurnOptions): Promise<void> {
 
   try {
     await harness.prompt(userText, images.length > 0 ? { images } : undefined);
+    return {
+      messages: (await session.buildContext())
+        .messages as unknown as JsonValue[],
+    };
   } catch (error) {
-    emit({
-      type: 'error',
-      message: error instanceof Error ? error.message : String(error),
-    });
+    return {
+      messages: (await session.buildContext())
+        .messages as unknown as JsonValue[],
+      error: error instanceof Error ? error.message : String(error),
+    };
   } finally {
     unsubscribe();
     signal.removeEventListener('abort', onAbort);
   }
-
-  const context = await session.buildContext();
-  const messages = context.messages as unknown as JsonValue[];
-
-  const title =
-    sessionRow.title && sessionRow.title !== 'New chat'
-      ? sessionRow.title
-      : deriveTitle(userText);
-
-  await db
-    .update(schema.agentSessions)
-    .set({
-      messages,
-      title,
-      providerId: picked.providerId,
-      modelId: picked.model.id,
-    })
-    .where(eq(schema.agentSessions.id, sessionId));
-
-  emit({ type: 'done', messages, title });
 }

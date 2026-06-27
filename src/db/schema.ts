@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   timestamp as _timestamp,
   boolean,
@@ -5,6 +6,7 @@ import {
   jsonb,
   pgTable,
   text,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { ulid as genUlid0 } from 'ulid';
 
@@ -74,6 +76,14 @@ export type ProviderApiType =
   | 'openai-responses'
   | 'openai-completions'
   | 'anthropic-messages';
+
+export type AgentRunStatus =
+  | 'running'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
 
 /** ================== apps ================== */
 
@@ -165,6 +175,49 @@ export const agentSessions = pgTable('agent_sessions', {
   createdAt,
   updatedAt,
 });
+
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    sessionId: ulid('session_id')
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: 'cascade' }),
+    providerId: ulid('provider_id').notNull(),
+    modelId: text('model_id').notNull(),
+    status: text().$type<AgentRunStatus>().notNull().default('running'),
+    /** The user input that started the run, stored for diagnostics/replay. */
+    input: jsonb().$type<JsonObject>().notNull(),
+    /** The currently pending ask, if the run is blocked waiting for the user. */
+    pendingAsk: jsonb('pending_ask').$type<JsonObject>(),
+    error: text(),
+    completedAt: timestamp('completed_at'),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    uniqueIndex('agent_runs_active_session_idx')
+      .on(table.sessionId)
+      .where(sql`${table.status} in ('running', 'blocked')`),
+  ],
+);
+
+export const agentRunEvents = pgTable(
+  'agent_run_events',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    runId: ulid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    seq: integer().notNull(),
+    type: text().notNull(),
+    payload: jsonb().$type<JsonObject>().notNull(),
+    createdAt,
+  },
+  (table) => [
+    uniqueIndex('agent_run_events_run_seq_idx').on(table.runId, table.seq),
+  ],
+);
 
 /** ================== dashboard & sidebar ================== */
 

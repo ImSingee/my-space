@@ -21,8 +21,7 @@ import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
 import { Route as AppAgentIndexRouteImport } from './routes/_app/agent/index'
 import { Route as AppAppIdSplatRouteImport } from './routes/app/$appId/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as ApiAgentStreamRouteImport } from './routes/api/agent/stream'
-import { Route as ApiAgentAnswerRouteImport } from './routes/api/agent/answer'
+import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
 import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
 import { Route as AppAppsAppIdIndexRouteImport } from './routes/_app/apps/$appId/index'
@@ -32,6 +31,9 @@ import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/app
 import { Route as ApiAppsAppIdStorageSplatRouteImport } from './routes/api/apps/$appId/storage/$'
 import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
 import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$appId/app/$'
+import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
+import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
+import { Route as ApiAgentRunsRunIdAnswerRouteImport } from './routes/api/agent/runs/$runId/answer'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -92,14 +94,9 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAgentStreamRoute = ApiAgentStreamRouteImport.update({
-  id: '/api/agent/stream',
-  path: '/api/agent/stream',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAgentAnswerRoute = ApiAgentAnswerRouteImport.update({
-  id: '/api/agent/answer',
-  path: '/api/agent/answer',
+const ApiAgentRunsRoute = ApiAgentRunsRouteImport.update({
+  id: '/api/agent/runs',
+  path: '/api/agent/runs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
@@ -149,6 +146,21 @@ const ApiAppsAppIdAppSplatRoute = ApiAppsAppIdAppSplatRouteImport.update({
   path: '/api/apps/$appId/app/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAgentRunsRunIdEventsRoute = ApiAgentRunsRunIdEventsRouteImport.update({
+  id: '/$runId/events',
+  path: '/$runId/events',
+  getParentRoute: () => ApiAgentRunsRoute,
+} as any)
+const ApiAgentRunsRunIdCancelRoute = ApiAgentRunsRunIdCancelRouteImport.update({
+  id: '/$runId/cancel',
+  path: '/$runId/cancel',
+  getParentRoute: () => ApiAgentRunsRoute,
+} as any)
+const ApiAgentRunsRunIdAnswerRoute = ApiAgentRunsRunIdAnswerRouteImport.update({
+  id: '/$runId/answer',
+  path: '/$runId/answer',
+  getParentRoute: () => ApiAgentRunsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -159,8 +171,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
-  '/api/agent/answer': typeof ApiAgentAnswerRoute
-  '/api/agent/stream': typeof ApiAgentStreamRoute
+  '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$appId/$': typeof AppAppIdSplatRoute
   '/agent/': typeof AppAgentIndexRoute
@@ -169,6 +180,9 @@ export interface FileRoutesByFullPath {
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/apps/$appId/': typeof AppAppsAppIdIndexRoute
+  '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
+  '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
+  '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
@@ -182,8 +196,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AppSettingsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
-  '/api/agent/answer': typeof ApiAgentAnswerRoute
-  '/api/agent/stream': typeof ApiAgentStreamRoute
+  '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$appId/$': typeof AppAppIdSplatRoute
   '/agent': typeof AppAgentIndexRoute
@@ -192,6 +205,9 @@ export interface FileRoutesByTo {
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/apps/$appId': typeof AppAppsAppIdIndexRoute
+  '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
+  '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
+  '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
@@ -208,8 +224,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRoute
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
-  '/api/agent/answer': typeof ApiAgentAnswerRoute
-  '/api/agent/stream': typeof ApiAgentStreamRoute
+  '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/app/$appId/$': typeof AppAppIdSplatRoute
   '/_app/agent/': typeof AppAgentIndexRoute
@@ -218,6 +233,9 @@ export interface FileRoutesById {
   '/_app/apps/$appId/manage': typeof AppAppsAppIdManageRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/_app/apps/$appId/': typeof AppAppsAppIdIndexRoute
+  '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
+  '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
+  '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
@@ -234,8 +252,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
-    | '/api/agent/answer'
-    | '/api/agent/stream'
+    | '/api/agent/runs'
     | '/api/auth/$'
     | '/app/$appId/$'
     | '/agent/'
@@ -244,6 +261,9 @@ export interface FileRouteTypes {
     | '/apps/$appId/manage'
     | '/api/hooks/$appId/$'
     | '/apps/$appId/'
+    | '/api/agent/runs/$runId/answer'
+    | '/api/agent/runs/$runId/cancel'
+    | '/api/agent/runs/$runId/events'
     | '/api/apps/$appId/app/$'
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
@@ -257,8 +277,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
-    | '/api/agent/answer'
-    | '/api/agent/stream'
+    | '/api/agent/runs'
     | '/api/auth/$'
     | '/app/$appId/$'
     | '/agent'
@@ -267,6 +286,9 @@ export interface FileRouteTypes {
     | '/apps/$appId/manage'
     | '/api/hooks/$appId/$'
     | '/apps/$appId'
+    | '/api/agent/runs/$runId/answer'
+    | '/api/agent/runs/$runId/cancel'
+    | '/api/agent/runs/$runId/events'
     | '/api/apps/$appId/app/$'
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
@@ -282,8 +304,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
-    | '/api/agent/answer'
-    | '/api/agent/stream'
+    | '/api/agent/runs'
     | '/api/auth/$'
     | '/app/$appId/$'
     | '/_app/agent/'
@@ -292,6 +313,9 @@ export interface FileRouteTypes {
     | '/_app/apps/$appId/manage'
     | '/api/hooks/$appId/$'
     | '/_app/apps/$appId/'
+    | '/api/agent/runs/$runId/answer'
+    | '/api/agent/runs/$runId/cancel'
+    | '/api/agent/runs/$runId/events'
     | '/api/apps/$appId/app/$'
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
@@ -303,8 +327,7 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
-  ApiAgentAnswerRoute: typeof ApiAgentAnswerRoute
-  ApiAgentStreamRoute: typeof ApiAgentStreamRoute
+  ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   AppAppIdSplatRoute: typeof AppAppIdSplatRoute
   ApiHooksAppIdSplatRoute: typeof ApiHooksAppIdSplatRoute
@@ -400,18 +423,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/agent/stream': {
-      id: '/api/agent/stream'
-      path: '/api/agent/stream'
-      fullPath: '/api/agent/stream'
-      preLoaderRoute: typeof ApiAgentStreamRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/agent/answer': {
-      id: '/api/agent/answer'
-      path: '/api/agent/answer'
-      fullPath: '/api/agent/answer'
-      preLoaderRoute: typeof ApiAgentAnswerRouteImport
+    '/api/agent/runs': {
+      id: '/api/agent/runs'
+      path: '/api/agent/runs'
+      fullPath: '/api/agent/runs'
+      preLoaderRoute: typeof ApiAgentRunsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/dashboard/$dashboardId': {
@@ -477,6 +493,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppsAppIdAppSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/agent/runs/$runId/events': {
+      id: '/api/agent/runs/$runId/events'
+      path: '/$runId/events'
+      fullPath: '/api/agent/runs/$runId/events'
+      preLoaderRoute: typeof ApiAgentRunsRunIdEventsRouteImport
+      parentRoute: typeof ApiAgentRunsRoute
+    }
+    '/api/agent/runs/$runId/cancel': {
+      id: '/api/agent/runs/$runId/cancel'
+      path: '/$runId/cancel'
+      fullPath: '/api/agent/runs/$runId/cancel'
+      preLoaderRoute: typeof ApiAgentRunsRunIdCancelRouteImport
+      parentRoute: typeof ApiAgentRunsRoute
+    }
+    '/api/agent/runs/$runId/answer': {
+      id: '/api/agent/runs/$runId/answer'
+      path: '/$runId/answer'
+      fullPath: '/api/agent/runs/$runId/answer'
+      preLoaderRoute: typeof ApiAgentRunsRunIdAnswerRouteImport
+      parentRoute: typeof ApiAgentRunsRoute
+    }
   }
 }
 
@@ -518,13 +555,28 @@ const AppRouteChildren: AppRouteChildren = {
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
+interface ApiAgentRunsRouteChildren {
+  ApiAgentRunsRunIdAnswerRoute: typeof ApiAgentRunsRunIdAnswerRoute
+  ApiAgentRunsRunIdCancelRoute: typeof ApiAgentRunsRunIdCancelRoute
+  ApiAgentRunsRunIdEventsRoute: typeof ApiAgentRunsRunIdEventsRoute
+}
+
+const ApiAgentRunsRouteChildren: ApiAgentRunsRouteChildren = {
+  ApiAgentRunsRunIdAnswerRoute: ApiAgentRunsRunIdAnswerRoute,
+  ApiAgentRunsRunIdCancelRoute: ApiAgentRunsRunIdCancelRoute,
+  ApiAgentRunsRunIdEventsRoute: ApiAgentRunsRunIdEventsRoute,
+}
+
+const ApiAgentRunsRouteWithChildren = ApiAgentRunsRoute._addFileChildren(
+  ApiAgentRunsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
-  ApiAgentAnswerRoute: ApiAgentAnswerRoute,
-  ApiAgentStreamRoute: ApiAgentStreamRoute,
+  ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   AppAppIdSplatRoute: AppAppIdSplatRoute,
   ApiHooksAppIdSplatRoute: ApiHooksAppIdSplatRoute,
