@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type {
   AgentRunStreamEvent,
@@ -220,8 +220,17 @@ export function useAgentStream(
     }
   }, []);
 
+  /**
+   * Open an SSE subscription for a run and return a disconnect callback.
+   *
+   * This is intentionally synchronous so a single `useEffect` can own the whole
+   * connection lifecycle: the caller wires the returned callback as the effect's
+   * cleanup. That keeps connect/disconnect symmetric, so when React tears down
+   * and re-runs passive effects (Suspense hide/show, remounts) the stream is
+   * aborted *and* re-established instead of being left dangling.
+   */
   const connect = useCallback(
-    async (runId: string) => {
+    (runId: string) => {
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -229,98 +238,107 @@ export function useAgentStream(
       lastSeqRef.current = 0;
       setState({ ...IDLE, active: true, runId });
 
-      try {
-        const res = await fetch(`/api/agent/runs/${runId}/events?after=0`, {
-          signal: ac.signal,
-        });
-        if (!res.ok || !res.body) {
-          throw new Error(`Request failed (${res.status})`);
-        }
+      const read = async () => {
+        try {
+          const res = await fetch(`/api/agent/runs/${runId}/events?after=0`, {
+            signal: ac.signal,
+          });
+          if (!res.ok || !res.body) {
+            throw new Error(`Request failed (${res.status})`);
+          }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const chunks = buffer.split('\n\n');
-          buffer = chunks.pop() ?? '';
-          for (const chunk of chunks) {
-            const line = chunk.trim();
-            if (!line.startsWith('data:')) continue;
-            const json = line.slice(5).trim();
-            if (!json) continue;
-            const envelope = JSON.parse(json) as AgentRunStreamEvent;
-            lastSeqRef.current = envelope.seq;
-            handleEvent(envelope.event);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const chunks = buffer.split('\n\n');
+            buffer = chunks.pop() ?? '';
+            for (const chunk of chunks) {
+              const line = chunk.trim();
+              if (!line.startsWith('data:')) continue;
+              const json = line.slice(5).trim();
+              if (!json) continue;
+              const envelope = JSON.parse(json) as AgentRunStreamEvent;
+              lastSeqRef.current = envelope.seq;
+              handleEvent(envelope.event);
+            }
+          }
+          if (!ac.signal.aborted && runIdRef.current === runId) {
+            runIdRef.current = null;
+            setState(IDLE);
+            onDisconnectRef.current?.(runId);
+          }
+        } catch (error) {
+          if (!ac.signal.aborted && runIdRef.current === runId) {
+            runIdRef.current = null;
+            toast.error(
+              error instanceof Error ? error.message : 'Stream failed',
+            );
+            setState(IDLE);
+            onDisconnectRef.current?.(runId);
           }
         }
-        if (!ac.signal.aborted && runIdRef.current === runId) {
-          runIdRef.current = null;
-          setState(IDLE);
-          onDisconnectRef.current?.(runId);
-        }
-      } catch (error) {
-        if (!ac.signal.aborted && runIdRef.current === runId) {
-          runIdRef.current = null;
-          toast.error(error instanceof Error ? error.message : 'Stream failed');
-          setState(IDLE);
-          onDisconnectRef.current?.(runId);
-        }
-      }
+      };
+
+      void read();
+
+      return () => {
+        ac.abort();
+      };
     },
     [handleEvent],
   );
 
-  const send = useCallback(
-    async (params: SendParams) => {
-      const requestId = startRequestIdRef.current + 1;
-      startRequestIdRef.current = requestId;
-      pendingStartRef.current = { requestId, stopRequested: false };
+  const send = useCallback(async (params: SendParams) => {
+    const requestId = startRequestIdRef.current + 1;
+    startRequestIdRef.current = requestId;
+    pendingStartRef.current = { requestId, stopRequested: false };
 
-      try {
-        setState({ ...IDLE, active: true });
-        const { runId } = await startAgentRunRequest(params);
-        const pending = pendingStartRef.current;
-        const shouldCancel =
-          !pending || pending.requestId !== requestId || pending.stopRequested;
+    try {
+      setState({ ...IDLE, active: true });
+      const { runId } = await startAgentRunRequest(params);
+      const pending = pendingStartRef.current;
+      const shouldCancel =
+        !pending || pending.requestId !== requestId || pending.stopRequested;
 
-        if (pending?.requestId === requestId) {
-          pendingStartRef.current = null;
-        }
+      if (pending?.requestId === requestId) {
+        pendingStartRef.current = null;
+      }
 
-        if (shouldCancel) {
-          try {
-            await cancelAgentRunRequest(runId);
-          } catch (error) {
-            toast.error(
-              error instanceof Error ? error.message : 'Could not stop.',
-            );
-          } finally {
-            onSessionChangedRef.current?.();
-          }
-          return null;
+      if (shouldCancel) {
+        try {
+          await cancelAgentRunRequest(runId);
+        } catch (error) {
+          toast.error(
+            error instanceof Error ? error.message : 'Could not stop.',
+          );
+        } finally {
+          onSessionChangedRef.current?.();
         }
-
-        void connect(runId);
-        return runId;
-      } catch (error) {
-        const pending = pendingStartRef.current;
-        const stopRequested =
-          pending?.requestId === requestId && pending.stopRequested;
-        if (pending?.requestId === requestId) {
-          pendingStartRef.current = null;
-        }
-        if (!stopRequested) {
-          toast.error(error instanceof Error ? error.message : 'Stream failed');
-        }
-        setState(IDLE);
         return null;
       }
-    },
-    [connect],
-  );
+
+      // The run is live; the caller surfaces it via `activeRun` and the
+      // connection effect subscribes. We deliberately do not connect here so
+      // a single effect owns the stream's lifecycle.
+      return runId;
+    } catch (error) {
+      const pending = pendingStartRef.current;
+      const stopRequested =
+        pending?.requestId === requestId && pending.stopRequested;
+      if (pending?.requestId === requestId) {
+        pendingStartRef.current = null;
+      }
+      if (!stopRequested) {
+        toast.error(error instanceof Error ? error.message : 'Stream failed');
+      }
+      setState(IDLE);
+      return null;
+    }
+  }, []);
 
   const answer = useCallback(async (askId: string, answers: AskAnswer[]) => {
     const runId = runIdRef.current;
@@ -350,16 +368,6 @@ export function useAgentStream(
       toast.error(error instanceof Error ? error.message : 'Could not stop.');
     }
   }, []);
-
-  useEffect(
-    () => () => {
-      if (pendingStartRef.current) {
-        pendingStartRef.current.stopRequested = true;
-      }
-      abortRef.current?.abort();
-    },
-    [],
-  );
 
   return { state, send, connect, stop, answer };
 }

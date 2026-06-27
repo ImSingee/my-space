@@ -88,7 +88,6 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const [model, setModel] = useState<string | null>(null);
   const [reconnectToken, setReconnectToken] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const connectedRunRef = useRef<string | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearReconnectTimer = useCallback(() => {
@@ -97,19 +96,13 @@ export function Chat({ sessionId }: { sessionId: string }) {
     reconnectTimerRef.current = null;
   }, []);
 
-  const scheduleReconnect = useCallback(
-    (runId: string) => {
-      if (connectedRunRef.current === runId) {
-        connectedRunRef.current = null;
-      }
-      clearReconnectTimer();
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null;
-        setReconnectToken((value) => value + 1);
-      }, 750);
-    },
-    [clearReconnectTimer],
-  );
+  const scheduleReconnect = useCallback(() => {
+    clearReconnectTimer();
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      setReconnectToken((value) => value + 1);
+    }, 750);
+  }, [clearReconnectTimer]);
 
   const revalidateSession = useCallback(() => {
     void qc.invalidateQueries({
@@ -120,7 +113,6 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   const clearActiveRun = () => {
     clearReconnectTimer();
-    connectedRunRef.current = null;
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
       old
         ? {
@@ -135,7 +127,6 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const stream = useAgentStream(
     (messages, title) => {
       clearReconnectTimer();
-      connectedRunRef.current = null;
       qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
         old
           ? {
@@ -188,7 +179,20 @@ export function Chat({ sessionId }: { sessionId: string }) {
       modelId,
     }).then((runId) => {
       if (!runId) return;
-      connectedRunRef.current = runId;
+      // Surface the run immediately so the connection effect subscribes without
+      // waiting for the session refetch round-trip.
+      qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
+        old
+          ? {
+              ...old,
+              activeRun: {
+                id: runId,
+                status: 'running' as const,
+                pendingAsk: null,
+              },
+            }
+          : old,
+      );
       revalidateSession();
     });
   };
@@ -201,20 +205,19 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const stop = () => {
     clearReconnectTimer();
     void stopRun(session?.activeRun?.id).finally(() => {
-      connectedRunRef.current = null;
       revalidateSession();
     });
   };
 
+  // One effect owns the event-stream subscription for the active run: it opens
+  // the stream on setup and aborts it on cleanup. Because connect and abort live
+  // in the same effect, React's passive-effect teardown/re-run cycle (Suspense
+  // hide/show, remounts) re-establishes the stream instead of leaving it
+  // canceled — which previously left the chat stuck on "Thinking…".
   useEffect(() => {
     const activeRunId = session?.activeRun?.id ?? null;
-    if (!activeRunId) {
-      connectedRunRef.current = null;
-      return;
-    }
-    if (connectedRunRef.current === activeRunId) return;
-    connectedRunRef.current = activeRunId;
-    void connect(activeRunId);
+    if (!activeRunId) return;
+    return connect(activeRunId);
   }, [connect, reconnectToken, session?.activeRun?.id]);
 
   useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
