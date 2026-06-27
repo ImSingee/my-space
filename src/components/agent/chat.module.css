@@ -1,9 +1,11 @@
 .messageText {
   white-space: pre-wrap;
-  /* break-word (not anywhere/break-all) keeps the intrinsic min-content equal
-     to the longest word, so short bubbles don't collapse and wrap mid-word —
-     while still breaking genuinely long tokens (URLs, hashes). */
-  overflow-wrap: break-word;
+  /* `anywhere` (not break-word) so a pathologically long unbreakable token —
+     a pasted JWT, URL, or hash — shrinks the text's intrinsic min-content.
+     Without it the flex-end bubble's `min-width: auto` resolves to that token's
+     full width and overrides the 80% cap, blowing the bubble out of the column.
+     Normal messages still size to max-content, so short bubbles don't collapse. */
+  overflow-wrap: anywhere;
   line-height: 1.6;
   font-size: var(--mantine-font-size-sm);
 }
@@ -136,6 +138,9 @@ button.stepHeader:hover {
    TypographyStylesProvider spacing so chat bubbles stay compact. */
 .markdown {
   font-size: var(--mantine-font-size-sm);
+  /* Break genuinely long tokens (URLs, autolinked bare links, hashes) so they
+     wrap inside the message column instead of overflowing it. */
+  overflow-wrap: anywhere;
 }
 
 .markdown :where(p, ul, ol, pre, blockquote, table) {
@@ -215,6 +220,8 @@ button.stepHeader:hover {
 .markdown :where(pre) {
   border-radius: var(--mantine-radius-sm);
   font-size: var(--mantine-font-size-xs);
+  /* Long code lines scroll horizontally rather than overflow the bubble. */
+  overflow-x: auto;
 }
 
 .markdown :where(code) {
