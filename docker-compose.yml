@@ -34,11 +34,9 @@ services:
     environment:
       # Platform database.
       DATABASE_URL: postgres://postgres@db:5432/postgres
-      # Admin connection used to create/drop a database per app.
-      PLATFORM_PG_ADMIN_URL: postgres://postgres@db:5432/postgres
-      # Host/port injected into each app backend's DATABASE_URL.
-      PLATFORM_PG_HOST: db
-      PLATFORM_PG_PORT: '5432'
+      # Admin connection used to create/drop a database per app. Each app's
+      # DATABASE_URL (host, port, credentials) is derived from this URL.
+      APP_DATABASE_URL: postgres://postgres@db:5432/postgres
       PORT: '3700'
       HOST: 0.0.0.0
       NODE_ENV: production

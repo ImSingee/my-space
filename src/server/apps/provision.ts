@@ -6,19 +6,24 @@ export function appDbName(id: string): string {
   return `app_${id.replace(/[^a-z0-9_]/g, '_')}`;
 }
 
-/** Connection string injected into an app backend as DATABASE_URL. */
-export function appDatabaseUrl(id: string): string {
-  const host = process.env.PLATFORM_PG_HOST ?? 'localhost';
-  const port = process.env.PLATFORM_PG_PORT ?? '5432';
-  return `postgres://postgres@${host}:${port}/${appDbName(id)}`;
-}
-
+/** Admin connection used to create/drop and derive per-app databases. */
 function adminUrl(): string {
-  const url = process.env.PLATFORM_PG_ADMIN_URL;
+  const url = process.env.APP_DATABASE_URL;
   if (!url) {
-    throw new Error('PLATFORM_PG_ADMIN_URL is not set');
+    throw new Error('APP_DATABASE_URL is not set');
   }
   return url;
+}
+
+/**
+ * Connection string injected into an app backend as DATABASE_URL. Host, port
+ * and credentials are inferred from APP_DATABASE_URL; only the database name is
+ * swapped for the app's dedicated database.
+ */
+export function appDatabaseUrl(id: string): string {
+  const url = new URL(adminUrl());
+  url.pathname = `/${appDbName(id)}`;
+  return url.toString();
 }
 
 /**
