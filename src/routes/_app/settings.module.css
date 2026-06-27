@@ -24,6 +24,7 @@
   color: var(--mantine-color-text);
   font-size: var(--mantine-font-size-sm);
   font-weight: 500;
+  text-decoration: none;
   transition:
     background-color 120ms ease,
     color 120ms ease;
@@ -33,8 +34,7 @@
   background-color: var(--mantine-color-default-hover);
 }
 
-.navItemActive {
-  composes: navItem;
+.navItem[data-status='active'] {
   background-color: var(--mantine-color-ember-light);
   color: var(--mantine-color-ember-light-color);
 }
@@ -48,8 +48,13 @@
   min-width: 0;
 }
 
-.sectionHead {
-  margin-bottom: var(--mantine-spacing-lg);
+/* Flat setting row: label block on the left, control on the right — no card. */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+  padding-block: var(--mantine-spacing-xs);
 }
 
 @media (max-width: 48em) {
@@ -65,8 +70,7 @@
     overflow-x: auto;
   }
 
-  .navItem,
-  .navItemActive {
+  .navItem {
     width: auto;
     white-space: nowrap;
   }

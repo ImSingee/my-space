@@ -1,17 +1,27 @@
+/* Calm warm-panel tile: a whisper-warm surface on the white page instead of a
+   hard bordered card. No lift/shadow — hover gently lifts the surface toward
+   white and adds a faint ember hairline. */
 .card {
   position: relative;
   display: flex;
   flex-direction: column;
+  background-color: var(--surface-panel);
+  border: 1px solid transparent;
   transition:
-    transform 150ms ease,
-    border-color 150ms ease,
-    box-shadow 150ms ease;
+    background-color 150ms ease,
+    border-color 150ms ease;
 }
 
 .card:hover {
-  transform: translateY(-2px);
+  /* A whisper *brighter* than the resting panel — a gentle lift toward the page
+     white, but nowhere near full white (which read as a jarring "bleach"). The
+     ember hairline carries most of the hover cue. */
+  background-color: color-mix(
+    in srgb,
+    var(--surface-raised) 35%,
+    var(--surface-panel)
+  );
   border-color: var(--mantine-color-ember-outline);
-  box-shadow: var(--mantine-shadow-md);
 }
 
 /*
@@ -40,8 +50,4 @@
 .cardAction {
   position: relative;
   z-index: 1;
-}
-
-.empty {
-  border-style: dashed;
 }

@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Button,
-  Card,
   Group,
   Modal,
   Stack,
@@ -35,6 +34,7 @@ import {
   reorderDashboards,
   setDashboardPin,
 } from '~server/apps';
+import classes from './dashboards.module.css';
 
 export const Route = createFileRoute('/_app/dashboards')({
   loader: ({ context }) =>
@@ -143,91 +143,84 @@ function DashboardsManagePage() {
         </Button>
       }
     >
-      <Stack gap="xs">
+      <Stack gap={0}>
         <SortableList
           items={list}
           onReorder={(ids) => reorder.mutate(ids)}
           renderItem={(d) => (
-            <Card withBorder padding="sm" radius="md">
-              <Group justify="space-between" wrap="nowrap">
-                <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                  <IconGripVertical
-                    size={18}
-                    stroke={1.6}
-                    style={{
-                      cursor: 'grab',
-                      color: 'var(--mantine-color-dimmed)',
-                    }}
-                  />
-                  <ThemeIcon
-                    variant="light"
-                    color="ember"
-                    radius="md"
-                    size={34}
-                  >
-                    <IconLayoutDashboard size={18} stroke={1.6} />
-                  </ThemeIcon>
-                  <Text fw={600} truncate>
-                    {d.name}
-                  </Text>
-                </Group>
-                <Group gap={4} wrap="nowrap">
-                  <Tooltip
-                    label={d.pinned ? 'Pinned to sidebar' : 'Not pinned'}
-                    withArrow
-                  >
-                    <Switch
-                      size="sm"
-                      checked={d.pinned}
-                      onChange={(e) =>
-                        setPin.mutate({
-                          id: d.id,
-                          pinned: e.currentTarget.checked,
-                        })
-                      }
-                      aria-label="Pin to sidebar"
-                    />
-                  </Tooltip>
-                  <Tooltip label="Rename" withArrow>
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      onClick={() => {
-                        setRenameTarget(d);
-                        setRenameValue(d.name);
-                      }}
-                      aria-label="Rename dashboard"
-                    >
-                      <IconPencil size={17} stroke={1.7} />
-                    </ActionIcon>
-                  </Tooltip>
-                  <Tooltip label="Delete" withArrow>
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      disabled={list.length <= 1}
-                      onClick={() => confirmDelete(d)}
-                      aria-label="Delete dashboard"
-                    >
-                      <IconTrash size={17} stroke={1.7} />
-                    </ActionIcon>
-                  </Tooltip>
-                  <Button
-                    variant="light"
-                    size="xs"
-                    rightSection={<IconArrowRight size={15} stroke={1.8} />}
-                    onClick={() =>
-                      navigate({
-                        to: '/dashboard/$dashboardId',
-                        params: { dashboardId: d.id },
+            <div className={classes.row}>
+              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                <IconGripVertical
+                  size={18}
+                  stroke={1.6}
+                  style={{
+                    cursor: 'grab',
+                    color: 'var(--mantine-color-dimmed)',
+                  }}
+                />
+                <ThemeIcon variant="light" color="ember" radius="md" size={34}>
+                  <IconLayoutDashboard size={18} stroke={1.6} />
+                </ThemeIcon>
+                <Text fw={600} truncate>
+                  {d.name}
+                </Text>
+              </Group>
+              <Group gap={4} wrap="nowrap">
+                <Tooltip
+                  label={d.pinned ? 'Pinned to sidebar' : 'Not pinned'}
+                  withArrow
+                >
+                  <Switch
+                    size="sm"
+                    checked={d.pinned}
+                    onChange={(e) =>
+                      setPin.mutate({
+                        id: d.id,
+                        pinned: e.currentTarget.checked,
                       })
                     }
+                    aria-label="Pin to sidebar"
+                  />
+                </Tooltip>
+                <Tooltip label="Rename" withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    onClick={() => {
+                      setRenameTarget(d);
+                      setRenameValue(d.name);
+                    }}
+                    aria-label="Rename dashboard"
                   >
-                    Open
-                  </Button>
-                </Group>
+                    <IconPencil size={17} stroke={1.7} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="Delete" withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    disabled={list.length <= 1}
+                    onClick={() => confirmDelete(d)}
+                    aria-label="Delete dashboard"
+                  >
+                    <IconTrash size={17} stroke={1.7} />
+                  </ActionIcon>
+                </Tooltip>
+                <Button
+                  variant="light"
+                  size="xs"
+                  rightSection={<IconArrowRight size={15} stroke={1.8} />}
+                  onClick={() =>
+                    navigate({
+                      to: '/dashboard/$dashboardId',
+                      params: { dashboardId: d.id },
+                    })
+                  }
+                >
+                  Open
+                </Button>
               </Group>
-            </Card>
+            </div>
           )}
         />
       </Stack>

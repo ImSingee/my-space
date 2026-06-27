@@ -1,0 +1,16 @@
+/* Flat list row: a hairline separator between items instead of a stacked card
+   per row. Hover gives a quiet warm wash; the whole row is draggable. */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+  padding: 10px 12px;
+  border-radius: var(--mantine-radius-md);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  transition: background-color 120ms ease;
+}
+
+.row:hover {
+  background-color: var(--surface-panel);
+}

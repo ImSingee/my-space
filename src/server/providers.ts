@@ -171,6 +171,35 @@ export const createModel = createServerFn({ method: 'POST' })
     return { id: row.id };
   });
 
+const updateModelSchema = z.object({
+  id: z.string().min(1),
+  modelId: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  reasoning: z.boolean().optional(),
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+});
+
+export const updateModel = createServerFn({ method: 'POST' })
+  .validator((data: z.input<typeof updateModelSchema>) =>
+    updateModelSchema.parse(data),
+  )
+  .handler(async ({ data }) => {
+    const patch: Partial<typeof schema.agentModels.$inferInsert> = {};
+    if (data.modelId !== undefined) patch.modelId = data.modelId.trim();
+    if (data.name !== undefined) patch.name = data.name;
+    if (data.reasoning !== undefined) patch.reasoning = data.reasoning;
+    if (data.contextWindow !== undefined)
+      patch.contextWindow = data.contextWindow;
+    if (data.maxTokens !== undefined) patch.maxTokens = data.maxTokens;
+
+    await db
+      .update(schema.agentModels)
+      .set(patch)
+      .where(eq(schema.agentModels.id, data.id));
+    return { ok: true };
+  });
+
 export const deleteModel = createServerFn({ method: 'POST' })
   .validator((data: { id: string }) => z.object({ id: z.string() }).parse(data))
   .handler(async ({ data }) => {

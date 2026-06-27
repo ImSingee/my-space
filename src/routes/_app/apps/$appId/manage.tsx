@@ -2,8 +2,9 @@ import {
   ActionIcon,
   Anchor,
   Badge,
+  Box,
   Button,
-  Card,
+  Divider,
   Group,
   Menu,
   SimpleGrid,
@@ -224,71 +225,67 @@ function AppDetailPage() {
         </>
       }
     >
-      <Stack gap="md">
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-          <Card withBorder padding="lg">
-            <Text fw={600} mb="sm">
+      <Stack gap="xl">
+        <Box component="section">
+          <Group justify="space-between" align="center" mb="md" wrap="nowrap">
+            <Text fw={600} fz="lg">
               Overview
             </Text>
-            <Stack gap="xs">
-              <DetailRow label="Identifier" value={app.id} mono />
-              {app.currentSourceCommit ? (
-                <DetailRow
-                  label="Source commit"
-                  value={shortSha(app.currentSourceCommit)}
-                  mono
-                  copyValue={app.currentSourceCommit}
-                />
-              ) : null}
-              <DetailRow
-                label="Backend mode"
-                value={app.backendMode ?? 'none'}
-              />
-              <DetailRow
-                label="Database"
-                value={app.dbName ?? 'not provisioned'}
-                mono={Boolean(app.dbName)}
-              />
-              <DetailRow
-                label="Created"
-                value={dayjs(app.createdAt).format('YYYY-MM-DD HH:mm')}
-              />
-              <DetailRow
-                label="Updated"
-                value={dayjs(app.updatedAt).format('YYYY-MM-DD HH:mm')}
-              />
-            </Stack>
-          </Card>
-
-          <Card withBorder padding="lg">
-            <Text fw={600} mb="sm">
-              Capabilities
-            </Text>
             {enabledCapabilities.length > 0 ? (
-              <Group gap="xs">
+              <Group gap={6} wrap="wrap" justify="flex-end">
                 {enabledCapabilities.map((key) => (
                   <Badge key={key} variant="light" radius="sm" color="gray">
                     {CAPABILITY_LABELS[key]}
                   </Badge>
                 ))}
               </Group>
-            ) : (
-              <Text size="sm" c="dimmed">
-                Capabilities will be detected from the app manifest after its
-                first build.
-              </Text>
-            )}
-            <Text size="sm" c="dimmed" mt="lg">
-              Continue editing this app from the{' '}
-              <Anchor component={Link} to="/agent">
-                Agent
-              </Anchor>
-              .
-            </Text>
-          </Card>
-        </SimpleGrid>
+            ) : null}
+          </Group>
+
+          <SimpleGrid
+            cols={{ base: 2, sm: 3 }}
+            spacing="xl"
+            verticalSpacing="lg"
+          >
+            <Field label="Identifier" value={app.id} mono />
+            <Field label="Backend mode" value={app.backendMode ?? 'none'} />
+            <Field
+              label="Database"
+              value={app.dbName ?? 'not provisioned'}
+              mono={Boolean(app.dbName)}
+            />
+            {app.currentSourceCommit ? (
+              <Field
+                label="Source commit"
+                value={shortSha(app.currentSourceCommit)}
+                mono
+                copyValue={app.currentSourceCommit}
+              />
+            ) : null}
+            <Field
+              label="Created"
+              value={dayjs(app.createdAt).format('YYYY-MM-DD HH:mm')}
+            />
+            <Field
+              label="Updated"
+              value={dayjs(app.updatedAt).format('YYYY-MM-DD HH:mm')}
+            />
+          </SimpleGrid>
+
+          <Text size="sm" c="dimmed" mt="lg">
+            Continue editing this app from the{' '}
+            <Anchor component={Link} to="/agent">
+              Agent
+            </Anchor>
+            .
+          </Text>
+        </Box>
+
+        <Divider />
 
         <OperationsPanel appId={app.id} />
+
+        <Divider />
 
         <DeploymentHistory appId={app.id} />
       </Stack>
@@ -298,7 +295,9 @@ function AppDetailPage() {
 
 const shortSha = (sha: string) => sha.slice(0, 7);
 
-function DetailRow({
+/** Stacked label/value pair: a small dimmed label above its value. Reads as a
+ * clean definition grid without any box chrome. */
+function Field({
   label,
   value,
   mono,
@@ -311,8 +310,8 @@ function DetailRow({
   copyValue?: string;
 }) {
   return (
-    <Group justify="space-between" gap="md" wrap="nowrap">
-      <Text size="sm" c="dimmed">
+    <Stack gap={3} style={{ minWidth: 0 }}>
+      <Text size="xs" c="dimmed">
         {label}
       </Text>
       {copyValue ? (
@@ -322,7 +321,7 @@ function DetailRow({
               copy(copyValue);
               toast.success('Copied');
             }}
-            style={{ minWidth: 0 }}
+            style={{ minWidth: 0, maxWidth: 'fit-content' }}
           >
             <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
               {value}
@@ -334,6 +333,6 @@ function DetailRow({
           {value}
         </Text>
       )}
-    </Group>
+    </Stack>
   );
 }

@@ -157,19 +157,20 @@ const amberColors: MantineColorsTuple = [
   '#F59E0B',
 ];
 // Terracotta / burnt-sienna brand ramp for the warm "ember" theme.
-// Shade 6 (#c2410c) is the primary fill: ~6.4:1 contrast with white text.
+// Shade 6 (#ea580c, orange-600) is the primary fill; it reads as a confident,
+// warm orange (not brick-red). Hover/active darken to shade 7 (#c2410c).
 const emberColors: MantineColorsTuple = [
-  '#fdf4ef',
-  '#f9e3d5',
-  '#f1c3a6',
-  '#e9a173',
-  '#e08247',
-  '#d96a28',
+  '#fff5ec',
+  '#ffe6d2',
+  '#fdcba3',
+  '#fcae72',
+  '#fa9147',
+  '#f4741d',
+  '#ea580c',
   '#c2410c',
-  '#9c3614',
+  '#9a3412',
   '#7c2d12',
-  '#5c2110',
-  '#C2410C',
+  '#ea580c',
 ];
 const yellowColors: MantineColorsTuple = [
   '#fefce8',

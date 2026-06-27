@@ -6,6 +6,7 @@ import {
   Stack,
   Text,
   TextInput,
+  Title,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router';
@@ -76,15 +77,20 @@ function LoginPage() {
     <div className={classes.root}>
       <div className={classes.panel}>
         <Stack gap="xl">
-          <Stack gap={6} align="center">
-            <Brand size="lg" />
-            <Text c="dimmed" size="sm" ta="center">
-              Spin up your own apps just by talking to AI.
-            </Text>
+          <Stack gap="md" align="center">
+            <Brand size="lg" withWordmark={false} />
+            <Stack gap={6} align="center">
+              <Title order={2} ta="center">
+                {mode === 'signin' ? 'Welcome back' : 'Create your account'}
+              </Title>
+              <Text c="dimmed" size="sm" ta="center" maw={300}>
+                Spin up your own apps just by talking to AI.
+              </Text>
+            </Stack>
           </Stack>
 
-          <Paper withBorder radius="lg" p="xl" shadow="sm">
-            <Stack gap="md">
+          <Paper withBorder radius="lg" p="xl" className={classes.card}>
+            <Stack gap="lg">
               <SegmentedControl
                 fullWidth
                 value={mode}
@@ -95,7 +101,7 @@ function LoginPage() {
                 ]}
               />
               <form onSubmit={submit}>
-                <Stack gap="sm">
+                <Stack gap="md">
                   {mode === 'signup' ? (
                     <TextInput
                       label="Name"
@@ -113,13 +119,25 @@ function LoginPage() {
                     placeholder="••••••••"
                     {...form.getInputProps('password')}
                   />
-                  <Button type="submit" loading={loading} mt="xs" fullWidth>
+                  <Button
+                    type="submit"
+                    loading={loading}
+                    mt="xs"
+                    fullWidth
+                    size="md"
+                  >
                     {mode === 'signin' ? 'Sign in' : 'Create account'}
                   </Button>
                 </Stack>
               </form>
             </Stack>
           </Paper>
+
+          <Text c="dimmed" size="xs" ta="center">
+            {mode === 'signin'
+              ? 'New here? Switch to Create account above.'
+              : 'Already have an account? Switch to Sign in above.'}
+          </Text>
         </Stack>
       </div>
     </div>

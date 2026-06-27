@@ -5,14 +5,39 @@
   padding: 24px;
   background:
     radial-gradient(
-      60% 50% at 50% 0%,
+      72% 56% at 50% -8%,
       var(--mantine-color-ember-light) 0%,
-      transparent 70%
+      transparent 64%
     ),
     var(--mantine-color-body);
 }
 
 .panel {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
+  animation: panel-rise 480ms
+    var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)) both;
+}
+
+/* The auth card is the one raised surface on an otherwise flat screen, so it
+   keeps a soft shadow even though editorial cards elsewhere stay flat. */
+.card {
+  box-shadow: var(--mantine-shadow-md);
+}
+
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
 }

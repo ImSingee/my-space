@@ -1,3 +1,21 @@
+/* Flat provider blocks separated by hairlines — no card framing. */
+.providerList {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider {
+  padding-block: var(--mantine-spacing-lg);
+}
+
+.provider:first-child {
+  padding-top: 0;
+}
+
+.provider:not(:first-child) {
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
 .providerHead {
   display: flex;
   align-items: flex-start;
@@ -13,9 +31,7 @@
 }
 
 .models {
-  margin-top: var(--mantine-spacing-md);
-  border-top: 1px solid var(--mantine-color-default-border);
-  padding-top: var(--mantine-spacing-xs);
+  margin-top: var(--mantine-spacing-sm);
 }
 
 .modelRow {
@@ -30,23 +46,36 @@
   background-color: var(--mantine-color-default-hover);
 }
 
-.modelName {
+/* Name + id sit together on the left; the id trails the name (not the far
+   right edge). The group takes the row's free space so actions stay right. */
+.modelMain {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
 }
 
-.modelRemove {
+.modelName {
+  flex: 0 0 auto;
+}
+
+.modelId {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* Edit/remove actions stay hidden until the row is hovered or focused, keeping
+   the list calm. */
+.modelActions {
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
-.modelRow:hover .modelRemove,
-.modelRemove:focus-visible {
+.modelRow:hover .modelActions,
+.modelActions:focus-within {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .modelRemove {
+  .modelActions {
     opacity: 1;
   }
 }

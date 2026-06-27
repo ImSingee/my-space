@@ -43,32 +43,35 @@ function AppsPage() {
       }
     >
       {apps.length === 0 ? (
-        <Card withBorder padding={0} className={classes.empty}>
-          <Stack align="center" gap="xs" py={64} px="md">
-            <ThemeIcon size={52} radius="xl" variant="light" color="ember">
-              <IconStack2 size={26} stroke={1.5} />
-            </ThemeIcon>
-            <Text fw={600} mt="xs">
-              No apps yet
-            </Text>
-            <Text size="sm" c="dimmed" ta="center" maw={440}>
-              Open the Agent and describe what you want — a tracker, a CRM, a
-              dashboard — and it will scaffold, build, and deploy it here.
-            </Text>
-            <Button
-              component={Link}
-              to="/agent"
-              mt="md"
-              leftSection={<IconPlus size={16} stroke={1.8} />}
-            >
-              Build your first app
-            </Button>
-          </Stack>
-        </Card>
+        <Stack align="center" gap="xs" py={80} px="md">
+          <ThemeIcon size={52} radius="xl" variant="light" color="ember">
+            <IconStack2 size={26} stroke={1.5} />
+          </ThemeIcon>
+          <Text fw={600} mt="xs">
+            No apps yet
+          </Text>
+          <Text size="sm" c="dimmed" ta="center" maw={440}>
+            Open the Agent and describe what you want — a tracker, a CRM, a
+            dashboard — and it will scaffold, build, and deploy it here.
+          </Text>
+          <Button
+            component={Link}
+            to="/agent"
+            mt="md"
+            leftSection={<IconPlus size={16} stroke={1.8} />}
+          >
+            Build your first app
+          </Button>
+        </Stack>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
           {apps.map((app) => (
-            <Card key={app.id} withBorder padding="lg" className={classes.card}>
+            <Card
+              key={app.id}
+              padding="lg"
+              radius="lg"
+              className={classes.card}
+            >
               <Group
                 justify="space-between"
                 wrap="nowrap"

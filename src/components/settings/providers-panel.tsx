@@ -1,10 +1,7 @@
 import {
   ActionIcon,
-  Avatar,
   Badge,
   Button,
-  Card,
-  Code,
   Group,
   Menu,
   Modal,
@@ -17,9 +14,11 @@ import {
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
+import { Claude, OpenAI } from '@lobehub/icons';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
+import { useState } from 'react';
 import {
   useMutation,
   useQueryClient,
@@ -27,6 +26,7 @@ import {
 } from '@tanstack/react-query';
 import {
   IconDotsVertical,
+  IconPencil,
   IconPlus,
   IconRobot,
   IconTrash,
@@ -38,7 +38,9 @@ import {
   createProvider,
   deleteModel,
   deleteProvider,
+  updateModel,
   updateProvider,
+  type ProviderModel,
   type ProviderWithModels,
 } from '~server/providers';
 import classes from './providers-panel.module.css';
@@ -49,9 +51,28 @@ const API_TYPE_OPTIONS = [
   { value: 'openai-completions', label: 'OpenAI Completions' },
 ];
 
-const API_TYPE_LABEL: Record<string, string> = Object.fromEntries(
-  API_TYPE_OPTIONS.map((o) => [o.value, o.label]),
-);
+const PROVIDER_AVATAR_SIZE = 40;
+
+/** Official brand avatar chosen by API protocol: OpenAI for openai-*, Claude
+ * for anthropic-messages, a neutral fallback otherwise. */
+function ProviderAvatar({ apiType }: { apiType: string }) {
+  if (apiType === 'anthropic-messages') {
+    return <Claude.Avatar size={PROVIDER_AVATAR_SIZE} />;
+  }
+  if (apiType.startsWith('openai')) {
+    return <OpenAI.Avatar size={PROVIDER_AVATAR_SIZE} type="gpt5" />;
+  }
+  return (
+    <ThemeIcon
+      size={PROVIDER_AVATAR_SIZE}
+      radius="xl"
+      variant="light"
+      color="ember"
+    >
+      <IconRobot size={22} stroke={1.5} />
+    </ThemeIcon>
+  );
+}
 
 function baseUrlHint(apiType: string): string {
   switch (apiType) {
@@ -188,32 +209,43 @@ function ModelFormModal({
   opened,
   onClose,
   providerId,
+  model,
 }: {
   opened: boolean;
   onClose: () => void;
   providerId: string;
+  model?: ProviderModel;
 }) {
   const qc = useQueryClient();
+  const editing = Boolean(model);
   const form = useForm<ModelFormValues>({
     initialValues: {
-      modelId: '',
-      name: '',
-      reasoning: false,
-      contextWindow: 128000,
-      maxTokens: 8192,
+      modelId: model?.modelId ?? '',
+      name: model?.name ?? '',
+      reasoning: model?.reasoning ?? false,
+      contextWindow: model?.contextWindow ?? 128000,
+      maxTokens: model?.maxTokens ?? 8192,
     },
     validate: {
       modelId: (v) => (v.trim() ? null : 'Required'),
-      name: (v) => (v.trim() ? null : 'Required'),
     },
   });
 
   const mutation = useMutation({
-    mutationFn: (values: ModelFormValues) =>
-      createModel({ data: { providerId, ...values, input: ['text'] } }),
+    mutationFn: async (values: ModelFormValues) => {
+      // Display name is optional: fall back to the model ID when left blank.
+      const name = values.name.trim() || values.modelId.trim();
+      if (model) {
+        await updateModel({ data: { id: model.id, ...values, name } });
+        return;
+      }
+      await createModel({
+        data: { providerId, ...values, name, input: ['text'] },
+      });
+    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: providersQueryOptions.queryKey });
-      toast.success('Model added');
+      toast.success(editing ? 'Model updated' : 'Model added');
       form.reset();
       onClose();
     },
@@ -221,7 +253,12 @@ function ModelFormModal({
   });
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Add model" centered>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={editing ? 'Edit model' : 'Add model'}
+      centered
+    >
       <form onSubmit={form.onSubmit((values) => mutation.mutate(values))}>
         <Stack gap="sm">
           <TextInput
@@ -232,7 +269,8 @@ function ModelFormModal({
           />
           <TextInput
             label="Display name"
-            placeholder="GPT-5.5"
+            description="Optional — defaults to the model ID"
+            placeholder={form.values.modelId.trim() || 'GPT-5.5'}
             {...form.getInputProps('name')}
           />
           <Group grow>
@@ -261,7 +299,7 @@ function ModelFormModal({
               Cancel
             </Button>
             <Button type="submit" loading={mutation.isPending}>
-              Add model
+              {editing ? 'Save' : 'Add model'}
             </Button>
           </Group>
         </Stack>
@@ -273,7 +311,10 @@ function ModelFormModal({
 function ProviderCard({ provider }: { provider: ProviderWithModels }) {
   const qc = useQueryClient();
   const [editOpen, editHandlers] = useDisclosure(false);
-  const [modelOpen, modelHandlers] = useDisclosure(false);
+  // null = closed, 'new' = add model, ProviderModel = edit that model.
+  const [modelTarget, setModelTarget] = useState<ProviderModel | 'new' | null>(
+    null,
+  );
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: providersQueryOptions.queryKey });
@@ -301,20 +342,15 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
   });
 
   return (
-    <Card radius="md">
+    <div className={classes.provider}>
       <div className={classes.providerHead}>
         <Group className={classes.providerInfo} wrap="nowrap" gap="sm">
-          <Avatar variant="light" color="ember" size={42} radius="md">
-            {provider.name.slice(0, 1).toUpperCase()}
-          </Avatar>
+          <ProviderAvatar apiType={provider.apiType} />
           <Stack gap={3} style={{ minWidth: 0 }}>
             <Group gap="xs" wrap="nowrap">
               <Text fw={600} truncate>
                 {provider.name}
               </Text>
-              <Badge variant="light" size="sm" color="gray">
-                {API_TYPE_LABEL[provider.apiType] ?? provider.apiType}
-              </Badge>
               {provider.enabled ? null : (
                 <Badge variant="default" size="sm">
                   Off
@@ -322,7 +358,7 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
               )}
             </Group>
             <Text size="xs" c="dimmed" truncate>
-              {provider.baseUrl} · key {provider.apiKeyPreview}
+              {provider.baseUrl}
             </Text>
           </Stack>
         </Group>
@@ -381,30 +417,41 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
           <Stack gap={2}>
             {provider.models.map((m) => (
               <div key={m.id} className={classes.modelRow}>
-                <Group className={classes.modelName} gap="xs" wrap="nowrap">
-                  <Text size="sm" fw={500} truncate>
+                <Group gap="sm" wrap="nowrap" className={classes.modelMain}>
+                  <Text size="sm" fw={500} className={classes.modelName}>
                     {m.name}
                   </Text>
-                  {m.reasoning ? (
-                    <Badge size="xs" variant="light" color="ember">
-                      reasoning
-                    </Badge>
-                  ) : null}
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    ff="monospace"
+                    truncate
+                    visibleFrom="xs"
+                    className={classes.modelId}
+                  >
+                    {m.modelId}
+                  </Text>
                 </Group>
-                <Code visibleFrom="xs">{m.modelId}</Code>
-                <Text size="xs" c="dimmed" visibleFrom="sm">
-                  {m.contextWindow.toLocaleString()} ctx
-                </Text>
-                <ActionIcon
-                  className={classes.modelRemove}
-                  variant="subtle"
-                  color="red"
-                  size="sm"
-                  aria-label="Remove model"
-                  onClick={() => removeModel.mutate(m.id)}
-                >
-                  <IconTrash size={15} stroke={1.6} />
-                </ActionIcon>
+                <Group gap={2} wrap="nowrap" className={classes.modelActions}>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="sm"
+                    aria-label="Edit model"
+                    onClick={() => setModelTarget(m)}
+                  >
+                    <IconPencil size={15} stroke={1.6} />
+                  </ActionIcon>
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    size="sm"
+                    aria-label="Remove model"
+                    onClick={() => removeModel.mutate(m.id)}
+                  >
+                    <IconTrash size={15} stroke={1.6} />
+                  </ActionIcon>
+                </Group>
               </div>
             ))}
           </Stack>
@@ -420,7 +467,7 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
             variant="subtle"
             color="gray"
             leftSection={<IconPlus size={14} stroke={2} />}
-            onClick={modelHandlers.open}
+            onClick={() => setModelTarget('new')}
           >
             Add model
           </Button>
@@ -433,11 +480,13 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
         provider={provider}
       />
       <ModelFormModal
-        opened={modelOpen}
-        onClose={modelHandlers.close}
+        key={modelTarget && modelTarget !== 'new' ? modelTarget.id : 'new'}
+        opened={modelTarget !== null}
+        onClose={() => setModelTarget(null)}
         providerId={provider.id}
+        model={modelTarget && modelTarget !== 'new' ? modelTarget : undefined}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -450,36 +499,34 @@ export function ProvidersPanel({
 
   if (providers.length === 0) {
     return (
-      <Card withBorder padding={0} radius="md">
-        <Stack align="center" gap="xs" py={64} px="md">
-          <ThemeIcon size={52} radius="xl" variant="light" color="ember">
-            <IconRobot size={26} stroke={1.5} />
-          </ThemeIcon>
-          <Text fw={600} mt="xs">
-            No providers yet
-          </Text>
-          <Text size="sm" c="dimmed" ta="center" maw={420}>
-            Add an LLM provider — Anthropic, OpenAI, or any compatible endpoint
-            — and its models so the Agent can start building apps.
-          </Text>
-          <Button
-            type="button"
-            mt="md"
-            leftSection={<IconPlus size={16} stroke={1.8} />}
-            onClick={onAddProvider}
-          >
-            Add provider
-          </Button>
-        </Stack>
-      </Card>
+      <Stack align="center" gap="xs" py={64} px="md">
+        <ThemeIcon size={52} radius="xl" variant="light" color="ember">
+          <IconRobot size={26} stroke={1.5} />
+        </ThemeIcon>
+        <Text fw={600} mt="xs">
+          No providers yet
+        </Text>
+        <Text size="sm" c="dimmed" ta="center" maw={420}>
+          Add an LLM provider — Anthropic, OpenAI, or any compatible endpoint —
+          and its models so the Agent can start building apps.
+        </Text>
+        <Button
+          type="button"
+          mt="md"
+          leftSection={<IconPlus size={16} stroke={1.8} />}
+          onClick={onAddProvider}
+        >
+          Add provider
+        </Button>
+      </Stack>
     );
   }
 
   return (
-    <Stack gap="md">
+    <div className={classes.providerList}>
       {providers.map((p) => (
         <ProviderCard key={p.id} provider={p} />
       ))}
-    </Stack>
+    </div>
   );
 }

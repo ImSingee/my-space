@@ -2,7 +2,6 @@ import {
   Badge,
   Box,
   Button,
-  Card,
   Center,
   Code,
   Collapse,
@@ -24,7 +23,6 @@ import {
   IconDownload,
   IconFileZip,
   IconGitCommit,
-  IconHistory,
   IconLoader,
   IconRestore,
   IconTag,
@@ -55,7 +53,7 @@ const STATUS_META: Record<
     icon: <IconLoader size={11} stroke={2.5} />,
   },
   deployed: {
-    color: 'teal',
+    color: 'ember',
     label: 'Deployed',
     icon: <IconCheck size={11} stroke={2.5} />,
   },
@@ -296,10 +294,11 @@ export function DeploymentHistory({ appId }: { appId: string }) {
   const deployments = query.data ?? [];
 
   return (
-    <Card withBorder padding="lg">
-      <Group gap="xs" mb="md">
-        <IconHistory size={18} stroke={1.8} />
-        <Text fw={600}>Deployment history</Text>
+    <Box component="section">
+      <Group gap="sm" mb="md" align="center">
+        <Text fw={600} fz="lg">
+          Deployment history
+        </Text>
         {deployments.length > 0 ? (
           <Badge size="sm" variant="default" radius="sm">
             {deployments.length}
@@ -336,6 +335,6 @@ export function DeploymentHistory({ appId }: { appId: string }) {
           ))}
         </Timeline>
       )}
-    </Card>
+    </Box>
   );
 }

@@ -1,8 +1,8 @@
 import {
   ActionIcon,
   Badge,
+  Box,
   Button,
-  Card,
   Center,
   Code,
   Group,
@@ -14,7 +14,6 @@ import {
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  IconBolt,
   IconClock,
   IconCopy,
   IconDatabaseCog,
@@ -89,11 +88,14 @@ export function OperationsPanel({ appId }: { appId: string }) {
 
   if (query.isLoading) {
     return (
-      <Card withBorder padding="lg">
+      <Box component="section">
+        <Text fw={600} fz="lg" mb="md">
+          Operations
+        </Text>
         <Center py="lg">
           <Loader size="sm" />
         </Center>
-      </Card>
+      </Box>
     );
   }
 
@@ -109,11 +111,10 @@ export function OperationsPanel({ appId }: { appId: string }) {
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
 
   return (
-    <Card withBorder padding="lg">
-      <Group gap="xs" mb="md">
-        <IconBolt size={18} stroke={1.8} />
-        <Text fw={600}>Operations</Text>
-      </Group>
+    <Box component="section">
+      <Text fw={600} fz="lg" mb="md">
+        Operations
+      </Text>
 
       {!anyEnabled ? (
         <Text size="sm" c="dimmed">
@@ -136,7 +137,7 @@ export function OperationsPanel({ appId }: { appId: string }) {
                       size="sm"
                       variant="dot"
                       radius="sm"
-                      color={ops.backend.running ? 'teal' : 'gray'}
+                      color={ops.backend.running ? 'ember' : 'gray'}
                     >
                       {ops.backend.running ? 'running' : 'idle'}
                     </Badge>
@@ -292,6 +293,6 @@ export function OperationsPanel({ appId }: { appId: string }) {
           ) : null}
         </Stack>
       )}
-    </Card>
+    </Box>
   );
 }
