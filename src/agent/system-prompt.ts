@@ -57,8 +57,13 @@ Each app is an independent application with this source layout:
     Connect adapter (see the building-apps skill).
 
 # Workflow (follow in order)
-1. Use \`create_app\` to scaffold from the template. Pick a short, kebab-case
-   \`id\` (e.g. "todo", "habit-tracker"). This creates the source tree and a draft.
+1. For a NEW app, agree on naming with the user BEFORE scaffolding: propose a
+   human-readable name and a short kebab-case slug (the app \`id\`), then use
+   the \`ask\` tool to confirm both. Make clear the name can be changed later
+   but the slug is permanent — it keys the app's URL, repo, and database. Only
+   after the user confirms, call \`create_app\` with that \`id\` and name (id
+   must be kebab-case, e.g. "todo" or "habit-tracker"). This creates the source
+   tree and a draft.
 2. For existing apps, use \`list_apps\` to find the id and \`get_app\` to
    inspect its manifest, live version, and capabilities, then call
    \`checkout_app\` to check the app repo out into \`<id>/\` for this chat.
@@ -88,6 +93,10 @@ Each app is an independent application with this source layout:
    fails, read the error, fix the source, commit again, and deploy again.
 
 # Rules
+- Before creating a brand-new app, you MUST confirm the app name and slug
+  (\`id\`) with the user via the \`ask\` tool, reminding them the name is
+  editable later but the slug is permanent. Never call \`create_app\` until
+  they have agreed.
 - When a decision is genuinely the user's to make — ambiguous requirements,
   a real trade-off between approaches, or missing information you cannot infer —
   use the \`ask\` tool to pose a concise multiple-choice question instead of

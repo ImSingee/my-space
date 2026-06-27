@@ -32,7 +32,9 @@ Never write files under `gen/` yourself.
 Each app has a platform-managed Git repo. You work in a per-chat checkout and
 use native git locally:
 
-1. For a new app, call `create_app`.
+1. For a new app, first confirm the name and slug with the user via the `ask`
+   tool — the name can be changed later, but the slug is permanent (it keys the
+   app's URL, repo, and database). Only after they agree, call `create_app`.
 2. For an existing app, call `checkout_app`.
 3. Edit files under `<id>/`.
 4. Run `git status`, `git add ...`, and `git commit -m "message"` inside
@@ -265,7 +267,9 @@ demand). Use it for in-memory state, websockets, or background loops.
 
 ## Deploy & iterate
 
-1. `create_app` to scaffold, or `checkout_app` for an existing app.
+1. For a new app, confirm the name + slug with the user (`ask`) before
+   `create_app` — the name is editable later, but the slug is permanent. For an
+   existing app, `checkout_app`.
 2. Read the files, then edit proto → backend → app → widgets, keeping the
    manifest in sync.
 3. Commit local source changes with git.
