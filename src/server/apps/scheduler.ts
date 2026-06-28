@@ -8,12 +8,14 @@ type SchedulerGlobal = typeof globalThis & {
   __hatchScheduler__?: {
     timers: Map<string, ReturnType<typeof setTimeout>>;
     started: boolean;
+    /** Bumped on every clear/reload to invalidate in-flight reschedules. */
+    generation: number;
   };
 };
 
 function state() {
   const g = globalThis as SchedulerGlobal;
-  g.__hatchScheduler__ ??= { timers: new Map(), started: false };
+  g.__hatchScheduler__ ??= { timers: new Map(), started: false, generation: 0 };
   return g.__hatchScheduler__;
 }
 
@@ -87,6 +89,10 @@ async function fire(appId: string, job: CronJob): Promise<void> {
 
 function scheduleOne(appId: string, job: CronJob): void {
   const s = state();
+  // Capture the generation this timer belongs to. A clearAll()/reload bumps the
+  // generation, so a fire() that was already in flight when the reload happened
+  // must not re-add a timer for a job that may no longer exist.
+  const gen = s.generation;
   const key = jobKey(appId, job.name);
   const existing = s.timers.get(key);
   if (existing) clearTimeout(existing);
@@ -108,10 +114,13 @@ function scheduleOne(appId: string, job: CronJob): void {
   const maxDelay = 6 * 60 * 60 * 1000;
   const delay = Math.min(Math.max(next.getTime() - Date.now(), 1000), maxDelay);
   const timer = setTimeout(() => {
+    if (s.generation !== gen) return;
     const reached = nextRun(spec, new Date(Date.now() - 60_000));
     const due = !reached || reached.getTime() <= Date.now() + 1000;
     if (due) {
-      void fire(appId, job).finally(() => scheduleOne(appId, job));
+      void fire(appId, job).finally(() => {
+        if (s.generation === gen) scheduleOne(appId, job);
+      });
     } else {
       scheduleOne(appId, job);
     }
@@ -122,6 +131,8 @@ function scheduleOne(appId: string, job: CronJob): void {
 
 function clearAll(): void {
   const s = state();
+  // Invalidate any reschedule that a still-running fire() might attempt.
+  s.generation++;
   for (const timer of s.timers.values()) clearTimeout(timer);
   s.timers.clear();
 }

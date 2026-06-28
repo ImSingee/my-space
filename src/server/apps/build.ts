@@ -108,6 +108,16 @@ export async function buildApp(
   try {
     const manifest = await readManifest(src);
 
+    // The manifest id drives every generated URL (app/widget/RPC/storage), but
+    // artifacts and the DB row are keyed by the `id` argument. If they diverge,
+    // the deploy "succeeds" with URLs pointing at a different slug. Reject early.
+    if (manifest.id !== id) {
+      throw new Error(
+        `manifest.id "${manifest.id}" does not match the app id "${id}". ` +
+          'Fix manifest.json so its id matches the app.',
+      );
+    }
+
     // Fresh output directory.
     await fs.rm(out, { recursive: true, force: true });
     await fs.mkdir(out, { recursive: true });

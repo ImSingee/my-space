@@ -15,8 +15,9 @@ import {
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
+import type { NormalizedManifest } from './manifest';
 import { dropAppDatabase } from './provision';
-import { stopApp } from './runtime';
+import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
 
 async function pathExists(p: string): Promise<boolean> {
@@ -178,7 +179,7 @@ export async function rollbackApp(
     deployment.sourceTag,
   );
 
-  const manifest = deployment.manifestNormalized as { name?: string } | null;
+  const manifest = deployment.manifestNormalized as NormalizedManifest | null;
   await db
     .update(schema.apps)
     .set({
@@ -186,11 +187,32 @@ export async function rollbackApp(
       currentDeploymentId: deployment.id,
       currentSourceCommit: sourceCommit,
       name: manifest?.name ?? app.name,
+      // Restore the rolled-back version's full metadata too. Otherwise the row
+      // keeps the newer deployment's capabilities/backendMode/description — e.g.
+      // the cron scheduler reads app.capabilities.cron and would skip jobs the
+      // restored version actually defines (mirrors what the deploy path writes).
+      description: manifest?.description || null,
+      capabilities: manifest?.capabilities ?? app.capabilities,
+      backendMode: manifest?.backendMode ?? app.backendMode,
+      manifest: deployment.manifestNormalized ?? app.manifest,
     })
     .where(eq(schema.apps.id, id));
 
-  // Force the backend to restart from the restored build.
+  // Force the backend to restart from the restored build, then re-apply the
+  // keep-alive contract for the *restored* manifest: rolling back to/from a
+  // long-running backend must flip warm-start accordingly (stopApp cleared it).
   stopApp(id);
+  const longRunning =
+    manifest?.backendMode === 'long-running' &&
+    Boolean(manifest?.capabilities?.backend);
+  if (longRunning) {
+    setKeepAlive(id, true);
+    try {
+      await ensureAppRunning(id);
+    } catch {
+      /* warm-start is best-effort; requests will retry the boot */
+    }
+  }
   // Reload schedules from the restored deployment's manifest.
   await reloadScheduler();
   return { version: deployment.version };

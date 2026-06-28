@@ -41,7 +41,35 @@ function workspaceRelative(p: string): string {
   return path.relative(WORKSPACE_ROOT, p).split(path.sep).join('/');
 }
 
-export async function deployApp(
+const appDeployChains = new Map<string, Promise<unknown>>();
+
+/** Run `fn` only after any in-flight deploy for the same app id has settled. */
+function withAppDeployLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prev = appDeployChains.get(id) ?? Promise.resolve();
+  // Chain regardless of the previous deploy's outcome — a failed deploy must not
+  // wedge later attempts for the same app.
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => {});
+  appDeployChains.set(id, tail);
+  void tail.finally(() => {
+    if (appDeployChains.get(id) === tail) appDeployChains.delete(id);
+  });
+  return run;
+}
+
+/**
+ * Build + record a deployment and flip the app live. Serialized per app so two
+ * concurrent deploys can't both read the same latest version, assign the same
+ * next version, and force-move the same `deploy/v<n>` tag onto different commits.
+ */
+export function deployApp(
+  id: string,
+  options: DeployAppOptions,
+): Promise<DeployResult> {
+  return withAppDeployLock(id, () => deployAppInner(id, options));
+}
+
+async function deployAppInner(
   id: string,
   options: DeployAppOptions,
 ): Promise<DeployResult> {
@@ -69,6 +97,9 @@ export async function deployApp(
   // Tracked so a failure after tagging can remove the tag (keeps Git history
   // free of failed attempts, mirroring the deployments table).
   let publishedTag: string | undefined;
+  // Once the deployment row exists it references `publishedTag` as its
+  // sourceTag, so a later failure must NOT delete that tag (rollback needs it).
+  let recorded = false;
 
   try {
     await db
@@ -124,6 +155,7 @@ export async function deployApp(
       artifactPath: workspaceRelative(artifact),
       buildLog: build.log,
     });
+    recorded = true;
 
     await db
       .update(schema.apps)
@@ -157,8 +189,11 @@ export async function deployApp(
       }
     }
 
-    // Pick up cron schedule changes from the new deployment.
-    await reloadScheduler();
+    // Pick up cron schedule changes from the new deployment. This is best-effort
+    // post-commit work: the release is already recorded and live, so a reload
+    // failure must neither fail the deploy nor trip the cleanup path below (which
+    // would delete this recorded deployment's source tag).
+    await reloadScheduler().catch(() => {});
 
     return {
       deploymentId,
@@ -167,20 +202,21 @@ export async function deployApp(
       log: build.log,
     };
   } catch (error) {
-    // The deploy failed before any release was recorded, so history stays clean.
-    // If we already created the version tag, remove it so a failed attempt
-    // leaves no Git trace (the next attempt reuses this version number).
-    if (publishedTag) {
+    // Only remove the version tag for a release that was never recorded — once a
+    // deployment row exists it references this tag, so deleting it would strand
+    // that row's sourceTag and break rollback to this version.
+    if (publishedTag && !recorded) {
       await deleteDeploymentTag(id, publishedTag).catch(() => {});
     }
-    // Restore the app's status: an archived app must stay archived (a failed
-    // redeploy must not silently re-enable it), one that already has a live
-    // deployment keeps serving it, and a never-deployed app is marked failed.
+    // Restore the app's status: a recorded release stays deployed; otherwise an
+    // archived app stays archived (a failed redeploy must not re-enable it), one
+    // with a live deployment keeps serving it, and a never-deployed app fails.
     await db
       .update(schema.apps)
       .set({
-        status:
-          app.status === 'archived'
+        status: recorded
+          ? 'deployed'
+          : app.status === 'archived'
             ? 'archived'
             : app.currentDeploymentId
               ? 'deployed'

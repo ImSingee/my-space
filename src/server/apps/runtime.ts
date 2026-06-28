@@ -16,6 +16,8 @@ type RunningBackend = {
 
 type RuntimeGlobal = typeof globalThis & {
   __hatchAppRuntime__?: Map<string, RunningBackend>;
+  __hatchAppStarting__?: Map<string, Promise<number>>;
+  __hatchAppStopEpoch__?: Map<string, number>;
   __hatchAppKeepAlive__?: Set<string>;
   __hatchAppCleanup__?: boolean;
 };
@@ -24,6 +26,31 @@ function registry(): Map<string, RunningBackend> {
   const g = globalThis as RuntimeGlobal;
   g.__hatchAppRuntime__ ??= new Map<string, RunningBackend>();
   return g.__hatchAppRuntime__;
+}
+
+/** In-flight cold starts, so concurrent callers coalesce onto one process. */
+function startingRegistry(): Map<string, Promise<number>> {
+  const g = globalThis as RuntimeGlobal;
+  g.__hatchAppStarting__ ??= new Map<string, Promise<number>>();
+  return g.__hatchAppStarting__;
+}
+
+/**
+ * Monotonic per-app counter bumped by {@link stopApp}. A cold start captures the
+ * epoch when it begins and refuses to register (and kills) its process if the
+ * epoch changed meanwhile — i.e. a stop/redeploy happened during startup — so a
+ * stale build is never left serving or orphaned.
+ */
+function stopEpoch(id: string): number {
+  const g = globalThis as RuntimeGlobal;
+  g.__hatchAppStopEpoch__ ??= new Map<string, number>();
+  return g.__hatchAppStopEpoch__.get(id) ?? 0;
+}
+
+function bumpStopEpoch(id: string): void {
+  const g = globalThis as RuntimeGlobal;
+  g.__hatchAppStopEpoch__ ??= new Map<string, number>();
+  g.__hatchAppStopEpoch__.set(id, (g.__hatchAppStopEpoch__.get(id) ?? 0) + 1);
 }
 
 function keepAliveSet(): Set<string> {
@@ -119,6 +146,30 @@ export async function ensureAppRunning(id: string): Promise<number> {
     reg.delete(id);
   }
 
+  // Coalesce concurrent cold starts. Without this, two requests that both find
+  // an empty registry each spawn a backend and the second `reg.set()` orphans
+  // the first process so `stopApp()` can never kill it. The first caller records
+  // a pending-start promise that later callers await instead of starting again.
+  const starting = startingRegistry();
+  const pending = starting.get(id);
+  if (pending) return pending;
+
+  const startPromise = startBackend(id);
+  starting.set(id, startPromise);
+  try {
+    return await startPromise;
+  } finally {
+    // Only clear our own entry: a stopApp() during startup deletes this entry
+    // and a later ensureAppRunning() may register a fresh one we must not drop.
+    if (starting.get(id) === startPromise) starting.delete(id);
+  }
+}
+
+async function startBackend(id: string): Promise<number> {
+  const reg = registry();
+  // Snapshot the stop epoch: if stopApp() runs while we're spawning, we abort
+  // instead of registering/serving a build the caller has since superseded.
+  const epoch = stopEpoch(id);
   const buildDir = appBuildDir(id);
   if (!existsSync(path.join(buildDir, 'backend', 'main.ts'))) {
     throw new Error(`App "${id}" has no built backend. Deploy it first.`);
@@ -160,6 +211,22 @@ export async function ensureAppRunning(id: string): Promise<number> {
   proc.stdout?.on('data', appendLog);
   proc.stderr?.on('data', appendLog);
 
+  // A stop/redeploy landed while we were awaiting db/port allocation: abort
+  // before registering this now-stale process (which a concurrent warm start
+  // could otherwise pick up and serve). This check runs *before* we create
+  // `backend.ready` on purpose — creating the readiness promise and then
+  // throwing would leave it rejected-but-unawaited (~20s later), an unhandled
+  // rejection that can crash the server. Kill the process; the caller boots the
+  // current build instead.
+  if (stopEpoch(id) !== epoch) {
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* best-effort */
+    }
+    throw new Error(`App "${id}" start was superseded by a stop/redeploy.`);
+  }
+
   const backend: RunningBackend = {
     proc,
     port,
@@ -192,9 +259,21 @@ export async function ensureAppRunning(id: string): Promise<number> {
     } catch {
       /* best-effort */
     }
-    reg.delete(id);
+    if (reg.get(id) === backend) reg.delete(id);
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to start app "${id}": ${message}\n${log}`);
+  }
+
+  // Stop/redeploy landed during the readiness wait: drop this stale backend so
+  // the next request boots the current build rather than reusing this one.
+  if (stopEpoch(id) !== epoch) {
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* best-effort */
+    }
+    if (reg.get(id) === backend) reg.delete(id);
+    throw new Error(`App "${id}" start was superseded by a stop/redeploy.`);
   }
 
   return port;
@@ -230,6 +309,11 @@ export function isAppRunning(id: string): boolean {
  */
 export function stopApp(id: string): void {
   keepAliveSet().delete(id);
+  // Invalidate any in-flight cold start so a subsequent ensureAppRunning() (e.g.
+  // the long-running warm start right after a deploy/rollback) boots the current
+  // build instead of coalescing onto a start for the build we're replacing.
+  bumpStopEpoch(id);
+  startingRegistry().delete(id);
   const reg = registry();
   const backend = reg.get(id);
   if (!backend) return;
