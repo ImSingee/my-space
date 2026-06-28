@@ -34,6 +34,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import {
+  appOpsQueryOptions,
   deploymentBuildLogQueryOptions,
   deploymentsQueryOptions,
 } from '~queries/apps';
@@ -290,6 +291,10 @@ export function DeploymentHistory({ appId }: { appId: string }) {
     onSuccess: (result) => {
       toast.success(`Restored v${result.version}`);
       void qc.invalidateQueries(deploymentsQueryOptions(appId));
+      // Rolling back can change backend/cron/webhook/storage capabilities, so
+      // refresh the Operations panel on this page too; the deployments + loader
+      // invalidation alone leaves its cached ops data stale.
+      void qc.invalidateQueries(appOpsQueryOptions(appId));
       void router.invalidate();
     },
     onError: (error) => toast.error((error as Error).message),

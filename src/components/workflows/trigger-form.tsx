@@ -97,9 +97,10 @@ function initialValues(fields: Field[]): Record<string, unknown> {
     if ('default' in f.schema) {
       values[f.key] = f.schema.default;
     } else if (f.kind === 'boolean') {
-      values[f.key] = false;
-    } else if (f.kind === 'json') {
-      values[f.key] = '';
+      // Leave an optional boolean unset so an untouched switch is omitted on
+      // submit and the schema's own default applies; a required one still
+      // starts at false (a valid value the user can flip).
+      values[f.key] = f.required ? false : undefined;
     } else {
       values[f.key] = '';
     }
@@ -168,6 +169,22 @@ export function TriggerForm({
     setError(null);
     let input: unknown;
     if (fields) {
+      // A required object/array is rendered as a raw JSON editor whose empty
+      // value would otherwise be silently dropped, so the run fails server-side
+      // for missing input. Surface that inline. Other kinds aren't checked
+      // here: an empty string is a valid required value (schema only requires
+      // the property to be present), so the server stays the source of truth.
+      for (const f of fields) {
+        if (!f.required || f.kind !== 'json') continue;
+        const v = values[f.key];
+        // Only the string editor value can be empty. A non-string value is a
+        // schema default (object/array) the server applies when the field is
+        // omitted, so don't block those.
+        if (typeof v === 'string' && !v.trim()) {
+          setError(`Field "${f.schema.title ?? f.key}" is required.`);
+          return;
+        }
+      }
       const obj: Record<string, unknown> = {};
       for (const f of fields) {
         const v = values[f.key];
