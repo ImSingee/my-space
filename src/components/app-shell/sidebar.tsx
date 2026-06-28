@@ -31,6 +31,7 @@ import {
   IconPencil,
   IconPinnedOff,
   IconPlus,
+  IconRepeat,
   IconSettings,
   IconSparkles,
   IconSun,
@@ -53,6 +54,8 @@ import {
   setDashboardPin,
   setSidebarPin,
 } from '~server/apps';
+import { workflowsQueryOptions } from '~queries/workflows';
+import { setWorkflowPinFn } from '~server/workflows';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { Brand } from './brand';
 import { SortableList, sortByIds } from './sortable-list';
@@ -680,6 +683,155 @@ function PinnedApps() {
   );
 }
 
+function PinnedWorkflows() {
+  const isActive = useIsActive();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: workflows } = useQuery(workflowsQueryOptions);
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: workflowsQueryOptions.queryKey,
+    });
+
+  const setPin = useMutation({
+    mutationFn: (input: { id: string; pinned: boolean }) =>
+      setWorkflowPinFn({ data: input }),
+    onSuccess: (_res, input) => {
+      void invalidate();
+      toast.success(input.pinned ? 'Pinned to sidebar' : 'Unpinned');
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  const all = workflows ?? [];
+  const pinned = all.filter((w) => w.pinned);
+  const candidates = all.filter((w) => !w.pinned);
+
+  const goCreate = () => {
+    toast.info('Create a new workflow by chatting with the Agent');
+    void navigate({ to: '/agent' });
+  };
+
+  const addBtnClass =
+    pinned.length === 0
+      ? `${classes.actionButton} ${classes.actionButtonStatic}`
+      : classes.actionButton;
+
+  const addControl =
+    candidates.length > 0 ? (
+      <Menu position="right-start" withArrow shadow="md" width={240}>
+        <Menu.Target>
+          <ActionIcon
+            className={addBtnClass}
+            variant="subtle"
+            color="gray"
+            size="xs"
+            radius="sm"
+            aria-label="Add workflow"
+          >
+            <IconPlus size={14} stroke={1.8} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>Pin a workflow</Menu.Label>
+          {candidates.map((w) => (
+            <Menu.Item
+              key={w.id}
+              leftSection={<IconRepeat size={16} stroke={1.6} />}
+              disabled={setPin.isPending}
+              onClick={() => setPin.mutate({ id: w.id, pinned: true })}
+            >
+              <Text size="sm" truncate>
+                {w.name}
+              </Text>
+            </Menu.Item>
+          ))}
+          <Menu.Divider />
+          <Menu.Item
+            leftSection={<IconSparkles size={16} stroke={1.6} />}
+            onClick={goCreate}
+          >
+            New workflow with Agent
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+    ) : (
+      <Tooltip
+        label="Create a workflow with the Agent"
+        position="top"
+        withArrow
+      >
+        <ActionIcon
+          className={addBtnClass}
+          variant="subtle"
+          color="gray"
+          size="xs"
+          radius="sm"
+          aria-label="Create a workflow with the Agent"
+          onClick={goCreate}
+        >
+          <IconPlus size={14} stroke={1.8} />
+        </ActionIcon>
+      </Tooltip>
+    );
+
+  return (
+    <>
+      <SectionHeading
+        label="Workflows"
+        addControl={addControl}
+        manageTo="/workflows"
+        manageLabel="Manage workflows"
+      />
+      <Stack gap={2} px="xs">
+        {pinned.map((w) => (
+          <Box key={w.id} className={classes.item}>
+            <NavLink
+              renderRoot={(props) => (
+                <Link
+                  to="/workflows/$workflowId"
+                  params={{ workflowId: w.id }}
+                  {...props}
+                />
+              )}
+              label={w.name}
+              leftSection={<AppGlyph name={w.name} seed={w.id} size="sm" />}
+              active={isActive(`/workflows/${w.id}`)}
+              variant="light"
+              pr={32}
+            />
+            <Box className={classes.itemActionWrap}>
+              <Menu position="bottom-end" withArrow shadow="md" width={160}>
+                <Menu.Target>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="sm"
+                    radius="sm"
+                    className={classes.itemAction}
+                    aria-label="Options"
+                  >
+                    <IconDots size={15} stroke={1.7} />
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item
+                    leftSection={<IconPinnedOff size={15} stroke={1.7} />}
+                    onClick={() => setPin.mutate({ id: w.id, pinned: false })}
+                  >
+                    Unpin
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            </Box>
+          </Box>
+        ))}
+      </Stack>
+    </>
+  );
+}
+
 export function Sidebar() {
   const isActive = useIsActive();
 
@@ -701,6 +853,7 @@ export function Sidebar() {
         </Stack>
         <PinnedDashboards />
         <PinnedApps />
+        <PinnedWorkflows />
       </ScrollArea>
 
       <Box className={classes.footer}>

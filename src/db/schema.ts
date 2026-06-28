@@ -71,6 +71,29 @@ export type AppStatus =
 
 export type DeploymentStatus = 'building' | 'deployed' | 'failed';
 
+/** ================== workflow domain types ================== */
+
+export type WorkflowStatus =
+  | 'draft'
+  | 'building'
+  | 'deployed'
+  | 'failed'
+  | 'archived';
+
+export type WorkflowDeploymentStatus = 'building' | 'deployed' | 'failed';
+
+/** How a workflow run was started. */
+export type WorkflowTrigger = 'manual' | 'cron' | 'webhook';
+
+export type WorkflowRunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled';
+
+export type WorkflowRunStepStatus = 'running' | 'succeeded' | 'failed';
+
 /** Wire API the platform speaks to a provider with (mirrors pi-ai `model.api`). */
 export type ProviderApiType =
   | 'openai-responses'
@@ -140,6 +163,120 @@ export const deployments = pgTable('deployments', {
   error: text(),
   createdAt,
 });
+
+/** ================== workflows ================== */
+
+/**
+ * A workflow is a first-class, code-defined task the Agent authors. Unlike apps
+ * it has no custom UI/API — the platform provides a fixed UI to trigger it
+ * (manually, on a cron, or via webhook) and to audit its runs. `id` is a
+ * human-readable kebab-case slug used in URLs and the workflow's Git repo.
+ */
+export const workflows = pgTable('workflows', {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  description: text(),
+  status: text().$type<WorkflowStatus>().notNull().default('draft'),
+  /** Latest source manifest.json (as authored by the Agent). */
+  manifest: jsonb().$type<JsonObject>(),
+  /**
+   * JSON Schema (draft 2020-12) of the workflow input, derived from the
+   * workflow's zod schema at deploy time and validated against before each run.
+   */
+  inputSchema: jsonb().$type<JsonObject>(),
+  /** Git bare repository path for this workflow's source. */
+  repoPath: text(),
+  /** Current commit of the authoritative master branch. */
+  currentSourceCommit: text(),
+  currentDeploymentId: ulid(),
+  /** Shared secret for verifying inbound webhook calls (webhook trigger). */
+  webhookSecret: text(),
+  /** Whether this workflow is pinned to the sidebar for quick access. */
+  pinned: boolean().notNull().default(true),
+  sortOrder: integer().notNull().default(0),
+  createdAt,
+  updatedAt,
+});
+
+export const workflowDeployments = pgTable('workflow_deployments', {
+  id: ulid().$defaultFn(genUlid).primaryKey(),
+  workflowId: text()
+    .notNull()
+    .references(() => workflows.id, { onDelete: 'cascade' }),
+  version: integer().notNull().default(1),
+  status: text()
+    .$type<WorkflowDeploymentStatus>()
+    .notNull()
+    .default('building'),
+  /** Release note for this deployment (required for new deploys). */
+  message: text(),
+  /** Normalized manifest produced by the builder (deployed webhook URL etc). */
+  manifestNormalized: jsonb().$type<JsonObject>(),
+  /** JSON Schema of the workflow input captured at build time. */
+  inputSchema: jsonb().$type<JsonObject>(),
+  /** Commit deployed from the workflow's master branch. */
+  sourceCommit: text(),
+  /** Immutable deploy/v<version> Git tag for this deployment. */
+  sourceTag: text(),
+  /** Versioned filesystem artifact (the bundled single-file program). */
+  artifactPath: text(),
+  buildLog: text(),
+  error: text(),
+  createdAt,
+});
+
+/** ================== workflow runs ================== */
+
+export const workflowRuns = pgTable('workflow_runs', {
+  id: ulid().$defaultFn(genUlid).primaryKey(),
+  workflowId: text()
+    .notNull()
+    .references(() => workflows.id, { onDelete: 'cascade' }),
+  /** Deployment (version) this run executed. */
+  deploymentId: ulid('deployment_id'),
+  version: integer(),
+  trigger: text().$type<WorkflowTrigger>().notNull(),
+  status: text().$type<WorkflowRunStatus>().notNull().default('queued'),
+  /** Validated input the run was started with. */
+  input: jsonb().$type<JsonValue>(),
+  /** Value returned by the workflow's run() on success. */
+  output: jsonb().$type<JsonValue>(),
+  error: text(),
+  /** Captured stdout/stderr that wasn't part of the structured event stream. */
+  log: text(),
+  startedAt: timestamp('started_at'),
+  finishedAt: timestamp('finished_at'),
+  createdAt,
+});
+
+export const workflowRunSteps = pgTable(
+  'workflow_run_steps',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    runId: ulid('run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    seq: integer().notNull(),
+    name: text().notNull(),
+    status: text().$type<WorkflowRunStepStatus>().notNull().default('running'),
+    attempt: integer().notNull().default(1),
+    output: jsonb().$type<JsonValue>(),
+    error: text(),
+    startedAt: timestamp('started_at'),
+    finishedAt: timestamp('finished_at'),
+    createdAt,
+  },
+  (table) => [
+    // Keyed on attempt too so each retry of a step persists as its own row
+    // (the run inspector renders every attempt); collapsing on (runId, seq)
+    // would overwrite a failed attempt's error/timing with the next try.
+    uniqueIndex('workflow_run_steps_run_seq_attempt_idx').on(
+      table.runId,
+      table.seq,
+      table.attempt,
+    ),
+  ],
+);
 
 /** ================== agent providers / models ================== */
 
@@ -291,7 +428,8 @@ export type LogSource =
   | 'deploy'
   | 'backend'
   | 'webhook'
-  | 'cron';
+  | 'cron'
+  | 'workflow';
 
 export const logs = pgTable('logs', {
   id: ulid().$defaultFn(genUlid).primaryKey(),

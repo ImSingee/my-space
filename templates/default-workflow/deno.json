@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@hatch/workflow": "./hatch/workflow.ts",
+    "zod": "npm:zod@^4.4.3"
+  },
+  "lock": false,
+  "nodeModulesDir": "none"
+}

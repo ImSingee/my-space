@@ -14,8 +14,10 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
+import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
 import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
@@ -27,10 +29,15 @@ import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
 import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
+import { Route as AppWorkflowsWorkflowIdIndexRouteImport } from './routes/_app/workflows/$workflowId/index'
 import { Route as AppAppsAppIdIndexRouteImport } from './routes/_app/apps/$appId/index'
+import { Route as ApiWorkflowsWorkflowIdDownloadRouteImport } from './routes/api/workflows/$workflowId/download'
+import { Route as ApiWorkflowHooksWorkflowIdSplatRouteImport } from './routes/api/workflow-hooks/$workflowId/$'
 import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
 import { Route as ApiAppsAppIdDownloadRouteImport } from './routes/api/apps/$appId/download'
+import { Route as AppWorkflowsWorkflowIdManageRouteImport } from './routes/_app/workflows/$workflowId/manage'
 import { Route as AppAppsAppIdManageRouteImport } from './routes/_app/apps/$appId/manage'
+import { Route as AppWorkflowsWorkflowIdExecutionsIndexRouteImport } from './routes/_app/workflows/$workflowId/executions/index'
 import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
 import { Route as ApiAppsAppIdStorageSplatRouteImport } from './routes/api/apps/$appId/storage/$'
 import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
@@ -38,6 +45,7 @@ import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$app
 import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
 import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
 import { Route as ApiAgentRunsRunIdAnswerRouteImport } from './routes/api/agent/runs/$runId/answer'
+import { Route as AppWorkflowsWorkflowIdExecutionsRunIdRouteImport } from './routes/_app/workflows/$workflowId/executions/$runId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -63,6 +71,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppExecutionsRoute = AppExecutionsRouteImport.update({
+  id: '/executions',
+  path: '/executions',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardsRoute = AppDashboardsRouteImport.update({
   id: '/dashboards',
   path: '/dashboards',
@@ -71,6 +84,11 @@ const AppDashboardsRoute = AppDashboardsRouteImport.update({
 const AppAgentRoute = AppAgentRouteImport.update({
   id: '/agent',
   path: '/agent',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWorkflowsIndexRoute = AppWorkflowsIndexRouteImport.update({
+  id: '/workflows/',
+  path: '/workflows/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
@@ -128,11 +146,29 @@ const AppAgentThreadIdRoute = AppAgentThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => AppAgentRoute,
 } as any)
+const AppWorkflowsWorkflowIdIndexRoute =
+  AppWorkflowsWorkflowIdIndexRouteImport.update({
+    id: '/workflows/$workflowId/',
+    path: '/workflows/$workflowId/',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppAppsAppIdIndexRoute = AppAppsAppIdIndexRouteImport.update({
   id: '/apps/$appId/',
   path: '/apps/$appId/',
   getParentRoute: () => AppRoute,
 } as any)
+const ApiWorkflowsWorkflowIdDownloadRoute =
+  ApiWorkflowsWorkflowIdDownloadRouteImport.update({
+    id: '/api/workflows/$workflowId/download',
+    path: '/api/workflows/$workflowId/download',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkflowHooksWorkflowIdSplatRoute =
+  ApiWorkflowHooksWorkflowIdSplatRouteImport.update({
+    id: '/api/workflow-hooks/$workflowId/$',
+    path: '/api/workflow-hooks/$workflowId/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiHooksAppIdSplatRoute = ApiHooksAppIdSplatRouteImport.update({
   id: '/api/hooks/$appId/$',
   path: '/api/hooks/$appId/$',
@@ -143,11 +179,23 @@ const ApiAppsAppIdDownloadRoute = ApiAppsAppIdDownloadRouteImport.update({
   path: '/api/apps/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppWorkflowsWorkflowIdManageRoute =
+  AppWorkflowsWorkflowIdManageRouteImport.update({
+    id: '/workflows/$workflowId/manage',
+    path: '/workflows/$workflowId/manage',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppAppsAppIdManageRoute = AppAppsAppIdManageRouteImport.update({
   id: '/apps/$appId/manage',
   path: '/apps/$appId/manage',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWorkflowsWorkflowIdExecutionsIndexRoute =
+  AppWorkflowsWorkflowIdExecutionsIndexRouteImport.update({
+    id: '/workflows/$workflowId/executions/',
+    path: '/workflows/$workflowId/executions/',
+    getParentRoute: () => AppRoute,
+  } as any)
 const ApiAppsAppIdWidgetWidgetIdRoute =
   ApiAppsAppIdWidgetWidgetIdRouteImport.update({
     id: '/api/apps/$appId/widget/$widgetId',
@@ -185,6 +233,12 @@ const ApiAgentRunsRunIdAnswerRoute = ApiAgentRunsRunIdAnswerRouteImport.update({
   path: '/$runId/answer',
   getParentRoute: () => ApiAgentRunsRoute,
 } as any)
+const AppWorkflowsWorkflowIdExecutionsRunIdRoute =
+  AppWorkflowsWorkflowIdExecutionsRunIdRouteImport.update({
+    id: '/workflows/$workflowId/executions/$runId',
+    path: '/workflows/$workflowId/executions/$runId',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -192,6 +246,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/agent': typeof AppAgentRouteWithChildren
   '/dashboards': typeof AppDashboardsRoute
+  '/executions': typeof AppExecutionsRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
@@ -204,10 +259,16 @@ export interface FileRoutesByFullPath {
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
+  '/workflows/': typeof AppWorkflowsIndexRoute
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/workflows/$workflowId/manage': typeof AppWorkflowsWorkflowIdManageRoute
   '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
+  '/api/workflow-hooks/$workflowId/$': typeof ApiWorkflowHooksWorkflowIdSplatRoute
+  '/api/workflows/$workflowId/download': typeof ApiWorkflowsWorkflowIdDownloadRoute
   '/apps/$appId/': typeof AppAppsAppIdIndexRoute
+  '/workflows/$workflowId/': typeof AppWorkflowsWorkflowIdIndexRoute
+  '/workflows/$workflowId/executions/$runId': typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
@@ -215,12 +276,14 @@ export interface FileRoutesByFullPath {
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
   '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
+  '/workflows/$workflowId/executions/': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
   '/dashboards': typeof AppDashboardsRoute
+  '/executions': typeof AppExecutionsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
@@ -232,10 +295,16 @@ export interface FileRoutesByTo {
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
   '/settings': typeof AppSettingsIndexRoute
+  '/workflows': typeof AppWorkflowsIndexRoute
   '/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/workflows/$workflowId/manage': typeof AppWorkflowsWorkflowIdManageRoute
   '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
+  '/api/workflow-hooks/$workflowId/$': typeof ApiWorkflowHooksWorkflowIdSplatRoute
+  '/api/workflows/$workflowId/download': typeof ApiWorkflowsWorkflowIdDownloadRoute
   '/apps/$appId': typeof AppAppsAppIdIndexRoute
+  '/workflows/$workflowId': typeof AppWorkflowsWorkflowIdIndexRoute
+  '/workflows/$workflowId/executions/$runId': typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
@@ -243,6 +312,7 @@ export interface FileRoutesByTo {
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
   '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
+  '/workflows/$workflowId/executions': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -252,6 +322,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_app/agent': typeof AppAgentRouteWithChildren
   '/_app/dashboards': typeof AppDashboardsRoute
+  '/_app/executions': typeof AppExecutionsRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
@@ -264,10 +335,16 @@ export interface FileRoutesById {
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/workflows/': typeof AppWorkflowsIndexRoute
   '/_app/apps/$appId/manage': typeof AppAppsAppIdManageRoute
+  '/_app/workflows/$workflowId/manage': typeof AppWorkflowsWorkflowIdManageRoute
   '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
+  '/api/workflow-hooks/$workflowId/$': typeof ApiWorkflowHooksWorkflowIdSplatRoute
+  '/api/workflows/$workflowId/download': typeof ApiWorkflowsWorkflowIdDownloadRoute
   '/_app/apps/$appId/': typeof AppAppsAppIdIndexRoute
+  '/_app/workflows/$workflowId/': typeof AppWorkflowsWorkflowIdIndexRoute
+  '/_app/workflows/$workflowId/executions/$runId': typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
@@ -275,6 +352,7 @@ export interface FileRoutesById {
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
   '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
+  '/_app/workflows/$workflowId/executions/': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -284,6 +362,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/agent'
     | '/dashboards'
+    | '/executions'
     | '/settings'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
@@ -296,10 +375,16 @@ export interface FileRouteTypes {
     | '/apps/'
     | '/dashboard/'
     | '/settings/'
+    | '/workflows/'
     | '/apps/$appId/manage'
+    | '/workflows/$workflowId/manage'
     | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
+    | '/api/workflow-hooks/$workflowId/$'
+    | '/api/workflows/$workflowId/download'
     | '/apps/$appId/'
+    | '/workflows/$workflowId/'
+    | '/workflows/$workflowId/executions/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/events'
@@ -307,12 +392,14 @@ export interface FileRouteTypes {
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
     | '/api/apps/$appId/widget/$widgetId'
+    | '/workflows/$workflowId/executions/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/404'
     | '/login'
     | '/dashboards'
+    | '/executions'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/settings/appearance'
@@ -324,10 +411,16 @@ export interface FileRouteTypes {
     | '/apps'
     | '/dashboard'
     | '/settings'
+    | '/workflows'
     | '/apps/$appId/manage'
+    | '/workflows/$workflowId/manage'
     | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
+    | '/api/workflow-hooks/$workflowId/$'
+    | '/api/workflows/$workflowId/download'
     | '/apps/$appId'
+    | '/workflows/$workflowId'
+    | '/workflows/$workflowId/executions/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/events'
@@ -335,6 +428,7 @@ export interface FileRouteTypes {
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
     | '/api/apps/$appId/widget/$widgetId'
+    | '/workflows/$workflowId/executions'
   id:
     | '__root__'
     | '/'
@@ -343,6 +437,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_app/agent'
     | '/_app/dashboards'
+    | '/_app/executions'
     | '/_app/settings'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
@@ -355,10 +450,16 @@ export interface FileRouteTypes {
     | '/_app/apps/'
     | '/_app/dashboard/'
     | '/_app/settings/'
+    | '/_app/workflows/'
     | '/_app/apps/$appId/manage'
+    | '/_app/workflows/$workflowId/manage'
     | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
+    | '/api/workflow-hooks/$workflowId/$'
+    | '/api/workflows/$workflowId/download'
     | '/_app/apps/$appId/'
+    | '/_app/workflows/$workflowId/'
+    | '/_app/workflows/$workflowId/executions/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/events'
@@ -366,6 +467,7 @@ export interface FileRouteTypes {
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
     | '/api/apps/$appId/widget/$widgetId'
+    | '/_app/workflows/$workflowId/executions/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -378,6 +480,8 @@ export interface RootRouteChildren {
   AppAppIdSplatRoute: typeof AppAppIdSplatRoute
   ApiAppsAppIdDownloadRoute: typeof ApiAppsAppIdDownloadRoute
   ApiHooksAppIdSplatRoute: typeof ApiHooksAppIdSplatRoute
+  ApiWorkflowHooksWorkflowIdSplatRoute: typeof ApiWorkflowHooksWorkflowIdSplatRoute
+  ApiWorkflowsWorkflowIdDownloadRoute: typeof ApiWorkflowsWorkflowIdDownloadRoute
   ApiAppsAppIdAppSplatRoute: typeof ApiAppsAppIdAppSplatRoute
   ApiAppsAppIdRpcSplatRoute: typeof ApiAppsAppIdRpcSplatRoute
   ApiAppsAppIdStorageSplatRoute: typeof ApiAppsAppIdStorageSplatRoute
@@ -421,6 +525,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/executions': {
+      id: '/_app/executions'
+      path: '/executions'
+      fullPath: '/executions'
+      preLoaderRoute: typeof AppExecutionsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboards': {
       id: '/_app/dashboards'
       path: '/dashboards'
@@ -433,6 +544,13 @@ declare module '@tanstack/react-router' {
       path: '/agent'
       fullPath: '/agent'
       preLoaderRoute: typeof AppAgentRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/workflows/': {
+      id: '/_app/workflows/'
+      path: '/workflows'
+      fullPath: '/workflows/'
+      preLoaderRoute: typeof AppWorkflowsIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
@@ -512,12 +630,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAgentThreadIdRouteImport
       parentRoute: typeof AppAgentRoute
     }
+    '/_app/workflows/$workflowId/': {
+      id: '/_app/workflows/$workflowId/'
+      path: '/workflows/$workflowId'
+      fullPath: '/workflows/$workflowId/'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/apps/$appId/': {
       id: '/_app/apps/$appId/'
       path: '/apps/$appId'
       fullPath: '/apps/$appId/'
       preLoaderRoute: typeof AppAppsAppIdIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/api/workflows/$workflowId/download': {
+      id: '/api/workflows/$workflowId/download'
+      path: '/api/workflows/$workflowId/download'
+      fullPath: '/api/workflows/$workflowId/download'
+      preLoaderRoute: typeof ApiWorkflowsWorkflowIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workflow-hooks/$workflowId/$': {
+      id: '/api/workflow-hooks/$workflowId/$'
+      path: '/api/workflow-hooks/$workflowId/$'
+      fullPath: '/api/workflow-hooks/$workflowId/$'
+      preLoaderRoute: typeof ApiWorkflowHooksWorkflowIdSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/hooks/$appId/$': {
       id: '/api/hooks/$appId/$'
@@ -533,11 +672,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppsAppIdDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/workflows/$workflowId/manage': {
+      id: '/_app/workflows/$workflowId/manage'
+      path: '/workflows/$workflowId/manage'
+      fullPath: '/workflows/$workflowId/manage'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdManageRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/apps/$appId/manage': {
       id: '/_app/apps/$appId/manage'
       path: '/apps/$appId/manage'
       fullPath: '/apps/$appId/manage'
       preLoaderRoute: typeof AppAppsAppIdManageRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/workflows/$workflowId/executions/': {
+      id: '/_app/workflows/$workflowId/executions/'
+      path: '/workflows/$workflowId/executions'
+      fullPath: '/workflows/$workflowId/executions/'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdExecutionsIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/api/apps/$appId/widget/$widgetId': {
@@ -589,6 +742,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAgentRunsRunIdAnswerRouteImport
       parentRoute: typeof ApiAgentRunsRoute
     }
+    '/_app/workflows/$workflowId/executions/$runId': {
+      id: '/_app/workflows/$workflowId/executions/$runId'
+      path: '/workflows/$workflowId/executions/$runId'
+      fullPath: '/workflows/$workflowId/executions/$runId'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdExecutionsRunIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -625,23 +785,37 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 interface AppRouteChildren {
   AppAgentRoute: typeof AppAgentRouteWithChildren
   AppDashboardsRoute: typeof AppDashboardsRoute
+  AppExecutionsRoute: typeof AppExecutionsRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppDashboardDashboardIdRoute: typeof AppDashboardDashboardIdRoute
   AppAppsIndexRoute: typeof AppAppsIndexRoute
   AppDashboardIndexRoute: typeof AppDashboardIndexRoute
+  AppWorkflowsIndexRoute: typeof AppWorkflowsIndexRoute
   AppAppsAppIdManageRoute: typeof AppAppsAppIdManageRoute
+  AppWorkflowsWorkflowIdManageRoute: typeof AppWorkflowsWorkflowIdManageRoute
   AppAppsAppIdIndexRoute: typeof AppAppsAppIdIndexRoute
+  AppWorkflowsWorkflowIdIndexRoute: typeof AppWorkflowsWorkflowIdIndexRoute
+  AppWorkflowsWorkflowIdExecutionsRunIdRoute: typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
+  AppWorkflowsWorkflowIdExecutionsIndexRoute: typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAgentRoute: AppAgentRouteWithChildren,
   AppDashboardsRoute: AppDashboardsRoute,
+  AppExecutionsRoute: AppExecutionsRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppDashboardDashboardIdRoute: AppDashboardDashboardIdRoute,
   AppAppsIndexRoute: AppAppsIndexRoute,
   AppDashboardIndexRoute: AppDashboardIndexRoute,
+  AppWorkflowsIndexRoute: AppWorkflowsIndexRoute,
   AppAppsAppIdManageRoute: AppAppsAppIdManageRoute,
+  AppWorkflowsWorkflowIdManageRoute: AppWorkflowsWorkflowIdManageRoute,
   AppAppsAppIdIndexRoute: AppAppsAppIdIndexRoute,
+  AppWorkflowsWorkflowIdIndexRoute: AppWorkflowsWorkflowIdIndexRoute,
+  AppWorkflowsWorkflowIdExecutionsRunIdRoute:
+    AppWorkflowsWorkflowIdExecutionsRunIdRoute,
+  AppWorkflowsWorkflowIdExecutionsIndexRoute:
+    AppWorkflowsWorkflowIdExecutionsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -672,6 +846,8 @@ const rootRouteChildren: RootRouteChildren = {
   AppAppIdSplatRoute: AppAppIdSplatRoute,
   ApiAppsAppIdDownloadRoute: ApiAppsAppIdDownloadRoute,
   ApiHooksAppIdSplatRoute: ApiHooksAppIdSplatRoute,
+  ApiWorkflowHooksWorkflowIdSplatRoute: ApiWorkflowHooksWorkflowIdSplatRoute,
+  ApiWorkflowsWorkflowIdDownloadRoute: ApiWorkflowsWorkflowIdDownloadRoute,
   ApiAppsAppIdAppSplatRoute: ApiAppsAppIdAppSplatRoute,
   ApiAppsAppIdRpcSplatRoute: ApiAppsAppIdRpcSplatRoute,
   ApiAppsAppIdStorageSplatRoute: ApiAppsAppIdStorageSplatRoute,

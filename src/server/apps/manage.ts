@@ -1,5 +1,6 @@
 /** Server-only: app lifecycle management — archive, rollback, delete. */
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
   deploymentBuildDir,
@@ -13,7 +14,7 @@ import {
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
-import { moveMasterToDeploymentTag } from './git';
+import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
 import { dropAppDatabase } from './provision';
 import { stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
@@ -226,6 +227,10 @@ export async function deleteApp(id: string): Promise<{ ok: true }> {
   // Cascades to deployments, dashboard widgets, and sidebar items.
   await db.delete(schema.apps).where(eq(schema.apps.id, id));
 
+  // Remove agent worktrees before the bare repo: deleteAgentWorktrees() scopes
+  // each checkout to this app via its git origin, which must still resolve
+  // against the not-yet-deleted repo or a stale worktree would be left behind.
+  await deleteAgentWorktrees(id);
   await Promise.all([
     fs.rm(appSrcDir(id), { recursive: true, force: true }),
     fs.rm(appBuildDir(id), { recursive: true, force: true }),
@@ -234,7 +239,6 @@ export async function deleteApp(id: string): Promise<{ ok: true }> {
     fs.rm(appRepoDir(id), { recursive: true, force: true }),
     fs.rm(appStorageDir(id), { recursive: true, force: true }),
   ]);
-  await deleteAgentWorktrees(id);
   // Cancel any scheduled cron jobs for the removed app.
   await reloadScheduler();
   return { ok: true };
@@ -243,14 +247,22 @@ export async function deleteApp(id: string): Promise<{ ok: true }> {
 async function deleteAgentWorktrees(id: string): Promise<void> {
   if (!(await pathExists(AGENTS_DIR))) return;
   const sessions = await fs.readdir(AGENTS_DIR, { withFileTypes: true });
+  const repoDir = appRepoDir(id);
   await Promise.all(
     sessions
       .filter((entry) => entry.isDirectory())
-      .map((entry) =>
-        fs.rm(`${AGENTS_DIR}/${entry.name}/work/${id}`, {
+      .map(async (entry) => {
+        const worktree = `${AGENTS_DIR}/${entry.name}/work/${id}`;
+        if (!(await pathExists(worktree))) return;
+        // Apps and workflows share the `work/<id>` namespace, so only remove a
+        // checkout that actually originates from this app's repo and never a
+        // same-slug workflow worktree (with its uncommitted changes).
+        const origin = await worktreeOrigin(worktree);
+        if (!origin || path.resolve(origin) !== path.resolve(repoDir)) return;
+        await fs.rm(worktree, {
           recursive: true,
           force: true,
-        }),
-      ),
+        });
+      }),
   );
 }

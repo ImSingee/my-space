@@ -18,6 +18,15 @@ async function replaceInFile(
   await fs.writeFile(file, text, 'utf8');
 }
 
+/**
+ * Escape a value for insertion *inside* an existing pair of JSON quotes (the
+ * template already supplies the surrounding `"`). Without this, a name or
+ * description containing `"`/newline/etc. produces invalid manifest.json.
+ */
+function jsonStringInner(value: string): string {
+  return JSON.stringify(value).slice(1, -1);
+}
+
 export type CreateAppInput = {
   id: string;
   name: string;
@@ -71,9 +80,9 @@ export async function createApp(
   const description = (input.description ?? '').trim();
 
   await replaceInFile(path.join(src, 'manifest.json'), {
-    __APP_ID__: id,
-    __APP_NAME__: name,
-    __APP_DESCRIPTION__: description,
+    __APP_ID__: jsonStringInner(id),
+    __APP_NAME__: jsonStringInner(name),
+    __APP_DESCRIPTION__: jsonStringInner(description),
   });
   await replaceInFile(path.join(src, 'app', 'index.html'), {
     __APP_NAME__: name,

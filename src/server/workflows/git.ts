@@ -1,16 +1,16 @@
-/** Server-only: Git-backed source storage for Hatch apps. */
+/** Server-only: Git-backed source storage for Hatch workflows. */
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import { access, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  agentAppWorkDir,
-  appDeployCheckoutDir,
-  appRepoDir,
   agentWorkDir,
+  agentWorkflowWorkDir,
+  workflowDeployCheckoutDir,
+  workflowRepoDir,
 } from '~agent/paths';
 
-export const APP_SOURCE_BRANCH = 'master';
+export const WORKFLOW_SOURCE_BRANCH = 'master';
 export const DEPLOY_TAG_PREFIX = 'deploy/';
 
 type CommandResult = {
@@ -19,8 +19,8 @@ type CommandResult = {
   stderr: string;
 };
 
-export type AppCheckout = {
-  appId: string;
+export type WorkflowCheckout = {
+  workflowId: string;
   path: string;
   absolutePath: string;
   dirty: boolean;
@@ -85,11 +85,11 @@ async function installServerHooks(repoDir: string): Promise<void> {
 while read oldrev newrev refname; do
   case "$refname" in
     refs/tags/*)
-      echo "Hatch deploy owns tags; call deploy_app instead of pushing tags." >&2
+      echo "Hatch deploy owns tags; call deploy_workflow instead of pushing tags." >&2
       exit 1
       ;;
     refs/heads/*)
-      echo "Hatch deploy owns branches; commit locally, rebase if needed, then call deploy_app." >&2
+      echo "Hatch deploy owns branches; commit locally, rebase if needed, then call deploy_workflow." >&2
       exit 1
       ;;
     *)
@@ -111,15 +111,15 @@ async function setLocalGitIdentity(worktree: string): Promise<void> {
   });
 }
 
-export async function ensureAppRepo(id: string): Promise<string> {
-  const repoDir = appRepoDir(id);
+export async function ensureWorkflowRepo(id: string): Promise<string> {
+  const repoDir = workflowRepoDir(id);
   if (!(await pathExists(repoDir))) {
     await mkdir(path.dirname(repoDir), { recursive: true });
     await runGit([
       'init',
       '--bare',
       '--initial-branch',
-      APP_SOURCE_BRANCH,
+      WORKFLOW_SOURCE_BRANCH,
       repoDir,
     ]);
   }
@@ -130,16 +130,14 @@ export async function ensureAppRepo(id: string): Promise<string> {
 async function refCommit(repoDir: string, ref: string): Promise<string | null> {
   const result = await runGit(
     ['--git-dir', repoDir, 'rev-parse', '--verify', ref],
-    {
-      allowFailure: true,
-    },
+    { allowFailure: true },
   );
   if (result.exitCode !== 0) return null;
   return result.stdout.trim();
 }
 
-export async function appMasterCommit(id: string): Promise<string | null> {
-  return refCommit(appRepoDir(id), `refs/heads/${APP_SOURCE_BRANCH}`);
+export async function workflowMasterCommit(id: string): Promise<string | null> {
+  return refCommit(workflowRepoDir(id), `refs/heads/${WORKFLOW_SOURCE_BRANCH}`);
 }
 
 async function worktreeHead(worktree: string): Promise<string | null> {
@@ -169,14 +167,14 @@ async function describeCheckout(
   sessionId: string,
   id: string,
   worktree: string,
-): Promise<AppCheckout> {
+): Promise<WorkflowCheckout> {
   const [status, headCommit, remoteCommit] = await Promise.all([
     worktreeStatus(worktree),
     worktreeHead(worktree),
-    appMasterCommit(id),
+    workflowMasterCommit(id),
   ]);
   return {
-    appId: id,
+    workflowId: id,
     path: path
       .relative(agentWorkDir(sessionId), worktree)
       .split(path.sep)
@@ -189,12 +187,12 @@ async function describeCheckout(
   };
 }
 
-export async function checkoutAppForAgent(
+export async function checkoutWorkflowForAgent(
   sessionId: string,
   id: string,
-): Promise<AppCheckout> {
-  const repoDir = await ensureAppRepo(id);
-  const worktree = agentAppWorkDir(sessionId, id);
+): Promise<WorkflowCheckout> {
+  const repoDir = await ensureWorkflowRepo(id);
+  const worktree = agentWorkflowWorkDir(sessionId, id);
   const gitDir = path.join(worktree, '.git');
 
   if (await pathExists(worktree)) {
@@ -204,13 +202,12 @@ export async function checkoutAppForAgent(
       );
     }
     // Apps and workflows share the chat worktree namespace (both appear as
-    // `<id>/`), so guard against a slug already checked out for a workflow —
-    // otherwise the app flow would reuse and deploy the workflow's repo.
+    // `<id>/`), so guard against a slug already checked out for an app.
     const origin = await worktreeOrigin(worktree);
     if (origin && path.resolve(origin) !== path.resolve(repoDir)) {
       throw new Error(
         `"${id}/" in this chat is already checked out from a different repo ` +
-          `(${origin}). Pick a different slug for this app.`,
+          `(${origin}). Pick a different slug for this workflow.`,
       );
     }
     await setLocalGitIdentity(worktree);
@@ -218,12 +215,12 @@ export async function checkoutAppForAgent(
   }
 
   await mkdir(path.dirname(worktree), { recursive: true });
-  const master = await appMasterCommit(id);
+  const master = await workflowMasterCommit(id);
   if (master) {
     await runGit(['clone', repoDir, worktree]);
   } else {
     await mkdir(worktree, { recursive: true });
-    await runGit(['init', '--initial-branch', APP_SOURCE_BRANCH], {
+    await runGit(['init', '--initial-branch', WORKFLOW_SOURCE_BRANCH], {
       cwd: worktree,
     });
     await runGit(['remote', 'add', 'origin', repoDir], { cwd: worktree });
@@ -233,12 +230,12 @@ export async function checkoutAppForAgent(
 }
 
 export async function prepareDeployCheckout(id: string): Promise<string> {
-  const repoDir = await ensureAppRepo(id);
-  const master = await appMasterCommit(id);
+  const repoDir = await ensureWorkflowRepo(id);
+  const master = await workflowMasterCommit(id);
   if (!master) {
-    throw new Error(`App "${id}" has no committed source on master yet.`);
+    throw new Error(`Workflow "${id}" has no committed source on master yet.`);
   }
-  const checkout = appDeployCheckoutDir(id);
+  const checkout = workflowDeployCheckoutDir(id);
   await rm(checkout, { recursive: true, force: true });
   await mkdir(path.dirname(checkout), { recursive: true });
   await runGit(['clone', repoDir, checkout]);
@@ -250,11 +247,11 @@ export async function assertDeployableWorktree(
   id: string,
   worktree: string,
 ): Promise<string> {
-  await ensureAppRepo(id);
+  await ensureWorkflowRepo(id);
   const status = await worktreeStatus(worktree);
   if (status) {
     throw new Error(
-      `Cannot deploy app "${id}" because the worktree is dirty.\n` +
+      `Cannot deploy workflow "${id}" because the worktree is dirty.\n` +
         'Commit or discard these changes first:\n' +
         status,
     );
@@ -262,8 +259,8 @@ export async function assertDeployableWorktree(
   const commit = await worktreeHead(worktree);
   if (!commit) {
     throw new Error(
-      `Cannot deploy app "${id}" because the worktree has no commits yet. ` +
-        'Run git add and git commit first.',
+      `Cannot deploy workflow "${id}" because the worktree has no commits ` +
+        'yet. Run git add and git commit first.',
     );
   }
   return commit;
@@ -274,13 +271,13 @@ export async function publishDeploymentSource(
   worktree: string,
   version: number,
 ): Promise<PublishedSource> {
-  const repoDir = await ensureAppRepo(id);
+  const repoDir = await ensureWorkflowRepo(id);
   const commit = await assertDeployableWorktree(id, worktree);
-  await runGit(['fetch', 'origin', APP_SOURCE_BRANCH], {
+  await runGit(['fetch', 'origin', WORKFLOW_SOURCE_BRANCH], {
     cwd: worktree,
     allowFailure: true,
   });
-  const master = await appMasterCommit(id);
+  const master = await workflowMasterCommit(id);
   if (master) {
     const ff = await runGit(['merge-base', '--is-ancestor', master, commit], {
       cwd: worktree,
@@ -288,42 +285,31 @@ export async function publishDeploymentSource(
     });
     if (ff.exitCode !== 0) {
       throw new Error(
-        `Cannot deploy app "${id}" because ${APP_SOURCE_BRANCH} advanced. ` +
-          `Run "git fetch origin ${APP_SOURCE_BRANCH}" and rebase your work ` +
-          'before deploying.',
+        `Cannot deploy workflow "${id}" because ${WORKFLOW_SOURCE_BRANCH} ` +
+          `advanced. Run "git fetch origin ${WORKFLOW_SOURCE_BRANCH}" and ` +
+          'rebase your work before deploying.',
       );
     }
   }
 
-  // Tags are named by release version (deploy/v1, deploy/v2, ...). The version
-  // is assigned from successful-deployment history, so any pre-existing tag for
-  // this version is a stale leftover from a failed attempt whose cleanup didn't
-  // run (e.g. the process was killed). Force-move it onto the new commit rather
-  // than failing the deploy.
   const tag = `${DEPLOY_TAG_PREFIX}v${version}`;
-
   await runGit([
     '--git-dir',
     repoDir,
     'fetch',
     worktree,
-    `HEAD:refs/heads/${APP_SOURCE_BRANCH}`,
+    `HEAD:refs/heads/${WORKFLOW_SOURCE_BRANCH}`,
   ]);
   await runGit(['--git-dir', repoDir, 'tag', '-f', tag, commit]);
   return { commit, tag, repoPath: repoDir };
 }
 
-/**
- * Delete a deployment tag. Used to roll back the tag created for a deploy that
- * failed after tagging, so a failed attempt leaves no Git history — mirroring
- * the database, which records no deployment row for failures.
- */
 export async function deleteDeploymentTag(
   id: string,
   tag: string,
 ): Promise<void> {
   if (!tag.startsWith(DEPLOY_TAG_PREFIX)) return;
-  const repoDir = appRepoDir(id);
+  const repoDir = workflowRepoDir(id);
   await runGit(['--git-dir', repoDir, 'tag', '-d', tag], {
     allowFailure: true,
   });
@@ -333,7 +319,7 @@ export async function moveMasterToDeploymentTag(
   id: string,
   tag: string,
 ): Promise<string> {
-  const repoDir = await ensureAppRepo(id);
+  const repoDir = await ensureWorkflowRepo(id);
   if (!tag.startsWith(DEPLOY_TAG_PREFIX)) {
     throw new Error(`Invalid deployment tag: ${tag}`);
   }
@@ -343,7 +329,7 @@ export async function moveMasterToDeploymentTag(
     '--git-dir',
     repoDir,
     'update-ref',
-    `refs/heads/${APP_SOURCE_BRANCH}`,
+    `refs/heads/${WORKFLOW_SOURCE_BRANCH}`,
     commit,
   ]);
   return commit;

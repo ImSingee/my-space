@@ -173,11 +173,19 @@ export async function deployApp(
     if (publishedTag) {
       await deleteDeploymentTag(id, publishedTag).catch(() => {});
     }
-    // Restore the app's status: an app that already has a live deployment keeps
-    // serving it, while a never-deployed app is marked failed.
+    // Restore the app's status: an archived app must stay archived (a failed
+    // redeploy must not silently re-enable it), one that already has a live
+    // deployment keeps serving it, and a never-deployed app is marked failed.
     await db
       .update(schema.apps)
-      .set({ status: app.currentDeploymentId ? 'deployed' : 'failed' })
+      .set({
+        status:
+          app.status === 'archived'
+            ? 'archived'
+            : app.currentDeploymentId
+              ? 'deployed'
+              : 'failed',
+      })
       .where(eq(schema.apps.id, id));
     throw error;
   } finally {

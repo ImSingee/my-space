@@ -74,3 +74,66 @@ export function deploymentArtifactDir(
 export function appStorageDir(id: string): string {
   return path.resolve(STORAGE_DIR, id);
 }
+
+/** ================== workflows ================== */
+/**
+ * Workflows mirror apps but live in their own namespaces so an app and a
+ * workflow may share a slug without colliding on disk. The Agent worktree is
+ * the one exception — both appear as `<id>/` under the chat work root, so the
+ * Git layer guards against a slug already checked out for the other kind.
+ */
+
+/** Git bare repositories for workflows: workspace/workflow-repos/<id>.git. */
+export const WORKFLOW_REPOS_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  'workflow-repos',
+);
+/** Temporary build inputs copied from clean workflow source worktrees. */
+export const WORKFLOW_BUILD_WORK_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  'workflow-build-work',
+);
+/** Deploy artifacts (bundled single-file program), one dir per deployment id. */
+export const WORKFLOW_ARTIFACTS_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  'workflow-artifacts',
+);
+/** Live bundle executed on trigger: workspace/workflow-current/<id>/workflow.js. */
+export const WORKFLOW_CURRENT_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  'workflow-current',
+);
+/** Server-managed workflow source checkouts used for non-Agent deploys. */
+export const WORKFLOW_CHECKOUTS_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  'workflow-checkouts',
+);
+
+export function workflowRepoDir(id: string): string {
+  return path.resolve(WORKFLOW_REPOS_DIR, `${id}.git`);
+}
+
+/** Agent worktree for a workflow (shares the chat work root with apps). */
+export function agentWorkflowWorkDir(sessionId: string, id: string): string {
+  return path.resolve(agentWorkDir(sessionId), id);
+}
+
+export function workflowDeployCheckoutDir(id: string): string {
+  return path.resolve(WORKFLOW_CHECKOUTS_DIR, id, 'deploy');
+}
+
+export function workflowArtifactsDir(id: string): string {
+  return path.resolve(WORKFLOW_ARTIFACTS_DIR, id);
+}
+
+export function workflowDeploymentArtifactDir(
+  id: string,
+  deploymentId: string,
+): string {
+  return path.resolve(WORKFLOW_ARTIFACTS_DIR, id, deploymentId);
+}
+
+/** Live directory holding the current bundled program for a workflow. */
+export function workflowCurrentDir(id: string): string {
+  return path.resolve(WORKFLOW_CURRENT_DIR, id);
+}
