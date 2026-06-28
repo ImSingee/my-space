@@ -112,9 +112,19 @@ export function ensureWorkflowScheduler(): void {
 
 /** Reload all schedules (call after a deploy/rollback/delete). */
 export async function reloadWorkflowScheduler(): Promise<void> {
-  state().started = true;
+  const s = state();
+  s.started = true;
   clearAll();
-  await loadAll();
+  try {
+    await loadAll();
+  } catch (error) {
+    // The old timers are already cleared; a transient DB/load failure would
+    // otherwise leave every cron trigger disabled with `started` stuck true so
+    // ensureWorkflowScheduler() never retries. Reset it so a later boot/reload
+    // rebuilds the schedule, then surface the failure to the caller.
+    s.started = false;
+    throw error;
+  }
 }
 
 export type WorkflowCronView = {

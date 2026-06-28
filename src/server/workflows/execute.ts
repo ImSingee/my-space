@@ -371,7 +371,12 @@ async function executeRun(
   if (!succeeded) {
     await failRunningSteps(runId, error ?? 'Run failed');
   }
-  await db
+  // Only transition a still-`running` row to its terminal state. A cancel that
+  // lands between the read above and here marks the row `canceled` and kills the
+  // child; without this predicate the unconditional update would clobber that
+  // back to succeeded/failed. If the conditional update matched nothing, persist
+  // just the log so the cancel's terminal status stays authoritative.
+  const finalized = await db
     .update(schema.workflowRuns)
     .set({
       status: finalStatus,
@@ -380,7 +385,19 @@ async function executeRun(
       log,
       finishedAt: new Date(),
     })
-    .where(eq(schema.workflowRuns.id, runId));
+    .where(
+      and(
+        eq(schema.workflowRuns.id, runId),
+        eq(schema.workflowRuns.status, 'running'),
+      ),
+    )
+    .returning({ id: schema.workflowRuns.id });
+  if (finalized.length === 0) {
+    await db
+      .update(schema.workflowRuns)
+      .set({ log })
+      .where(eq(schema.workflowRuns.id, runId));
+  }
 }
 
 /**
@@ -449,10 +466,22 @@ export async function cancelWorkflowRun(
   if (run.status !== 'running' && run.status !== 'queued') {
     return { canceled: false };
   }
-  await db
+  // The status check above is a read; the run may finish before this update. Gate
+  // the UPDATE on the row still being queued/running (and use the affected rows)
+  // so a completed succeeded/failed run is never overwritten as canceled.
+  const canceled = await db
     .update(schema.workflowRuns)
     .set({ status: 'canceled', error: 'Canceled', finishedAt: new Date() })
-    .where(eq(schema.workflowRuns.id, runId));
+    .where(
+      and(
+        eq(schema.workflowRuns.id, runId),
+        inArray(schema.workflowRuns.status, ['queued', 'running']),
+      ),
+    )
+    .returning({ id: schema.workflowRuns.id });
+  if (canceled.length === 0) {
+    return { canceled: false };
+  }
   const child = runRegistry().get(runId);
   if (child) {
     try {
