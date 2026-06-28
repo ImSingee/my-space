@@ -33,7 +33,8 @@ async function handle({ request }: { request: Request }): Promise<Response> {
 
   const provided =
     request.headers.get('x-hatch-secret') ?? url.searchParams.get('secret');
-  if (!provided || provided !== workflow.webhookSecret) {
+  const { secretsMatch } = await import('~server/secrets');
+  if (!secretsMatch(provided, workflow.webhookSecret)) {
     return new Response('Forbidden', { status: 403 });
   }
 

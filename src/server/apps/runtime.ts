@@ -335,6 +335,7 @@ export async function proxyAppRequest(
   request: Request,
   stripPrefix: string,
   prependPath = '',
+  options: { stripSecretParam?: boolean; preserveAuthorization?: boolean } = {},
 ): Promise<Response> {
   const port = await ensureAppRunning(id);
   const url = new URL(request.url);
@@ -342,12 +343,50 @@ export async function proxyAppRequest(
     ? url.pathname.slice(stripPrefix.length)
     : url.pathname;
   const rest = `${prependPath}${stripped}` || '/';
-  const target = `http://127.0.0.1:${port}${rest}${url.search}`;
+  // Only the webhook proxy path strips `?secret=` (the verified shared secret);
+  // for the authenticated RPC/app routes `secret` is a legitimate app parameter.
+  let search = url.search;
+  if (options.stripSecretParam) {
+    const params = new URLSearchParams(url.search);
+    params.delete('secret');
+    const qs = params.toString();
+    search = qs ? `?${qs}` : '';
+  }
+  const target = `http://127.0.0.1:${port}${rest}${search}`;
 
   const headers = new Headers(request.headers);
-  headers.delete('host');
-  headers.delete('connection');
-  headers.delete('content-length');
+  // Strip platform credentials and client-controlled routing/secret headers so a
+  // deployed app can neither read the platform's Better Auth session nor the
+  // webhook secret, nor spoof forwarding headers. Also drop hop-by-hop headers.
+  for (const header of [
+    'host',
+    'cookie',
+    'x-hatch-secret',
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+    'forwarded',
+    'x-forwarded-for',
+    'x-forwarded-host',
+    'x-forwarded-proto',
+    'x-forwarded-port',
+    'via',
+    'content-length',
+  ]) {
+    headers.delete(header);
+  }
+  // On authenticated RPC/app routes `authorization` would carry the platform's
+  // credential, so strip it. On the public webhook path it is instead a
+  // caller-supplied header the app's `/__webhook` handler may need to validate,
+  // so the webhook proxy opts to preserve it.
+  if (!options.preserveAuthorization) {
+    headers.delete('authorization');
+  }
 
   const init: RequestInit = { method: request.method, headers };
   if (request.method !== 'GET' && request.method !== 'HEAD') {

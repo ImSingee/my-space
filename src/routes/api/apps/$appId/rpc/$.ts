@@ -12,6 +12,22 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     return new Response('Not found', { status: 404 });
   }
   const id = match[1];
+  // Don't resurrect an archived/never-deployed app via a retained RPC URL:
+  // proxyAppRequest would cold-start it. Gate on a live deployment + backend
+  // capability rather than status === 'deployed' so a redeploy (status
+  // 'building', previous backend still valid) keeps serving without downtime.
+  const { db } = await import('~/db');
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq }) => eq(s.id, id),
+  });
+  if (
+    !app ||
+    app.status === 'archived' ||
+    !app.currentDeploymentId ||
+    !app.capabilities?.backend
+  ) {
+    return new Response('Not found', { status: 404 });
+  }
   const { proxyAppRequest } = await import('~server/apps/runtime');
   try {
     return await proxyAppRequest(id, request, `/api/apps/${id}/rpc`);

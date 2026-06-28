@@ -23,15 +23,31 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     return new Response('Webhook not enabled', { status: 404 });
   }
 
-  const provided =
-    request.headers.get('x-hatch-secret') ?? url.searchParams.get('secret');
-  if (!provided || provided !== app.webhookSecret) {
+  const headerSecret = request.headers.get('x-hatch-secret');
+  const provided = headerSecret ?? url.searchParams.get('secret');
+  const { secretsMatch } = await import('~server/secrets');
+  if (!secretsMatch(provided, app.webhookSecret)) {
     return new Response('Forbidden', { status: 403 });
   }
 
   const { proxyAppRequest } = await import('~server/apps/runtime');
   try {
-    return await proxyAppRequest(id, request, `/api/hooks/${id}`, '/__webhook');
+    return await proxyAppRequest(
+      id,
+      request,
+      `/api/hooks/${id}`,
+      '/__webhook',
+      {
+        // Only strip `?secret=` when it was the credential we just verified. If
+        // the caller authenticated via `x-hatch-secret`, then `?secret=` is an
+        // app/provider token the backend may need, so leave it intact.
+        stripSecretParam: !headerSecret,
+        // The webhook secret already authenticated this request; any
+        // `Authorization` header is the external caller's own credential for
+        // the app's webhook handler, not the platform session, so forward it.
+        preserveAuthorization: true,
+      },
+    );
   } catch (error) {
     return new Response(
       error instanceof Error ? error.message : 'App backend error',

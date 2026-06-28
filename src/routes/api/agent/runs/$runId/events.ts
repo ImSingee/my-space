@@ -51,15 +51,12 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
             let closed = false;
             let lastSeq = parsed.after;
             let unsubscribe = () => {};
-            let listeningForAbort = false;
 
             const close = () => {
               if (closed) return;
               closed = true;
               unsubscribe();
-              if (listeningForAbort) {
-                request.signal.removeEventListener('abort', close);
-              }
+              request.signal.removeEventListener('abort', close);
               try {
                 controller.close();
               } catch {
@@ -67,6 +64,16 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
               }
             };
             closeStream = close;
+
+            // Attach abort handling BEFORE any await: if the client disconnects
+            // during async setup (slow replay, immediate tab close) the signal
+            // could otherwise fire before we subscribe, leaking the subscription
+            // and a blocked run until a later terminal event.
+            request.signal.addEventListener('abort', close);
+            if (request.signal.aborted) {
+              close();
+              return;
+            }
 
             const send = (event: AgentRunStreamEvent) => {
               if (closed || event.seq <= lastSeq) return;
@@ -117,9 +124,6 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
                 close();
                 return;
               }
-
-              request.signal.addEventListener('abort', close);
-              listeningForAbort = true;
             } catch (error) {
               if (!closed) {
                 try {
