@@ -13,10 +13,12 @@ import { fetchSession } from '~server/auth';
 import classes from './_app.module.css';
 
 export const Route = createFileRoute('/_app')({
-  beforeLoad: async () => {
+  beforeLoad: async ({ location }) => {
     const session = await fetchSession();
     if (!session) {
-      throw redirect({ to: '/login' });
+      // Carry the attempted URL so /login can return the user to their deep
+      // link after authenticating instead of always landing on /dashboard.
+      throw redirect({ to: '/login', search: { redirect: location.href } });
     }
     return { session };
   },

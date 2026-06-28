@@ -40,7 +40,7 @@ import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
 import { StatusBadge } from '~components/apps/status-badge';
-import { sidebarItemsQueryOptions } from '~queries/apps';
+import { appsQueryOptions, sidebarItemsQueryOptions } from '~queries/apps';
 import { archiveAppFn, deleteAppFn, getApp, setSidebarPin } from '~server/apps';
 
 export const Route = createFileRoute('/_app/apps/$appId/manage')({
@@ -82,6 +82,15 @@ function AppDetailPage() {
     mutationFn: () => deleteAppFn({ data: app.id }),
     onSuccess: () => {
       toast.success(`Deleted ${app.name}`);
+      // The delete cascades to sidebar pins, so drop those caches too; otherwise
+      // the deleted app lingers in the sidebar / pin menu and links to a 404
+      // until the next focus refetch.
+      void queryClient.invalidateQueries({
+        queryKey: sidebarItemsQueryOptions.queryKey,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: appsQueryOptions.queryKey,
+      });
       void navigate({ to: '/apps' });
     },
     onError: (error) => toast.error((error as Error).message),

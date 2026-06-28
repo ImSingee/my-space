@@ -17,11 +17,24 @@ import { Brand } from '~components/app-shell/brand';
 import { fetchSession } from '~server/auth';
 import classes from './login.module.css';
 
+/**
+ * Resolve the post-login destination. Only same-origin absolute paths are
+ * honored so a crafted `?redirect=` can't bounce a freshly authenticated user
+ * to another origin (`//evil.com`, `https://evil.com`, `/\evil.com`).
+ */
+function safeRedirect(target: string | undefined): string {
+  if (target && /^\/(?![/\\])/.test(target)) return target;
+  return '/dashboard';
+}
+
 export const Route = createFileRoute('/login')({
-  beforeLoad: async () => {
+  validateSearch: (search): { redirect?: string } => ({
+    redirect: typeof search.redirect === 'string' ? search.redirect : undefined,
+  }),
+  beforeLoad: async ({ search }) => {
     const session = await fetchSession();
     if (session) {
-      throw redirect({ to: '/dashboard' });
+      throw redirect({ href: safeRedirect(search.redirect) });
     }
   },
   component: LoginPage,
@@ -31,6 +44,7 @@ type Mode = 'signin' | 'signup';
 
 function LoginPage() {
   const router = useRouter();
+  const { redirect: redirectTo } = Route.useSearch();
   const [mode, setMode] = useState<Mode>('signin');
   const [loading, setLoading] = useState(false);
 
@@ -65,7 +79,7 @@ function LoginPage() {
         return;
       }
       toast.success(mode === 'signin' ? 'Welcome back' : 'Account created');
-      await router.navigate({ to: '/dashboard' });
+      await router.navigate({ href: safeRedirect(redirectTo) });
     } catch {
       toast.error('Something went wrong. Please try again.');
     } finally {
