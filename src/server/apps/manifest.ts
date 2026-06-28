@@ -7,15 +7,47 @@
  */
 import { z } from 'zod';
 
+/**
+ * Reject manifest-provided paths that would escape the app source tree once
+ * joined to it (absolute paths, Windows drive/UNC paths, or any `..` segment).
+ * Kept as a pure string check so this module stays isomorphic (no `node:path`).
+ */
+function isUnsafeSourcePath(p: string): boolean {
+  if (p.startsWith('/') || p.startsWith('\\')) return true;
+  if (/^[a-zA-Z]:/.test(p)) return true;
+  return p.split(/[/\\]/).some((segment) => segment === '..');
+}
+
+/**
+ * A relative path the build later joins against the app source dir to read or
+ * bundle a file. Constrained so a malicious/mistaken manifest can't read files
+ * outside the app source (e.g. `../../.env.local`).
+ */
+const sourceRelativePath = z
+  .string()
+  .min(1)
+  .refine((p) => !isUnsafeSourcePath(p), {
+    message:
+      'must be a relative path inside the app source (no absolute or ".." paths)',
+  });
+
 export const widgetSizeSchema = z.object({
   w: z.number().int().min(1).max(12).default(4),
   h: z.number().int().min(1).max(12).default(3),
 });
 
 export const widgetSchema = z.object({
-  id: z.string().min(1),
+  // Used both as a URL path segment and as the built `<id>.js` filename, so it
+  // must be a safe slug — never a value with path separators or `..`.
+  id: z
+    .string()
+    .min(1)
+    .regex(
+      /^[a-zA-Z0-9_-]+$/,
+      'widget id must contain only letters, digits, hyphens, or underscores',
+    ),
   name: z.string().min(1),
-  entry: z.string().min(1),
+  entry: sourceRelativePath,
   defaultSize: widgetSizeSchema.default({ w: 4, h: 3 }),
 });
 
@@ -54,11 +86,11 @@ export const sourceManifestSchema = z.object({
   capabilities: capabilitiesSchema,
   backendMode: z.enum(['serverless', 'long-running']).default('serverless'),
   rpc: z
-    .object({ proto: z.string().min(1), service: z.string().min(1) })
+    .object({ proto: sourceRelativePath, service: z.string().min(1) })
     .optional(),
-  backend: z.object({ entry: z.string().min(1) }).optional(),
+  backend: z.object({ entry: sourceRelativePath }).optional(),
   app: z
-    .object({ entry: z.string().min(1), html: z.string().optional() })
+    .object({ entry: sourceRelativePath, html: sourceRelativePath.optional() })
     .optional(),
   widgets: z.array(widgetSchema).default([]),
   cron: z.array(cronJobSchema).default([]),

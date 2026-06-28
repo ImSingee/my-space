@@ -16,6 +16,16 @@ async function handle({ request }: { request: Request }): Promise<Response> {
   if (!parsed) return new Response('Not found', { status: 404 });
   const { id, key } = parsed;
 
+  // Resolve and authorize the target app before touching storage: reject
+  // missing, archived, or non-storage apps so a stale/handcrafted URL can't
+  // reach a retired app's blobs. (Per-app sandboxing of one deployed app
+  // against another's storage would require per-app origins/tokens, which the
+  // same-origin iframe model doesn't yet provide.)
+  const { liveAppManifest } = await import('~server/apps/access');
+  if (!(await liveAppManifest(id, 'storage'))) {
+    return new Response('Not found', { status: 404 });
+  }
+
   const storage = await import('~server/apps/storage');
   try {
     if (request.method === 'GET') {

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { appBuildDir } from '~agent/paths';
+import { liveAppManifest } from './access';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -25,6 +26,12 @@ export async function serveAppAppFile(
   id: string,
   rawRel: string,
 ): Promise<Response> {
+  // Don't serve a retired/never-deployed app's bundle from leftover build files
+  // via a stale direct URL: require a live, non-archived frontend deployment.
+  if (!(await liveAppManifest(id, 'frontend'))) {
+    return new Response('Not found', { status: 404 });
+  }
+
   let rel = decodeURIComponent(rawRel || '');
   if (rel === '' || rel.endsWith('/')) {
     rel += 'index.html';
