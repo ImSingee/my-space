@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { ProviderApiType } from '~/db/schema';
+import { authMiddleware } from './auth';
 
 const apiTypeSchema = z.enum([
   'anthropic-messages',
@@ -39,8 +40,9 @@ export type ProviderWithModels = {
 };
 
 /** List providers with their models. Seeds defaults on first run. API keys are masked. */
-export const listProviders = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<ProviderWithModels[]> => {
+export const listProviders = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async (): Promise<ProviderWithModels[]> => {
     const { seedDefaultProviders } = await import('~agent/seed-providers');
     await seedDefaultProviders();
 
@@ -76,8 +78,7 @@ export const listProviders = createServerFn({ method: 'GET' }).handler(
       });
     }
     return result;
-  },
-);
+  });
 
 const createProviderSchema = z.object({
   name: z.string().min(1),
@@ -87,6 +88,7 @@ const createProviderSchema = z.object({
 });
 
 export const createProvider = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: z.input<typeof createProviderSchema>) =>
     createProviderSchema.parse(data),
   )
@@ -114,6 +116,7 @@ const updateProviderSchema = z.object({
 });
 
 export const updateProvider = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: z.input<typeof updateProviderSchema>) =>
     updateProviderSchema.parse(data),
   )
@@ -133,6 +136,7 @@ export const updateProvider = createServerFn({ method: 'POST' })
   });
 
 export const deleteProvider = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: { id: string }) => z.object({ id: z.string() }).parse(data))
   .handler(async ({ data }) => {
     await db
@@ -152,6 +156,7 @@ const createModelSchema = z.object({
 });
 
 export const createModel = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: z.input<typeof createModelSchema>) =>
     createModelSchema.parse(data),
   )
@@ -181,6 +186,7 @@ const updateModelSchema = z.object({
 });
 
 export const updateModel = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: z.input<typeof updateModelSchema>) =>
     updateModelSchema.parse(data),
   )
@@ -201,6 +207,7 @@ export const updateModel = createServerFn({ method: 'POST' })
   });
 
 export const deleteModel = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: { id: string }) => z.object({ id: z.string() }).parse(data))
   .handler(async ({ data }) => {
     await db

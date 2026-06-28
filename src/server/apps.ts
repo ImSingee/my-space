@@ -2,17 +2,21 @@ import { createServerFn } from '@tanstack/react-start';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { NormalizedManifest } from './apps/manifest';
+import { authMiddleware } from './auth';
 
-export const listApps = createServerFn({ method: 'GET' }).handler(async () => {
-  // Opportunistically (re)start the cron scheduler on app load so schedules
-  // survive a platform restart without requiring a redeploy.
-  void import('./apps/scheduler').then((m) => m.ensureScheduler());
-  return db.query.apps.findMany({
-    orderBy: (s, { desc }) => [desc(s.updatedAt)],
+export const listApps = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    // Opportunistically (re)start the cron scheduler on app load so schedules
+    // survive a platform restart without requiring a redeploy.
+    void import('./apps/scheduler').then((m) => m.ensureScheduler());
+    return db.query.apps.findMany({
+      orderBy: (s, { desc }) => [desc(s.updatedAt)],
+    });
   });
-});
 
 export const getApp = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const row = await db.query.apps.findFirst({
@@ -37,10 +41,12 @@ async function normalizedManifestFor(
 }
 
 export const getNormalizedManifest = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => normalizedManifestFor(id));
 
 export const listDeployments = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const { listDeployments: list } = await import('./apps/manage');
@@ -48,6 +54,7 @@ export const listDeployments = createServerFn({ method: 'GET' })
   });
 
 export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; deploymentId: string }) => input)
   .handler(async ({ data }) => {
     const { deploymentBuildLog } = await import('./apps/manage');
@@ -55,6 +62,7 @@ export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
   });
 
 export const rollbackAppFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; deploymentId: string }) => input)
   .handler(async ({ data }) => {
     const { rollbackApp } = await import('./apps/manage');
@@ -62,6 +70,7 @@ export const rollbackAppFn = createServerFn({ method: 'POST' })
   });
 
 export const archiveAppFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; archived: boolean }) => input)
   .handler(async ({ data }) => {
     const { setAppArchived } = await import('./apps/manage');
@@ -69,6 +78,7 @@ export const archiveAppFn = createServerFn({ method: 'POST' })
   });
 
 export const deleteAppFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const { deleteApp } = await import('./apps/manage');
@@ -107,6 +117,7 @@ export type AppOps = {
 };
 
 export const getAppOps = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }): Promise<AppOps> => {
     const app = await db.query.apps.findFirst({
@@ -153,6 +164,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
   });
 
 export const runCronJobFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; name: string }) => input)
   .handler(async ({ data }) => {
     const { runCronJobNow } = await import('./apps/scheduler');
@@ -160,6 +172,7 @@ export const runCronJobFn = createServerFn({ method: 'POST' })
   });
 
 export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; key: string }) => input)
   .handler(async ({ data }) => {
     const { deleteObject } = await import('./apps/storage');
@@ -187,8 +200,9 @@ async function ensureDefaultDashboard(): Promise<void> {
     .onConflictDoNothing();
 }
 
-export const listDashboards = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Dashboard[]> => {
+export const listDashboards = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async (): Promise<Dashboard[]> => {
     await ensureDefaultDashboard();
     const rows = await db.query.dashboards.findMany({
       orderBy: (d, { asc }) => [asc(d.sortOrder), asc(d.createdAt)],
@@ -200,10 +214,10 @@ export const listDashboards = createServerFn({ method: 'GET' }).handler(
       pinned: d.pinned,
       sortOrder: d.sortOrder,
     }));
-  },
-);
+  });
 
 export const createDashboard = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { name: string }) => input)
   .handler(async ({ data }): Promise<Dashboard> => {
     const name = data.name.trim() || 'Untitled';
@@ -222,6 +236,7 @@ export const createDashboard = createServerFn({ method: 'POST' })
   });
 
 export const setDashboardPin = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; pinned: boolean }) => input)
   .handler(async ({ data }) => {
     await db
@@ -232,6 +247,7 @@ export const setDashboardPin = createServerFn({ method: 'POST' })
   });
 
 export const renameDashboard = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; name: string }) => input)
   .handler(async ({ data }) => {
     const name = data.name.trim();
@@ -244,6 +260,7 @@ export const renameDashboard = createServerFn({ method: 'POST' })
   });
 
 export const setDashboardDescription = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; description: string }) => input)
   .handler(async ({ data }) => {
     const description = data.description.trim();
@@ -255,6 +272,7 @@ export const setDashboardDescription = createServerFn({ method: 'POST' })
   });
 
 export const deleteDashboard = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const all = await db.query.dashboards.findMany();
@@ -266,6 +284,7 @@ export const deleteDashboard = createServerFn({ method: 'POST' })
   });
 
 export const reorderDashboards = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((orderedIds: string[]) => orderedIds)
   .handler(async ({ data: orderedIds }) => {
     await Promise.all(
@@ -295,6 +314,7 @@ export type DashboardItem = {
 };
 
 export const getDashboard = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((dashboardId: string) => dashboardId)
   .handler(async ({ data: dashboardId }): Promise<DashboardItem[]> => {
     const placements = await db.query.dashboardWidgets.findMany({
@@ -338,8 +358,9 @@ export type AvailableWidget = {
   defaultSize: { w: number; h: number };
 };
 
-export const listAvailableWidgets = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<AvailableWidget[]> => {
+export const listAvailableWidgets = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async (): Promise<AvailableWidget[]> => {
     const deployed = await db.query.apps.findMany({
       where: (s, { eq: e }) => e(s.status, 'deployed'),
     });
@@ -359,10 +380,10 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' }).handler(
       }
     }
     return items;
-  },
-);
+  });
 
 export const addDashboardWidget = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator(
     (input: { dashboardId: string; appId: string; widgetId: string }) => input,
   )
@@ -411,6 +432,7 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
   });
 
 export const removeDashboardWidget = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     await db
@@ -428,8 +450,9 @@ export type SidebarItem = {
   status: schema.AppStatus;
 };
 
-export const listSidebarItems = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<SidebarItem[]> => {
+export const listSidebarItems = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async (): Promise<SidebarItem[]> => {
     const pins = await db.query.sidebarItems.findMany({
       orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
     });
@@ -447,10 +470,10 @@ export const listSidebarItems = createServerFn({ method: 'GET' }).handler(
       });
     }
     return items;
-  },
-);
+  });
 
 export const setSidebarPin = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { appId: string; pinned: boolean }) => input)
   .handler(async ({ data }) => {
     const existing = await db.query.sidebarItems.findFirst({
@@ -480,6 +503,7 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
   });
 
 export const renameSidebarItem = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; label: string }) => input)
   .handler(async ({ data }) => {
     const label = data.label.trim();
@@ -492,6 +516,7 @@ export const renameSidebarItem = createServerFn({ method: 'POST' })
   });
 
 export const reorderSidebarItems = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((orderedIds: string[]) => orderedIds)
   .handler(async ({ data: orderedIds }) => {
     await Promise.all(
@@ -508,6 +533,7 @@ export const reorderSidebarItems = createServerFn({ method: 'POST' })
 type LayoutPatch = { id: string; x: number; y: number; w: number; h: number };
 
 export const updateDashboardLayout = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((items: LayoutPatch[]) => items)
   .handler(async ({ data: items }) => {
     await Promise.all(

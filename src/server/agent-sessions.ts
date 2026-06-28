@@ -8,6 +8,7 @@ import {
   getActiveAgentRun,
   type ActiveAgentRun,
 } from './agent-runs';
+import { authMiddleware } from './auth';
 
 export type SessionSummary = {
   id: string;
@@ -19,8 +20,9 @@ export type SessionSummary = {
   updatedAt: string;
 };
 
-export const listSessions = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<SessionSummary[]> => {
+export const listSessions = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async (): Promise<SessionSummary[]> => {
     const rows = await db.query.agentSessions.findMany({
       orderBy: (s, { desc }) => [desc(s.updatedAt)],
     });
@@ -33,8 +35,7 @@ export const listSessions = createServerFn({ method: 'GET' }).handler(
       messageCount: Array.isArray(s.messages) ? s.messages.length : 0,
       updatedAt: s.updatedAt.toISOString(),
     }));
-  },
-);
+  });
 
 export type SessionDetail = {
   id: string;
@@ -47,6 +48,7 @@ export type SessionDetail = {
 };
 
 export const getSession = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => z.string().parse(id))
   .handler(async ({ data: id }): Promise<SessionDetail | null> => {
     const row = await db.query.agentSessions.findFirst({
@@ -72,6 +74,7 @@ const createSchema = z.object({
 });
 
 export const createSession = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: z.input<typeof createSchema>) => createSchema.parse(data))
   .handler(async ({ data }) => {
     const [row] = await db
@@ -87,6 +90,7 @@ export const createSession = createServerFn({ method: 'POST' })
   });
 
 export const renameSession = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: { id: string; title: string }) =>
     z.object({ id: z.string(), title: z.string().min(1) }).parse(data),
   )
@@ -99,6 +103,7 @@ export const renameSession = createServerFn({ method: 'POST' })
   });
 
 export const setSessionModel = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: { id: string; providerId: string; modelId: string }) =>
     z
       .object({
@@ -117,6 +122,7 @@ export const setSessionModel = createServerFn({ method: 'POST' })
   });
 
 export const deleteSession = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((data: { id: string }) => z.object({ id: z.string() }).parse(data))
   .handler(async ({ data }) => {
     // Abort (and wait for) any in-flight run first. Otherwise the deletion

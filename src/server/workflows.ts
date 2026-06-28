@@ -1,9 +1,11 @@
 import { createServerFn } from '@tanstack/react-start';
 import { db } from '~/db';
+import { authMiddleware } from './auth';
 import { workflowWebhookUrl } from './workflows/manifest';
 
-export const listWorkflows = createServerFn({ method: 'GET' }).handler(
-  async () => {
+export const listWorkflows = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
     // Opportunistically (re)start the workflow cron scheduler so schedules
     // survive a platform restart without requiring a redeploy.
     void import('./workflows/scheduler').then((m) =>
@@ -12,10 +14,10 @@ export const listWorkflows = createServerFn({ method: 'GET' }).handler(
     return db.query.workflows.findMany({
       orderBy: (s, { desc }) => [desc(s.updatedAt)],
     });
-  },
-);
+  });
 
 export const getWorkflow = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const row = await db.query.workflows.findFirst({
@@ -27,6 +29,7 @@ export const getWorkflow = createServerFn({ method: 'GET' })
 export type WorkflowRow = NonNullable<Awaited<ReturnType<typeof getWorkflow>>>;
 
 export const listWorkflowDeployments = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const { listWorkflowDeployments: list } =
@@ -35,6 +38,7 @@ export const listWorkflowDeployments = createServerFn({ method: 'GET' })
   });
 
 export const getWorkflowDeploymentBuildLog = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; deploymentId: string }) => input)
   .handler(async ({ data }) => {
     const { workflowDeploymentBuildLog } = await import('./workflows/manage');
@@ -42,6 +46,7 @@ export const getWorkflowDeploymentBuildLog = createServerFn({ method: 'GET' })
   });
 
 export const rollbackWorkflowFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; deploymentId: string }) => input)
   .handler(async ({ data }) => {
     const { rollbackWorkflow } = await import('./workflows/manage');
@@ -49,6 +54,7 @@ export const rollbackWorkflowFn = createServerFn({ method: 'POST' })
   });
 
 export const archiveWorkflowFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; archived: boolean }) => input)
   .handler(async ({ data }) => {
     const { setWorkflowArchived } = await import('./workflows/manage');
@@ -56,6 +62,7 @@ export const archiveWorkflowFn = createServerFn({ method: 'POST' })
   });
 
 export const deleteWorkflowFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const { deleteWorkflow } = await import('./workflows/manage');
@@ -63,6 +70,7 @@ export const deleteWorkflowFn = createServerFn({ method: 'POST' })
   });
 
 export const setWorkflowPinFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; pinned: boolean }) => input)
   .handler(async ({ data }) => {
     const { eq } = await import('drizzle-orm');
@@ -89,6 +97,7 @@ export type WorkflowOps = {
 };
 
 export const getWorkflowOps = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }): Promise<WorkflowOps> => {
     const workflow = await db.query.workflows.findFirst({
@@ -131,6 +140,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
 /* --------------------------------- runs ----------------------------------- */
 
 export const runWorkflowFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((input: { id: string; input?: unknown }) => input)
   .handler(async ({ data }) => {
     const { startWorkflowRun } = await import('./workflows/execute');
@@ -141,20 +151,22 @@ export const runWorkflowFn = createServerFn({ method: 'POST' })
   });
 
 export const listWorkflowRuns = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
     const { listWorkflowRuns: list } = await import('./workflows/manage');
     return list(id);
   });
 
-export const listAllWorkflowRuns = createServerFn({ method: 'GET' }).handler(
-  async () => {
+export const listAllWorkflowRuns = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
     const { listRecentWorkflowRuns } = await import('./workflows/manage');
     return listRecentWorkflowRuns();
-  },
-);
+  });
 
 export const getWorkflowRun = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .validator((runId: string) => runId)
   .handler(async ({ data: runId }) => {
     const { getWorkflowRun: get } = await import('./workflows/manage');
@@ -162,6 +174,7 @@ export const getWorkflowRun = createServerFn({ method: 'GET' })
   });
 
 export const cancelWorkflowRunFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .validator((runId: string) => runId)
   .handler(async ({ data: runId }) => {
     const { cancelWorkflowRun } = await import('./workflows/execute');
