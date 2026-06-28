@@ -20,7 +20,7 @@ import {
 import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { sessionsQueryOptions } from '~queries/agent';
+import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import { deleteSession, renameSession } from '~server/agent-sessions';
 import classes from './chat.module.css';
 
@@ -46,6 +46,9 @@ export function SessionsPanel({
     mutationFn: (id: string) => deleteSession({ data: { id } }),
     onSuccess: async (_res, id) => {
       await invalidate();
+      // Drop the cached transcript so a browser Back to the deleted thread
+      // refetches (and renders empty) instead of replaying the stale messages.
+      qc.removeQueries({ queryKey: sessionQueryOptions(id).queryKey });
       if (selected === id) onSelect(null);
       toast.success('Chat deleted');
     },
@@ -54,8 +57,13 @@ export function SessionsPanel({
   const rename = useMutation({
     mutationFn: (input: { id: string; title: string }) =>
       renameSession({ data: input }),
-    onSuccess: async () => {
+    onSuccess: async (_res, variables) => {
       await invalidate();
+      // The list refresh alone leaves the open chat's detail query stale, so
+      // its header keeps the old title until a hard reload — refetch it too.
+      await qc.invalidateQueries({
+        queryKey: sessionQueryOptions(variables.id).queryKey,
+      });
       setRenameTarget(null);
       toast.success('Chat renamed');
     },

@@ -237,7 +237,9 @@ export function Composer({
           }
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
+          // `isComposing` guards IME users (CJK): the Enter that commits a
+          // candidate must not also submit the prompt mid-composition.
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             submit();
           }

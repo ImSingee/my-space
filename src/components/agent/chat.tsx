@@ -48,6 +48,23 @@ export function useModelOptions() {
   }, [providers]);
 }
 
+/**
+ * Decode a model picker value (`<providerId>:<modelId>`). Provider ids are
+ * ULIDs (never contain a colon), but model ids legitimately do — e.g.
+ * Bedrock-style ids ending in `:0` — so split only on the first separator and
+ * keep the remainder intact instead of `split(':')` which would truncate them.
+ */
+export function splitModelValue(
+  value: string,
+): { providerId: string; modelId: string } | null {
+  const sep = value.indexOf(':');
+  if (sep <= 0) return null;
+  const providerId = value.slice(0, sep);
+  const modelId = value.slice(sep + 1);
+  if (!providerId || !modelId) return null;
+  return { providerId, modelId };
+}
+
 type RenderTurn =
   | { kind: 'user'; key: string; message: ChatMessage }
   | { kind: 'assistant'; key: string; blocks: AssistantBlock[] };
@@ -192,15 +209,15 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const send = (text: string, images: ComposerImage[], modelValue: string) => {
     if (busy) return;
     if (!text && images.length === 0) return;
-    const [providerId, modelId] = modelValue.split(':');
-    if (!providerId || !modelId) return;
+    const parsed = splitModelValue(modelValue);
+    if (!parsed) return;
 
     void sendRun({
       sessionId,
       userText: text,
       images,
-      providerId,
-      modelId,
+      providerId: parsed.providerId,
+      modelId: parsed.modelId,
     }).then((runId) => {
       if (!runId) return;
       // Surface the run immediately so the connection effect subscribes without

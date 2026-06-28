@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
 import { createSession } from '~server/agent-sessions';
-import { useModelOptions } from './chat';
+import { splitModelValue, useModelOptions } from './chat';
 import { Composer, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
 import { startAgentRunRequest } from './use-agent-stream';
@@ -55,8 +55,9 @@ export function NewChat({
     if (creating) return;
     const value = effectiveModel;
     if (!value) return;
-    const [providerId, modelId] = value.split(':');
-    if (!providerId || !modelId) return;
+    const parsed = splitModelValue(value);
+    if (!parsed) return;
+    const { providerId, modelId } = parsed;
 
     setCreating(true);
     try {
