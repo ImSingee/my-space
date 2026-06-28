@@ -15,6 +15,12 @@ export const VERSIONS_DIR = path.resolve(WORKSPACE_ROOT, 'versions');
 export const REPOS_DIR = path.resolve(WORKSPACE_ROOT, 'repos');
 /** Persistent Agent work roots: workspace/agents/<sessionId>/work/<appId>. */
 export const AGENTS_DIR = path.resolve(WORKSPACE_ROOT, 'agents');
+/**
+ * Sandbox HOME for the Agent's shell. run_command points HOME/XDG/cache dirs
+ * here so prompt-injected commands can't read the server user's real home
+ * (~/.npmrc, ~/.ssh, ~/.aws, …). Persistent so tool caches stay warm.
+ */
+export const AGENT_HOME_DIR = path.resolve(WORKSPACE_ROOT, 'agent-home');
 /** Server-managed source checkouts used for non-Agent deploys. */
 export const CHECKOUTS_DIR = path.resolve(WORKSPACE_ROOT, 'checkouts');
 /** Deploy artifacts, one dir per deployment id (tagged deploy/v<version>). */

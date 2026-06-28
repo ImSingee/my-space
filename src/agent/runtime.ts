@@ -12,6 +12,7 @@ import type { JsonValue } from '~/db/schema';
 import type { ResolvedModel } from './build-models';
 import type { AgentStreamEvent } from './events';
 import { agentWorkDir, SKILLS_DIR } from './paths';
+import { agentShellEnv } from './shell-env';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge } from './tools';
 
@@ -71,9 +72,13 @@ export async function runAgentTurn(
   const cwd = agentWorkDir(sessionId);
   mkdirSync(cwd, { recursive: true });
 
+  // Never hand the model's shell the raw server env: with run_command it could
+  // otherwise read host secrets (DATABASE_URL, auth keys, provider keys, …),
+  // including via prompt-injected project files. agentShellEnv() strips
+  // everything outside a small dev allowlist.
   const env = new NodeExecutionEnv({
     cwd,
-    shellEnv: process.env,
+    shellEnv: agentShellEnv(),
   });
 
   const repo = new InMemorySessionRepo();

@@ -3,7 +3,11 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
-import { getActiveAgentRun, type ActiveAgentRun } from './agent-runs';
+import {
+  cancelAgentRun,
+  getActiveAgentRun,
+  type ActiveAgentRun,
+} from './agent-runs';
 
 export type SessionSummary = {
   id: string;
@@ -115,6 +119,12 @@ export const setSessionModel = createServerFn({ method: 'POST' })
 export const deleteSession = createServerFn({ method: 'POST' })
   .validator((data: { id: string }) => z.object({ id: z.string() }).parse(data))
   .handler(async ({ data }) => {
+    // Abort (and wait for) any in-flight run first. Otherwise the deletion
+    // cascades the run rows while its model/tool execution keeps going in the
+    // background — still running shell commands, deploys, etc. after the chat is
+    // gone — and late event inserts would hit already-deleted rows.
+    const active = await getActiveAgentRun(data.id);
+    if (active) await cancelAgentRun(active.id);
     await db
       .delete(schema.agentSessions)
       .where(eq(schema.agentSessions.id, data.id));

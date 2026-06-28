@@ -2,9 +2,13 @@
  * Server-only: seed the built-in `ai.singee.me` test providers so the platform
  * is usable out of the box. Idempotent — does nothing if any provider exists.
  */
+import { sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
 
 const TEST_KEY = 'sk-e2f9188df87094bccc63a144cbd809d3';
+
+/** Stable advisory-lock key that serializes default seeding ("SEED"). */
+const SEED_LOCK_KEY = 0x53454544;
 
 type SeedProvider = {
   name: string;
@@ -63,34 +67,42 @@ const DEFAULTS: SeedProvider[] = [
 
 /** Insert the default providers/models when the providers table is empty. */
 export async function seedDefaultProviders(): Promise<boolean> {
-  const existing = await db.query.agentProviders.findFirst();
-  if (existing) return false;
+  // Serialize concurrent seeds (two requests hitting a fresh DB at once) so the
+  // empty-table check and the inserts are atomic; otherwise both callers pass
+  // the check and double-insert the defaults. A transaction-scoped advisory lock
+  // makes the whole check+insert mutually exclusive and auto-releases on commit.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${SEED_LOCK_KEY})`);
 
-  for (const def of DEFAULTS) {
-    const [provider] = await db
-      .insert(schema.agentProviders)
-      .values({
-        name: def.name,
-        apiType: def.apiType,
-        baseUrl: def.baseUrl,
-        apiKey: def.apiKey,
-        sortOrder: def.sortOrder,
-      })
-      .returning();
+    const existing = await tx.query.agentProviders.findFirst();
+    if (existing) return false;
 
-    await db.insert(schema.agentModels).values(
-      def.models.map((m, index) => ({
-        providerId: provider.id,
-        modelId: m.modelId,
-        name: m.name,
-        reasoning: m.reasoning,
-        contextWindow: m.contextWindow,
-        maxTokens: m.maxTokens,
-        input: m.input,
-        sortOrder: index,
-      })),
-    );
-  }
+    for (const def of DEFAULTS) {
+      const [provider] = await tx
+        .insert(schema.agentProviders)
+        .values({
+          name: def.name,
+          apiType: def.apiType,
+          baseUrl: def.baseUrl,
+          apiKey: def.apiKey,
+          sortOrder: def.sortOrder,
+        })
+        .returning();
 
-  return true;
+      await tx.insert(schema.agentModels).values(
+        def.models.map((m, index) => ({
+          providerId: provider.id,
+          modelId: m.modelId,
+          name: m.name,
+          reasoning: m.reasoning,
+          contextWindow: m.contextWindow,
+          maxTokens: m.maxTokens,
+          input: m.input,
+          sortOrder: index,
+        })),
+      );
+    }
+
+    return true;
+  });
 }

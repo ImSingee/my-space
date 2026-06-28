@@ -161,6 +161,25 @@ async function resolveExistingTextFile(
   };
 }
 
+async function resolveListableDir(
+  env: ExecutionEnv,
+  inputPath: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const [root, canonicalPath] = await Promise.all([
+    canonicalWorkspaceRoot(env, signal),
+    unwrap(await env.canonicalPath(inputPath, signal)),
+  ]);
+  if (!isInsidePath(root, canonicalPath)) {
+    throw new Error(`${inputPath} is outside the workspace.`);
+  }
+  const info = unwrap(await env.fileInfo(canonicalPath, signal));
+  if (info.kind !== 'directory') {
+    throw new Error(`${inputPath} is not a directory.`);
+  }
+  return canonicalPath;
+}
+
 async function resolveWritableTextFile(
   env: ExecutionEnv,
   inputPath: string,
@@ -215,8 +234,11 @@ export function createTools(
         Type.String({ description: 'Directory path. Defaults to ".".' }),
       ),
     }),
-    execute: async (_id, params) => {
-      const entries = unwrap(await env.listDir(params.path ?? '.'));
+    execute: async (_id, params, signal) => {
+      // Containment check parity with read/write/edit: `..` or an absolute path
+      // must not let the agent enumerate directories outside its workspace.
+      const dir = await resolveListableDir(env, params.path ?? '.', signal);
+      const entries = unwrap(await env.listDir(dir, signal));
       const lines = entries
         .map((e) => `${e.kind === 'directory' ? 'd' : '-'} ${e.name}`)
         .sort();
