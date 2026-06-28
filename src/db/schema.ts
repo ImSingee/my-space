@@ -138,31 +138,39 @@ export const apps = pgTable('apps', {
 
 /** ================== deployments ================== */
 
-export const deployments = pgTable('deployments', {
-  id: ulid().$defaultFn(genUlid).primaryKey(),
-  appId: text()
-    .notNull()
-    .references(() => apps.id, { onDelete: 'cascade' }),
-  version: integer().notNull().default(1),
-  status: text().$type<DeploymentStatus>().notNull().default('building'),
-  /**
-   * Release note for this deployment. Required for new deploys (the Agent
-   * supplies it via deploy_app); nullable so pre-existing rows stay empty
-   * (not backfilled).
-   */
-  message: text(),
-  /** Normalized manifest produced by the builder (deployed URLs etc). */
-  manifestNormalized: jsonb().$type<JsonObject>(),
-  /** Commit deployed from the app's master branch. */
-  sourceCommit: text(),
-  /** Immutable deploy/v<version> Git tag for this deployment. */
-  sourceTag: text(),
-  /** Versioned filesystem artifact associated with sourceTag. */
-  artifactPath: text(),
-  buildLog: text(),
-  error: text(),
-  createdAt,
-});
+export const deployments = pgTable(
+  'deployments',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    appId: text()
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    version: integer().notNull().default(1),
+    status: text().$type<DeploymentStatus>().notNull().default('building'),
+    /**
+     * Release note for this deployment. Required for new deploys (the Agent
+     * supplies it via deploy_app); nullable so pre-existing rows stay empty
+     * (not backfilled).
+     */
+    message: text(),
+    /** Normalized manifest produced by the builder (deployed URLs etc). */
+    manifestNormalized: jsonb().$type<JsonObject>(),
+    /** Commit deployed from the app's master branch. */
+    sourceCommit: text(),
+    /** Immutable deploy/v<version> Git tag for this deployment. */
+    sourceTag: text(),
+    /** Versioned filesystem artifact associated with sourceTag. */
+    artifactPath: text(),
+    buildLog: text(),
+    error: text(),
+    createdAt,
+  },
+  (table) => [
+    // Version is allocated as max(version)+1 per app; enforce it at the DB so
+    // overlapping deploys can't record the same version / force-move one tag.
+    uniqueIndex('deployments_app_version_idx').on(table.appId, table.version),
+  ],
+);
 
 /** ================== workflows ================== */
 
@@ -198,32 +206,42 @@ export const workflows = pgTable('workflows', {
   updatedAt,
 });
 
-export const workflowDeployments = pgTable('workflow_deployments', {
-  id: ulid().$defaultFn(genUlid).primaryKey(),
-  workflowId: text()
-    .notNull()
-    .references(() => workflows.id, { onDelete: 'cascade' }),
-  version: integer().notNull().default(1),
-  status: text()
-    .$type<WorkflowDeploymentStatus>()
-    .notNull()
-    .default('building'),
-  /** Release note for this deployment (required for new deploys). */
-  message: text(),
-  /** Normalized manifest produced by the builder (deployed webhook URL etc). */
-  manifestNormalized: jsonb().$type<JsonObject>(),
-  /** JSON Schema of the workflow input captured at build time. */
-  inputSchema: jsonb().$type<JsonObject>(),
-  /** Commit deployed from the workflow's master branch. */
-  sourceCommit: text(),
-  /** Immutable deploy/v<version> Git tag for this deployment. */
-  sourceTag: text(),
-  /** Versioned filesystem artifact (the bundled single-file program). */
-  artifactPath: text(),
-  buildLog: text(),
-  error: text(),
-  createdAt,
-});
+export const workflowDeployments = pgTable(
+  'workflow_deployments',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    workflowId: text()
+      .notNull()
+      .references(() => workflows.id, { onDelete: 'cascade' }),
+    version: integer().notNull().default(1),
+    status: text()
+      .$type<WorkflowDeploymentStatus>()
+      .notNull()
+      .default('building'),
+    /** Release note for this deployment (required for new deploys). */
+    message: text(),
+    /** Normalized manifest produced by the builder (deployed webhook URL etc). */
+    manifestNormalized: jsonb().$type<JsonObject>(),
+    /** JSON Schema of the workflow input captured at build time. */
+    inputSchema: jsonb().$type<JsonObject>(),
+    /** Commit deployed from the workflow's master branch. */
+    sourceCommit: text(),
+    /** Immutable deploy/v<version> Git tag for this deployment. */
+    sourceTag: text(),
+    /** Versioned filesystem artifact (the bundled single-file program). */
+    artifactPath: text(),
+    buildLog: text(),
+    error: text(),
+    createdAt,
+  },
+  (table) => [
+    // Same per-workflow version allocation as apps; enforce uniqueness at the DB.
+    uniqueIndex('workflow_deployments_workflow_version_idx').on(
+      table.workflowId,
+      table.version,
+    ),
+  ],
+);
 
 /** ================== workflow runs ================== */
 
@@ -390,35 +408,55 @@ export const dashboards = pgTable('dashboards', {
   updatedAt,
 });
 
-export const dashboardWidgets = pgTable('dashboard_widgets', {
-  id: ulid().$defaultFn(genUlid).primaryKey(),
-  dashboardId: text()
-    .notNull()
-    .references(() => dashboards.id, { onDelete: 'cascade' }),
-  appId: text()
-    .notNull()
-    .references(() => apps.id, { onDelete: 'cascade' }),
-  /** Widget id as declared in the app manifest. */
-  widgetId: text().notNull(),
-  x: integer().notNull().default(0),
-  y: integer().notNull().default(0),
-  w: integer().notNull().default(4),
-  h: integer().notNull().default(3),
-  config: jsonb().$type<JsonObject>(),
-  sortOrder: integer().notNull().default(0),
-  createdAt,
-});
+export const dashboardWidgets = pgTable(
+  'dashboard_widgets',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    dashboardId: text()
+      .notNull()
+      .references(() => dashboards.id, { onDelete: 'cascade' }),
+    appId: text()
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    /** Widget id as declared in the app manifest. */
+    widgetId: text().notNull(),
+    x: integer().notNull().default(0),
+    y: integer().notNull().default(0),
+    w: integer().notNull().default(4),
+    h: integer().notNull().default(3),
+    config: jsonb().$type<JsonObject>(),
+    sortOrder: integer().notNull().default(0),
+    createdAt,
+  },
+  (table) => [
+    // One placement per (dashboard, app, widget): the add path returns an existing
+    // row, so the DB must reject duplicate concurrent inserts.
+    uniqueIndex('dashboard_widgets_dash_app_widget_idx').on(
+      table.dashboardId,
+      table.appId,
+      table.widgetId,
+    ),
+  ],
+);
 
-export const sidebarItems = pgTable('sidebar_items', {
-  id: ulid().$defaultFn(genUlid).primaryKey(),
-  appId: text()
-    .notNull()
-    .references(() => apps.id, { onDelete: 'cascade' }),
-  label: text().notNull(),
-  icon: text(),
-  sortOrder: integer().notNull().default(0),
-  createdAt,
-});
+export const sidebarItems = pgTable(
+  'sidebar_items',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    appId: text()
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    label: text().notNull(),
+    icon: text(),
+    sortOrder: integer().notNull().default(0),
+    createdAt,
+  },
+  (table) => [
+    // One sidebar pin per app: the pin path checks-then-inserts, so the DB must
+    // reject duplicate concurrent pins.
+    uniqueIndex('sidebar_items_app_idx').on(table.appId),
+  ],
+);
 
 /** ================== logs ================== */
 

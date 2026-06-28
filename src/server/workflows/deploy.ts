@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import {
   WORKFLOW_BUILD_WORK_DIR,
@@ -40,7 +40,43 @@ function workspaceRelative(p: string): string {
   return path.relative(WORKSPACE_ROOT, p).split(path.sep).join('/');
 }
 
-export async function deployWorkflow(
+// Advisory-lock namespace for workflow deploys (distinct from apps) so version
+// allocation is serialized across server processes, not just within one.
+const WORKFLOW_DEPLOY_LOCK_NS = 2;
+
+const workflowDeployChains = new Map<string, Promise<unknown>>();
+
+/** Run `fn` only after any in-flight deploy for the same workflow has settled. */
+function withWorkflowDeployLock<T>(
+  id: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = workflowDeployChains.get(id) ?? Promise.resolve();
+  // Chain regardless of the previous deploy's outcome — a failed deploy must not
+  // wedge later attempts for the same workflow.
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => {});
+  workflowDeployChains.set(id, tail);
+  void tail.finally(() => {
+    if (workflowDeployChains.get(id) === tail) workflowDeployChains.delete(id);
+  });
+  return run;
+}
+
+/**
+ * Build + record a workflow deployment and flip it live. Serialized per workflow
+ * so two concurrent deploys can't both read the same latest version, assign the
+ * same next version, and force-move the same `deploy/v<n>` tag onto different
+ * commits.
+ */
+export function deployWorkflow(
+  id: string,
+  options: DeployWorkflowOptions,
+): Promise<DeployWorkflowResult> {
+  return withWorkflowDeployLock(id, () => deployWorkflowInner(id, options));
+}
+
+async function deployWorkflowInner(
   id: string,
   options: DeployWorkflowOptions,
 ): Promise<DeployWorkflowResult> {
@@ -64,6 +100,9 @@ export async function deployWorkflow(
   const deploymentId = ulid().toLowerCase();
   const tempBuild = path.join(WORKFLOW_BUILD_WORK_DIR, id, deploymentId, 'out');
   let publishedTag: string | undefined;
+  // Once the deployment row exists it references `publishedTag` as its sourceTag,
+  // so a later failure (e.g. a scheduler reload error) must NOT delete that tag.
+  let recorded = false;
 
   try {
     await db
@@ -96,51 +135,67 @@ export async function deployWorkflow(
     await fs.mkdir(artifact, { recursive: true });
     await fs.cp(tempBuild, artifact, { recursive: true });
 
-    const last = await db.query.workflowDeployments.findFirst({
-      where: (d, { eq: e }) => e(d.workflowId, id),
-      orderBy: (d, { desc }) => [desc(d.version)],
-    });
-    const version = (last?.version ?? 0) + 1;
+    // version → tag → record runs under a per-workflow advisory lock (held for
+    // the transaction) so concurrent deploys on different processes can't both
+    // allocate the same version and force-move deploy/v<n> onto different
+    // commits; the loser blocks, then takes the next number.
+    let version = 0;
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+      );
+      const last = await tx.query.workflowDeployments.findFirst({
+        where: (d, { eq: e }) => e(d.workflowId, id),
+        orderBy: (d, { desc }) => [desc(d.version)],
+      });
+      version = (last?.version ?? 0) + 1;
 
-    const published = await publishDeploymentSource(id, sourceDir, version);
-    publishedTag = published.tag;
+      const published = await publishDeploymentSource(id, sourceDir, version);
+      publishedTag = published.tag;
 
-    const live = workflowCurrentDir(id);
-    await fs.rm(live, { recursive: true, force: true });
-    await fs.mkdir(live, { recursive: true });
-    await fs.cp(tempBuild, live, { recursive: true });
+      const live = workflowCurrentDir(id);
+      await fs.rm(live, { recursive: true, force: true });
+      await fs.mkdir(live, { recursive: true });
+      await fs.cp(tempBuild, live, { recursive: true });
 
-    await db.insert(schema.workflowDeployments).values({
-      id: deploymentId,
-      workflowId: id,
-      version,
-      status: 'deployed',
-      message,
-      manifestNormalized: build.normalized as unknown as JsonObject,
-      inputSchema: build.inputSchema as JsonObject,
-      sourceCommit: published.commit,
-      sourceTag: published.tag,
-      artifactPath: workspaceRelative(artifact),
-      buildLog: build.log,
-    });
-
-    await db
-      .update(schema.workflows)
-      .set({
+      await tx.insert(schema.workflowDeployments).values({
+        id: deploymentId,
+        workflowId: id,
+        version,
         status: 'deployed',
-        name: build.source.name,
-        description: build.source.description || null,
-        manifest: build.source as unknown as JsonObject,
+        message,
+        manifestNormalized: build.normalized as unknown as JsonObject,
         inputSchema: build.inputSchema as JsonObject,
-        repoPath: published.repoPath,
-        currentSourceCommit: published.commit,
-        webhookSecret,
-        currentDeploymentId: deploymentId,
-      })
-      .where(eq(schema.workflows.id, id));
+        sourceCommit: published.commit,
+        sourceTag: published.tag,
+        artifactPath: workspaceRelative(artifact),
+        buildLog: build.log,
+      });
 
-    // Pick up cron schedule changes from the new deployment.
-    await reloadWorkflowScheduler();
+      await tx
+        .update(schema.workflows)
+        .set({
+          status: 'deployed',
+          name: build.source.name,
+          description: build.source.description || null,
+          manifest: build.source as unknown as JsonObject,
+          inputSchema: build.inputSchema as JsonObject,
+          repoPath: published.repoPath,
+          currentSourceCommit: published.commit,
+          webhookSecret,
+          currentDeploymentId: deploymentId,
+        })
+        .where(eq(schema.workflows.id, id));
+    });
+    // Set only after the tx commits: a rollback after the insert would otherwise
+    // leave `recorded` true with no row, stranding the force-moved tag.
+    recorded = true;
+
+    // Pick up cron schedule changes from the new deployment. Best-effort
+    // post-commit work: the release is already recorded and live, so a reload
+    // failure must neither fail the deploy nor trip the cleanup path below (which
+    // would delete this recorded deployment's source tag).
+    await reloadWorkflowScheduler().catch(() => {});
 
     return {
       deploymentId,
@@ -150,8 +205,28 @@ export async function deployWorkflow(
       log: build.log,
     };
   } catch (error) {
-    if (publishedTag) {
-      await deleteDeploymentTag(id, publishedTag).catch(() => {});
+    // Only remove the version tag for a release that was never recorded — once a
+    // deployment row exists it references this tag. We re-check ownership and
+    // delete UNDER the per-workflow advisory lock: otherwise a concurrent deploy
+    // could be mid-critical-section (its deploy/v<n> tag force-moved but its row
+    // not yet committed) and we'd delete the tag its successful release will
+    // reference. Holding the lock serializes us with that deploy.
+    if (publishedTag && !recorded) {
+      const tag = publishedTag;
+      await db
+        .transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+          );
+          const owner = await tx.query.workflowDeployments.findFirst({
+            where: (d, { eq: e, and: a }) =>
+              a(e(d.workflowId, id), e(d.sourceTag, tag)),
+          });
+          if (!owner) {
+            await deleteDeploymentTag(id, tag).catch(() => {});
+          }
+        })
+        .catch(() => {});
     }
     // Restore the prior status: an archived workflow must stay archived (a
     // failed redeploy must not silently re-enable its cron/webhook triggers),

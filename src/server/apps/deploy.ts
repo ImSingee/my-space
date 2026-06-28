@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import {
   BUILD_WORK_DIR,
@@ -40,6 +40,10 @@ export type DeployAppOptions = {
 function workspaceRelative(p: string): string {
   return path.relative(WORKSPACE_ROOT, p).split(path.sep).join('/');
 }
+
+// Advisory-lock namespace for app deploys (distinct from workflows) so version
+// allocation is serialized across server processes, not just within one.
+const APP_DEPLOY_LOCK_NS = 1;
 
 const appDeployChains = new Map<string, Promise<unknown>>();
 
@@ -124,55 +128,65 @@ async function deployAppInner(
     await fs.mkdir(artifact, { recursive: true });
     await fs.cp(tempBuild, artifact, { recursive: true });
 
-    // The build passed, so this release earns the next version number. Compute
-    // it before tagging so the Git tag (deploy/v<version>) and the deployment
-    // row share the same version. Versions are derived from successful releases
-    // only, so a failed attempt neither records a row nor keeps its tag.
-    const last = await db.query.deployments.findFirst({
-      where: (d, { eq: e }) => e(d.appId, id),
-      orderBy: (d, { desc }) => [desc(d.version)],
-    });
-    const version = (last?.version ?? 0) + 1;
+    // The build passed, so this release earns the next version number. The
+    // version → tag → record critical section runs under a per-app advisory lock
+    // (held for the transaction) so concurrent deploys on different processes
+    // can't both allocate the same version and force-move deploy/v<n> onto
+    // different commits; the loser blocks here, then sees the winner's row and
+    // takes the next number. Versions derive from successful releases only.
+    let version = 0;
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+      );
+      const last = await tx.query.deployments.findFirst({
+        where: (d, { eq: e }) => e(d.appId, id),
+        orderBy: (d, { desc }) => [desc(d.version)],
+      });
+      version = (last?.version ?? 0) + 1;
 
-    const published = await publishDeploymentSource(id, sourceDir, version);
-    publishedTag = published.tag;
+      const published = await publishDeploymentSource(id, sourceDir, version);
+      publishedTag = published.tag;
 
-    const live = appBuildDir(id);
-    await fs.rm(live, { recursive: true, force: true });
-    await fs.mkdir(live, { recursive: true });
-    await fs.cp(tempBuild, live, { recursive: true });
+      const live = appBuildDir(id);
+      await fs.rm(live, { recursive: true, force: true });
+      await fs.mkdir(live, { recursive: true });
+      await fs.cp(tempBuild, live, { recursive: true });
 
-    // Built, published, and live — only now record the release.
-    await db.insert(schema.deployments).values({
-      id: deploymentId,
-      appId: id,
-      version,
-      status: 'deployed',
-      message,
-      manifestNormalized: build.normalized as unknown as JsonObject,
-      sourceCommit: published.commit,
-      sourceTag: published.tag,
-      artifactPath: workspaceRelative(artifact),
-      buildLog: build.log,
-    });
-    recorded = true;
-
-    await db
-      .update(schema.apps)
-      .set({
+      // Built, published, and live — only now record the release.
+      await tx.insert(schema.deployments).values({
+        id: deploymentId,
+        appId: id,
+        version,
         status: 'deployed',
-        name: build.source.name,
-        description: build.source.description || null,
-        capabilities: build.source.capabilities,
-        backendMode: build.source.backendMode,
-        manifest: build.source as unknown as JsonObject,
-        repoPath: published.repoPath,
-        currentSourceCommit: published.commit,
-        dbName,
-        webhookSecret,
-        currentDeploymentId: deploymentId,
-      })
-      .where(eq(schema.apps.id, id));
+        message,
+        manifestNormalized: build.normalized as unknown as JsonObject,
+        sourceCommit: published.commit,
+        sourceTag: published.tag,
+        artifactPath: workspaceRelative(artifact),
+        buildLog: build.log,
+      });
+
+      await tx
+        .update(schema.apps)
+        .set({
+          status: 'deployed',
+          name: build.source.name,
+          description: build.source.description || null,
+          capabilities: build.source.capabilities,
+          backendMode: build.source.backendMode,
+          manifest: build.source as unknown as JsonObject,
+          repoPath: published.repoPath,
+          currentSourceCommit: published.commit,
+          dbName,
+          webhookSecret,
+          currentDeploymentId: deploymentId,
+        })
+        .where(eq(schema.apps.id, id));
+    });
+    // Set only after the tx commits: a rollback after the insert would otherwise
+    // leave `recorded` true with no row, stranding the force-moved tag.
+    recorded = true;
 
     // Drop the old backend process so the next request boots the new build.
     const longRunning =
@@ -204,9 +218,28 @@ async function deployAppInner(
   } catch (error) {
     // Only remove the version tag for a release that was never recorded — once a
     // deployment row exists it references this tag, so deleting it would strand
-    // that row's sourceTag and break rollback to this version.
+    // that row's sourceTag and break rollback to this version. We re-check
+    // ownership and delete UNDER the per-app advisory lock: otherwise a concurrent
+    // deploy could be mid-critical-section (its deploy/v<n> tag force-moved but its
+    // row not yet committed) and we'd see "no owner" and delete the tag its
+    // successful release will reference. Holding the lock serializes us with that
+    // deploy, so we only ever delete a genuinely orphaned tag.
     if (publishedTag && !recorded) {
-      await deleteDeploymentTag(id, publishedTag).catch(() => {});
+      const tag = publishedTag;
+      await db
+        .transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+          );
+          const owner = await tx.query.deployments.findFirst({
+            where: (d, { eq: e, and: a }) =>
+              a(e(d.appId, id), e(d.sourceTag, tag)),
+          });
+          if (!owner) {
+            await deleteDeploymentTag(id, tag).catch(() => {});
+          }
+        })
+        .catch(() => {});
     }
     // Restore the app's status: a recorded release stays deployed; otherwise an
     // archived app stays archived (a failed redeploy must not re-enable it), one

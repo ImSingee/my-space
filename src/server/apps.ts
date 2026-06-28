@@ -427,8 +427,18 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
         h,
         sortOrder: index,
       })
+      .onConflictDoNothing()
       .returning();
-    return row;
+    if (row) return row;
+    // Lost a concurrent add race: return the placement the winner created.
+    return db.query.dashboardWidgets.findFirst({
+      where: (col, { eq: e }) =>
+        and(
+          e(col.dashboardId, data.dashboardId),
+          e(col.appId, data.appId),
+          e(col.widgetId, data.widgetId),
+        ),
+    });
   });
 
 export const removeDashboardWidget = createServerFn({ method: 'POST' })
@@ -493,8 +503,13 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
           label: app.name,
           sortOrder: count.length,
         })
+        .onConflictDoNothing()
         .returning();
-      return row;
+      if (row) return row;
+      // Lost a concurrent pin race: return the existing pin.
+      return db.query.sidebarItems.findFirst({
+        where: (s, { eq: e }) => e(s.appId, data.appId),
+      });
     }
     await db
       .delete(schema.sidebarItems)

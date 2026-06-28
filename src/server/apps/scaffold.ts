@@ -110,11 +110,14 @@ export async function createApp(
   const shouldPin = input.pin ?? manifest.capabilities.frontend;
   if (shouldPin) {
     const pins = await db.query.sidebarItems.findMany();
-    await db.insert(schema.sidebarItems).values({
-      appId: id,
-      label: name,
-      sortOrder: pins.length,
-    });
+    await db
+      .insert(schema.sidebarItems)
+      .values({
+        appId: id,
+        label: name,
+        sortOrder: pins.length,
+      })
+      .onConflictDoNothing();
   }
 
   return { id, name };
