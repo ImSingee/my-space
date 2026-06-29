@@ -393,13 +393,26 @@ export function useAgentStream(
   const answer = useCallback(async (askId: string, answers: AskAnswer[]) => {
     const runId = runIdRef.current;
     if (!runId) return;
-    setState((p) =>
-      p.pendingAsk?.askId === askId ? { ...p, pendingAsk: undefined } : p,
-    );
+    // Optimistically hide the form for snappy feedback, but remember it: if the
+    // POST fails the run is still blocked, so we must restore the form or the
+    // chat is stuck with no way to unblock it.
+    let previousAsk: PendingAsk | undefined;
+    setState((p) => {
+      if (p.pendingAsk?.askId !== askId) return p;
+      previousAsk = p.pendingAsk;
+      return { ...p, pendingAsk: undefined };
+    });
     try {
       await answerAgentRunRequest(runId, askId, answers);
     } catch {
       toast.error('Could not submit your answer. Try again.');
+      // Restore the same ask so the user can retry — but only if this run is
+      // still active and nothing newer (a fresh ask) has taken its place.
+      setState((p) =>
+        previousAsk && p.active && !p.pendingAsk && runIdRef.current === runId
+          ? { ...p, pendingAsk: previousAsk }
+          : p,
+      );
     }
   }, []);
 

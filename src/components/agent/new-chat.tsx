@@ -51,12 +51,12 @@ export function NewChat({
 
   const effectiveModel = model ?? first;
 
-  const start = async ({ text, images }: ComposerSubmit) => {
-    if (creating) return;
+  const start = async ({ text, images }: ComposerSubmit): Promise<boolean> => {
+    if (creating) return false;
     const value = effectiveModel;
-    if (!value) return;
+    if (!value) return false;
     const parsed = splitModelValue(value);
-    if (!parsed) return;
+    if (!parsed) return false;
     const { providerId, modelId } = parsed;
 
     setCreating(true);
@@ -71,9 +71,12 @@ export function NewChat({
       });
       await qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
       onStart(id);
+      return true;
     } catch {
+      // Keep the draft (return false) so the user can retry without retyping.
       toast.error('Could not start the chat.');
       setCreating(false);
+      return false;
     }
   };
 

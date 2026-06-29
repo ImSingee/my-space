@@ -206,41 +206,50 @@ export function Chat({ sessionId }: { sessionId: string }) {
   );
   const busy = streamState.active || Boolean(session?.activeRun);
 
-  const send = (text: string, images: ComposerImage[], modelValue: string) => {
-    if (busy) return;
-    if (!text && images.length === 0) return;
+  const send = async (
+    text: string,
+    images: ComposerImage[],
+    modelValue: string,
+  ): Promise<boolean> => {
+    if (busy) return false;
+    if (!text && images.length === 0) return false;
     const parsed = splitModelValue(modelValue);
-    if (!parsed) return;
+    if (!parsed) return false;
 
-    void sendRun({
+    const runId = await sendRun({
       sessionId,
       userText: text,
       images,
       providerId: parsed.providerId,
       modelId: parsed.modelId,
-    }).then((runId) => {
-      if (!runId) return;
-      // Surface the run immediately so the connection effect subscribes without
-      // waiting for the session refetch round-trip.
-      qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
-        old
-          ? {
-              ...old,
-              activeRun: {
-                id: runId,
-                status: 'running' as const,
-                pendingAsk: null,
-              },
-            }
-          : old,
-      );
-      revalidateSession();
     });
+    if (!runId) return false;
+    // Surface the run immediately so the connection effect subscribes without
+    // waiting for the session refetch round-trip.
+    qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
+      old
+        ? {
+            ...old,
+            activeRun: {
+              id: runId,
+              status: 'running' as const,
+              pendingAsk: null,
+            },
+          }
+        : old,
+    );
+    revalidateSession();
+    return true;
   };
 
-  const onComposerSubmit = ({ text, images }: ComposerSubmit) => {
-    if (!effectiveModel) return;
-    send(text, images, effectiveModel);
+  // Return acceptance so the composer keeps the draft if the run fails to start
+  // (e.g. an oversized payload the server rejects) instead of losing it.
+  const onComposerSubmit = ({
+    text,
+    images,
+  }: ComposerSubmit): Promise<boolean> => {
+    if (!effectiveModel) return Promise.resolve(false);
+    return send(text, images, effectiveModel);
   };
 
   const stop = () => {

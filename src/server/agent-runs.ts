@@ -515,6 +515,66 @@ async function executeRun(
   }
 }
 
+/**
+ * Validate the user's answers against the exact questions that are still
+ * pending. The HTTP route only shape-checks the payload, so without this a
+ * crafted POST could resume the run with answers for unknown questions, options
+ * that were never offered, multiple picks for a single-choice question, or no
+ * answer at all — feeding the agent garbage decisions.
+ */
+function validateAskAnswers(
+  questions: AskQuestion[],
+  answers: AskAnswer[],
+): void {
+  const byId = new Map(questions.map((q) => [q.id, q]));
+  const seen = new Set<string>();
+  for (const answer of answers) {
+    const question = byId.get(answer.questionId);
+    if (!question) {
+      throw new Error(`Unknown question "${answer.questionId}".`);
+    }
+    if (seen.has(answer.questionId)) {
+      throw new Error(`Duplicate answer for question "${answer.questionId}".`);
+    }
+    seen.add(answer.questionId);
+
+    const validOptionIds = new Set(question.options.map((o) => o.id));
+    for (const optionId of answer.selectedOptionIds) {
+      if (!validOptionIds.has(optionId)) {
+        throw new Error(
+          `Invalid option "${optionId}" for question "${answer.questionId}".`,
+        );
+      }
+    }
+    // Custom ("Other") text counts as a choice too: the radio UI makes it
+    // mutually exclusive with the options, so a single-choice answer must carry
+    // exactly one of {an option, custom text} — never both. Reject duplicate
+    // option ids first, otherwise ['o1','o1'] would collapse to one choice and
+    // sneak past the single-choice cap (and double a label to the model).
+    const uniqueSelected = new Set(answer.selectedOptionIds);
+    if (uniqueSelected.size !== answer.selectedOptionIds.length) {
+      throw new Error(
+        `Duplicate option in answer for question "${answer.questionId}".`,
+      );
+    }
+    const hasCustom = Boolean(answer.customText && answer.customText.trim());
+    const choiceCount = uniqueSelected.size + (hasCustom ? 1 : 0);
+    if (choiceCount === 0) {
+      throw new Error(`Question "${answer.questionId}" needs an answer.`);
+    }
+    if (!question.allowMultiple && choiceCount > 1) {
+      throw new Error(
+        `Question "${answer.questionId}" accepts only one option.`,
+      );
+    }
+  }
+  for (const question of questions) {
+    if (!seen.has(question.id)) {
+      throw new Error(`Missing answer for question "${question.id}".`);
+    }
+  }
+}
+
 export async function answerAgentRun(
   runId: string,
   askId: string,
@@ -528,6 +588,7 @@ export async function answerAgentRun(
   if (!pendingAsk || pendingAsk.askId !== askId) {
     throw new Error('Question is no longer waiting.');
   }
+  validateAskAnswers(pendingAsk.questions, answers);
   if (!submitAnswer(runId, askId, answers)) {
     throw new Error('Agent run is no longer active.');
   }

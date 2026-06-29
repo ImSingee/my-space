@@ -29,6 +29,17 @@ type Attachment = {
 
 const MAX_DIM = 1280;
 const MAX_ATTACHMENTS = 6;
+// Accepted upload image types. Kept in sync with the server allowlist in
+// src/routes/api/agent/runs.ts so a file the UI accepts here is never rejected
+// with a 400 after the draft + attachments have already been cleared on submit.
+const ACCEPTED_IMAGE_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+];
+const ACCEPTED_IMAGE_SET = new Set<string>(ACCEPTED_IMAGE_TYPES);
+const IMAGE_ACCEPT_ATTR = ACCEPTED_IMAGE_TYPES.join(',');
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -93,7 +104,14 @@ export function Composer({
   seedNonce,
   modelControl,
 }: {
-  onSubmit: (payload: ComposerSubmit) => void;
+  /**
+   * Send the draft. Return `false` (or reject) to keep the draft intact — e.g.
+   * the server rejected an oversized/invalid payload — so the user never loses
+   * their typed text and attachments. Returning void/true clears the composer.
+   */
+  onSubmit: (
+    payload: ComposerSubmit,
+  ) => void | boolean | Promise<void | boolean>;
   busy?: boolean;
   onStop?: () => void;
   disabled?: boolean;
@@ -130,7 +148,15 @@ export function Composer({
 
   const addFiles = async (files: FileList | File[] | null) => {
     if (!files) return;
-    const images = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    const all = Array.from(files);
+    const images = all.filter((f) => ACCEPTED_IMAGE_SET.has(f.type));
+    if (
+      all.some(
+        (f) => f.type.startsWith('image/') && !ACCEPTED_IMAGE_SET.has(f.type),
+      )
+    ) {
+      toast.error('Only PNG, JPEG, WebP, or GIF images are supported.');
+    }
     if (images.length === 0) return;
     const room = MAX_ATTACHMENTS - attachments.length;
     if (room <= 0) {
@@ -151,17 +177,36 @@ export function Composer({
   const canSend =
     (input.trim().length > 0 || attachments.length > 0) && !disabled;
 
-  const submit = () => {
+  const submit = async () => {
     if (busy) return;
-    const text = input.trim();
-    if (!text && attachments.length === 0) return;
-    const images = attachments.map((a) => ({
+    // Snapshot exactly what we send so we can clear only this draft later.
+    const submittedInput = input;
+    const submittedAttachments = attachments;
+    const text = submittedInput.trim();
+    if (!text && submittedAttachments.length === 0) return;
+    const images = submittedAttachments.map((a) => ({
       data: a.base64,
       mimeType: a.mimeType,
     }));
-    onSubmit({ text, images });
-    setInput('');
-    setAttachments([]);
+    // Clear only once the send is accepted: if onSubmit returns false or throws
+    // (server rejected the payload, network error, etc.) the draft stays so the
+    // user can fix and retry instead of silently losing their message.
+    let accepted = true;
+    try {
+      accepted = (await onSubmit({ text, images })) !== false;
+    } catch {
+      accepted = false;
+    }
+    if (accepted) {
+      // Only clear the submitted snapshot: if the user kept typing or changed
+      // attachments while the send was in flight, preserve those newer edits
+      // (setAttachments always makes a new array, so an unchanged list is the
+      // same reference).
+      setInput((current) => (current === submittedInput ? '' : current));
+      setAttachments((current) =>
+        current === submittedAttachments ? [] : current,
+      );
+    }
   };
 
   return (
@@ -208,7 +253,7 @@ export function Composer({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept={IMAGE_ACCEPT_ATTR}
         multiple
         style={{ display: 'none' }}
         onChange={(e) => {
@@ -241,7 +286,7 @@ export function Composer({
           // candidate must not also submit the prompt mid-composition.
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            submit();
+            void submit();
           }
         }}
       />
@@ -289,7 +334,7 @@ export function Composer({
               size="lg"
               aria-label="Send"
               disabled={!canSend}
-              onClick={submit}
+              onClick={() => void submit()}
             >
               <IconArrowUp size={18} stroke={2} />
             </ActionIcon>
