@@ -1,8 +1,13 @@
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { devtools } from '@tanstack/devtools-vite';
+
+// Mirror src/agent/paths.ts: runtime data lives under HATCH_DATA_DIR (default
+// `workspace`). Keep it out of the dev watcher so agent writes don't reload.
+const dataDir = path.resolve(process.env.HATCH_DATA_DIR ?? 'workspace');
 
 const config = defineConfig({
   resolve: {
@@ -20,7 +25,7 @@ const config = defineConfig({
       // interrupts the live agent stream (losing the half-streamed reply). These
       // are runtime data, not source, so keep them out of the dev file watcher.
       // (Vite appends this to its built-in ignores like node_modules and .git.)
-      ignored: ['**/workspace/**'],
+      ignored: ['**/workspace/**', path.join(dataDir, '**')],
     },
   },
   plugins: [

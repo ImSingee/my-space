@@ -16,8 +16,9 @@ __screenshots__
 .vitest
 todos.json
 
-# BYOD platform runtime data (app sources, build artifacts, temp)
-/workspace
+# Local-only big-feature progress tracker (not part of the repo)
+/PROGRESS.md
+
 # pi agent credential file (we inject keys explicitly instead)
 auth.json
 .pi

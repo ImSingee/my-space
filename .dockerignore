@@ -8,11 +8,8 @@ dist-ssr
 .nitro
 .vinxi
 
-# Agent-authored apps + build artifacts (provided by a volume at runtime)
-workspace/apps
-workspace/builds
-workspace/versions
-workspace/storage
+# Platform runtime data (provided by a volume at runtime; never baked into the image)
+workspace
 .deno
 
 # Development and cache

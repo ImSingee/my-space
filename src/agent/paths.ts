@@ -2,7 +2,18 @@
 import path from 'node:path';
 
 export const REPO_ROOT = process.cwd();
-export const WORKSPACE_ROOT = path.resolve(REPO_ROOT, 'workspace');
+/**
+ * Runtime data root: agent-authored app/workflow sources, Git repos, build
+ * artifacts, per-app storage and agent worktrees. Defaults to `<repo>/workspace`
+ * (matching the Docker volume mount). Set HATCH_DATA_DIR to relocate it — e.g.
+ * a sibling directory outside the repo in local dev so the checkout stays free
+ * of runtime data. Relative values resolve against the server's working
+ * directory; absolute values are used as-is.
+ */
+export const WORKSPACE_ROOT = path.resolve(
+  REPO_ROOT,
+  process.env.HATCH_DATA_DIR ?? 'workspace',
+);
 /** Legacy app source trees used before Git-backed app repositories. */
 export const APPS_DIR = path.resolve(WORKSPACE_ROOT, 'apps');
 /** Built artifacts (live, served): workspace/builds/<id>/{app,widgets}. */

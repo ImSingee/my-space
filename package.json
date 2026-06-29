@@ -7,9 +7,9 @@
   },
   "packageManager": "pnpm@10.12.2",
   "scripts": {
-    "dev": "vite dev --port 3700",
+    "dev": "HATCH_DATA_DIR=../my-space-data vite dev --port 3700",
     "build": "SKIP_DATABASE_MIGRATIONS=true vite build",
-    "preview": "node .output/server/index.mjs",
+    "preview": "HATCH_DATA_DIR=../my-space-data node .output/server/index.mjs",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
