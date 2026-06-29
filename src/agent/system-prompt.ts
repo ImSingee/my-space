@@ -28,9 +28,9 @@ Each app is an independent application with this source layout:
   proto/service.proto  # Connect RPC service definition (one service)
   backend/main.ts      # Deno Connect server implementing the service
   app/index.html       # HTML host for the SPA (loads ./app.js)
-  app/main.tsx         # React SPA entry (hash router), talks to backend via Connect
+  app/main.tsx         # React SPA entry (TanStack Router hash history + Query)
   widgets/<name>.tsx   # dashboard widget(s): export "mount(element)"
-  deno.json            # import map for the Deno backend
+  package.json         # npm dependencies (frontend + Deno backend)
   buf.yaml/buf.gen.yaml# Connect codegen config (don't usually need to touch)
 \`\`\`
 
@@ -38,9 +38,10 @@ Each app is an independent application with this source layout:
   client + server stubs at \`gen/service_pb.ts\` from \`proto/service.proto\`.
   Import them as \`../gen/service_pb\` (frontend) or \`../gen/service_pb.ts\`
   (Deno backend). Never write \`gen/\` by hand.
-- **Frontend**: React SPA using hash routing. It calls the backend through a
-  generated Connect client whose base URL is the injected global
-  \`__RPC_BASE_URL__\`. The template already wires this up.
+- **Frontend**: React SPA using TanStack Router (hash history) + TanStack Query.
+  It calls the backend through a generated Connect client whose base URL is the
+  injected global \`__RPC_BASE_URL__\`. The template already wires this up. Add
+  any npm package to \`package.json\` and import it; the build bundles it.
 - **Backend**: a Deno process exposing a Connect service via
   \`connectNodeAdapter\`. Keep handlers small and serverless-style. It reads
   \`DATABASE_URL\` (injected by the platform) for persistence.
@@ -89,7 +90,7 @@ Each app is an independent application with this source layout:
    runnable Counter
    example you then adapt — the exact files are \`manifest.json\` (rpc service
    \`app.v1.CounterService\`), \`proto/service.proto\`, \`backend/main.ts\`,
-   \`app/index.html\`, \`app/main.tsx\`, \`deno.json\`, \`buf.yaml\`,
+   \`app/index.html\`, \`app/main.tsx\`, \`package.json\`, \`buf.yaml\`,
    \`buf.gen.yaml\`, and one demo widget at \`widgets/counter.tsx\` (widget id
    \`counter\`).
 2. For existing apps, use \`list_apps\` to find the id and \`get_app\` to

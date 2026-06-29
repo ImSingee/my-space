@@ -1,6 +1,6 @@
 ---
 name: building-apps
-description: How to design, build, and deploy a Hatch app end to end — manifest, Connect proto, Deno Connect backend, React SPA with hash routing, dashboard widgets, and a per-app Postgres database. Use this whenever you create or modify an app.
+description: How to design, build, and deploy a Hatch app end to end — manifest, Connect proto, Deno Connect backend, React SPA (TanStack Router hash history + Query), dashboard widgets, npm packages via package.json, and a per-app Postgres database. Use this whenever you create or modify an app.
 ---
 
 # Building a Hatch app
@@ -18,9 +18,9 @@ bundling, process management, the Postgres database, and serving.
   proto/service.proto    Connect RPC service (one service per app)
   backend/main.ts        Deno Connect server implementing the service
   app/index.html         HTML host that loads ./app.js
-  app/main.tsx           React SPA entry (hash routing) using the Connect client
+  app/main.tsx           React SPA entry (TanStack Router, hash history) + Query
   widgets/<name>.tsx     dashboard widget(s); each exports mount(element)
-  deno.json              import map for the Deno backend
+  package.json           npm dependencies (shared by frontend + Deno backend)
   buf.yaml, buf.gen.yaml Connect codegen config (rarely needs changes)
 ```
 
@@ -30,7 +30,7 @@ Never write files under `gen/` yourself.
 `create_app` scaffolds a runnable **Counter** example you adapt in place — not a
 blank tree. The exact files are `manifest.json` (rpc service
 `app.v1.CounterService`), `proto/service.proto`, `backend/main.ts`,
-`app/index.html`, `app/main.tsx`, `deno.json`, `buf.yaml`, `buf.gen.yaml`, and a
+`app/index.html`, `app/main.tsx`, `package.json`, `buf.yaml`, `buf.gen.yaml`, and a
 single demo widget at `widgets/counter.tsx` (widget id `counter`). Read those
 exact paths before editing — don't guess filenames (the demo widget is
 `widgets/counter.tsx`, not `widgets/summary.tsx`). The `todo`/`summary` snippets
@@ -172,18 +172,23 @@ const port = Number(Deno.env.get('PORT') ?? '8080');
 http.createServer(connectNodeAdapter({ routes })).listen(port);
 ```
 
-If you add npm imports beyond the defaults, add them to `deno.json` `imports`
-using `npm:` specifiers.
+To use any npm package (frontend, widget, or backend), add it to `package.json`
+`dependencies` with a normal semver range — `deploy_app` runs `deno install`,
+caches the deps, and esbuild bundles them. Deno reads `package.json` natively, so
+bare imports (`import x from 'pkg'`) work in the backend too. No `deno.json`.
 
-## Frontend (React SPA, hash routing)
+## Frontend (React SPA, TanStack Router + Query)
 
-The Connect client base URL is the injected global `__RPC_BASE_URL__`. Use
-TanStack-free plain React; the platform serves `app/index.html` which loads the
-bundled `./app.js`.
+The Connect client base URL is the injected global `__RPC_BASE_URL__`. The
+template wires **TanStack Router with hash history** (required — the app is
+served from a static iframe with no server router) and **TanStack Query** for
+data fetching. The platform serves `app/index.html`, which loads the bundled
+`./app.js`.
 
 ```tsx
 import { createClient } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-web';
+import { useQuery } from '@tanstack/react-query';
 import { TodoService } from '../gen/service_pb';
 
 declare const __RPC_BASE_URL__: string;
@@ -191,10 +196,17 @@ const client = createClient(
   TodoService,
   createConnectTransport({ baseUrl: __RPC_BASE_URL__ }),
 );
-// client.list({}) / client.add({ text }) ...
+
+function useTodos() {
+  return useQuery({ queryKey: ['todos'], queryFn: () => client.list({}) });
+}
 ```
 
-Use hash routing (`window.location.hash`) for navigation, never the History API.
+Use **TanStack Query** (`useQuery`/`useMutation`) for backend calls — never
+`useEffect` + `useState`. For navigation use TanStack Router with
+`createHashHistory()`; never the History API directly. The scaffolded
+`app/main.tsx` shows the full router + query wiring — adapt it in place. Zod and
+`@tabler/icons-react` are also available by default.
 
 ## Widgets
 

@@ -84,6 +84,11 @@ export async function createApp(
     __APP_NAME__: jsonStringInner(name),
     __APP_DESCRIPTION__: jsonStringInner(description),
   });
+  // package.json `name` is never published; the app id is already a valid npm
+  // name (kebab-case), so a plain substitution is safe.
+  await replaceInFile(path.join(src, 'package.json'), {
+    __APP_ID__: id,
+  });
   await replaceInFile(path.join(src, 'app', 'index.html'), {
     __APP_NAME__: name,
   });
