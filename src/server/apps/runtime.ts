@@ -2,9 +2,31 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { appBuildDir, appStorageDir } from '~agent/paths';
+import { subprocessSandboxEnv } from '../sandbox-env';
 import { ensureAppDatabase } from './provision';
+
+/**
+ * Resolve Deno's module cache directory (`DENO_DIR` or the platform default).
+ * Staged backends load their npm/jsr deps from here at runtime, and some
+ * packages read their own bundled files from the cache, so it must be readable.
+ */
+function denoCacheDir(): string | null {
+  if (process.env.DENO_DIR) return process.env.DENO_DIR;
+  const home = os.homedir();
+  if (!home) return null;
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Caches', 'deno');
+  }
+  if (process.platform === 'win32') {
+    const local = process.env.LOCALAPPDATA;
+    return local ? path.join(local, 'deno') : null;
+  }
+  const xdgCache = process.env.XDG_CACHE_HOME ?? path.join(home, '.cache');
+  return path.join(xdgCache, 'deno');
+}
 
 type RunningBackend = {
   proc: ChildProcess;
@@ -181,25 +203,51 @@ async function startBackend(id: string): Promise<number> {
   const storageDir = appStorageDir(id);
   mkdirSync(storageDir, { recursive: true });
 
+  // Scope filesystem access to the app's own build (read) and storage
+  // (read/write) so one deployed backend can't read another app's build/storage
+  // or platform files. Static imports of the bundled entry aren't gated by
+  // --allow-read, so the build dir suffices for the program's own reads; TLS
+  // trust stores are added when configured so HTTPS keeps working.
+  const allowRead = [buildDir, storageDir];
+  const allowWrite = [storageDir];
+  // Staged backends resolve npm/jsr deps from Deno's cache at runtime; without
+  // read access there, packages that read their own bundled files fail with
+  // NotCapable.
+  const cacheDir = denoCacheDir();
+  if (cacheDir) allowRead.push(cacheDir);
+  for (const certVar of [
+    'NODE_EXTRA_CA_CERTS',
+    'SSL_CERT_FILE',
+    'SSL_CERT_DIR',
+  ]) {
+    const certPath = process.env[certVar];
+    if (certPath) allowRead.push(certPath);
+  }
+
   const proc = spawn(
     'deno',
     [
       'run',
+      `--allow-read=${allowRead.join(',')}`,
+      `--allow-write=${allowWrite.join(',')}`,
+      // Outbound network stays open: apps legitimately call external APIs and
+      // their own per-app Postgres. The env is sandboxed below, so --allow-env
+      // exposes only the app's own variables, not platform secrets.
       '--allow-net',
       '--allow-env',
-      '--allow-read',
-      '--allow-write',
       '--no-prompt',
       'backend/main.ts',
     ],
     {
       cwd: buildDir,
-      env: {
-        ...process.env,
+      // Never inherit the platform's process.env (DATABASE_URL, auth secrets,
+      // provider keys); hand over only the sandbox allowlist plus the app's own
+      // runtime variables.
+      env: subprocessSandboxEnv({
         PORT: String(port),
         DATABASE_URL: databaseUrl,
         STORAGE_DIR: storageDir,
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -388,13 +436,19 @@ export async function proxyAppRequest(
     headers.delete('authorization');
   }
 
-  const init: RequestInit = { method: request.method, headers };
+  const init: RequestInit & { duplex?: 'half' } = {
+    method: request.method,
+    headers,
+  };
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    init.body = new Uint8Array(await request.arrayBuffer());
+    // Stream the request body straight through rather than buffering the whole
+    // upload in memory, so a large body can't exhaust the server process.
+    // `duplex: 'half'` is required by undici when the body is a stream.
+    init.body = request.body;
+    init.duplex = 'half';
   }
 
   const upstream = await fetch(target, init);
-  const body = new Uint8Array(await upstream.arrayBuffer());
   const responseHeaders = new Headers();
   const contentType = upstream.headers.get('content-type');
   if (contentType) responseHeaders.set('content-type', contentType);
@@ -407,7 +461,8 @@ export async function proxyAppRequest(
     if (value) responseHeaders.set(key, value);
   }
 
-  return new Response(body, {
+  // Stream the upstream response body through as well instead of buffering it.
+  return new Response(upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: responseHeaders,

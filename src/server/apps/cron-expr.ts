@@ -13,11 +13,24 @@ const FIELDS: Field[] = [
   { min: 0, max: 6 }, // day of week
 ];
 
+/**
+ * Parse a strictly-numeric cron token. Unlike `Number.parseInt`, this rejects
+ * trailing junk ("5foo" -> NaN instead of 5) so a malformed field surfaces as a
+ * validation error rather than silently running at an unintended time.
+ */
+function strictInt(token: string): number {
+  return /^\d+$/.test(token) ? Number.parseInt(token, 10) : Number.NaN;
+}
+
 function parseField(spec: string, field: Field): Set<number> {
   const out = new Set<number>();
   for (const part of spec.split(',')) {
-    const [rangePart, stepPart] = part.split('/');
-    const step = stepPart ? Number.parseInt(stepPart, 10) : 1;
+    const slash = part.split('/');
+    if (slash.length > 2) {
+      throw new Error(`Invalid cron step in "${part}"`);
+    }
+    const [rangePart, stepPart] = slash;
+    const step = stepPart === undefined ? 1 : strictInt(stepPart);
     if (!Number.isInteger(step) || step < 1) {
       throw new Error(`Invalid cron step in "${part}"`);
     }
@@ -27,11 +40,14 @@ function parseField(spec: string, field: Field): Set<number> {
       lo = field.min;
       hi = field.max;
     } else if (rangePart.includes('-')) {
-      const [a, b] = rangePart.split('-');
-      lo = Number.parseInt(a, 10);
-      hi = Number.parseInt(b, 10);
+      const bounds = rangePart.split('-');
+      if (bounds.length !== 2) {
+        throw new Error(`Invalid cron range in "${part}"`);
+      }
+      lo = strictInt(bounds[0]);
+      hi = strictInt(bounds[1]);
     } else {
-      lo = hi = Number.parseInt(rangePart, 10);
+      lo = hi = strictInt(rangePart);
     }
     if (
       !Number.isInteger(lo) ||

@@ -158,9 +158,20 @@ export function ensureScheduler(): void {
 
 /** Reload all schedules (call after a deploy/rollback/delete). */
 export async function reloadScheduler(): Promise<void> {
-  state().started = true;
+  const s = state();
+  s.started = true;
   clearAll();
-  await loadAll();
+  try {
+    await loadAll();
+  } catch (error) {
+    // Timers are already cleared; a transient DB/read failure would otherwise
+    // leave every cron job unscheduled with `started` stuck true so
+    // ensureScheduler() never retries (and deploy suppresses this error). Reset
+    // it so a later boot/app-list load rebuilds the schedule, then surface the
+    // failure to the caller.
+    s.started = false;
+    throw error;
+  }
 }
 
 /** Manually trigger a single cron job now. */

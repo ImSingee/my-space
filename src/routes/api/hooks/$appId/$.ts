@@ -16,7 +16,11 @@ async function handle({ request }: { request: Request }): Promise<Response> {
   const app = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.id, id),
   });
-  if (!app || app.status !== 'deployed') {
+  // Gate on a live deployment rather than status === 'deployed' so a redeploy
+  // (status 'building', previous backend still live) keeps accepting webhooks
+  // without downtime — matching the RPC/static routes — while still rejecting
+  // archived/never-deployed apps reached via a retained URL.
+  if (!app || app.status === 'archived' || !app.currentDeploymentId) {
     return new Response('Not found', { status: 404 });
   }
   if (!app.capabilities?.webhook || !app.webhookSecret) {
