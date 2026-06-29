@@ -20,7 +20,12 @@ export const Route = createFileRoute('/_app')({
       // link after authenticating instead of always landing on /dashboard.
       throw redirect({ to: '/login', search: { redirect: location.href } });
     }
-    return { session };
+    // Intentionally return nothing. TanStack Router serializes beforeLoad return
+    // values into the SSR-dehydrated match state sent to the client, so returning
+    // the Better Auth session would leak its token (which must stay in the
+    // HttpOnly cookie). This is a guard only — server functions enforce auth
+    // independently via authMiddleware/requireSession, and the client reads user
+    // info through authClient.useSession().
   },
   component: AppLayout,
 });
