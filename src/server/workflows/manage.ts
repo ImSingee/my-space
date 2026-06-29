@@ -1,7 +1,7 @@
 /** Server-only: workflow lifecycle management + run inspection views. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   AGENTS_DIR,
   workflowArtifactsDir,
@@ -18,7 +18,9 @@ import type {
   WorkflowStatus,
   WorkflowTrigger,
 } from '~/db/schema';
+import { WORKFLOW_DEPLOY_LOCK_NS, withWorkflowDeployLock } from './deploy';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
+import { isValidWorkflowId } from './manifest';
 import { reloadWorkflowScheduler } from './scheduler';
 
 async function pathExists(p: string): Promise<boolean> {
@@ -119,8 +121,22 @@ export async function setWorkflowArchived(
   return { status };
 }
 
-/** Roll a workflow back to a previous deployment by restoring its artifact. */
-export async function rollbackWorkflow(
+/**
+ * Roll a workflow back to a previous deployment by restoring its artifact.
+ * Serialized with deploys via the shared per-workflow lock so a rollback and a
+ * deploy can't interleave their artifact/Git/row mutations and leave the DB
+ * pointing at one version while `master`/`workflow-current` points at another.
+ */
+export function rollbackWorkflow(
+  id: string,
+  deploymentId: string,
+): Promise<{ version: number }> {
+  return withWorkflowDeployLock(id, () =>
+    rollbackWorkflowInner(id, deploymentId),
+  );
+}
+
+async function rollbackWorkflowInner(
   id: string,
   deploymentId: string,
 ): Promise<{ version: number }> {
@@ -150,34 +166,41 @@ export async function rollbackWorkflow(
     );
   }
 
-  const live = workflowCurrentDir(id);
-  await fs.rm(live, { recursive: true, force: true });
-  await fs.mkdir(live, { recursive: true });
-  await fs.cp(artifact, live, { recursive: true });
-  const sourceCommit = await moveMasterToDeploymentTag(
-    id,
-    deployment.sourceTag,
-  );
-
   const manifest = deployment.manifestNormalized as {
     name?: string;
     description?: string;
   } | null;
-  await db
-    .update(schema.workflows)
-    .set({
-      status: 'deployed',
-      currentDeploymentId: deployment.id,
-      currentSourceCommit: sourceCommit,
-      inputSchema: deployment.inputSchema,
-      manifest: deployment.manifestNormalized,
-      name: manifest?.name ?? workflow.name,
-      // Restore the rolled-back version's description too; otherwise the row
-      // keeps a newer deployment's metadata after rolling back (mirrors the
-      // `description || null` normalization the deploy path applies).
-      description: manifest?.description || null,
-    })
-    .where(eq(schema.workflows.id, id));
+  const sourceTag = deployment.sourceTag;
+
+  // Mutate the live artifact, Git master, and the workflow row under the same
+  // advisory lock deploy holds for its version→tag→record step, so a concurrent
+  // deploy on another process blocks until we finish (and vice versa).
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+    );
+    const live = workflowCurrentDir(id);
+    await fs.rm(live, { recursive: true, force: true });
+    await fs.mkdir(live, { recursive: true });
+    await fs.cp(artifact, live, { recursive: true });
+    const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
+
+    await tx
+      .update(schema.workflows)
+      .set({
+        status: 'deployed',
+        currentDeploymentId: deployment.id,
+        currentSourceCommit: sourceCommit,
+        inputSchema: deployment.inputSchema,
+        manifest: deployment.manifestNormalized,
+        name: manifest?.name ?? workflow.name,
+        // Restore the rolled-back version's description too; otherwise the row
+        // keeps a newer deployment's metadata after rolling back (mirrors the
+        // `description || null` normalization the deploy path applies).
+        description: manifest?.description || null,
+      })
+      .where(eq(schema.workflows.id, id));
+  });
 
   await reloadWorkflowScheduler();
   return { version: deployment.version };
@@ -199,6 +222,14 @@ export async function rollbackWorkflowToVersion(
 
 /** Permanently delete a workflow: rows, artifacts, repo, and worktrees. */
 export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
+  // The id flows into `fs.rm(..., { force: true })` on several per-workflow
+  // dirs (whose helpers `path.resolve`), so reject anything that isn't a valid
+  // slug before touching the filesystem. Otherwise a crafted id like
+  // "../../src" (which matches no DB row) would still resolve outside the
+  // workflow namespace and delete arbitrary directories.
+  if (!isValidWorkflowId(id)) {
+    throw new Error(`Invalid workflow id: ${id}`);
+  }
   // Kill any in-flight run processes first so deleting the rows below cannot
   // strand an orphaned Deno child that keeps causing side effects.
   const { killActiveWorkflowRuns } = await import('./execute');

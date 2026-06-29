@@ -12,6 +12,7 @@ import {
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
+import { validateCron } from '~server/apps/cron-expr';
 import { buildWorkflow } from './build';
 import {
   assertDeployableWorktree,
@@ -21,6 +22,7 @@ import {
 } from './git';
 import type { NormalizedWorkflowManifest } from './manifest';
 import { reloadWorkflowScheduler } from './scheduler';
+import { validateWorkflowInput } from './validate';
 
 export type DeployWorkflowResult = {
   deploymentId: string;
@@ -41,13 +43,18 @@ function workspaceRelative(p: string): string {
 }
 
 // Advisory-lock namespace for workflow deploys (distinct from apps) so version
-// allocation is serialized across server processes, not just within one.
-const WORKFLOW_DEPLOY_LOCK_NS = 2;
+// allocation is serialized across server processes, not just within one. Shared
+// with rollback (see manage.ts) so the two can't interleave their artifact/Git/
+// row mutations.
+export const WORKFLOW_DEPLOY_LOCK_NS = 2;
 
 const workflowDeployChains = new Map<string, Promise<unknown>>();
 
-/** Run `fn` only after any in-flight deploy for the same workflow has settled. */
-function withWorkflowDeployLock<T>(
+/**
+ * Run `fn` only after any in-flight deploy (or rollback) for the same workflow
+ * has settled. Exported so rollback shares the same in-process serialization.
+ */
+export function withWorkflowDeployLock<T>(
   id: string,
   fn: () => Promise<T>,
 ): Promise<T> {
@@ -123,6 +130,28 @@ async function deployWorkflowInner(
         `manifest.json id "${build.source.id}" does not match the workflow ` +
           `being deployed ("${id}"). Set "id": "${id}" in manifest.json.`,
       );
+    }
+
+    // Fail the deploy on cron triggers that would silently never fire (the
+    // scheduler skips an unparseable schedule) or always fail at runtime (input
+    // that doesn't satisfy the workflow's captured input schema), instead of
+    // publishing a release whose schedule is dead on arrival.
+    for (const job of build.source.triggers.cron) {
+      const cronError = validateCron(job.schedule);
+      if (cronError) {
+        throw new Error(
+          `Invalid cron schedule for job "${job.name}": ${cronError}`,
+        );
+      }
+      const inputCheck = validateWorkflowInput(
+        build.inputSchema,
+        job.input ?? {},
+      );
+      if (!inputCheck.success) {
+        throw new Error(
+          `Invalid cron input for job "${job.name}": ${inputCheck.message}`,
+        );
+      }
     }
 
     let webhookSecret = workflow.webhookSecret ?? null;

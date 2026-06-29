@@ -9,6 +9,39 @@
  */
 import { z } from 'zod';
 
+/**
+ * Reject manifest-provided paths that would escape the workflow source tree once
+ * joined to it (absolute paths, Windows drive/UNC paths, or any `..` segment).
+ * Kept as a pure string check so this module stays isomorphic (no `node:path`).
+ */
+function isUnsafeSourcePath(p: string): boolean {
+  if (p.startsWith('/') || p.startsWith('\\')) return true;
+  if (/^[a-zA-Z]:/.test(p)) return true;
+  return p.split(/[/\\]/).some((segment) => segment === '..');
+}
+
+/**
+ * A relative path the build later joins against the workflow source dir to read
+ * or bundle a file. Constrained so a malicious/mistaken manifest can't read
+ * files outside the workflow checkout (e.g. `../../.env.local`).
+ */
+const sourceRelativePath = z
+  .string()
+  .min(1)
+  .refine((p) => !isUnsafeSourcePath(p), {
+    message:
+      'must be a relative path inside the workflow source ' +
+      '(no absolute or ".." paths)',
+  });
+
+/** Canonical workflow-id shape: kebab-case slug, safe as a path segment. */
+export const WORKFLOW_ID_RE = /^[a-z][a-z0-9-]*$/;
+
+/** True when `id` is a valid workflow slug (and therefore a safe path segment). */
+export function isValidWorkflowId(id: string): boolean {
+  return WORKFLOW_ID_RE.test(id);
+}
+
 /** JSON-serializable value mirror (kept local to avoid importing the db here). */
 export type JsonValue =
   | string
@@ -43,14 +76,14 @@ export const sourceWorkflowManifestSchema = z.object({
     .string()
     .min(1)
     .regex(
-      /^[a-z][a-z0-9-]*$/,
+      WORKFLOW_ID_RE,
       'id must be kebab-case (lowercase letters, digits, hyphens)',
     ),
   name: z.string().min(1),
   description: z.string().default(''),
   version: z.number().int().min(1).default(1),
   /** Entry module exporting `defineWorkflow(...)` as default. */
-  entry: z.string().min(1).default('workflow.ts'),
+  entry: sourceRelativePath.default('workflow.ts'),
   triggers: workflowTriggersSchema.default({ cron: [], webhook: false }),
 });
 

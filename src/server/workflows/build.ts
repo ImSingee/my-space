@@ -29,7 +29,23 @@ export type BuildWorkflowOptions = {
 
 const SENTINEL = '[[hatch]]';
 
+// A build step (deno bundle / describe) runs untrusted authored code and fetches
+// dependencies. Bound it so top-level code that hangs, or a stalled dependency
+// fetch, can't wedge the deploy in `building` forever with a live Deno child.
+const BUILD_STEP_TIMEOUT_MS = 5 * 60 * 1000;
+// Cap captured output so a runaway build that spews logs can't exhaust memory.
+const MAX_CAPTURED_OUTPUT = 1_000_000;
+
 type RunResult = { code: number; stdout: string; stderr: string };
+
+/** Append `chunk` to `buf`, stopping once the captured-output cap is reached. */
+function appendCapped(buf: string, chunk: string): string {
+  if (buf.length >= MAX_CAPTURED_OUTPUT) return buf;
+  const next = buf + chunk;
+  return next.length > MAX_CAPTURED_OUTPUT
+    ? `${next.slice(0, MAX_CAPTURED_OUTPUT)}\n…output truncated…`
+    : next;
+}
 
 function run(
   cmd: string,
@@ -44,13 +60,39 @@ function run(
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d) => (stdout += d.toString()));
-    child.stderr.on('data', (d) => (stderr += d.toString()));
+    let settled = false;
+    const finish = (result: RunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      stderr = appendCapped(
+        stderr,
+        `\n${cmd} timed out after ${BUILD_STEP_TIMEOUT_MS}ms`,
+      );
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* best-effort */
+      }
+      finish({ code: 1, stdout, stderr });
+    }, BUILD_STEP_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    child.stdout.on(
+      'data',
+      (d) => (stdout = appendCapped(stdout, d.toString())),
+    );
+    child.stderr.on(
+      'data',
+      (d) => (stderr = appendCapped(stderr, d.toString())),
+    );
     child.on('error', (err) => {
-      stderr += `\n${cmd} failed to start: ${err.message}`;
-      resolve({ code: 1, stdout, stderr });
+      stderr = appendCapped(stderr, `\n${cmd} failed to start: ${err.message}`);
+      finish({ code: 1, stdout, stderr });
     });
-    child.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }));
+    child.on('close', (code) => finish({ code: code ?? 0, stdout, stderr }));
     if (opts.input !== undefined) {
       child.stdin.end(opts.input);
     } else {
@@ -135,7 +177,10 @@ export async function buildWorkflow(
     const wrapper = path.join(tempSrc, '__hatch_main.ts');
     await fs.writeFile(
       wrapper,
-      `import workflow from '${entryImport}';\n` +
+      // JSON.stringify the specifier so an entry path with quotes/backslashes
+      // can't break out of the import string (entry is already constrained to a
+      // safe relative path by the manifest schema; this is defense in depth).
+      `import workflow from ${JSON.stringify(entryImport)};\n` +
         `import { runCli } from '@hatch/workflow';\n` +
         'await runCli(workflow);\n',
       'utf8',
