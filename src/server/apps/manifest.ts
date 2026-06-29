@@ -31,6 +31,20 @@ const sourceRelativePath = z
       'must be a relative path inside the app source (no absolute or ".." paths)',
   });
 
+/**
+ * The backend entry must live under the `backend/` tree. The build only stages
+ * `backend/` (plus generated `gen/`) into the runtime artifact, so an entry
+ * elsewhere would deploy successfully yet fail to start at runtime. Enforcing it
+ * here keeps the manifest honest about what the platform can actually run.
+ */
+const backendEntryPath = sourceRelativePath.refine(
+  (p) => {
+    const segments = p.split(/[/\\]/);
+    return segments.length >= 2 && segments[0] === 'backend';
+  },
+  { message: 'backend entry must live under the "backend/" directory' },
+);
+
 export const widgetSizeSchema = z.object({
   w: z.number().int().min(1).max(12).default(4),
   h: z.number().int().min(1).max(12).default(3),
@@ -96,7 +110,7 @@ export const sourceManifestSchema = z.object({
   rpc: z
     .object({ proto: sourceRelativePath, service: z.string().min(1) })
     .optional(),
-  backend: z.object({ entry: sourceRelativePath }).optional(),
+  backend: z.object({ entry: backendEntryPath }).optional(),
   app: z
     .object({ entry: sourceRelativePath, html: sourceRelativePath.optional() })
     .optional(),
@@ -122,6 +136,8 @@ export type NormalizedManifest = {
   version: number;
   capabilities: AppCapabilitiesShape;
   backendMode: 'serverless' | 'long-running';
+  /** Source-relative backend entry the platform runs, when a backend is present. */
+  backend?: { entry: string };
   /** Iframe URL for the full app, when a frontend is present. */
   app?: { url: string };
   widgets: NormalizedWidget[];
@@ -185,6 +201,9 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
       : [],
     cron: src.capabilities.cron ? src.cron : [],
   };
+  if (src.capabilities.backend && src.backend) {
+    out.backend = { entry: src.backend.entry };
+  }
   if (src.capabilities.frontend && src.app) {
     out.app = { url: appUrl(src.id) };
   }

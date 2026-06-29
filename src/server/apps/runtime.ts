@@ -1,12 +1,32 @@
 /** Server-only: lazy Deno backend process manager + Connect reverse proxy. */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { appBuildDir, appStorageDir } from '~agent/paths';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import { ensureAppDatabase } from './provision';
+
+/**
+ * Resolve the backend's source-relative entry file from the staged normalized
+ * manifest. Falls back to the scaffold convention (`backend/main.ts`) for older
+ * artifacts whose manifest predates the recorded `backend.entry`.
+ */
+function resolveBackendEntry(buildDir: string): string {
+  try {
+    const raw = readFileSync(
+      path.join(buildDir, 'manifest.normalized.json'),
+      'utf8',
+    );
+    const entry = (JSON.parse(raw) as { backend?: { entry?: unknown } }).backend
+      ?.entry;
+    if (typeof entry === 'string' && entry.length > 0) return entry;
+  } catch {
+    /* fall back to the convention below */
+  }
+  return 'backend/main.ts';
+}
 
 /**
  * Resolve Deno's module cache directory (`DENO_DIR` or the platform default).
@@ -193,7 +213,8 @@ async function startBackend(id: string): Promise<number> {
   // instead of registering/serving a build the caller has since superseded.
   const epoch = stopEpoch(id);
   const buildDir = appBuildDir(id);
-  if (!existsSync(path.join(buildDir, 'backend', 'main.ts'))) {
+  const backendEntry = resolveBackendEntry(buildDir);
+  if (!existsSync(path.join(buildDir, backendEntry))) {
     throw new Error(`App "${id}" has no built backend. Deploy it first.`);
   }
 
@@ -224,33 +245,52 @@ async function startBackend(id: string): Promise<number> {
     if (certPath) allowRead.push(certPath);
   }
 
-  const proc = spawn(
-    'deno',
-    [
-      'run',
-      `--allow-read=${allowRead.join(',')}`,
-      `--allow-write=${allowWrite.join(',')}`,
-      // Outbound network stays open: apps legitimately call external APIs and
-      // their own per-app Postgres. The env is sandboxed below, so --allow-env
-      // exposes only the app's own variables, not platform secrets.
-      '--allow-net',
-      '--allow-env',
-      '--no-prompt',
-      'backend/main.ts',
-    ],
-    {
-      cwd: buildDir,
-      // Never inherit the platform's process.env (DATABASE_URL, auth secrets,
-      // provider keys); hand over only the sandbox allowlist plus the app's own
-      // runtime variables.
-      env: subprocessSandboxEnv({
-        PORT: String(port),
-        DATABASE_URL: databaseUrl,
-        STORAGE_DIR: storageDir,
-      }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  const denoArgs = [
+    'run',
+    // Resolve npm deps from Deno's module cache (primed by `deno install` +
+    // `deno cache` at build time) instead of a per-app node_modules:
+    // package.json apps stage only package.json + deno.lock, and legacy
+    // deno.json import maps still work. Avoids staging (and read-sandboxing) a
+    // heavy node_modules tree.
+    //
+    // We deliberately do NOT pass `--cached-only`: the build pre-caches the
+    // whole graph so a healthy backend never hits the network at startup, but
+    // older artifacts (built before pre-caching) and cache-loss scenarios must
+    // still be able to resolve their imports rather than fail to boot.
+    '--node-modules-dir=none',
+    `--allow-read=${allowRead.join(',')}`,
+    `--allow-write=${allowWrite.join(',')}`,
+    // Outbound network stays open: apps legitimately call external APIs and
+    // their own per-app Postgres. The env is sandboxed below, so --allow-env
+    // exposes only the app's own variables, not platform secrets.
+    '--allow-net',
+    '--allow-env',
+    '--no-prompt',
+  ];
+  // Enforce the staged dependency lock when present so the backend runs the
+  // exact versions baked into the artifact, overriding any app deno.json
+  // `"lock": false`. `--frozen` makes the lock authoritative and read-only:
+  // Deno errors instead of silently updating/downloading newer versions, and
+  // never tries to rewrite the lock (which the write sandbox would block). The
+  // lock is complete (built via `deno install --lock` + `deno cache --lock`), so
+  // a healthy artifact passes. Older artifacts without a staged lock skip this.
+  if (existsSync(path.join(buildDir, 'deno.lock'))) {
+    denoArgs.push('--lock=deno.lock', '--frozen');
+  }
+  denoArgs.push(backendEntry);
+
+  const proc = spawn('deno', denoArgs, {
+    cwd: buildDir,
+    // Never inherit the platform's process.env (DATABASE_URL, auth secrets,
+    // provider keys); hand over only the sandbox allowlist plus the app's own
+    // runtime variables.
+    env: subprocessSandboxEnv({
+      PORT: String(port),
+      DATABASE_URL: databaseUrl,
+      STORAGE_DIR: storageDir,
+    }),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
   let log = '';
   const appendLog = (chunk: Buffer) => {

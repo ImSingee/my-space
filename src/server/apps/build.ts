@@ -17,6 +17,7 @@ import {
   parseSourceManifest,
   rpcUrl,
 } from './manifest';
+import { subprocessSandboxEnv } from '../sandbox-env';
 
 export type BuildResult = {
   source: SourceManifest;
@@ -34,12 +35,13 @@ const BIN_DIR = path.join(REPO_ROOT, 'node_modules', '.bin');
 function run(
   cmd: string,
   args: string[],
-  opts: { cwd: string },
+  opts: { cwd: string; env?: NodeJS.ProcessEnv },
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
+    const baseEnv = opts.env ?? process.env;
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
-      env: { ...process.env, PATH: `${BIN_DIR}:${process.env.PATH ?? ''}` },
+      env: { ...baseEnv, PATH: `${BIN_DIR}:${baseEnv.PATH ?? ''}` },
     });
     let output = '';
     child.stdout.on('data', (d) => (output += d.toString()));
@@ -132,9 +134,56 @@ export async function buildApp(
       }
     }
 
+    // 2) Install app-declared npm dependencies. A `package.json` lets the app
+    // bring its own packages (frontend bundle + Deno backend). We force
+    // `--node-modules-dir=auto` so a local node_modules is always materialized
+    // for esbuild, even when the app keeps a `deno.json` with
+    // `nodeModulesDir: "none"` (which `deno install` would otherwise honor and
+    // skip node_modules). The install also primes Deno's module cache +
+    // deno.lock, used by the backend at runtime with --node-modules-dir=none,
+    // so the heavy node_modules is never staged. Legacy single-file apps have
+    // no package.json and keep resolving the bundle's imports from the
+    // platform's node_modules.
+    //
+    // The install runs with a sandboxed env (no platform secrets): Deno does not
+    // execute npm lifecycle scripts without an explicit `--allow-scripts`, so no
+    // app-controlled code runs here, but we still withhold the platform's
+    // secrets as defense-in-depth. `--lock=deno.lock` forces a lockfile even when
+    // the app's deno.json sets `"lock": false`, so the staged artifact always
+    // pins exact versions (the runtime enforces this lock).
+    const hasPackageJson = await pathExists(path.join(src, 'package.json'));
+    if (hasPackageJson) {
+      const install = await run(
+        'deno',
+        ['install', '--node-modules-dir=auto', '--lock=deno.lock'],
+        {
+          cwd: src,
+          env: subprocessSandboxEnv(),
+        },
+      );
+      logs.push(
+        `$ deno install --node-modules-dir=auto --lock=deno.lock\n${install.output.trim()}`,
+      );
+      if (install.code !== 0) {
+        throw new Error(`Dependency install failed:\n${install.output}`);
+      }
+    }
+    // esbuild resolves bare imports by walking node_modules up from each entry
+    // file, then falling back to `nodePaths`. package.json apps get their own
+    // node_modules (from `deno install`) preferred via the in-src entry walk; the
+    // platform node_modules stays a fallback so an app that adds a package.json
+    // for one dependency doesn't have to re-declare react/connect/etc. Legacy
+    // single-file apps have no app node_modules, so they resolve straight from
+    // the platform via nodePaths (the temp build dir lives outside the repo, so
+    // esbuild's directory walk can't reach platform deps otherwise).
+    const esbuildResolve = {
+      absWorkingDir: hasPackageJson ? src : REPO_ROOT,
+      nodePaths: [path.join(REPO_ROOT, 'node_modules')],
+    };
+
     const define = browserDefine(id, manifest.name);
 
-    // 2) Bundle the frontend SPA -> static app/app.js + index.html.
+    // 3) Bundle the frontend SPA -> static app/app.js + index.html.
     if (manifest.capabilities.frontend && manifest.app) {
       const entry = path.join(src, manifest.app.entry);
       if (!(await pathExists(entry))) {
@@ -142,7 +191,7 @@ export async function buildApp(
       }
       await fs.mkdir(path.join(out, 'app'), { recursive: true });
       await esbuild.build({
-        absWorkingDir: REPO_ROOT,
+        ...esbuildResolve,
         entryPoints: [entry],
         outfile: path.join(out, 'app', 'app.js'),
         bundle: true,
@@ -181,7 +230,7 @@ export async function buildApp(
       logs.push('bundled app -> inlined into app/index.html');
     }
 
-    // 3) Bundle each widget -> standalone ESM module exporting mount().
+    // 4) Bundle each widget -> standalone ESM module exporting mount().
     if (manifest.capabilities.widgets && manifest.widgets.length > 0) {
       await fs.mkdir(path.join(out, 'widgets'), { recursive: true });
       for (const widget of manifest.widgets) {
@@ -190,7 +239,7 @@ export async function buildApp(
           throw new Error(`widget entry not found: ${widget.entry}`);
         }
         await esbuild.build({
-          absWorkingDir: REPO_ROOT,
+          ...esbuildResolve,
           entryPoints: [entry],
           outfile: path.join(out, 'widgets', `${widget.id}.js`),
           bundle: true,
@@ -207,17 +256,44 @@ export async function buildApp(
       }
     }
 
-    // 4) Stage the Deno backend + generated stubs + import map for the runtime.
+    // 5) Stage the Deno backend + generated stubs + dependency manifest for the
+    // runtime. We stage package.json + deno.lock (not node_modules): the backend
+    // runs with --node-modules-dir=none and resolves deps from Deno's module
+    // cache (primed by `deno install` above). A legacy deno.json import map is
+    // staged when present so single-file apps keep working.
     if (manifest.capabilities.backend && manifest.backend) {
+      // Pre-cache the backend's full module graph into Deno's global cache so a
+      // healthy backend never resolves deps from the network at startup, and bad
+      // deps fail the deploy instead of the first request. `--node-modules-dir=
+      // none` mirrors the runtime flag so the cache is primed for the exact
+      // resolution mode used there; `--lock=deno.lock` completes/pins the lock
+      // (covering any backend imports beyond package.json) even under
+      // `"lock": false`. Cache exactly the declared entry the runtime runs.
+      const backendEntry = manifest.backend.entry;
+      const cache = await run(
+        'deno',
+        ['cache', '--node-modules-dir=none', '--lock=deno.lock', backendEntry],
+        { cwd: src, env: subprocessSandboxEnv() },
+      );
+      logs.push(
+        `$ deno cache --node-modules-dir=none --lock=deno.lock ${backendEntry}\n${cache.output.trim()}`,
+      );
+      if (cache.code !== 0) {
+        throw new Error(`Backend dependency cache failed:\n${cache.output}`);
+      }
+      // The manifest schema constrains `backend.entry` to live under `backend/`,
+      // so staging these two trees always includes the declared entry + stubs.
       for (const dir of ['backend', 'gen']) {
         const from = path.join(src, dir);
         if (await pathExists(from)) {
           await fs.cp(from, path.join(out, dir), { recursive: true });
         }
       }
-      const denoJson = path.join(src, 'deno.json');
-      if (await pathExists(denoJson)) {
-        await fs.copyFile(denoJson, path.join(out, 'deno.json'));
+      for (const file of ['package.json', 'deno.lock', 'deno.json']) {
+        const from = path.join(src, file);
+        if (await pathExists(from)) {
+          await fs.copyFile(from, path.join(out, file));
+        }
       }
       logs.push('staged Deno backend');
     }
