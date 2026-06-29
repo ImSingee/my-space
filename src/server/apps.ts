@@ -379,13 +379,17 @@ export const getDashboard = createServerFn({ method: 'GET' })
       where: (w, { eq: e }) => e(w.dashboardId, dashboardId),
       orderBy: (w, { asc }) => [asc(w.sortOrder), asc(w.createdAt)],
     });
+    // Resolve through the LIVE manifest (non-archived, widgets-capable) so a
+    // placement for an archived/retired app is dropped rather than rendered as a
+    // permanently failing card — the widget bundle route rejects those too.
+    const { liveAppManifest } = await import('./apps/access');
     const manifests = new Map<string, NormalizedManifest | null>();
     const items: DashboardItem[] = [];
     for (const placement of placements) {
       if (!manifests.has(placement.appId)) {
         manifests.set(
           placement.appId,
-          await normalizedManifestFor(placement.appId),
+          await liveAppManifest(placement.appId, 'widgets'),
         );
       }
       const manifest = manifests.get(placement.appId);
@@ -605,23 +609,39 @@ export const reorderSidebarItems = createServerFn({ method: 'POST' })
 
 type LayoutPatch = { id: string; x: number; y: number; w: number; h: number };
 
+/** react-grid-layout column count (mirrors COLS in dashboard-grid.tsx). */
+const DASHBOARD_GRID_COLS = 12;
+const DASHBOARD_MAX_H = 100;
+const DASHBOARD_MAX_Y = 10_000;
+
+function clampInt(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const n = Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 export const updateDashboardLayout = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((items: LayoutPatch[]) => items)
   .handler(async ({ data: items }) => {
     await Promise.all(
-      items.map((item, index) =>
-        db
+      items.map((item, index) => {
+        // Never persist client-supplied coords verbatim: a crafted call could
+        // otherwise store negative or out-of-grid values that break later
+        // react-grid-layout renders. Clamp to the same bounds the UI produces.
+        const w = clampInt(item.w, 1, DASHBOARD_GRID_COLS, 1);
+        const x = clampInt(item.x, 0, DASHBOARD_GRID_COLS - w, 0);
+        const y = clampInt(item.y, 0, DASHBOARD_MAX_Y, 0);
+        const h = clampInt(item.h, 1, DASHBOARD_MAX_H, 1);
+        return db
           .update(schema.dashboardWidgets)
-          .set({
-            x: item.x,
-            y: item.y,
-            w: item.w,
-            h: item.h,
-            sortOrder: index,
-          })
-          .where(eq(schema.dashboardWidgets.id, item.id)),
-      ),
+          .set({ x, y, w, h, sortOrder: index })
+          .where(eq(schema.dashboardWidgets.id, item.id));
+      }),
     );
     return { ok: true };
   });

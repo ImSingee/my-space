@@ -13,9 +13,45 @@ import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
 import type { DashboardItem } from '~server/apps';
 
-type WidgetModule = {
-  mount: (element: HTMLElement, props?: unknown) => (() => void) | void;
-};
+/** Encode widget bundle source as a `data:` module URL (UTF-8 safe). */
+function toModuleDataUrl(code: string): string {
+  const bytes = new TextEncoder().encode(code);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:text/javascript;base64,${btoa(binary)}`;
+}
+
+/** Build the sandboxed document that mounts a widget bundle inside the iframe. */
+function widgetFrameHtml(moduleUrl: string): string {
+  // Run the widget in its own iframe document/realm instead of the dashboard
+  // page: a crashing or DOM-mutating widget can no longer corrupt the dashboard,
+  // and top-navigation/popups stay blocked (sandbox omits those tokens). The
+  // frame stays same-origin (allow-same-origin) because widgets use the
+  // documented Connect/storage clients, which need the signed-in user's
+  // same-origin session to reach `/api/apps/<id>/rpc` and `/storage`.
+  // NOTE: same-origin means this is a robustness/blast-radius boundary, not a
+  // hard security sandbox against malicious widget code — that needs per-app
+  // origins or a scoped postMessage proxy (a platform-level change, same
+  // limitation as cross-app runtime isolation). `moduleUrl` is base64 (no
+  // quotes / `</script`), so inlining it is safe.
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;height:100%}
+body{font:14px/1.5 system-ui,-apple-system,sans-serif}
+#hatch-widget-root{height:100%;overflow:auto}
+</style></head><body><div id="hatch-widget-root"></div>
+<script type="module">
+(async () => {
+  try {
+    const m = await import(${JSON.stringify(moduleUrl)});
+    if (typeof m.mount !== 'function') throw new Error('widget does not export mount()');
+    m.mount(document.getElementById('hatch-widget-root'));
+    parent.postMessage({ __hatchWidget: 'ready' }, '*');
+  } catch (e) {
+    parent.postMessage({ __hatchWidget: 'error', message: String((e && e.message) || e) }, '*');
+  }
+})();
+</script></body></html>`;
+}
 
 export function WidgetCard({
   item,
@@ -24,48 +60,45 @@ export function WidgetCard({
   item: DashboardItem;
   onRemove: () => void;
 }) {
-  const hostRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
     'loading',
   );
 
   useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
     let cancelled = false;
-    let cleanup: (() => void) | void;
-    let objectUrl: string | undefined;
     setStatus('loading');
 
-    // Load the widget module via a Blob URL. Importing the served URL directly
-    // is intercepted by the dev module pipeline; a Blob URL bypasses it and
-    // works the same in production. Widgets are fully bundled, so they have no
-    // relative sub-imports that would break under a blob: specifier.
+    // Only accept ready/error from THIS widget's frame.
+    const onMessage = (event: MessageEvent) => {
+      if (cancelled || event.source !== frame.contentWindow) return;
+      const data = event.data as { __hatchWidget?: string } | null;
+      if (!data || typeof data !== 'object') return;
+      if (data.__hatchWidget === 'ready') setStatus('ready');
+      else if (data.__hatchWidget === 'error') setStatus('error');
+    };
+    window.addEventListener('message', onMessage);
+
+    // Fetch the (authenticated, same-origin) bundle in the host, then hand it to
+    // the iframe as an inlined `data:` module. Fetching here keeps the request
+    // out of the dev module pipeline (which intercepts a direct import of the
+    // served URL); the widget still executes inside its own iframe document.
     void (async () => {
       const res = await fetch(item.url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const code = await res.text();
-      objectUrl = URL.createObjectURL(
-        new Blob([code], { type: 'text/javascript' }),
-      );
-      const mod: WidgetModule = await import(/* @vite-ignore */ objectUrl);
-      if (cancelled || !hostRef.current) return;
-      if (typeof mod.mount !== 'function') {
-        throw new Error('widget does not export mount()');
-      }
-      cleanup = mod.mount(hostRef.current);
-      setStatus('ready');
-    })()
-      .catch(() => {
-        if (!cancelled) setStatus('error');
-      })
-      .finally(() => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-      });
+      if (cancelled) return;
+      frame.srcdoc = widgetFrameHtml(toModuleDataUrl(code));
+    })().catch(() => {
+      if (!cancelled) setStatus('error');
+    });
 
     return () => {
       cancelled = true;
-      if (typeof cleanup === 'function') {
-        cleanup();
-      }
+      window.removeEventListener('message', onMessage);
+      frame.srcdoc = '';
     };
   }, [item.url]);
 
@@ -127,12 +160,20 @@ export function WidgetCard({
         </Group>
       </Group>
 
-      <div
-        ref={hostRef}
+      <iframe
+        ref={frameRef}
+        title={item.name}
+        // allow-scripts + allow-same-origin: scripts run and the widget keeps
+        // the same-origin session its Connect/storage client needs, while the
+        // omitted tokens still block top-navigation and popups. See
+        // widgetFrameHtml for why this is a robustness — not hard-security —
+        // boundary.
+        sandbox="allow-scripts allow-same-origin"
         style={{
           flex: 1,
           minHeight: 0,
-          overflow: 'auto',
+          border: 0,
+          width: '100%',
           display: status === 'ready' ? 'block' : 'none',
         }}
       />

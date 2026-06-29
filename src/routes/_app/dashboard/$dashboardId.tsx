@@ -25,7 +25,7 @@ import {
   IconPlus,
   IconTrash,
 } from '@tabler/icons-react';
-import { Suspense, useState } from 'react';
+import { Suspense, useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { DashboardGrid } from '~components/dashboard/dashboard-grid';
@@ -124,12 +124,35 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
     onError: (error) => toast.error((error as Error).message),
   });
 
-  const saveLayout = useMutation({
-    mutationFn: (
-      items: { id: string; x: number; y: number; w: number; h: number }[],
-    ) => updateDashboardLayout({ data: items }),
-    onError: (error) => toast.error((error as Error).message),
-  });
+  // Persist layout saves one at a time, always sending the most recent layout
+  // last. Each drag/resize fires onLayoutChange; firing independent requests
+  // lets a slow earlier save land after a newer one and overwrite it. We keep
+  // only the latest pending layout and drain it after the in-flight save.
+  const pendingLayout = useRef<
+    { id: string; x: number; y: number; w: number; h: number }[] | null
+  >(null);
+  const savingLayout = useRef(false);
+  const flushLayout = useCallback(async () => {
+    if (savingLayout.current) return;
+    savingLayout.current = true;
+    try {
+      while (pendingLayout.current) {
+        const next = pendingLayout.current;
+        pendingLayout.current = null;
+        try {
+          await updateDashboardLayout({ data: next });
+        } catch (error) {
+          toast.error((error as Error).message);
+          // Don't retry the failed layout (avoids a spin on a persistent
+          // failure), but leave pendingLayout untouched: if the user moved again
+          // during this save, that newer layout is queued there and must still
+          // be persisted on the next loop turn.
+        }
+      }
+    } finally {
+      savingLayout.current = false;
+    }
+  }, []);
 
   if (widgets.length === 0) {
     return <DashboardEmptyState hasApps={apps.length > 0} />;
@@ -139,11 +162,16 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
     <DashboardGrid
       items={widgets}
       onRemove={(id) => remove.mutate(id)}
-      onLayoutChange={(layout) =>
-        saveLayout.mutate(
-          layout.map((l) => ({ id: l.i, x: l.x, y: l.y, w: l.w, h: l.h })),
-        )
-      }
+      onLayoutChange={(layout) => {
+        pendingLayout.current = layout.map((l) => ({
+          id: l.i,
+          x: l.x,
+          y: l.y,
+          w: l.w,
+          h: l.h,
+        }));
+        void flushLayout();
+      }}
     />
   );
 }
