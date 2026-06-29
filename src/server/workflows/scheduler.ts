@@ -8,17 +8,31 @@ type SchedulerGlobal = typeof globalThis & {
   __hatchWorkflowScheduler__?: {
     timers: Map<string, ReturnType<typeof setTimeout>>;
     started: boolean;
+    /**
+     * Bumped on every clearAll() so stale timer callbacks can self-cancel.
+     * Optional because a hot reload can leave an older-shaped object on
+     * globalThis; readers treat a missing value as 0 so `++` never yields NaN
+     * (which would compare unequal to every captured generation and silently
+     * stop all timers from firing).
+     */
+    generation?: number;
   };
 };
 
 function state() {
   const g = globalThis as SchedulerGlobal;
-  g.__hatchWorkflowScheduler__ ??= { timers: new Map(), started: false };
+  g.__hatchWorkflowScheduler__ ??= {
+    timers: new Map(),
+    started: false,
+    generation: 0,
+  };
   return g.__hatchWorkflowScheduler__;
 }
 
-function jobKey(workflowId: string, jobName: string): string {
-  return `${workflowId}::${jobName}`;
+// Index is part of the key so two cron jobs that share a `name` get distinct
+// timers instead of the second clobbering the first.
+function jobKey(workflowId: string, index: number, jobName: string): string {
+  return `${workflowId}::${index}::${jobName}`;
 }
 
 /** Read cron jobs from a workflow's current deployment normalized manifest. */
@@ -52,9 +66,17 @@ async function fire(workflowId: string, job: WorkflowCronJob): Promise<void> {
   }
 }
 
-function scheduleOne(workflowId: string, job: WorkflowCronJob): void {
+function scheduleOne(
+  workflowId: string,
+  job: WorkflowCronJob,
+  index: number,
+): void {
   const s = state();
-  const key = jobKey(workflowId, job.name);
+  // Capture the generation this timer belongs to. A reload (clearAll) bumps it;
+  // a timer that already fired before its clearTimeout ran would otherwise keep
+  // a removed/changed cron definition alive by rescheduling itself.
+  const generation = s.generation ?? 0;
+  const key = jobKey(workflowId, index, job.name);
   const existing = s.timers.get(key);
   if (existing) clearTimeout(existing);
 
@@ -70,12 +92,20 @@ function scheduleOne(workflowId: string, job: WorkflowCronJob): void {
   const maxDelay = 6 * 60 * 60 * 1000;
   const delay = Math.min(Math.max(next.getTime() - Date.now(), 1000), maxDelay);
   const timer = setTimeout(() => {
+    // Superseded by a reload between firing and clearTimeout: do nothing so we
+    // neither fire nor reschedule the stale job onto the rebuilt schedule.
+    if ((state().generation ?? 0) !== generation) return;
     const reached = nextRun(spec, new Date(Date.now() - 60_000));
     const due = !reached || reached.getTime() <= Date.now() + 1000;
+    const reschedule = () => {
+      if ((state().generation ?? 0) === generation) {
+        scheduleOne(workflowId, job, index);
+      }
+    };
     if (due) {
-      void fire(workflowId, job).finally(() => scheduleOne(workflowId, job));
+      void fire(workflowId, job).finally(reschedule);
     } else {
-      scheduleOne(workflowId, job);
+      reschedule();
     }
   }, delay);
   if (typeof timer.unref === 'function') timer.unref();
@@ -86,6 +116,9 @@ function clearAll(): void {
   const s = state();
   for (const timer of s.timers.values()) clearTimeout(timer);
   s.timers.clear();
+  // Invalidate any timer callback already in flight (fired but not yet cleared)
+  // so it can't reschedule itself after the upcoming reload rebuilds the map.
+  s.generation = (s.generation ?? 0) + 1;
 }
 
 async function loadAll(): Promise<void> {
@@ -94,7 +127,7 @@ async function loadAll(): Promise<void> {
   });
   for (const workflow of workflows) {
     const jobs = await cronJobsFor(workflow.id);
-    for (const job of jobs) scheduleOne(workflow.id, job);
+    jobs.forEach((job, index) => scheduleOne(workflow.id, job, index));
   }
 }
 

@@ -18,6 +18,11 @@ import { validateWorkflowInput } from './validate';
 const SENTINEL = '[[hatch]]';
 const RUN_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_LOG = 100_000;
+// Cap a single pending stdout record (a line with no newline yet). `MAX_LOG`
+// only bounds completed log lines, so without this an untrusted/buggy workflow
+// that streams megabytes on one line would grow the buffer until the Node
+// process runs out of memory, long before the run timeout fires.
+const MAX_STDOUT_BUFFER = 1_000_000;
 
 type RuntimeGlobal = typeof globalThis & {
   __hatchWorkflowRuns__?: Map<string, ChildProcess>;
@@ -314,11 +319,27 @@ async function executeRun(
   };
 
   let stdoutBuf = '';
+  let overflowed = false;
   child.stdout.on('data', (d) => {
+    if (overflowed) return;
     stdoutBuf += d.toString();
     const parts = stdoutBuf.split('\n');
     stdoutBuf = parts.pop() ?? '';
     for (const part of parts) enqueue(part);
+    // Only the trailing, still-unterminated record remains in the buffer now.
+    // If it alone exceeds the cap the workflow is streaming one unbounded line,
+    // so kill the run rather than let it exhaust memory (complete lines were
+    // already drained above, so a chatty-but-newline-terminated workflow is
+    // unaffected). The close handler records the failure.
+    if (stdoutBuf.length > MAX_STDOUT_BUFFER) {
+      overflowed = true;
+      stdoutBuf = '';
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* best-effort */
+      }
+    }
   });
   child.stderr.on('data', (d) => appendLog(d.toString()));
 
@@ -365,9 +386,11 @@ async function executeRun(
   const error = succeeded
     ? null
     : (runEnd?.error ??
-      (timedOut
-        ? 'Run timed out'
-        : 'Workflow exited before completing (see log).'));
+      (overflowed
+        ? 'Workflow produced too much output on a single line'
+        : timedOut
+          ? 'Run timed out'
+          : 'Workflow exited before completing (see log).'));
   if (!succeeded) {
     await failRunningSteps(runId, error ?? 'Run failed');
   }
