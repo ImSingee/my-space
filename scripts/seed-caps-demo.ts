@@ -24,12 +24,12 @@ import { dropAppDatabase } from '../src/server/apps/provision';
 import { stopApp } from '../src/server/apps/runtime';
 import { createApp } from '../src/server/apps/scaffold';
 
-const ID = 'caps-demo';
+const SLUG = 'caps-demo';
 const SESSION_ID = 'caps-demo-session';
-const worktree = agentAppWorkDir(SESSION_ID, ID);
 
 const MANIFEST = {
-  id: ID,
+  // Overwritten with the generated app id in main(); the id is no longer the slug.
+  id: SLUG,
   name: 'Capabilities Demo',
   description: 'Storage, cron, webhook and a long-running backend.',
   version: 1,
@@ -135,28 +135,37 @@ async function commitWorktree(
 }
 
 async function main() {
-  // Reset any prior copy.
-  stopApp(ID);
-  await db.delete(schema.apps).where(eq(schema.apps.id, ID));
-  await Promise.all([
-    fs.rm(appSrcDir(ID), { recursive: true, force: true }),
-    fs.rm(appBuildDir(ID), { recursive: true, force: true }),
-    fs.rm(appVersionsDir(ID), { recursive: true, force: true }),
-    fs.rm(appStorageDir(ID), { recursive: true, force: true }),
-    fs.rm(appArtifactsDir(ID), { recursive: true, force: true }),
-    fs.rm(appRepoDir(ID), { recursive: true, force: true }),
-    fs.rm(agentWorkDir(SESSION_ID), { recursive: true, force: true }),
-  ]);
-  await dropAppDatabase(ID).catch(() => {});
+  // Reset any prior copy. The id is now a generated ULID, so find the existing
+  // app by its slug and clean up using whatever id it has.
+  const prior = await db.query.apps.findFirst({
+    where: (s, { eq: e }) => e(s.slug, SLUG),
+    columns: { id: true },
+  });
+  if (prior) {
+    stopApp(prior.id);
+    await db.delete(schema.apps).where(eq(schema.apps.id, prior.id));
+    await Promise.all([
+      fs.rm(appSrcDir(prior.id), { recursive: true, force: true }),
+      fs.rm(appBuildDir(prior.id), { recursive: true, force: true }),
+      fs.rm(appVersionsDir(prior.id), { recursive: true, force: true }),
+      fs.rm(appStorageDir(prior.id), { recursive: true, force: true }),
+      fs.rm(appArtifactsDir(prior.id), { recursive: true, force: true }),
+      fs.rm(appRepoDir(prior.id), { recursive: true, force: true }),
+    ]);
+    await dropAppDatabase(prior.id).catch(() => {});
+  }
+  await fs.rm(agentWorkDir(SESSION_ID), { recursive: true, force: true });
 
-  await createApp(
+  const { id } = await createApp(
     {
-      id: ID,
+      slug: SLUG,
       name: 'Capabilities Demo',
       description: 'demo',
     },
     { sessionId: SESSION_ID },
   );
+  MANIFEST.id = id;
+  const worktree = agentAppWorkDir(SESSION_ID, id);
   await fs.writeFile(
     path.join(worktree, 'manifest.json'),
     JSON.stringify(MANIFEST, null, 2),
@@ -169,19 +178,19 @@ async function main() {
   );
   await commitWorktree(worktree, 'Seed capabilities demo');
 
-  const dep = await deployApp(ID, {
+  const dep = await deployApp(id, {
     sourceDir: worktree,
     message: 'Seed demo deployment',
   });
   const row = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, ID),
+    where: (s, { eq: e }) => e(s.id, id),
   });
-  console.log('deployed', ID, 'v' + dep.version);
+  console.log('deployed', id, '(slug ' + SLUG + ') v' + dep.version);
   console.log('webhookSecret', row?.webhookSecret);
-  console.log('webhook URL', `/api/hooks/${ID}?secret=${row?.webhookSecret}`);
+  console.log('webhook URL', `/api/hooks/${id}?secret=${row?.webhookSecret}`);
   // Stop the warm backend started in THIS process; the dev server will lazily
   // boot + keep it alive on first request / scheduled tick.
-  stopApp(ID);
+  stopApp(id);
   process.exit(0);
 }
 

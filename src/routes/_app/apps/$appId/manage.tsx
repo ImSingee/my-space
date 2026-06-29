@@ -8,6 +8,7 @@ import {
   Menu,
   Stack,
   Text,
+  TextInput,
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
@@ -24,16 +25,20 @@ import {
   IconArchive,
   IconArchiveOff,
   IconArrowLeft,
+  IconCheck,
   IconDotsVertical,
   IconExternalLink,
   IconFileZip,
   IconGitBranch,
+  IconPencil,
   IconPin,
   IconPinnedOff,
   IconTrash,
+  IconX,
 } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
 import dayjs from 'dayjs';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -45,7 +50,13 @@ import {
   appsQueryOptions,
   sidebarItemsQueryOptions,
 } from '~queries/apps';
-import { archiveAppFn, deleteAppFn, getApp, setSidebarPin } from '~server/apps';
+import {
+  archiveAppFn,
+  deleteAppFn,
+  getApp,
+  setAppSlugFn,
+  setSidebarPin,
+} from '~server/apps';
 
 export const Route = createFileRoute('/_app/apps/$appId/manage')({
   loader: async ({ params }) => {
@@ -139,7 +150,7 @@ function AppDetailPage() {
           <StatusBadge status={app.status} />
         </Group>
       }
-      description={app.description || `App · ${app.id}`}
+      description={app.description || `App · ${app.slug}`}
       actions={
         <>
           <Button
@@ -229,7 +240,8 @@ function AppDetailPage() {
           </Text>
 
           <Stack gap="sm">
-            <Field label="Identifier" value={app.id} mono copyValue={app.id} />
+            <SlugField appId={app.id} slug={app.slug} />
+            <Field label="App ID" value={app.id} mono copyValue={app.id} />
             <Field
               label="Updated"
               value={dayjs(app.updatedAt).format('YYYY-MM-DD HH:mm')}
@@ -258,6 +270,140 @@ function AppDetailPage() {
         <DeploymentHistory appId={app.id} />
       </Stack>
     </Page>
+  );
+}
+
+/**
+ * Editable URL-slug row. The slug is the only part of an app's identity that
+ * users can change; it appears in the shareable `/app/<slug>/` URL and renaming
+ * it never requires a rebuild (everything technical is keyed off the immutable
+ * id).
+ */
+function SlugField({ appId, slug }: { appId: string; slug: string }) {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(slug);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const save = useMutation({
+    mutationFn: (next: string) =>
+      setAppSlugFn({ data: { id: appId, slug: next } }),
+    onSuccess: (result) => {
+      toast.success(`URL slug is now "${result.slug}"`);
+      setEditing(false);
+      void queryClient.invalidateQueries({
+        queryKey: appsQueryOptions.queryKey,
+      });
+      // The route may have been opened with the (now stale) old slug as its
+      // param; pin the URL to the immutable id before reloading so the loader
+      // doesn't refetch a slug that no longer resolves and 404.
+      void navigate({
+        to: '/apps/$appId/manage',
+        params: { appId },
+        replace: true,
+      });
+      void router.invalidate();
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  const submit = () => {
+    const next = draft.trim();
+    if (next === slug) {
+      setEditing(false);
+      return;
+    }
+    save.mutate(next);
+  };
+
+  return (
+    <Group gap="md" wrap="nowrap" align="center">
+      <Text size="sm" c="dimmed" style={{ width: 96, flex: 'none' }}>
+        URL slug
+      </Text>
+      {editing ? (
+        <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit();
+              if (e.key === 'Escape') {
+                setDraft(slug);
+                setEditing(false);
+              }
+            }}
+            size="xs"
+            disabled={save.isPending}
+            styles={{ input: { fontFamily: 'monospace' } }}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Tooltip label="Save" withArrow position="top">
+            <ActionIcon
+              variant="light"
+              color="green"
+              onClick={submit}
+              loading={save.isPending}
+              aria-label="Save slug"
+            >
+              <IconCheck size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Cancel" withArrow position="top">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={() => {
+                setDraft(slug);
+                setEditing(false);
+              }}
+              disabled={save.isPending}
+              aria-label="Cancel"
+            >
+              <IconX size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      ) : (
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text size="sm" ff="monospace" truncate>
+            {slug}
+          </Text>
+          <Tooltip label="Open app" withArrow position="top">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              component="a"
+              href={`/app/${slug}/`}
+              target="_blank"
+              aria-label="Open app"
+            >
+              <IconExternalLink size={15} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Edit slug" withArrow position="top">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={() => {
+                setDraft(slug);
+                setEditing(true);
+              }}
+              aria-label="Edit slug"
+            >
+              <IconPencil size={15} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      )}
+    </Group>
   );
 }
 

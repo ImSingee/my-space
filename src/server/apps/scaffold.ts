@@ -1,11 +1,13 @@
 /** Server-only: scaffold a new app source tree from the template. */
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { ulid } from 'ulid';
 import { TEMPLATES_DIR, appSrcDir } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
+import { slugConflictExists } from './access';
 import { checkoutAppForAgent, ensureAppRepo } from './git';
-import { parseSourceManifest } from './manifest';
+import { isValidAppSlug, parseSourceManifest } from './manifest';
 
 async function replaceInFile(
   file: string,
@@ -28,7 +30,11 @@ function jsonStringInner(value: string): string {
 }
 
 export type CreateAppInput = {
-  id: string;
+  /**
+   * Mutable, human-facing URL slug (kebab-case). The immutable internal `id`
+   * is generated here (a ULID) and is independent of the slug.
+   */
+  slug: string;
   name: string;
   description?: string;
   /**
@@ -47,20 +53,23 @@ export type CreateAppOptions = {
 export async function createApp(
   input: CreateAppInput,
   options: CreateAppOptions = {},
-): Promise<{ id: string; name: string }> {
-  const { id } = input;
-  if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+): Promise<{ id: string; slug: string; name: string }> {
+  const slug = input.slug.trim();
+  if (!isValidAppSlug(slug)) {
     throw new Error(
-      'id must be kebab-case (lowercase letters, digits, hyphens).',
+      'slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
+        'starting with a letter).',
     );
   }
 
-  const existing = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
-  });
-  if (existing) {
-    throw new Error(`App "${id}" already exists.`);
+  if (await slugConflictExists(slug)) {
+    throw new Error(
+      `Slug "${slug}" conflicts with an existing app's id or slug.`,
+    );
   }
+
+  // The id is an immutable internal key, independent of the mutable slug.
+  const id = ulid().toLowerCase();
 
   const repoPath = await ensureAppRepo(id);
   const checkout = options.sessionId
@@ -76,7 +85,7 @@ export async function createApp(
   // Generated stubs are produced at build time, never copied from the template.
   await fs.rm(path.join(src, 'gen'), { recursive: true, force: true });
 
-  const name = input.name.trim() || id;
+  const name = input.name.trim() || slug;
   const description = (input.description ?? '').trim();
 
   await replaceInFile(path.join(src, 'manifest.json'), {
@@ -84,10 +93,10 @@ export async function createApp(
     __APP_NAME__: jsonStringInner(name),
     __APP_DESCRIPTION__: jsonStringInner(description),
   });
-  // package.json `name` is never published; the app id is already a valid npm
-  // name (kebab-case), so a plain substitution is safe.
+  // package.json `name` is never published; the kebab-case slug is a valid,
+  // readable npm name, so a plain substitution is safe.
   await replaceInFile(path.join(src, 'package.json'), {
-    __APP_ID__: id,
+    __APP_ID__: slug,
   });
   await replaceInFile(path.join(src, 'app', 'index.html'), {
     __APP_NAME__: name,
@@ -99,6 +108,7 @@ export async function createApp(
 
   await db.insert(schema.apps).values({
     id,
+    slug,
     name,
     description: description || null,
     status: 'draft',
@@ -125,5 +135,5 @@ export async function createApp(
       .onConflictDoNothing();
   }
 
-  return { id, name };
+  return { id, slug, name };
 }

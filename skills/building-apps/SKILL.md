@@ -49,8 +49,11 @@ use native git locally:
      few style-matched candidates), then — after they pick one — a second for
      the **slug**, suggesting a kebab-case slug derived from the chosen name.
      Never bundle them into one question or invent a slug without asking.
-   - The name can be changed later, but the slug is permanent (it keys the app's
-     URL, repo, and database). Only after they agree to both, call `create_app`.
+   - Both the name and the slug can be changed later (the slug from the manage
+     page), so reassure the user not to overthink it. The slug only appears in
+     the `/app/<slug>/` URL; the platform generates a separate immutable id that
+     keys the repo and database. Only after they agree to both, call
+     `create_app` (it takes the chosen `slug`).
      Pass `pin: true` when the app will have a user-facing frontend (the default)
      so it's pinned to the sidebar, or `pin: false` for backend-only /
      widget-only apps.
@@ -300,8 +303,9 @@ demand). Use it for in-memory state, websockets, or background loops.
 
 1. For a new app, settle the name + slug with the user before `create_app`:
    `list_apps` first to match their style, then ask the name and the slug as two
-   separate `ask` calls (name first, slug derived from it). The name is editable
-   later, but the slug is permanent. For an existing app, `checkout_app`.
+   separate `ask` calls (name first, slug derived from it). Both the name and
+   slug are editable later (slug from the manage page). For an existing app,
+   `checkout_app`.
 2. Read the files, then edit proto → backend → app → widgets, keeping the
    manifest in sync.
 3. Commit local source changes with git.

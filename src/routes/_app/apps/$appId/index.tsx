@@ -37,7 +37,9 @@ function AppView() {
   const app = Route.useLoaderData();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [loading, setLoading] = useState(true);
-  const src = `/app/${app.id}/`;
+  // The shareable app URL uses the mutable slug; the route still resolves the
+  // immutable id too, so old `/app/<id>/` links keep working.
+  const src = `/app/${app.slug}/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const canOpen = app.status === 'deployed' && hasFrontend;
 

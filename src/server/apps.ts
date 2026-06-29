@@ -6,6 +6,7 @@ import { authMiddleware } from './auth';
 
 export type AppListItem = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: schema.AppStatus;
@@ -27,6 +28,7 @@ export const listApps = createServerFn({ method: 'GET' })
       orderBy: (s, { desc }) => [desc(s.updatedAt)],
       columns: {
         id: true,
+        slug: true,
         name: true,
         description: true,
         status: true,
@@ -44,6 +46,7 @@ export const listApps = createServerFn({ method: 'GET' })
 
 export type AppDetail = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: schema.AppStatus;
@@ -57,24 +60,35 @@ export type AppDetail = {
 export const getApp = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => id)
-  .handler(async ({ data: id }): Promise<AppDetail | null> => {
+  .handler(async ({ data: idOrSlug }): Promise<AppDetail | null> => {
     // Project to a display view: the raw row carries secrets/internal columns
     // (webhookSecret, repoPath, raw manifest, currentDeploymentId) the app
     // detail/manage pages never need and must not ship to the browser.
-    const row = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
-      columns: {
-        id: true,
-        name: true,
-        description: true,
-        status: true,
-        capabilities: true,
-        currentSourceCommit: true,
-        dbName: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    //
+    // Accept either the immutable id or the mutable slug (id first) so the
+    // /apps/<x> management routes work even when a link carries the slug (e.g.
+    // an agent deploy_app call made with a slug handle).
+    const columns = {
+      id: true,
+      slug: true,
+      name: true,
+      description: true,
+      status: true,
+      capabilities: true,
+      currentSourceCommit: true,
+      dbName: true,
+      createdAt: true,
+      updatedAt: true,
+    } as const;
+    const row =
+      (await db.query.apps.findFirst({
+        where: (s, { eq: e }) => e(s.id, idOrSlug),
+        columns,
+      })) ??
+      (await db.query.apps.findFirst({
+        where: (s, { eq: e }) => e(s.slug, idOrSlug),
+        columns,
+      }));
     if (!row) return null;
     return {
       ...row,
@@ -141,6 +155,14 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
   .handler(async ({ data: id }) => {
     const { deleteApp } = await import('./apps/manage');
     return deleteApp(id);
+  });
+
+export const setAppSlugFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; slug: string }) => input)
+  .handler(async ({ data }) => {
+    const { renameAppSlug } = await import('./apps/manage');
+    return renameAppSlug(data.id, data.slug);
   });
 
 /** ================== capabilities (cron / webhook / storage / backend) ========= */

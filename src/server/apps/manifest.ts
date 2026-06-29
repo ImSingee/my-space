@@ -86,12 +86,29 @@ export const capabilitiesSchema = z.object({
   workflow: z.boolean().default(false),
 });
 
-/** Canonical app-id shape: kebab-case slug, safe as a path segment. */
-export const APP_ID_RE = /^[a-z][a-z0-9-]*$/;
+/**
+ * Canonical app-id shape: lowercase alphanumerics and hyphens, safe as a path
+ * segment. A leading digit is allowed so generated ULID ids (e.g.
+ * `01jabc...`) pass alongside legacy kebab-case ids (`habit-tracker`). This is
+ * an internal, immutable identifier — see `APP_SLUG_RE` for the human URL slug.
+ */
+export const APP_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
-/** True when `id` is a valid app slug (and therefore a safe path segment). */
+/**
+ * Canonical app-slug shape: kebab-case, must start with a letter. Used in the
+ * mutable, human-facing `/app/<slug>/` URL. Stricter than `APP_ID_RE` so slugs
+ * stay readable and never collide with a bare numeric id.
+ */
+export const APP_SLUG_RE = /^[a-z][a-z0-9-]*$/;
+
+/** True when `id` is a safe app-id path segment (ULID or legacy kebab). */
 export function isValidAppId(id: string): boolean {
   return APP_ID_RE.test(id);
+}
+
+/** True when `slug` is a valid, human-facing app URL slug. */
+export function isValidAppSlug(slug: string): boolean {
+  return APP_SLUG_RE.test(slug);
 }
 
 export const sourceManifestSchema = z.object({
@@ -100,7 +117,7 @@ export const sourceManifestSchema = z.object({
     .min(1)
     .regex(
       APP_ID_RE,
-      'id must be kebab-case (lowercase letters, digits, hyphens)',
+      'id must be lowercase letters, digits, and hyphens (a ULID or kebab slug)',
     ),
   name: z.string().min(1),
   description: z.string().default(''),

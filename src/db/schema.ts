@@ -111,30 +111,44 @@ export type AgentRunStatus =
 /** ================== apps ================== */
 
 /**
- * An app is the unit AI Agent creates / maintains. `id` is the human readable
- * slug used in manifest.id and in deployed paths (`/apps/<id>/`).
+ * An app is the unit AI Agent creates / maintains.
+ *
+ * `id` is an immutable internal key (a ULID for apps created after the
+ * id/slug split; legacy apps keep their original kebab id). It keys the Git
+ * repo, build artifacts, every `/api/apps/<id>/...` runtime URL, and all FKs,
+ * so it never changes once an app exists.
+ *
+ * `slug` is the mutable, unique, human-facing URL segment used only in
+ * `/app/<slug>/`. Renaming it is cheap (no rebuild) because nothing technical
+ * is keyed off it.
  */
-export const apps = pgTable('apps', {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text(),
-  status: text().$type<AppStatus>().notNull().default('draft'),
-  capabilities: jsonb().$type<AppCapabilities>(),
-  /** Latest source manifest.json (as authored by the Agent). */
-  manifest: jsonb().$type<JsonObject>(),
-  /** Git bare repository path for this app's source. */
-  repoPath: text(),
-  /** Current commit of the authoritative master branch. */
-  currentSourceCommit: text(),
-  backendMode: text().$type<'serverless' | 'long-running'>(),
-  /** Provisioned per-app Postgres database name, when database capability is on. */
-  dbName: text(),
-  /** Shared secret for verifying inbound webhook calls (webhook capability). */
-  webhookSecret: text(),
-  currentDeploymentId: ulid(),
-  createdAt,
-  updatedAt,
-});
+export const apps = pgTable(
+  'apps',
+  {
+    id: text().primaryKey(),
+    /** Mutable, unique URL slug used in the human-facing `/app/<slug>/` URL. */
+    slug: text().notNull(),
+    name: text().notNull(),
+    description: text(),
+    status: text().$type<AppStatus>().notNull().default('draft'),
+    capabilities: jsonb().$type<AppCapabilities>(),
+    /** Latest source manifest.json (as authored by the Agent). */
+    manifest: jsonb().$type<JsonObject>(),
+    /** Git bare repository path for this app's source. */
+    repoPath: text(),
+    /** Current commit of the authoritative master branch. */
+    currentSourceCommit: text(),
+    backendMode: text().$type<'serverless' | 'long-running'>(),
+    /** Provisioned per-app Postgres database name, when database capability is on. */
+    dbName: text(),
+    /** Shared secret for verifying inbound webhook calls (webhook capability). */
+    webhookSecret: text(),
+    currentDeploymentId: ulid(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [uniqueIndex('apps_slug_idx').on(table.slug)],
+);
 
 /** ================== deployments ================== */
 

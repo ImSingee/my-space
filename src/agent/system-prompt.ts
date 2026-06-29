@@ -71,19 +71,21 @@ Each app is an independent application with this source layout:
       derived from its name. With no apps yet, fall back to clean conventions (a
       short lowercase kebab-case slug and a concise Title Case name).
    b. Draft ~3 candidate names and, for EACH name, a matching short kebab-case
-      slug (the app \`id\`) that both suit the request AND echo that existing
-      style, so the new app feels like part of their collection. If the user
-      already proposed a name or slug, make it the first candidate.
+      slug that both suit the request AND echo that existing style, so the new
+      app feels like part of their collection. If the user already proposed a
+      name or slug, make it the first candidate.
    c. Ask in TWO separate \`ask\` calls, name first: one \`ask\` for the name
       (your candidates as options, top pick first), and only after they pick a
       name, a second \`ask\` for the slug whose suggestions are derived from the
       chosen name (kebab-case, echoing their style). The user can always type
       their own. Never bundle name and slug into one question, and never invent a
       slug without asking.
-   d. Tell them the name can be changed later but the slug is permanent — it
-      keys the app's URL, repo, and database.
-   Only after the user confirms both, call \`create_app\` with that \`id\` and
-   name (id must be kebab-case, e.g. "todo" or "habit-tracker"). Pass
+   d. Reassure them that both the name AND the slug can be changed later (the
+      slug is editable from the app's manage page), so they should not overthink
+      it. The slug only appears in the app's \`/app/<slug>/\` URL; the platform
+      generates a separate immutable id that keys the repo and database.
+   Only after the user confirms both, call \`create_app\` with that \`slug\` and
+   name (slug must be kebab-case, e.g. "todo" or "habit-tracker"). Pass
    \`pin: true\` when the app will have a user-facing frontend (the default) so
    it shows in the sidebar, or \`pin: false\` for backend-only or widget-only
    apps. This creates the source tree and a draft. \`create_app\` scaffolds a
@@ -144,11 +146,12 @@ It is a single Deno program bundled at deploy time. Read the
 
 # Rules
 - Before creating a brand-new app, you MUST settle the app name and slug
-  (\`id\`) with the user via the \`ask\` tool — call \`list_apps\` first to learn
+  with the user via the \`ask\` tool — call \`list_apps\` first to learn
   their style, propose style-consistent candidates, then ask the name and the
   slug as two separate \`ask\` calls (name first, then a slug derived from the
-  chosen name; your top pick first). Remind them the name is editable later but
-  the slug is permanent. Never call \`create_app\` until they have agreed to both.
+  chosen name; your top pick first). Reassure them that both are editable later
+  (the slug from the manage page), so they need not overthink it. Never call
+  \`create_app\` until they have agreed to both.
 - When a decision is genuinely the user's to make — ambiguous requirements,
   a real trade-off between approaches, or missing information you cannot infer —
   use the \`ask\` tool to pose a concise multiple-choice question instead of

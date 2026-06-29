@@ -35,6 +35,7 @@ async function deploymentVersion(
 
 export type AppSummary = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: AppStatus;
@@ -52,6 +53,7 @@ export async function listAppsForAgent(): Promise<AppSummary[]> {
   return Promise.all(
     apps.map(async (app) => ({
       id: app.id,
+      slug: app.slug,
       name: app.name,
       description: app.description,
       status: app.status,
@@ -93,6 +95,7 @@ export type AppRuntimeOps = {
 
 export type AppDetail = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: AppStatus;
@@ -145,6 +148,7 @@ export async function getAppDetailForAgent(
 
   return {
     id: app.id,
+    slug: app.slug,
     name: app.name,
     description: app.description,
     status: app.status,

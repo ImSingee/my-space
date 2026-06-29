@@ -88,25 +88,39 @@ const HARD_OUTPUT_LIMIT = 5_000_000;
 const COMMAND_UPDATE_INTERVAL_MS = 100;
 
 /**
- * Canonical app/workflow id shape: a kebab-case slug that is safe to use as a
- * single path segment, Git worktree name, or database identifier.
+ * Identifier shape that is safe to use as a single path segment, Git worktree
+ * name, or database identifier: lowercase alphanumerics and hyphens. A leading
+ * digit is allowed so generated ULID app ids pass alongside kebab-case slugs
+ * and workflow ids. This is a path-safety guard, not a semantic check.
  */
-const ID_SLUG_RE = /^[a-z][a-z0-9-]*$/;
+const ID_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * Guard a model-supplied id before it flows into filesystem paths, Git
  * worktrees, or database names. Without this a hallucinated or injected id like
  * "../../outside" or "/tmp/pwn" would resolve repo/worktree/DB targets outside
- * the intended workspace. Mirrors the slug validation enforced by the app and
- * workflow manifests.
+ * the intended workspace.
  */
 function requireIdSlug(id: string): string {
   if (!ID_SLUG_RE.test(id)) {
     throw new Error(
-      `Invalid id "${id}": must be a kebab-case slug (lowercase letters, ` +
-        'digits, and hyphens, starting with a letter).',
+      `Invalid id "${id}": must contain only lowercase letters, digits, and ` +
+        'hyphens.',
     );
   }
+  return id;
+}
+
+/**
+ * Resolve an agent-supplied app handle (which may be the immutable id or the
+ * mutable slug) to the canonical app id, after a path-safety check. Throws when
+ * no app matches so callers fail fast with a clear message.
+ */
+async function resolveAppHandle(handle: string): Promise<string> {
+  requireIdSlug(handle);
+  const { resolveAppId } = await import('~server/apps/access');
+  const id = await resolveAppId(handle);
+  if (!id) throw new Error(`App "${handle}" not found.`);
   return id;
 }
 
@@ -444,7 +458,7 @@ export function createTools(
             : ' (not deployed)';
         const caps =
           a.capabilities.length > 0 ? ` — ${a.capabilities.join(', ')}` : '';
-        return `- ${a.id} · ${a.name} [${a.status}]${version}${caps}`;
+        return `- ${a.slug} · ${a.name} (id: ${a.id}) [${a.status}]${version}${caps}`;
       });
       return text(lines.join('\n'), { apps });
     },
@@ -459,16 +473,16 @@ export function createTools(
       'state (backend running, cron jobs), and deployment history. Mirrors ' +
       'the app management panel.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id to inspect.' }),
+      id: Type.String({ description: 'App id or slug to inspect.' }),
     }),
     execute: async (_id, params) => {
-      requireIdSlug(params.id);
+      const id = await resolveAppHandle(params.id);
       const { getAppDetailForAgent } = await import('~server/apps/inspect');
-      const detail = await getAppDetailForAgent(params.id);
+      const detail = await getAppDetailForAgent(id);
       if (!detail) throw new Error(`App "${params.id}" not found.`);
       const m = detail.manifest;
       const lines: (string | null)[] = [
-        `${detail.name} (${detail.id}) — ${detail.status}` +
+        `${detail.name} (slug: ${detail.slug}, id: ${detail.id}) — ${detail.status}` +
           (detail.currentVersion != null
             ? ` · v${detail.currentVersion}`
             : ' · not deployed'),
@@ -486,7 +500,7 @@ export function createTools(
             ? detail.capabilities.join(', ')
             : 'none detected yet'
         }`,
-        m?.app ? `App URL: ${m.app.url}` : null,
+        m?.app ? `App URL: /app/${detail.slug}/` : null,
         m?.rpc ? `RPC: ${m.rpc.url} (${m.rpc.service})` : null,
         m && m.widgets.length > 0
           ? `Widgets: ${m.widgets.map((w) => `${w.id} (${w.url})`).join(', ')}`
@@ -532,15 +546,15 @@ export function createTools(
       "Checkout an app's Git repo into this chat's persistent worktree. " +
       'Use before reading or editing an existing app.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id to checkout.' }),
+      id: Type.String({ description: 'App id or slug to checkout.' }),
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
-      requireIdSlug(params.id);
+      const id = await resolveAppHandle(params.id);
       const { checkoutAppForAgent } = await import('~server/apps/git');
-      const checkout = await checkoutAppForAgent(sessionId, params.id);
+      const checkout = await checkoutAppForAgent(sessionId, id);
       const lines = [
-        `Checked out "${params.id}" at ${checkout.path}/.`,
+        `Checked out "${id}" at ${checkout.path}/.`,
         checkout.headCommit
           ? `HEAD: ${checkout.headCommit}`
           : 'No commits yet. Create files, then run git add and git commit.',
@@ -563,8 +577,11 @@ export function createTools(
       'worktree with manifest, proto, Deno backend, React app, and a sample ' +
       'widget.',
     parameters: Type.Object({
-      id: Type.String({
-        description: 'kebab-case id, e.g. "todo" or "habit-tracker".',
+      slug: Type.String({
+        description:
+          'kebab-case URL slug, e.g. "todo" or "habit-tracker". Appears in the ' +
+          'app URL (/app/<slug>/) and can be changed later from the manage ' +
+          'page, so it is not permanent.',
       }),
       name: Type.String({ description: 'Human-readable name.' }),
       description: Type.Optional(
@@ -581,13 +598,14 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
-      requireIdSlug(params.id);
       const { createApp } = await import('~server/apps/scaffold');
       const res = await createApp(params, { sessionId });
       return text(
-        `Created app "${res.id}". Source is at ${res.id}/.\n` +
-          'Read the scaffolded files, edit proto/backend/app/widgets, then ' +
-          'commit your changes with git before calling deploy_app.',
+        `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
+          `Source is at ${res.id}/.\n` +
+          'Use the id for checkout_app/deploy_app. Read the scaffolded files, ' +
+          'edit proto/backend/app/widgets, then commit your changes with git ' +
+          'before calling deploy_app.',
         res,
       );
     },
@@ -600,7 +618,7 @@ export function createTools(
       'Build (Connect codegen + bundle app/widgets + stage Deno backend) and ' +
       'deploy an app so it becomes live. Reports the app/widget/RPC URLs.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id to deploy.' }),
+      id: Type.String({ description: 'App id or slug to deploy.' }),
       message: Type.String({
         description:
           'Required release note describing what this deployment changes ' +
@@ -609,16 +627,20 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
-      requireIdSlug(params.id);
+      const id = await resolveAppHandle(params.id);
       const { agentAppWorkDir } = await import('~agent/paths');
       const { deployApp } = await import('~server/apps/deploy');
-      const res = await deployApp(params.id, {
-        sourceDir: agentAppWorkDir(sessionId, params.id),
+      const res = await deployApp(id, {
+        sourceDir: agentAppWorkDir(sessionId, id),
         message: params.message,
       });
+      // The baked manifest URL is keyed by the immutable id; surface the
+      // human-facing /app/<slug>/ URL the user actually shares instead.
+      const { appSlug } = await import('~server/apps/access');
+      const slug = await appSlug(id);
       const lines = [
-        `Deployed "${params.id}" (v${res.version}).`,
-        res.normalized.app ? `App (iframe): ${res.normalized.app.url}` : null,
+        `Deployed "${id}" (v${res.version}).`,
+        res.normalized.app ? `App (iframe): /app/${slug ?? id}/` : null,
         res.normalized.widgets.length > 0
           ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
           : null,
@@ -638,17 +660,17 @@ export function createTools(
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
       'restored.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id to rollback.' }),
+      id: Type.String({ description: 'App id or slug to rollback.' }),
       version: Type.Number({
         description: 'Deployment version to restore, e.g. 4 for v4.',
       }),
     }),
     execute: async (_id, params) => {
-      requireIdSlug(params.id);
+      const id = await resolveAppHandle(params.id);
       const { rollbackAppToVersion } = await import('~server/apps/manage');
-      const res = await rollbackAppToVersion(params.id, params.version);
+      const res = await rollbackAppToVersion(id, params.version);
       return text(
-        `Rolled back "${params.id}" to v${res.version}. ` +
+        `Rolled back "${id}" to v${res.version}. ` +
           'Run checkout_app or git fetch/rebase in existing worktrees before ' +
           'making more changes.',
         res,
@@ -663,14 +685,14 @@ export function createTools(
       "Run SQL against an app's own Postgres database (provisioned on first " +
       'use). Use to create tables and inspect data. Returns up to 100 rows.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id.' }),
+      id: Type.String({ description: 'App id or slug.' }),
       sql: Type.String({ description: 'SQL statement to execute.' }),
     }),
     execute: async (_id, params) => {
-      requireIdSlug(params.id);
+      const id = await resolveAppHandle(params.id);
       const { ensureAppDatabase } = await import('~server/apps/provision');
       const postgres = (await import('postgres')).default;
-      const url = await ensureAppDatabase(params.id);
+      const url = await ensureAppDatabase(id);
       const sql = postgres(url, { max: 1 });
       try {
         const rows = await sql.unsafe(params.sql);

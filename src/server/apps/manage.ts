@@ -15,7 +15,11 @@ import {
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
-import { type NormalizedManifest, isValidAppId } from './manifest';
+import {
+  type NormalizedManifest,
+  isValidAppId,
+  isValidAppSlug,
+} from './manifest';
 import { dropAppDatabase } from './provision';
 import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
@@ -128,6 +132,44 @@ export async function setAppArchived(
   // Archived apps must not keep firing cron; restored ones resume.
   await reloadScheduler();
   return { status };
+}
+
+/**
+ * Change an app's mutable URL slug. The slug only appears in the human-facing
+ * `/app/<slug>/` URL, so this is a cheap rename: no rebuild and no FK churn
+ * (everything technical is keyed off the immutable `id`). Enforces shape and
+ * uniqueness; the unique index on `slug` is the final backstop against races.
+ */
+export async function renameAppSlug(
+  id: string,
+  rawSlug: string,
+): Promise<{ slug: string }> {
+  const slug = rawSlug.trim();
+  if (!isValidAppSlug(slug)) {
+    throw new Error(
+      'Slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
+        'starting with a letter).',
+    );
+  }
+
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq: e }) => e(s.id, id),
+    columns: { id: true, slug: true },
+  });
+  if (!app) throw new Error(`App "${id}" not found.`);
+  if (app.slug === slug) return { slug };
+
+  // Reject a slug that matches any other app's id OR slug: id-first resolution
+  // means a slug equal to another app's id would shadow it at /app/<slug>/.
+  const { slugConflictExists } = await import('./access');
+  if (await slugConflictExists(slug, id)) {
+    throw new Error(
+      `Slug "${slug}" conflicts with an existing app's id or slug.`,
+    );
+  }
+
+  await db.update(schema.apps).set({ slug }).where(eq(schema.apps.id, id));
+  return { slug };
 }
 
 /**

@@ -20,20 +20,27 @@ import { dropAppDatabase } from '../src/server/apps/provision';
 import { stopApp } from '../src/server/apps/runtime';
 import { promises as fs } from 'node:fs';
 
-const ID = process.env.SMOKE_ID ?? 'agent-demo';
+// The app id is now a generated ULID; "agent-demo" is the user-facing slug.
+const SLUG = process.env.SMOKE_SLUG ?? 'agent-demo';
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 240_000);
 const PROMPT =
   process.env.SMOKE_PROMPT ??
-  `Create a new app with id "${ID}" and name "Agent Demo". ` +
+  `Create a new app with slug "${SLUG}" and name "Agent Demo". ` +
     'The default counter template is fine as-is. ' +
     'Then deploy it and reply with the app URL. Keep it minimal.';
 
-async function cleanup() {
-  stopApp(ID);
-  await db.delete(schema.apps).where(eq(schema.apps.id, ID));
-  await fs.rm(appSrcDir(ID), { recursive: true, force: true });
-  await fs.rm(appBuildDir(ID), { recursive: true, force: true });
-  await dropAppDatabase(ID);
+/** Remove any prior app using this slug, cleaning resources by its real id. */
+async function cleanupBySlug(slug: string) {
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq: e }) => e(s.slug, slug),
+    columns: { id: true },
+  });
+  if (!app) return;
+  stopApp(app.id);
+  await db.delete(schema.apps).where(eq(schema.apps.id, app.id));
+  await fs.rm(appSrcDir(app.id), { recursive: true, force: true });
+  await fs.rm(appBuildDir(app.id), { recursive: true, force: true });
+  await dropAppDatabase(app.id).catch(() => {});
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -44,7 +51,7 @@ async function main() {
   console.log('  seeded:', seeded);
 
   console.log('[cleanup prior run]');
-  await cleanup();
+  await cleanupBySlug(SLUG);
 
   const [session] = await db
     .insert(schema.agentSessions)
@@ -118,9 +125,12 @@ async function main() {
   }
 
   const row = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, ID),
+    where: (s, { eq: e }) => e(s.slug, SLUG),
   });
-  console.log('\n[app row]', row && { id: row.id, status: row.status });
+  console.log(
+    '\n[app row]',
+    row && { id: row.id, slug: row.slug, status: row.status },
+  );
 
   if (!toolCalls.includes('create_app')) {
     throw new Error('agent did not call create_app');
@@ -133,12 +143,11 @@ async function main() {
   }
 
   console.log('\nPASS: agent scaffolded + deployed an app from NL.');
-  stopApp(ID);
+  if (row) stopApp(row.id);
   process.exit(0);
 }
 
 main().catch((e) => {
   console.error('\nAGENT SMOKE FAILED:', e);
-  stopApp(ID);
   process.exit(1);
 });
