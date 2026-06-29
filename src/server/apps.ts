@@ -4,15 +4,42 @@ import { db, schema } from '~/db';
 import type { NormalizedManifest } from './apps/manifest';
 import { authMiddleware } from './auth';
 
+export type AppListItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: schema.AppStatus;
+  capabilities: schema.AppCapabilities | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export const listApps = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .handler(async () => {
+  .handler(async (): Promise<AppListItem[]> => {
     // Opportunistically (re)start the cron scheduler on app load so schedules
     // survive a platform restart without requiring a redeploy.
     void import('./apps/scheduler').then((m) => m.ensureScheduler());
-    return db.query.apps.findMany({
+    // Project to a safe view model: the raw row carries secrets/internal columns
+    // (webhookSecret, dbName, repoPath, source commit, raw manifest) the app
+    // list UI never needs and must not ship to the browser.
+    const rows = await db.query.apps.findMany({
       orderBy: (s, { desc }) => [desc(s.updatedAt)],
+      columns: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        capabilities: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
+    return rows.map((r) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    }));
   });
 
 export const getApp = createServerFn({ method: 'GET' })

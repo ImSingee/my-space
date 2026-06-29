@@ -72,12 +72,20 @@ export const capabilitiesSchema = z.object({
   workflow: z.boolean().default(false),
 });
 
+/** Canonical app-id shape: kebab-case slug, safe as a path segment. */
+export const APP_ID_RE = /^[a-z][a-z0-9-]*$/;
+
+/** True when `id` is a valid app slug (and therefore a safe path segment). */
+export function isValidAppId(id: string): boolean {
+  return APP_ID_RE.test(id);
+}
+
 export const sourceManifestSchema = z.object({
   id: z
     .string()
     .min(1)
     .regex(
-      /^[a-z][a-z0-9-]*$/,
+      APP_ID_RE,
       'id must be kebab-case (lowercase letters, digits, hyphens)',
     ),
   name: z.string().min(1),

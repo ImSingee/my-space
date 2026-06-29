@@ -9,6 +9,7 @@ import {
   WORKSPACE_ROOT,
   appBuildDir,
   deploymentArtifactDir,
+  deploymentBuildDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
@@ -39,6 +40,76 @@ export type DeployAppOptions = {
 
 function workspaceRelative(p: string): string {
   return path.relative(WORKSPACE_ROOT, p).split(path.sep).join('/');
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Undo a half-applied live swap when a deploy fails after touching the live dir.
+ *
+ * Runs under the per-app deploy advisory lock and only acts while
+ * `currentDeploymentId` still equals the deployment we're restoring to:
+ * otherwise a concurrent successful deploy on another process may have already
+ * become current and swapped live, and restoring here would clobber its newer
+ * build while the DB points at it.
+ *
+ * Restores the exact previous build from `liveBackup` when present; for a
+ * never-deployed app (no previous build) it clears the unrecorded swap. It never
+ * deletes the live dir without first confirming a restore source exists, so a
+ * pruned snapshot can't turn a failed deploy into an outage.
+ */
+async function restoreLiveBuild(
+  id: string,
+  deploymentId: string | null,
+  liveBackup: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+    );
+    const current = await tx.query.apps.findFirst({
+      where: (s, { eq: e }) => e(s.id, id),
+      columns: { currentDeploymentId: true },
+    });
+    if ((current?.currentDeploymentId ?? null) !== deploymentId) {
+      // A newer deploy already became current and owns the live dir; just drop
+      // our stale backup.
+      await fs.rm(liveBackup, { recursive: true, force: true }).catch(() => {});
+      return;
+    }
+    const live = appBuildDir(id);
+    if (await pathExists(liveBackup)) {
+      // Put the exact previous build back.
+      await fs.rm(live, { recursive: true, force: true });
+      await fs.rename(liveBackup, live);
+      return;
+    }
+    // No backup means there was no previous build (first deploy): nothing is
+    // recorded to serve, so clear the unrecorded swap.
+    if (!deploymentId) {
+      await fs.rm(live, { recursive: true, force: true });
+      return;
+    }
+    // A previous deployment is recorded but its backup is gone (e.g. a crash
+    // between deploys removed it): fall back to its immutable snapshot, resolved
+    // the same way rollback/download do. Only swap once we know the source
+    // exists — never leave the app with nothing to serve.
+    const artifact = deploymentArtifactDir(id, deploymentId);
+    const snapshot = (await pathExists(artifact))
+      ? artifact
+      : deploymentBuildDir(id, deploymentId);
+    if (!(await pathExists(snapshot))) return;
+    await fs.rm(live, { recursive: true, force: true });
+    await fs.mkdir(live, { recursive: true });
+    await fs.cp(snapshot, live, { recursive: true });
+  });
 }
 
 // Advisory-lock namespace for app deploys (distinct from workflows) so version
@@ -104,6 +175,16 @@ async function deployAppInner(
   // Once the deployment row exists it references `publishedTag` as its
   // sourceTag, so a later failure must NOT delete that tag (rollback needs it).
   let recorded = false;
+  // The deployment this app currently serves; used to restore the live build if
+  // the swap runs but the release isn't recorded (e.g. a COMMIT failure).
+  const prevDeploymentId = app.currentDeploymentId ?? null;
+  // The previous live build is moved here (cheap same-dir rename) before the
+  // swap so a failed COMMIT can restore the exact prior bits without depending
+  // on artifact retention.
+  const liveBackup = `${appBuildDir(id)}.bak-${deploymentId}`;
+  // Set right before the live dir is mutated so the catch can tell an
+  // unrecorded-but-swapped state from one where the live dir was never touched.
+  let liveTouched = false;
 
   try {
     await db
@@ -148,12 +229,11 @@ async function deployAppInner(
       const published = await publishDeploymentSource(id, sourceDir, version);
       publishedTag = published.tag;
 
-      const live = appBuildDir(id);
-      await fs.rm(live, { recursive: true, force: true });
-      await fs.mkdir(live, { recursive: true });
-      await fs.cp(tempBuild, live, { recursive: true });
-
-      // Built, published, and live — only now record the release.
+      // Record the release first, then swap the live build dir as the LAST step
+      // in the transaction. Ordering the filesystem swap after the row writes
+      // means a failing insert/update never touches the live dir, and the only
+      // window where live could change without the row committing is a COMMIT
+      // failure — handled by the `liveTouched` restore in the catch below.
       await tx.insert(schema.deployments).values({
         id: deploymentId,
         appId: id,
@@ -183,10 +263,27 @@ async function deployAppInner(
           currentDeploymentId: deploymentId,
         })
         .where(eq(schema.apps.id, id));
+
+      // Live swap is the last statement so an insert/update failure leaves the
+      // previous build serving untouched. `liveTouched` arms the catch's restore
+      // for the remaining window (a swap done, then COMMIT fails).
+      liveTouched = true;
+      const live = appBuildDir(id);
+      await fs.rm(liveBackup, { recursive: true, force: true });
+      // Move the old build aside instead of deleting it so the catch can put it
+      // back verbatim if this transaction never commits.
+      if (await pathExists(live)) {
+        await fs.rename(live, liveBackup);
+      }
+      await fs.mkdir(live, { recursive: true });
+      await fs.cp(tempBuild, live, { recursive: true });
     });
     // Set only after the tx commits: a rollback after the insert would otherwise
     // leave `recorded` true with no row, stranding the force-moved tag.
     recorded = true;
+    // The release is committed and live; the old build's backup is no longer
+    // needed.
+    await fs.rm(liveBackup, { recursive: true, force: true }).catch(() => {});
 
     // Drop the old backend process so the next request boots the new build.
     const longRunning =
@@ -240,6 +337,13 @@ async function deployAppInner(
           }
         })
         .catch(() => {});
+    }
+    // If the live dir was swapped but the release wasn't recorded (only a COMMIT
+    // failure can reach here), the app would otherwise serve unrecorded files
+    // while the DB still points at the previous deployment. Put the previous
+    // build back so the filesystem and DB agree.
+    if (liveTouched && !recorded) {
+      await restoreLiveBuild(id, prevDeploymentId, liveBackup).catch(() => {});
     }
     // Restore the app's status: a recorded release stays deployed; otherwise an
     // archived app stays archived (a failed redeploy must not re-enable it), one

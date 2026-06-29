@@ -15,7 +15,7 @@ import {
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
-import type { NormalizedManifest } from './manifest';
+import { type NormalizedManifest, isValidAppId } from './manifest';
 import { dropAppDatabase } from './provision';
 import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
@@ -239,6 +239,13 @@ export async function rollbackAppToVersion(
 
 /** Permanently delete an app: process, database, rows, and all artifacts. */
 export async function deleteApp(id: string): Promise<{ ok: true }> {
+  // The id flows into `fs.rm(..., { force: true })` on several per-app dirs, so
+  // reject anything that isn't a valid app slug before touching the filesystem.
+  // Otherwise a crafted id like "../../src" (which matches no DB row) would
+  // still resolve outside the app namespace and delete arbitrary directories.
+  if (!isValidAppId(id)) {
+    throw new Error(`Invalid app id: ${id}`);
+  }
   stopApp(id);
   // Drop the per-app database (best-effort; ignore if it never existed).
   try {
