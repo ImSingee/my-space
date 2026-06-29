@@ -42,10 +42,9 @@ function ProvidersRoute() {
         <ProvidersPanel onAddProvider={() => setCreateOpen(true)} />
       </Suspense>
 
-      <ProviderFormModal
-        opened={createOpen}
-        onClose={() => setCreateOpen(false)}
-      />
+      {createOpen && (
+        <ProviderFormModal opened onClose={() => setCreateOpen(false)} />
+      )}
     </>
   );
 }

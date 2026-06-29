@@ -11,11 +11,6 @@ const apiTypeSchema = z.enum([
   'openai-completions',
 ]);
 
-function maskKey(key: string): string {
-  if (key.length <= 8) return '••••';
-  return `${key.slice(0, 3)}…${key.slice(-4)}`;
-}
-
 export type ProviderModel = {
   id: string;
   modelId: string;
@@ -33,13 +28,15 @@ export type ProviderWithModels = {
   name: string;
   apiType: ProviderApiType;
   baseUrl: string;
-  apiKeyPreview: string;
   enabled: boolean;
   sortOrder: number;
   models: ProviderModel[];
 };
 
-/** List providers with their models. Seeds defaults on first run. API keys are masked. */
+/**
+ * List providers with their models. Seeds defaults on first run. API keys are
+ * never returned to the client — not even a masked fragment.
+ */
 export const listProviders = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async (): Promise<ProviderWithModels[]> => {
@@ -61,7 +58,6 @@ export const listProviders = createServerFn({ method: 'GET' })
         name: p.name,
         apiType: p.apiType,
         baseUrl: p.baseUrl,
-        apiKeyPreview: maskKey(p.apiKey),
         enabled: p.enabled,
         sortOrder: p.sortOrder,
         models: models.map((m) => ({
@@ -125,7 +121,10 @@ export const updateProvider = createServerFn({ method: 'POST' })
     if (data.name !== undefined) patch.name = data.name;
     if (data.apiType !== undefined) patch.apiType = data.apiType;
     if (data.baseUrl !== undefined) patch.baseUrl = data.baseUrl.trim();
-    if (data.apiKey) patch.apiKey = data.apiKey.trim();
+    // Trim first so a whitespace-only value keeps the existing key instead of
+    // silently wiping it.
+    const trimmedKey = data.apiKey?.trim();
+    if (trimmedKey) patch.apiKey = trimmedKey;
     if (data.enabled !== undefined) patch.enabled = data.enabled;
 
     await db

@@ -474,11 +474,13 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
         </Group>
       </div>
 
-      <ProviderFormModal
-        opened={editOpen}
-        onClose={editHandlers.close}
-        provider={provider}
-      />
+      {editOpen && (
+        <ProviderFormModal
+          opened
+          onClose={editHandlers.close}
+          provider={provider}
+        />
+      )}
       <ModelFormModal
         key={modelTarget && modelTarget !== 'new' ? modelTarget.id : 'new'}
         opened={modelTarget !== null}

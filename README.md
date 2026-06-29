@@ -278,12 +278,29 @@ Persistent state lives in named volumes:
 - `hatch_workspace` — agent-authored app source, builds, versions, storage
 - `hatch_deno` — Deno's npm cache (faster app cold starts)
 
-Configure the LLM providers from **Settings** in the UI after first launch. For
-production, set a strong `BETTER_AUTH_SECRET` (env var or a `.env` file next to
-`docker-compose.yml`):
+Configure the LLM providers from **Settings** in the UI after first launch.
+
+**Production setup.** `docker compose` automatically loads a `.env` file next to
+`docker-compose.yml`, so keep persistent settings there rather than as one-shot
+inline variables (an inline `VAR=… docker compose up` only applies to that single
+invocation and silently reverts to the compose defaults on the next restart or
+upgrade). Start by writing a strong session secret:
 
 ```bash
-BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up --build -d
+echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" > .env
+docker compose up --build -d
+```
+
+**Create the owner account, then lock sign-up.** Hatch is single-tenant: the
+compose stack opens self-service sign-up on first run so you can create your
+account, but anyone who can reach the URL could register until you close it.
+After creating your account, persist the lock in the same `.env` file and
+redeploy so it survives future restarts and upgrades (sign-in keeps working, and
+the secret above stays in place):
+
+```bash
+echo 'HATCH_ALLOW_SIGNUP=false' >> .env
+docker compose up --build -d
 ```
 
 The image bundles dev dependencies on purpose: `buf` + `protoc-gen-es` (Connect
