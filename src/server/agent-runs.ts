@@ -260,10 +260,15 @@ export async function getAgentRun(runId: string) {
 export async function listRunEventsAfter(
   runId: string,
   afterSeq: number,
+  limit = 1000,
 ): Promise<AgentRunStreamEvent[]> {
+  // Bound each query: a long or noisy run can persist thousands of events, so
+  // callers page through with `limit` instead of loading the whole tail into
+  // memory at once (see the SSE replay loop).
   const rows = await db.query.agentRunEvents.findMany({
     where: (e) => and(eq(e.runId, runId), gt(e.seq, afterSeq)),
     orderBy: (e, { asc }) => [asc(e.seq)],
+    limit,
   });
   return rows.map((row) => ({
     seq: row.seq,

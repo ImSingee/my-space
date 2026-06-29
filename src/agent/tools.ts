@@ -78,6 +78,48 @@ function unwrap<T>(
 
 const MAX_FILE_CHARS = 60000;
 
+/** Bounded tail of a running command's output kept in memory / per update. */
+const MAX_LIVE_OUTPUT = 16_000;
+/** Per-stream cap on captured stdout/stderr returned to the model. */
+const MAX_COMMAND_OUTPUT = MAX_FILE_CHARS;
+/** Hard cap on total command output; the child is killed past this. */
+const HARD_OUTPUT_LIMIT = 5_000_000;
+/** Minimum gap between streamed run_command updates. */
+const COMMAND_UPDATE_INTERVAL_MS = 100;
+
+/**
+ * Canonical app/workflow id shape: a kebab-case slug that is safe to use as a
+ * single path segment, Git worktree name, or database identifier.
+ */
+const ID_SLUG_RE = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Guard a model-supplied id before it flows into filesystem paths, Git
+ * worktrees, or database names. Without this a hallucinated or injected id like
+ * "../../outside" or "/tmp/pwn" would resolve repo/worktree/DB targets outside
+ * the intended workspace. Mirrors the slug validation enforced by the app and
+ * workflow manifests.
+ */
+function requireIdSlug(id: string): string {
+  if (!ID_SLUG_RE.test(id)) {
+    throw new Error(
+      `Invalid id "${id}": must be a kebab-case slug (lowercase letters, ` +
+        'digits, and hyphens, starting with a letter).',
+    );
+  }
+  return id;
+}
+
+/** Cap a captured stream for the tool result, keeping the (more useful) tail. */
+function capCommandStream(label: string, value: string): string | null {
+  if (!value) return null;
+  if (value.length <= MAX_COMMAND_OUTPUT) return `${label}:\n${value}`;
+  return (
+    `${label} (truncated to last ${MAX_COMMAND_OUTPUT} chars):\n` +
+    value.slice(-MAX_COMMAND_OUTPUT)
+  );
+}
+
 function isInsidePath(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return (
@@ -338,10 +380,29 @@ export function createTools(
       command: Type.String({ description: 'Shell command to run.' }),
     }),
     execute: async (_id, params, signal, onUpdate) => {
+      // Keep only a bounded tail of the live stream and throttle updates so a
+      // chatty command can't grow `live` (and every persisted update event)
+      // without bound. Past a hard total, throw from the callback:
+      // NodeExecutionEnv catches it, kills the whole process tree, and settles
+      // with that error — so a runaway command can't keep filling the env's
+      // internal stdout/stderr buffers either.
       let live = '';
+      let total = 0;
+      let lastEmit = 0;
       const stream = (chunk: string) => {
-        live += chunk;
-        onUpdate?.(live);
+        total += chunk.length;
+        if (total > HARD_OUTPUT_LIMIT) {
+          throw new Error(
+            `Command exceeded the ${HARD_OUTPUT_LIMIT}-byte output limit; ` +
+              'aborted. Redirect bulk output to a file instead.',
+          );
+        }
+        live = (live + chunk).slice(-MAX_LIVE_OUTPUT);
+        const now = Date.now();
+        if (now - lastEmit >= COMMAND_UPDATE_INTERVAL_MS) {
+          lastEmit = now;
+          onUpdate?.(live);
+        }
       };
       const res = await env.exec(params.command, {
         timeout: 120,
@@ -352,8 +413,8 @@ export function createTools(
       if (!res.ok) throw new Error(res.error.message);
       const { stdout, stderr, exitCode } = res.value;
       const body = [
-        stdout && `stdout:\n${stdout}`,
-        stderr && `stderr:\n${stderr}`,
+        capCommandStream('stdout', stdout),
+        capCommandStream('stderr', stderr),
         `exit code: ${exitCode}`,
       ]
         .filter(Boolean)
@@ -401,6 +462,7 @@ export function createTools(
       id: Type.String({ description: 'App id to inspect.' }),
     }),
     execute: async (_id, params) => {
+      requireIdSlug(params.id);
       const { getAppDetailForAgent } = await import('~server/apps/inspect');
       const detail = await getAppDetailForAgent(params.id);
       if (!detail) throw new Error(`App "${params.id}" not found.`);
@@ -474,6 +536,7 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
+      requireIdSlug(params.id);
       const { checkoutAppForAgent } = await import('~server/apps/git');
       const checkout = await checkoutAppForAgent(sessionId, params.id);
       const lines = [
@@ -518,6 +581,7 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
+      requireIdSlug(params.id);
       const { createApp } = await import('~server/apps/scaffold');
       const res = await createApp(params, { sessionId });
       return text(
@@ -545,6 +609,7 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
+      requireIdSlug(params.id);
       const { agentAppWorkDir } = await import('~agent/paths');
       const { deployApp } = await import('~server/apps/deploy');
       const res = await deployApp(params.id, {
@@ -579,6 +644,7 @@ export function createTools(
       }),
     }),
     execute: async (_id, params) => {
+      requireIdSlug(params.id);
       const { rollbackAppToVersion } = await import('~server/apps/manage');
       const res = await rollbackAppToVersion(params.id, params.version);
       return text(
@@ -601,6 +667,7 @@ export function createTools(
       sql: Type.String({ description: 'SQL statement to execute.' }),
     }),
     execute: async (_id, params) => {
+      requireIdSlug(params.id);
       const { ensureAppDatabase } = await import('~server/apps/provision');
       const postgres = (await import('postgres')).default;
       const url = await ensureAppDatabase(params.id);
@@ -661,6 +728,7 @@ export function createTools(
       id: Type.String({ description: 'Workflow id to inspect.' }),
     }),
     execute: async (_id, params) => {
+      requireIdSlug(params.id);
       const { getWorkflowDetailForAgent } =
         await import('~server/workflows/inspect');
       const detail = await getWorkflowDetailForAgent(params.id);
@@ -708,6 +776,7 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
+      requireIdSlug(params.id);
       const { checkoutWorkflowForAgent } =
         await import('~server/workflows/git');
       const checkout = await checkoutWorkflowForAgent(sessionId, params.id);
@@ -753,6 +822,7 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
+      requireIdSlug(params.id);
       const { createWorkflow } = await import('~server/workflows/scaffold');
       const res = await createWorkflow(params, { sessionId });
       return text(
@@ -782,6 +852,7 @@ export function createTools(
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
+      requireIdSlug(params.id);
       const { agentWorkflowWorkDir } = await import('~agent/paths');
       const { deployWorkflow } = await import('~server/workflows/deploy');
       const res = await deployWorkflow(params.id, {
@@ -814,6 +885,7 @@ export function createTools(
       version: Type.Number({ description: 'Deployment version to restore.' }),
     }),
     execute: async (_id, params) => {
+      requireIdSlug(params.id);
       const { rollbackWorkflowToVersion } =
         await import('~server/workflows/manage');
       const res = await rollbackWorkflowToVersion(params.id, params.version);

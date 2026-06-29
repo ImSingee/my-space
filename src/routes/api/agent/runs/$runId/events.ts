@@ -2,6 +2,9 @@ import { createFileRoute } from '@tanstack/react-router';
 import type { AgentRunStreamEvent } from '~agent/events';
 import { auth } from '~auth/server';
 
+/** Page size for replaying persisted run events (keeps replay memory bounded). */
+const REPLAY_PAGE_SIZE = 500;
+
 function parse(request: Request): { runId: string; after: number } | null {
   const url = new URL(request.url);
   const match = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/events$/);
@@ -89,9 +92,20 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
               if (isTerminalEvent(event)) close();
             };
 
+            // Replay persisted events in bounded pages so a long/noisy run
+            // can't load its entire event history into memory at once on
+            // (re)connect. `send` advances `lastSeq`, so each page picks up
+            // after the previous one until a short (final) page drains it.
             const replay = async () => {
-              const events = await listRunEventsAfter(parsed.runId, lastSeq);
-              for (const event of events) send(event);
+              while (!closed) {
+                const events = await listRunEventsAfter(
+                  parsed.runId,
+                  lastSeq,
+                  REPLAY_PAGE_SIZE,
+                );
+                for (const event of events) send(event);
+                if (closed || events.length < REPLAY_PAGE_SIZE) break;
+              }
             };
 
             try {
