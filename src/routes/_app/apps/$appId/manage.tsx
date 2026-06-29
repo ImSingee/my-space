@@ -40,7 +40,11 @@ import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
 import { StatusBadge } from '~components/apps/status-badge';
-import { appsQueryOptions, sidebarItemsQueryOptions } from '~queries/apps';
+import {
+  appOpsQueryOptions,
+  appsQueryOptions,
+  sidebarItemsQueryOptions,
+} from '~queries/apps';
 import { archiveAppFn, deleteAppFn, getApp, setSidebarPin } from '~server/apps';
 
 export const Route = createFileRoute('/_app/apps/$appId/manage')({
@@ -73,6 +77,10 @@ function AppDetailPage() {
       archiveAppFn({ data: { id: app.id, archived } }),
     onSuccess: (_result, archived) => {
       toast.success(archived ? 'App archived' : 'App restored');
+      // Archiving stops the backend/cron/storage; restoring re-enables them. The
+      // Operations panel reads appOpsQueryOptions, so invalidate it too or it
+      // keeps showing pre-toggle running/idle state until a later refetch.
+      void queryClient.invalidateQueries(appOpsQueryOptions(app.id));
       void router.invalidate();
     },
     onError: (error) => toast.error((error as Error).message),

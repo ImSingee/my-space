@@ -42,14 +42,45 @@ export const listApps = createServerFn({ method: 'GET' })
     }));
   });
 
+export type AppDetail = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: schema.AppStatus;
+  capabilities: schema.AppCapabilities | null;
+  currentSourceCommit: string | null;
+  dbName: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export const getApp = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => id)
-  .handler(async ({ data: id }) => {
+  .handler(async ({ data: id }): Promise<AppDetail | null> => {
+    // Project to a display view: the raw row carries secrets/internal columns
+    // (webhookSecret, repoPath, raw manifest, currentDeploymentId) the app
+    // detail/manage pages never need and must not ship to the browser.
     const row = await db.query.apps.findFirst({
       where: (s, { eq: e }) => e(s.id, id),
+      columns: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        capabilities: true,
+        currentSourceCommit: true,
+        dbName: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
-    return row ?? null;
+    if (!row) return null;
+    return {
+      ...row,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
   });
 
 export type AppRow = NonNullable<Awaited<ReturnType<typeof getApp>>>;
