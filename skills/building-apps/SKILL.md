@@ -41,12 +41,19 @@ below are illustrative only.
 Each app has a platform-managed Git repo. You work in a per-chat checkout and
 use native git locally:
 
-1. For a new app, first confirm the name and slug with the user via the `ask`
-   tool — the name can be changed later, but the slug is permanent (it keys the
-   app's URL, repo, and database). Only after they agree, call `create_app`.
-   Pass `pin: true` when the app will have a user-facing frontend (the default)
-   so it's pinned to the sidebar, or `pin: false` for backend-only /
-   widget-only apps.
+1. For a new app, settle the name and slug with the user before creating it:
+   - Call `list_apps` first and study the existing `slug · name` pairs to infer
+     the user's style (casing, length, tone, how each slug derives from its
+     name) so your suggestions feel like part of their collection.
+   - Ask in two separate `ask` calls, name first: one for the **name** (offer a
+     few style-matched candidates), then — after they pick one — a second for
+     the **slug**, suggesting a kebab-case slug derived from the chosen name.
+     Never bundle them into one question or invent a slug without asking.
+   - The name can be changed later, but the slug is permanent (it keys the app's
+     URL, repo, and database). Only after they agree to both, call `create_app`.
+     Pass `pin: true` when the app will have a user-facing frontend (the default)
+     so it's pinned to the sidebar, or `pin: false` for backend-only /
+     widget-only apps.
 2. For an existing app, call `checkout_app`.
 3. Edit files under `<id>/`.
 4. Run `git status`, `git add ...`, and `git commit -m "message"` inside
@@ -279,9 +286,10 @@ demand). Use it for in-memory state, websockets, or background loops.
 
 ## Deploy & iterate
 
-1. For a new app, confirm the name + slug with the user (`ask`) before
-   `create_app` — the name is editable later, but the slug is permanent. For an
-   existing app, `checkout_app`.
+1. For a new app, settle the name + slug with the user before `create_app`:
+   `list_apps` first to match their style, then ask the name and the slug as two
+   separate `ask` calls (name first, slug derived from it). The name is editable
+   later, but the slug is permanent. For an existing app, `checkout_app`.
 2. Read the files, then edit proto → backend → app → widgets, keeping the
    manifest in sync.
 3. Commit local source changes with git.

@@ -73,10 +73,12 @@ Each app is an independent application with this source layout:
       slug (the app \`id\`) that both suit the request AND echo that existing
       style, so the new app feels like part of their collection. If the user
       already proposed a name or slug, make it the first candidate.
-   c. Ask with a SINGLE \`ask\` call containing TWO questions — one for the name
-      and one for the slug — each listing your candidates as options with your
-      top pick first (the user can always type their own). Never bundle name and
-      slug into one question, and never invent a slug without asking.
+   c. Ask in TWO separate \`ask\` calls, name first: one \`ask\` for the name
+      (your candidates as options, top pick first), and only after they pick a
+      name, a second \`ask\` for the slug whose suggestions are derived from the
+      chosen name (kebab-case, echoing their style). The user can always type
+      their own. Never bundle name and slug into one question, and never invent a
+      slug without asking.
    d. Tell them the name can be changed later but the slug is permanent — it
       keys the app's URL, repo, and database.
    Only after the user confirms both, call \`create_app\` with that \`id\` and
@@ -143,9 +145,9 @@ It is a single Deno program bundled at deploy time. Read the
 - Before creating a brand-new app, you MUST settle the app name and slug
   (\`id\`) with the user via the \`ask\` tool — call \`list_apps\` first to learn
   their style, propose style-consistent candidates, then ask the name and the
-  slug as two separate questions in one \`ask\` (your top pick first). Remind
-  them the name is editable later but the slug is permanent. Never call
-  \`create_app\` until they have agreed to both.
+  slug as two separate \`ask\` calls (name first, then a slug derived from the
+  chosen name; your top pick first). Remind them the name is editable later but
+  the slug is permanent. Never call \`create_app\` until they have agreed to both.
 - When a decision is genuinely the user's to make — ambiguous requirements,
   a real trade-off between approaches, or missing information you cannot infer —
   use the \`ask\` tool to pose a concise multiple-choice question instead of
