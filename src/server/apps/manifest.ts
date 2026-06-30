@@ -78,6 +78,13 @@ export const widgetSchema = z.object({
   name: z.string().min(1),
   entry: sourceRelativePath,
   defaultSize: widgetSizeSchema.default({ w: 4, h: 3 }),
+  /**
+   * The discrete grid footprints the widget supports. When non-empty the
+   * dashboard constrains resizing to these sizes (snapping to the nearest on
+   * release) instead of allowing any free-form span. Leave empty for a widget
+   * that adapts to any size.
+   */
+  supportedSizes: z.array(widgetSizeSchema).default([]),
 });
 
 export const cronJobSchema = z
@@ -244,13 +251,46 @@ export type AppCapabilitiesShape = z.infer<typeof capabilitiesSchema>;
 /** Platform-side inbound-webhook auth mode (see webhookConfigSchema). */
 export type WebhookAuth = z.infer<typeof webhookConfigSchema>['auth'];
 
+/** A grid footprint in dashboard column/row units. */
+export type GridSize = { w: number; h: number };
+
 export type NormalizedWidget = {
   id: string;
   name: string;
   /** ESM module URL exposing `mount(element, context)`. */
   url: string;
-  defaultSize: { w: number; h: number };
+  defaultSize: GridSize;
+  /**
+   * Discrete footprints the widget supports, de-duplicated in author order.
+   * Empty means free-form resizing; non-empty makes the dashboard snap resizes
+   * to the nearest entry. `defaultSize` is always one of these when non-empty.
+   */
+  supportedSizes: GridSize[];
 };
+
+/**
+ * Nearest declared size to a target footprint, by Euclidean distance in grid
+ * units (first entry wins ties). Returns `undefined` only for an empty list, so
+ * callers can fall back to free-form behavior. Shared by manifest normalization
+ * (to keep `defaultSize` valid) and the dashboard grid (to snap on resize).
+ */
+export function snapToSupportedSize<T extends GridSize>(
+  sizes: readonly T[],
+  target: GridSize,
+): T | undefined {
+  let best: T | undefined;
+  let bestScore = Infinity;
+  for (const size of sizes) {
+    const dw = size.w - target.w;
+    const dh = size.h - target.h;
+    const score = dw * dw + dh * dh;
+    if (score < bestScore) {
+      bestScore = score;
+      best = size;
+    }
+  }
+  return best;
+}
 
 /** A single RPC method parsed from the app's compiled proto descriptor. */
 export type RpcMethodApi = {
@@ -377,6 +417,41 @@ export function parseSourceManifest(raw: unknown): SourceManifest {
   return sourceManifestSchema.parse(raw);
 }
 
+/** Resolve a source widget into its deploy-time shape (URL + sized footprints). */
+function normalizeWidget(
+  appId: string,
+  widget: SourceManifest['widgets'][number],
+): NormalizedWidget {
+  const seen = new Set<string>();
+  const supportedSizes: GridSize[] = [];
+  for (const size of widget.supportedSizes) {
+    const key = `${size.w}x${size.h}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    supportedSizes.push({ w: size.w, h: size.h });
+  }
+  // Keep the opening size inside the supported set so a freshly placed widget
+  // never starts at a footprint its own resize rules would immediately snap away.
+  let defaultSize: GridSize = {
+    w: widget.defaultSize.w,
+    h: widget.defaultSize.h,
+  };
+  if (
+    supportedSizes.length > 0 &&
+    !seen.has(`${defaultSize.w}x${defaultSize.h}`)
+  ) {
+    defaultSize =
+      snapToSupportedSize(supportedSizes, defaultSize) ?? defaultSize;
+  }
+  return {
+    id: widget.id,
+    name: widget.name,
+    url: widgetUrl(appId, widget.id),
+    defaultSize,
+    supportedSizes,
+  };
+}
+
 /** Produce the deploy-time manifest with concrete platform URLs. */
 export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   const out: NormalizedManifest = {
@@ -387,12 +462,7 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     capabilities: src.capabilities,
     backendMode: src.backendMode,
     widgets: src.capabilities.widgets
-      ? src.widgets.map((w) => ({
-          id: w.id,
-          name: w.name,
-          url: widgetUrl(src.id, w.id),
-          defaultSize: w.defaultSize,
-        }))
+      ? src.widgets.map((w) => normalizeWidget(src.id, w))
       : [],
     cron: src.capabilities.cron ? src.cron : [],
   };

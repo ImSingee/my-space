@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
+import { snapToSupportedSize } from './apps/manifest';
 import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
 
@@ -489,6 +490,8 @@ export type DashboardItem = {
   y: number;
   w: number;
   h: number;
+  /** Discrete footprints the widget supports; empty means free-form resizing. */
+  supportedSizes: { w: number; h: number }[];
 };
 
 export const getDashboard = createServerFn({ method: 'GET' })
@@ -515,6 +518,21 @@ export const getDashboard = createServerFn({ method: 'GET' })
       const manifest = manifests.get(placement.appId);
       const widget = manifest?.widgets.find((w) => w.id === placement.widgetId);
       if (!manifest || !widget) continue;
+      // Deployments made before widget supportedSizes existed have no such field
+      // in their stored manifest; default to free-form ([]) for them.
+      const supportedSizes = widget.supportedSizes ?? [];
+      // A placement saved while the widget was free-form (or before it declared
+      // sizes) can hold a footprint the widget no longer supports. Snap it on
+      // read so the widget opens at a supported size and RGL compacts using it;
+      // the snapped value is persisted later on the next user drag/resize (we
+      // don't auto-write on load — edits persist only on explicit user action).
+      const size =
+        supportedSizes.length > 0
+          ? (snapToSupportedSize(supportedSizes, {
+              w: placement.w,
+              h: placement.h,
+            }) ?? { w: placement.w, h: placement.h })
+          : { w: placement.w, h: placement.h };
       items.push({
         id: placement.id,
         appId: placement.appId,
@@ -524,8 +542,9 @@ export const getDashboard = createServerFn({ method: 'GET' })
         url: widget.url,
         x: placement.x,
         y: placement.y,
-        w: placement.w,
-        h: placement.h,
+        w: size.w,
+        h: size.h,
+        supportedSizes,
       });
     }
     return items;

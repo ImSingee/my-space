@@ -116,7 +116,12 @@ Keep `manifest.json` consistent with the files. Example:
       "id": "summary",
       "name": "Todo summary",
       "entry": "widgets/summary.tsx",
-      "defaultSize": { "w": 4, "h": 3 }
+      "defaultSize": { "w": 4, "h": 3 },
+      "supportedSizes": [
+        { "w": 3, "h": 2 },
+        { "w": 4, "h": 3 },
+        { "w": 6, "h": 3 }
+      ]
     }
   ]
 }
@@ -124,6 +129,10 @@ Keep `manifest.json` consistent with the files. Example:
 
 The `service` value must be the fully-qualified proto service name
 (`<package>.<ServiceName>`), and the widget `id` is what the dashboard pins.
+`defaultSize` is the footprint a widget opens at (grid units, 12-column system).
+`supportedSizes` is optional: list the discrete footprints your widget is
+designed for and the dashboard restricts resizing to them, snapping to the
+nearest on release (omit it to allow any size). Keep `defaultSize` in the list.
 
 ## Proto
 
@@ -246,7 +255,9 @@ export function mount(
 
 Make widgets size-aware: use `context.size` / `context.onResize` to adapt the
 layout (e.g. hide labels when narrow, switch to a compact view at small pixel
-sizes). Widgets can also use the same Connect client pattern as the app.
+sizes). If you only support a few footprints, declare `supportedSizes` in the
+manifest (see above) so the dashboard snaps resizes to them. Widgets can also
+use the same Connect client pattern as the app.
 
 ## Database
 

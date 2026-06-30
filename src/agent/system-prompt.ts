@@ -55,8 +55,10 @@ Each app is an independent application with this source layout:
   the given element and returns an unmount function. \`context\` carries the
   widget's size — grid units (\`w\`/\`h\`) and live pixel size
   (\`width\`/\`height\`) — via \`context.size\` and a \`context.onResize\`
-  subscription, so widgets can adapt their layout. Widgets bundle their own
-  React, so just write normal React inside.
+  subscription, so widgets can adapt their layout. Set \`defaultSize\` (and
+  optionally \`supportedSizes\` to snap resizing to specific footprints) per
+  widget in the manifest. Widgets bundle their own React, so just write normal
+  React inside.
 - **Extended capabilities** (opt in via manifest \`capabilities\`):
   - \`cron\`: declare jobs (\`{ name, schedule, method }\`, 5-field cron) in a
     top-level \`cron\` array; on schedule the platform calls that proto RPC

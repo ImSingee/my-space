@@ -7,6 +7,7 @@ import {
   WidthProvider,
 } from 'react-grid-layout';
 import type { DashboardItem } from '~server/apps';
+import { buildWidgetLayout, snapUnits } from './dashboard-layout';
 import { WidgetCard } from './widget-card';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -50,17 +51,12 @@ export function DashboardGrid({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const layout = useMemo<Layout[]>(
-    () =>
-      items.map((item) => ({
-        i: item.id,
-        x: item.x,
-        y: item.y,
-        w: item.w,
-        h: item.h,
-        minW: 2,
-        minH: 2,
-      })),
+  const layout = useMemo<Layout[]>(() => buildWidgetLayout(items), [items]);
+
+  // Look up a widget's declared footprints by placement id for the resize-snap
+  // handlers (which only get the RGL layout item, not the DashboardItem).
+  const sizesById = useMemo(
+    () => new Map(items.map((item) => [item.id, item.supportedSizes])),
     [items],
   );
   // Only the canonical breakpoint is fed a layout; RGL derives the narrower ones
@@ -111,7 +107,27 @@ export function DashboardGrid({
         breakpointRef.current = breakpoint;
       }}
       onDragStop={persistCanonicalEdit}
-      onResizeStop={persistCanonicalEdit}
+      onResize={(_layout, _oldItem, newItem, placeholder) => {
+        // Snap the live resize preview (and its placeholder) to the nearest
+        // declared footprint so the user sees exactly where it will land.
+        const snapped = snapUnits(
+          sizesById.get(newItem.i),
+          newItem.w,
+          newItem.h,
+        );
+        newItem.w = snapped.w;
+        newItem.h = snapped.h;
+        placeholder.w = snapped.w;
+        placeholder.h = snapped.h;
+      }}
+      onResizeStop={(next) =>
+        persistCanonicalEdit(
+          next.map((l) => {
+            const snapped = snapUnits(sizesById.get(l.i), l.w, l.h);
+            return { ...l, w: snapped.w, h: snapped.h };
+          }),
+        )
+      }
     >
       {items.map((item) => (
         <div key={item.id} className={classes.cell}>
