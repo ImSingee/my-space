@@ -2,7 +2,10 @@ import { createServerFn } from '@tanstack/react-start';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
+import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
+
+export type { AppCronRunView } from './apps/scheduler';
 
 export type AppListItem = {
   id: string;
@@ -264,6 +267,14 @@ export const runCronJobFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const { runCronJobNow } = await import('./apps/scheduler');
     return runCronJobNow(data.id, data.name);
+  });
+
+export const listCronRunsFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .validator((id: string) => id)
+  .handler(async ({ data: id }): Promise<AppCronRunView[]> => {
+    const { listCronRuns } = await import('./apps/scheduler');
+    return listCronRuns(id);
   });
 
 export const deleteStorageObjectFn = createServerFn({ method: 'POST' })

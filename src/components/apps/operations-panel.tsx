@@ -20,6 +20,7 @@ import {
   IconDatabase,
   IconDatabaseCog,
   IconDownload,
+  IconHistory,
   IconPlayerPlay,
   IconServerBolt,
   IconTrash,
@@ -29,15 +30,111 @@ import copy from 'copy-to-clipboard';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { toast } from 'sonner';
-import { appOpsQueryOptions } from '~queries/apps';
+import { appOpsQueryOptions, cronRunsQueryOptions } from '~queries/apps';
 import { deleteStorageObjectFn, runCronJobFn } from '~server/apps';
 
 dayjs.extend(relativeTime);
+
+function formatDuration(ms: number | null): string {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s % 60)}s`;
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Recent cron-trigger history (scheduled fires + manual "Run now"), newest
+// first. Distinct from the backend log stream: structured per-run rows with
+// trigger, status, and duration. Mirrors the workflow Executions table.
+function CronHistory({ appId }: { appId: string }) {
+  const query = useQuery(cronRunsQueryOptions(appId));
+  const runs = query.data ?? [];
+
+  return (
+    <Stack gap={6}>
+      <Group gap={8} wrap="nowrap">
+        <IconHistory size={16} stroke={1.8} />
+        <Text fw={600} size="sm">
+          Trigger history
+        </Text>
+        {runs.length > 0 ? (
+          <Text size="xs" c="dimmed">
+            {runs.length}
+          </Text>
+        ) : null}
+      </Group>
+      {query.isLoading ? (
+        <Center py="sm">
+          <Loader size="sm" />
+        </Center>
+      ) : runs.length === 0 ? (
+        <Text size="xs" c="dimmed">
+          No runs yet. Scheduled fires and manual runs will appear here.
+        </Text>
+      ) : (
+        <Table withTableBorder verticalSpacing={6} highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Job</Table.Th>
+              <Table.Th w={110}>Trigger</Table.Th>
+              <Table.Th w={90}>Status</Table.Th>
+              <Table.Th w={80}>Duration</Table.Th>
+              <Table.Th w={120}>When</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {runs.map((run) => (
+              <Table.Tr key={run.id}>
+                <Table.Td>
+                  <Text size="sm" fw={500} truncate>
+                    {run.jobName}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Badge size="xs" variant="default">
+                    {run.trigger}
+                  </Badge>
+                </Table.Td>
+                <Table.Td>
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color={run.ok ? 'teal' : 'red'}
+                  >
+                    {run.ok ? 'ok' : 'fail'}
+                    {run.status != null ? ` ${run.status}` : ''}
+                  </Badge>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" c="dimmed">
+                    {formatDuration(run.durationMs)}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Tooltip
+                    label={dayjs(run.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                    withArrow
+                    position="left"
+                  >
+                    <Text size="xs" c="dimmed">
+                      {dayjs(run.createdAt).fromNow()}
+                    </Text>
+                  </Tooltip>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+    </Stack>
+  );
 }
 
 // Flat section header: the title's status / value flows inline right after the
@@ -104,9 +201,16 @@ export function OperationsPanel({
       } else {
         toast.error(`"${name}" returned ${res.status}`);
       }
-      void qc.invalidateQueries(appOpsQueryOptions(appId));
     },
     onError: (error) => toast.error((error as Error).message),
+    // A manual run records a history row on BOTH paths: success returns an HTTP
+    // status, but a thrown failure (backend unreachable) also writes a `manual`
+    // row and rethrows into onError. Invalidate in onSettled so the new row
+    // shows immediately whether the call succeeded or threw.
+    onSettled: () => {
+      void qc.invalidateQueries(appOpsQueryOptions(appId));
+      void qc.invalidateQueries(cronRunsQueryOptions(appId));
+    },
   });
 
   const deleteObject = useMutation({
@@ -283,6 +387,7 @@ export function OperationsPanel({
                   </Table.Tbody>
                 </Table>
               )}
+              <CronHistory appId={appId} />
             </Stack>
           ) : null}
 

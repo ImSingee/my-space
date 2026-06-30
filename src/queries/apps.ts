@@ -5,6 +5,7 @@ import {
   getDeploymentBuildLog,
   getNormalizedManifest,
   listAvailableWidgets,
+  listCronRunsFn,
   listDashboards,
   listDeployments,
   listSidebarItems,
@@ -58,6 +59,18 @@ export const appOpsQueryOptions = (id: string) =>
   queryOptions({
     queryKey: ['apps', id, 'ops'],
     queryFn: () => getAppOps({ data: id }),
+  });
+
+export const cronRunsQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ['apps', id, 'cron-runs'],
+    queryFn: () => listCronRunsFn({ data: id }),
+    // Scheduled fires are written by the background scheduler with no client
+    // event to invalidate against, so poll while the panel is open to surface
+    // them live. React Query pauses this when the tab is hidden
+    // (refetchIntervalInBackground defaults to false), so it stays cheap;
+    // manual "Run now" still invalidates for an instant update.
+    refetchInterval: 15_000,
   });
 
 export const normalizedManifestQueryOptions = (id: string) =>

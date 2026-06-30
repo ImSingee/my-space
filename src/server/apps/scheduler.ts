@@ -47,6 +47,38 @@ async function log(
   }
 }
 
+/**
+ * Persist one structured cron-run record for the app's trigger-history panel.
+ * Best-effort: a history write must never break (or fail) the actual cron call.
+ */
+async function recordCronRun(
+  appId: string,
+  jobName: string,
+  trigger: 'scheduled' | 'manual',
+  result: {
+    status: number | null;
+    ok: boolean;
+    target: string | null;
+    detail: string | null;
+    durationMs: number;
+  },
+): Promise<void> {
+  try {
+    await db.insert(schema.appCronRuns).values({
+      appId,
+      jobName,
+      trigger,
+      status: result.status,
+      ok: result.ok,
+      target: result.target,
+      detail: result.detail ? result.detail.slice(0, 1000) : null,
+      durationMs: result.durationMs,
+    });
+  } catch {
+    /* history is best-effort */
+  }
+}
+
 /** Read cron jobs from an app's current deployment normalized manifest. */
 async function cronJobsFor(appId: string): Promise<CronJob[]> {
   const app = await db.query.apps.findFirst({
@@ -146,9 +178,17 @@ async function invokeCron(
 }
 
 async function fire(appId: string, job: CronJob): Promise<void> {
+  const startedAt = Date.now();
   try {
     const res = await invokeCron(appId, job);
     const ok = res.status >= 200 && res.status < 300;
+    await recordCronRun(appId, job.name, 'scheduled', {
+      status: res.status,
+      ok,
+      target: res.target,
+      detail: res.body,
+      durationMs: Date.now() - startedAt,
+    });
     await log(
       appId,
       ok ? 'info' : 'error',
@@ -156,6 +196,13 @@ async function fire(appId: string, job: CronJob): Promise<void> {
       { status: res.status, body: res.body.slice(0, 500) },
     );
   } catch (error) {
+    await recordCronRun(appId, job.name, 'scheduled', {
+      status: null,
+      ok: false,
+      target: null,
+      detail: (error as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     await log(appId, 'error', `cron "${job.name}" failed`, {
       error: (error as Error).message,
     });
@@ -257,14 +304,73 @@ export async function runCronJobNow(
   const jobs = await cronJobsFor(appId);
   const job = jobs.find((j) => j.name === jobName);
   if (!job) throw new Error(`Cron job "${jobName}" not found.`);
-  const res = await invokeCron(appId, job);
-  await log(
-    appId,
-    res.status >= 200 && res.status < 300 ? 'info' : 'error',
-    `cron "${job.name}" run manually (${res.status})`,
-    { status: res.status },
-  );
-  return { status: res.status, body: res.body };
+  const startedAt = Date.now();
+  try {
+    const res = await invokeCron(appId, job);
+    const ok = res.status >= 200 && res.status < 300;
+    await recordCronRun(appId, job.name, 'manual', {
+      status: res.status,
+      ok,
+      target: res.target,
+      detail: res.body,
+      durationMs: Date.now() - startedAt,
+    });
+    await log(
+      appId,
+      ok ? 'info' : 'error',
+      `cron "${job.name}" run manually (${res.status})`,
+      { status: res.status },
+    );
+    return { status: res.status, body: res.body };
+  } catch (error) {
+    await recordCronRun(appId, job.name, 'manual', {
+      status: null,
+      ok: false,
+      target: null,
+      detail: (error as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
+    await log(appId, 'error', `cron "${job.name}" manual run failed`, {
+      error: (error as Error).message,
+    });
+    throw error;
+  }
+}
+
+export type AppCronRunView = {
+  id: string;
+  jobName: string;
+  trigger: 'scheduled' | 'manual';
+  /** HTTP status the backend returned, or null if the call threw first. */
+  status: number | null;
+  ok: boolean;
+  target: string | null;
+  detail: string | null;
+  durationMs: number | null;
+  createdAt: string;
+};
+
+/** List an app's recent cron runs (newest first) for the trigger-history panel. */
+export async function listCronRuns(
+  appId: string,
+  limit = 50,
+): Promise<AppCronRunView[]> {
+  const rows = await db.query.appCronRuns.findMany({
+    where: (r, { eq }) => eq(r.appId, appId),
+    orderBy: (r, { desc }) => [desc(r.createdAt)],
+    limit,
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    jobName: r.jobName,
+    trigger: r.trigger,
+    status: r.status,
+    ok: r.ok,
+    target: r.target,
+    detail: r.detail,
+    durationMs: r.durationMs,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 export type CronJobView = {

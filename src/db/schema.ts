@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   timestamp as _timestamp,
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -69,6 +70,9 @@ export type AppStatus =
   | 'archived';
 
 export type DeploymentStatus = 'building' | 'deployed' | 'failed';
+
+/** How an app cron job run was triggered. */
+export type AppCronTrigger = 'scheduled' | 'manual';
 
 /** ================== workflow domain types ================== */
 
@@ -190,6 +194,42 @@ export const deployments = pgTable(
     // Version is allocated as max(version)+1 per app; enforce it at the DB so
     // overlapping deploys can't record the same version / force-move one tag.
     uniqueIndex('deployments_app_version_idx').on(table.appId, table.version),
+  ],
+);
+
+/** ================== app cron runs ================== */
+
+/**
+ * History of app cron job invocations (both scheduled fires and manual "Run
+ * now" triggers). One row per attempt, written by the scheduler after the call
+ * completes, so the app's manage page can show a trigger history. Distinct from
+ * `logs` (a free-text backend/agent log stream) — this is structured run data
+ * (status, duration, trigger) mirroring `workflow_runs`.
+ */
+export const appCronRuns = pgTable(
+  'app_cron_runs',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    appId: text()
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    /** Cron job name as declared in the manifest. */
+    jobName: text('job_name').notNull(),
+    trigger: text().$type<AppCronTrigger>().notNull().default('scheduled'),
+    /** HTTP status the backend returned, or null if the call threw first. */
+    status: integer(),
+    ok: boolean().notNull().default(false),
+    /** Backend target invoked: an RPC `/service/Method` or a legacy raw path. */
+    target: text(),
+    /** Truncated response body (or error message) for quick diagnosis. */
+    detail: text(),
+    /** Wall-clock duration of the invocation in milliseconds. */
+    durationMs: integer('duration_ms'),
+    createdAt,
+  },
+  (table) => [
+    // Listing is always "newest first for one app", so index that access path.
+    index('app_cron_runs_app_created_idx').on(table.appId, table.createdAt),
   ],
 );
 
