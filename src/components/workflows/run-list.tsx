@@ -21,12 +21,16 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
   const navigate = useNavigate();
   const query = useQuery({
     ...workflowRunsQueryOptions(workflowId),
-    // Live-refresh while any run is still in flight.
     refetchInterval: (q) => {
       const runs = q.state.data ?? [];
-      return runs.some((r) => r.status === 'queued' || r.status === 'running')
-        ? 1500
-        : false;
+      // Fast poll while a run is in flight so progress updates near-live.
+      if (runs.some((r) => r.status === 'queued' || r.status === 'running')) {
+        return 1500;
+      }
+      // Otherwise keep a slow idle poll so background-triggered runs (cron /
+      // webhook) appear without a manual refresh. React Query pauses this while
+      // the tab is hidden (refetchIntervalInBackground defaults false).
+      return 15_000;
     },
   });
 
