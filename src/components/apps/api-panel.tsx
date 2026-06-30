@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Box,
   Center,
@@ -14,6 +15,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { IconChevronRight, IconCopy } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
 import { toast } from 'sonner';
@@ -171,38 +173,83 @@ export function ApiPanel({ appId }: { appId: string }) {
     );
   }
 
-  const api = query.data?.api;
+  const manifest = query.data;
+  const api = manifest?.api;
+  const workflows = manifest?.workflows ?? [];
 
   return (
     <Box component="section">
       <Text fw={600} fz="lg" mb="md">
         API
       </Text>
-      {!query.data ? (
+      {!manifest ? (
         <Text size="sm" c="dimmed">
           Deploy this app to capture its declared API.
         </Text>
-      ) : !api || api.services.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          No RPC services declared in the proto.
-        </Text>
       ) : (
         <Stack gap="lg">
-          <Text size="sm" c="dimmed">
-            Connect RPC services this app exposes, captured from its proto on
-            deploy.
-          </Text>
-          {api.services.map((service) => (
-            <ServiceBlock key={service.name} service={service} />
-          ))}
-          {api.protoFiles.length > 0 ? (
+          {!api || api.services.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No RPC services declared in the proto.
+            </Text>
+          ) : (
+            <>
+              <Text size="sm" c="dimmed">
+                Connect RPC services this app exposes, captured from its proto
+                on deploy.
+              </Text>
+              {api.services.map((service) => (
+                <ServiceBlock key={service.name} service={service} />
+              ))}
+              {api.protoFiles.length > 0 ? (
+                <Stack gap={6}>
+                  <Text fw={600} size="sm">
+                    Proto source
+                  </Text>
+                  {api.protoFiles.map((file) => (
+                    <ProtoSource key={file.path} file={file} />
+                  ))}
+                </Stack>
+              ) : null}
+            </>
+          )}
+          {workflows.length > 0 ? (
             <Stack gap={6}>
               <Text fw={600} size="sm">
-                Proto source
+                Workflow calls
               </Text>
-              {api.protoFiles.map((file) => (
-                <ProtoSource key={file.path} file={file} />
-              ))}
+              <Text size="xs" c="dimmed">
+                Top-level workflows this app&apos;s backend can invoke. The
+                platform injects each call&apos;s URL + secret at runtime.
+              </Text>
+              <Table withTableBorder verticalSpacing={6} highlightOnHover>
+                <Table.Tbody>
+                  {workflows.map((w) => (
+                    <Table.Tr key={w.alias}>
+                      <Table.Td>
+                        <Text size="sm" fw={500} ff="monospace">
+                          {w.alias}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Anchor
+                          size="xs"
+                          ff="monospace"
+                          renderRoot={(props) => (
+                            <Link
+                              to="/workflows/$workflowId"
+                              params={{ workflowId: w.workflow }}
+                              {...props}
+                            />
+                          )}
+                        >
+                          {w.workflow}
+                        </Anchor>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
             </Stack>
           ) : null}
         </Stack>

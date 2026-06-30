@@ -90,6 +90,58 @@ export const cronJobSchema = z.object({
 
 export type CronJob = z.infer<typeof cronJobSchema>;
 
+/**
+ * A reference to a top-level Workflow this app's backend is allowed to invoke.
+ * The app does NOT define the workflow — it is created independently in the
+ * Workflow module; the platform injects the invocation URL + secret for each
+ * declared workflow into the backend env at runtime so the app can trigger it
+ * via the existing external workflow API.
+ */
+export const appWorkflowRefSchema = z.object({
+  /**
+   * Target workflow id (kebab-case slug, mirrors WORKFLOW_ID_RE in the workflow
+   * module). Kept as an inline literal so this manifest stays isomorphic.
+   */
+  workflow: z
+    .string()
+    .min(1)
+    .regex(/^[a-z][a-z0-9-]*$/, 'workflow must be a workflow id (kebab-case)'),
+  /**
+   * Optional stable key the app code uses to look the workflow up in the
+   * injected `HATCH_WORKFLOWS` map. Defaults to the workflow id.
+   */
+  alias: z
+    .string()
+    .min(1)
+    .regex(
+      /^[a-zA-Z][a-zA-Z0-9_-]*$/,
+      'alias must start with a letter and contain only letters, digits, ' +
+        'hyphens, or underscores',
+    )
+    .optional(),
+});
+
+export type AppWorkflowRef = z.infer<typeof appWorkflowRefSchema>;
+
+/** Declared workflow calls with unique effective aliases (alias ?? workflow). */
+const appWorkflowsSchema = z
+  .array(appWorkflowRefSchema)
+  .default([])
+  .superRefine((refs, ctx) => {
+    const seen = new Set<string>();
+    for (const [i, ref] of refs.entries()) {
+      const alias = ref.alias ?? ref.workflow;
+      if (seen.has(alias)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `duplicate workflow alias "${alias}"`,
+          path: [i, 'alias'],
+        });
+      }
+      seen.add(alias);
+    }
+  });
+
 export const capabilitiesSchema = z.object({
   database: z.boolean().default(false),
   frontend: z.boolean().default(false),
@@ -147,6 +199,8 @@ export const sourceManifestSchema = z.object({
     .optional(),
   widgets: z.array(widgetSchema).default([]),
   cron: z.array(cronJobSchema).default([]),
+  /** Top-level workflows this app's backend may invoke (see appWorkflowRefSchema). */
+  workflows: appWorkflowsSchema,
 });
 
 export type SourceManifest = z.infer<typeof sourceManifestSchema>;
@@ -196,6 +250,19 @@ export type AppApi = {
   protoFiles: ProtoFile[];
 };
 
+/**
+ * A resolved outbound workflow call this app declares. The invocation URL +
+ * secret are NOT stored here (they are injected into the backend env at runtime,
+ * never shipped to the browser) — only the alias the app code uses and the
+ * target workflow id.
+ */
+export type NormalizedAppWorkflow = {
+  /** Key the app uses in the injected `HATCH_WORKFLOWS` map. */
+  alias: string;
+  /** Target workflow id. */
+  workflow: string;
+};
+
 export type NormalizedManifest = {
   id: string;
   name: string;
@@ -212,6 +279,12 @@ export type NormalizedManifest = {
   rpc?: { url: string; service: string };
   /** Scheduled jobs the platform triggers against the backend. */
   cron: CronJob[];
+  /**
+   * Top-level workflows this app's backend may invoke. Present only when the
+   * app has a backend and declares workflow calls. The runtime injects the
+   * matching URL + secret per alias into the backend env (`HATCH_WORKFLOWS`).
+   */
+  workflows?: NormalizedAppWorkflow[];
   /** Inbound webhook URL, when the webhook capability is enabled. */
   webhook?: { url: string };
   /** Blob storage base URL, when the storage capability is enabled. */
@@ -288,6 +361,16 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   }
   if (src.capabilities.storage) {
     out.storage = { url: storageUrl(src.id) };
+  }
+  // Workflow calls are outbound from the backend (the platform injects each
+  // target's secret into the backend env), so they only apply to apps that
+  // actually stage a backend — the capability alone, without a `backend.entry`,
+  // produces no process to receive the injected config.
+  if (src.capabilities.backend && src.backend && src.workflows.length > 0) {
+    out.workflows = src.workflows.map((w) => ({
+      alias: w.alias ?? w.workflow,
+      workflow: w.workflow,
+    }));
   }
   return out;
 }

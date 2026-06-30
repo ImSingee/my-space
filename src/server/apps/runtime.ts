@@ -28,6 +28,62 @@ function resolveBackendEntry(buildDir: string): string {
   return 'backend/main.ts';
 }
 
+/** Outbound workflow calls the app declared, read from the staged manifest. */
+function readWorkflowRefs(
+  buildDir: string,
+): { alias: string; workflow: string }[] {
+  try {
+    const raw = readFileSync(
+      path.join(buildDir, 'manifest.normalized.json'),
+      'utf8',
+    );
+    const refs = (JSON.parse(raw) as { workflows?: unknown }).workflows;
+    if (!Array.isArray(refs)) return [];
+    return refs.filter(
+      (r): r is { alias: string; workflow: string } =>
+        !!r &&
+        typeof r === 'object' &&
+        typeof (r as { alias?: unknown }).alias === 'string' &&
+        typeof (r as { workflow?: unknown }).workflow === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the `HATCH_WORKFLOWS` env value: a JSON map of alias →
+ * `{ workflow, name, url, secret }` so the backend can invoke each declared
+ * workflow through the platform's external workflow API. The secret lives only
+ * in this injected env (never in the normalized manifest shipped to the
+ * browser). Returns null when the app declares no callable workflows.
+ */
+async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
+  const refs = readWorkflowRefs(buildDir);
+  if (refs.length === 0) return null;
+  // Absolute platform origin so the sandboxed backend can reach the public
+  // workflow-hooks route (relative URLs have no host inside the subprocess).
+  const base = (process.env.BETTER_AUTH_URL ?? '').replace(/\/+$/, '');
+  const { getCallableWorkflow } = await import('../workflows/external');
+  const map: Record<
+    string,
+    { workflow: string; name: string; url: string; secret: string }
+  > = {};
+  for (const ref of refs) {
+    const callable = await getCallableWorkflow(ref.workflow);
+    // Skip workflows that became un-callable since deploy (e.g. webhook
+    // disabled); the app handles a missing alias the same as any other error.
+    if (!callable) continue;
+    map[ref.alias] = {
+      workflow: callable.id,
+      name: callable.name,
+      url: `${base}${callable.path}`,
+      secret: callable.secret,
+    };
+  }
+  return Object.keys(map).length > 0 ? JSON.stringify(map) : null;
+}
+
 /**
  * Resolve Deno's module cache directory (`DENO_DIR` or the platform default).
  * Staged backends load their npm/jsr deps from here at runtime, and some
@@ -224,6 +280,10 @@ async function startBackend(id: string): Promise<number> {
   const storageDir = appStorageDir(id);
   mkdirSync(storageDir, { recursive: true });
 
+  // Resolve invocation config (URL + secret) for each declared workflow call so
+  // the backend can trigger top-level workflows through the external API.
+  const workflowsEnv = await buildWorkflowsEnv(buildDir);
+
   // Scope filesystem access to the app's own build (read) and storage
   // (read/write) so one deployed backend can't read another app's build/storage
   // or platform files. Static imports of the bundled entry aren't gated by
@@ -288,6 +348,7 @@ async function startBackend(id: string): Promise<number> {
       PORT: String(port),
       DATABASE_URL: databaseUrl,
       STORAGE_DIR: storageDir,
+      ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });

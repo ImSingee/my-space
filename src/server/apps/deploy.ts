@@ -193,6 +193,37 @@ async function deployAppInner(
       .where(eq(schema.apps.id, id));
 
     const build = await buildApp(id, { sourceDir, outputDir: tempBuild });
+
+    // Validate declared outbound workflow calls before recording the release:
+    // each must reference a top-level workflow that is currently callable
+    // (deployed with its webhook trigger enabled) so the runtime injection
+    // actually works. The secret is injected into a *running* backend's env, so
+    // a declaration needs both the backend capability AND a staged backend
+    // entry — otherwise the build stages no process to receive HATCH_WORKFLOWS
+    // and the calls can never fire.
+    if (
+      build.source.workflows.length > 0 &&
+      (!build.source.capabilities.backend || !build.source.backend)
+    ) {
+      throw new Error(
+        'Workflow calls require a backend: set capabilities.backend and ' +
+          'define backend.entry.',
+      );
+    }
+    if (build.normalized.workflows && build.normalized.workflows.length > 0) {
+      const { getCallableWorkflow } = await import('../workflows/external');
+      for (const ref of build.normalized.workflows) {
+        const callable = await getCallableWorkflow(ref.workflow);
+        if (!callable) {
+          throw new Error(
+            `This app declares a call to workflow "${ref.workflow}" (alias ` +
+              `"${ref.alias}"), but that workflow is not callable. Deploy the ` +
+              'workflow with its webhook trigger enabled, then redeploy this app.',
+          );
+        }
+      }
+    }
+
     let dbName = app.dbName ?? null;
     if (build.source.capabilities.database) {
       await ensureAppDatabase(id);

@@ -64,6 +64,15 @@ Each app is an independent application with this source layout:
   - \`backendMode: "long-running"\` keeps the backend warm (vs default
     \`serverless\`). Handle \`/__cron/*\` and \`/__webhook\` by wrapping the
     Connect adapter (see the building-apps skill).
+- **Calling workflows** (top-level \`workflows\` array, not a capability flag):
+  an app's backend can invoke top-level Workflows. The app does NOT define
+  them — they are created in the Workflow module. Add a top-level
+  \`workflows: [{ "workflow": "<workflow-id>", "alias": "optional" }]\` to the
+  manifest. The platform injects \`HATCH_WORKFLOWS\` (a JSON map alias →
+  \`{ workflow, name, url, secret }\`) into the backend env; the backend POSTs
+  input JSON to that \`url\` with the \`x-hatch-secret\` header to start a run.
+  The target workflow must already be deployed WITH its webhook trigger enabled
+  (verify with \`get_workflow\`), or the app deploy fails.
 
 # Workflow (follow in order)
 1. For a NEW app, settle the name and slug WITH the user before scaffolding —

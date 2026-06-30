@@ -302,6 +302,53 @@ Set `"backendMode": "long-running"` to keep the backend warm (started at deploy,
 auto-restarted if it exits) instead of the default `serverless` (booted on
 demand). Use it for in-memory state, websockets, or background loops.
 
+## Calling top-level workflows
+
+An app's backend can invoke **top-level Workflows** (created independently in the
+Workflow module — an app never defines its own workflows). Declare the workflows
+the backend may call in a top-level `workflows` array (NOT under `capabilities`):
+
+```json
+"workflows": [
+  { "workflow": "daily-digest" },
+  { "workflow": "send-report", "alias": "report" }
+]
+```
+
+Each entry references a workflow `id`; `alias` (optional, defaults to the id) is
+the key your code uses. The target workflow MUST already be deployed with its
+**webhook trigger enabled** — use `list_workflows` / `get_workflow` to find one
+and confirm `Webhook: ... [secret set]`. If it is not callable, the app deploy
+fails with a clear error.
+
+At runtime the platform injects `HATCH_WORKFLOWS` into the backend env: a JSON
+map of `alias → { workflow, name, url, secret }`. Call a workflow by POSTing the
+input JSON to its `url` with the secret (reuses the external workflow API, which
+starts a run and returns `{ runId, status }`):
+
+```ts
+const registry = JSON.parse(Deno.env.get('HATCH_WORKFLOWS') ?? '{}');
+
+async function callWorkflow(alias: string, input: unknown) {
+  const wf = registry[alias];
+  if (!wf) throw new Error(`workflow "${alias}" not available`);
+  const res = await fetch(wf.url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-hatch-secret': wf.secret,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`workflow ${alias} failed: ${res.status}`);
+  return (await res.json()) as { runId: string; status: string };
+}
+```
+
+The call is asynchronous: it enqueues a run and returns its id/status (it does
+not wait for the workflow to finish). The injected secret stays server-side —
+never forward it to the frontend.
+
 ## Deploy & iterate
 
 1. For a new app, settle the name + slug with the user before `create_app`:
