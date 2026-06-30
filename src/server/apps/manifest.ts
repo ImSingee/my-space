@@ -98,7 +98,6 @@ export const capabilitiesSchema = z.object({
   cron: z.boolean().default(false),
   webhook: z.boolean().default(false),
   storage: z.boolean().default(false),
-  workflow: z.boolean().default(false),
 });
 
 /**

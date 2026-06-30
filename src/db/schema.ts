@@ -59,7 +59,6 @@ export type AppCapabilities = {
   cron: boolean;
   webhook: boolean;
   storage: boolean;
-  workflow: boolean;
 };
 
 export type AppStatus =

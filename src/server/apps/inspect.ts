@@ -13,7 +13,6 @@ const CAPABILITY_KEYS = [
   'cron',
   'webhook',
   'storage',
-  'workflow',
 ] as const satisfies readonly (keyof AppCapabilities)[];
 
 function enabledCapabilities(

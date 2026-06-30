@@ -41,7 +41,6 @@ const MANIFEST = {
     cron: true,
     webhook: true,
     storage: true,
-    workflow: false,
   },
   backendMode: 'long-running',
   backend: { entry: 'backend/main.ts' },

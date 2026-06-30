@@ -104,8 +104,7 @@ Keep `manifest.json` consistent with the files. Example:
     "backend": true,
     "cron": false,
     "webhook": false,
-    "storage": false,
-    "workflow": false
+    "storage": false
   },
   "backendMode": "serverless",
   "rpc": { "proto": "proto/service.proto", "service": "app.v1.TodoService" },

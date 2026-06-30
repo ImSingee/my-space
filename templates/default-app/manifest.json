@@ -10,8 +10,7 @@
     "backend": true,
     "cron": false,
     "webhook": false,
-    "storage": false,
-    "workflow": false
+    "storage": false
   },
   "backendMode": "serverless",
   "rpc": {
