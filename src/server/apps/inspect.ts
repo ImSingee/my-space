@@ -2,7 +2,7 @@
 import { db } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { listDeployments } from './manage';
-import type { NormalizedManifest } from './manifest';
+import type { NormalizedManifest, WebhookAuth } from './manifest';
 
 /** Capability flags in the same order the management UI lists them. */
 const CAPABILITY_KEYS = [
@@ -89,7 +89,13 @@ export type AppRuntimeOps = {
       nextRun: string | null;
     }[];
   };
-  webhook: { enabled: boolean; url: string | null; hasSecret: boolean };
+  webhook: {
+    enabled: boolean;
+    url: string | null;
+    hasSecret: boolean;
+    /** Platform-side auth mode: 'platform' (secret + HMAC) or 'none'. */
+    auth: WebhookAuth;
+  };
   storage: { enabled: boolean; url: string | null; objectCount: number };
 };
 
@@ -171,7 +177,12 @@ export async function getAppDetailForAgent(
       webhook: {
         enabled: Boolean(caps?.webhook),
         url: manifest?.webhook?.url ?? null,
-        hasSecret: Boolean(app.webhookSecret),
+        // A secret may persist on the row for rollback safety while the live
+        // mode is 'none'; only report it when the live mode actually uses it.
+        hasSecret:
+          (manifest?.webhook?.auth ?? 'platform') === 'platform' &&
+          Boolean(app.webhookSecret),
+        auth: manifest?.webhook?.auth ?? 'platform',
       },
       storage: {
         enabled: Boolean(caps?.storage),

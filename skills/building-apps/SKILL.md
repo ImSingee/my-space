@@ -334,10 +334,43 @@ signed, same headers). Prefer `method`.
 
 ### webhook
 
-Set `"webhook": true`. The platform exposes a PUBLIC endpoint
-`/api/hooks/<id>?secret=<secret>` (the secret is generated on deploy and shown
-on the app page). Verified requests are forwarded to your backend under
-`/__webhook/...`. Use this for inbound events from external services.
+Set `"webhook": true` (requires a `backend`). The platform exposes a PUBLIC
+endpoint at `/api/hooks/<id>` that forwards inbound requests to your backend
+under `/__webhook/...`. It is always plain HTTP (any verb/body — never Connect
+RPC). A top-level `webhook` manifest block picks the platform-side auth mode:
+
+```json
+"capabilities": { "webhook": true, "backend": true, ... },
+"webhook": { "auth": "platform" }   // or "none"; defaults to "platform"
+```
+
+**`platform` (default) — platform-managed secret + HMAC.** The platform mints a
+per-app secret (shown on the app page) and the public URL is
+`/api/hooks/<id>?secret=<secret>` (or send the secret as an `x-hatch-secret`
+header). The platform verifies the secret, **strips it**, and forwards an
+HMAC-signed request to `/__webhook` — the secret never reaches your app. Verify
+the signature like cron, but the HMAC is over `<timestamp>.<rawBodyBytes>`. Read
+the EXACT raw request bytes (a Buffer, not a decoded string — webhook bodies may
+be binary) and sign empty bytes for GET/HEAD:
+
+```ts
+import { Buffer } from 'node:buffer';
+// rawBody: Buffer of the exact request bytes (e.g. from req body stream)
+const want =
+  'sha256=' +
+  createHmac('sha256', Deno.env.get('HATCH_SIGNING_SECRET')!)
+    .update(Buffer.concat([Buffer.from(`${ts}.`), rawBody]))
+    .digest('hex');
+```
+
+Use this when your own small services need to ping the app and you want the
+platform to handle the shared secret.
+
+**`none` — unauthenticated passthrough.** No secret and no signature: the raw
+request (headers, body, `?secret=` if any) is forwarded untouched to
+`/__webhook`. Your backend authenticates the caller itself (e.g. verifying a
+GitHub/Stripe signature against your own secret). Use this to integrate
+third-party webhook providers that sign requests their own way.
 
 ### storage
 

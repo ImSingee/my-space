@@ -27,14 +27,19 @@ export const HATCH_SIGNATURE_HEADER = 'x-hatch-signature';
  * can reconstruct on both ends (the cron job name for RPC calls, the raw body
  * for webhooks). The result is prefixed `sha256=` so the scheme is greppable and
  * future-proof if the digest ever changes.
+ *
+ * `payload` may be raw bytes (a Buffer) — used for webhook bodies, which can be
+ * binary/non-UTF-8. The digest is taken over the exact bytes, so a string and
+ * its UTF-8 encoding produce the same signature (cron job names are unaffected).
  */
 export function hatchSignature(
   secret: string,
   timestamp: string,
-  payload: string,
+  payload: string | Buffer,
 ): string {
+  const body = typeof payload === 'string' ? Buffer.from(payload) : payload;
   const mac = createHmac('sha256', secret)
-    .update(`${timestamp}.${payload}`)
+    .update(Buffer.concat([Buffer.from(`${timestamp}.`), body]))
     .digest('hex');
   return `sha256=${mac}`;
 }
@@ -48,7 +53,7 @@ export function hatchSignature(
 export function verifyHatchSignature(args: {
   secret: string | null | undefined;
   timestamp: string | null | undefined;
-  payload: string;
+  payload: string | Buffer;
   signature: string | null | undefined;
   maxSkewMs?: number;
 }): boolean {

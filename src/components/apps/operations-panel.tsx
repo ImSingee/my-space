@@ -291,6 +291,17 @@ export function OperationsPanel({
               <SectionHeader
                 icon={<IconWebhook size={16} stroke={1.8} />}
                 title="Inbound webhook"
+                meta={
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color={ops.webhook.auth === 'platform' ? 'teal' : 'gray'}
+                  >
+                    {ops.webhook.auth === 'platform'
+                      ? 'platform auth'
+                      : 'no platform auth'}
+                  </Badge>
+                }
               />
               <Group gap={8} wrap="nowrap" align="center">
                 <Code
@@ -301,17 +312,30 @@ export function OperationsPanel({
                     fontSize: 'var(--mantine-font-size-xs)',
                   }}
                 >
-                  {`${ops.webhook.url ?? ''}?secret=${ops.webhook.secret ?? ''}`}
+                  {ops.webhook.auth === 'platform'
+                    ? `${ops.webhook.url ?? ''}?secret=${ops.webhook.secret ?? ''}`
+                    : (ops.webhook.url ?? '')}
                 </Code>
-                <Tooltip label="Copy URL with secret" withArrow position="left">
+                <Tooltip
+                  label={
+                    ops.webhook.auth === 'platform'
+                      ? 'Copy URL with secret'
+                      : 'Copy URL'
+                  }
+                  withArrow
+                  position="left"
+                >
                   <ActionIcon
                     variant="subtle"
                     color="gray"
                     aria-label="Copy webhook URL"
                     onClick={() => {
-                      const url = `${origin}${ops.webhook.url ?? ''}?secret=${
-                        ops.webhook.secret ?? ''
-                      }`;
+                      const url =
+                        ops.webhook.auth === 'platform'
+                          ? `${origin}${ops.webhook.url ?? ''}?secret=${
+                              ops.webhook.secret ?? ''
+                            }`
+                          : `${origin}${ops.webhook.url ?? ''}`;
                       copy(url);
                       toast.success('Webhook URL copied');
                     }}
@@ -321,8 +345,19 @@ export function OperationsPanel({
                 </Tooltip>
               </Group>
               <Text size="xs" c="dimmed">
-                POST here from external services. The platform verifies the
-                secret and forwards to your backend at <Code>/__webhook</Code>.
+                {ops.webhook.auth === 'platform' ? (
+                  <>
+                    POST here from external services. The platform verifies the
+                    secret, strips it, and forwards an HMAC-signed request to
+                    your backend at <Code>/__webhook</Code>.
+                  </>
+                ) : (
+                  <>
+                    Unauthenticated passthrough: the platform forwards requests
+                    as-is to your backend at <Code>/__webhook</Code>. Your
+                    backend must verify the caller itself.
+                  </>
+                )}
               </Text>
             </Stack>
           ) : null}

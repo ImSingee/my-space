@@ -156,6 +156,24 @@ const appWorkflowsSchema = z
     }
   });
 
+/**
+ * Inbound-webhook configuration. The webhook itself is always plain HTTP (any
+ * verb/body — never Connect RPC); this only controls platform-side auth:
+ *
+ * - `platform` (default): the platform mints a per-app secret, verifies it on
+ *   every call (`?secret=` or `x-hatch-secret`), strips it, and forwards the
+ *   request to the backend's `/__webhook` with an HMAC signature
+ *   (`x-hatch-timestamp` + `x-hatch-signature` over the body) so the app can
+ *   trust the call was vetted by the platform. The secret never reaches the app.
+ *   Best for simple notifications from your own services.
+ * - `none`: no platform secret and no signature. The raw request is forwarded
+ *   untouched; the app must authenticate it itself (e.g. verify a GitHub/Stripe
+ *   signature). Best for integrating third-party webhook providers.
+ */
+export const webhookConfigSchema = z.object({
+  auth: z.enum(['platform', 'none']).default('platform'),
+});
+
 export const capabilitiesSchema = z.object({
   database: z.boolean().default(false),
   frontend: z.boolean().default(false),
@@ -213,12 +231,16 @@ export const sourceManifestSchema = z.object({
     .optional(),
   widgets: z.array(widgetSchema).default([]),
   cron: z.array(cronJobSchema).default([]),
+  /** Inbound webhook auth mode (see webhookConfigSchema); defaults to platform. */
+  webhook: webhookConfigSchema.optional(),
   /** Top-level workflows this app's backend may invoke (see appWorkflowRefSchema). */
   workflows: appWorkflowsSchema,
 });
 
 export type SourceManifest = z.infer<typeof sourceManifestSchema>;
 export type AppCapabilitiesShape = z.infer<typeof capabilitiesSchema>;
+/** Platform-side inbound-webhook auth mode (see webhookConfigSchema). */
+export type WebhookAuth = z.infer<typeof webhookConfigSchema>['auth'];
 
 export type NormalizedWidget = {
   id: string;
@@ -299,8 +321,12 @@ export type NormalizedManifest = {
    * matching URL + secret per alias into the backend env (`HATCH_WORKFLOWS`).
    */
   workflows?: NormalizedAppWorkflow[];
-  /** Inbound webhook URL, when the webhook capability is enabled. */
-  webhook?: { url: string };
+  /**
+   * Inbound webhook URL + platform-side auth mode, when the webhook capability
+   * is enabled. `platform` = secret-verified + HMAC-signed forward; `none` =
+   * unauthenticated passthrough (app self-secures). See webhookConfigSchema.
+   */
+  webhook?: { url: string; auth: WebhookAuth };
   /** Blob storage base URL, when the storage capability is enabled. */
   storage?: { url: string };
   /**
@@ -371,7 +397,10 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     out.rpc = { url: rpcUrl(src.id), service: src.rpc.service };
   }
   if (src.capabilities.webhook) {
-    out.webhook = { url: webhookUrl(src.id) };
+    out.webhook = {
+      url: webhookUrl(src.id),
+      auth: src.webhook?.auth ?? 'platform',
+    };
   }
   if (src.capabilities.storage) {
     out.storage = { url: storageUrl(src.id) };

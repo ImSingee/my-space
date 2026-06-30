@@ -268,23 +268,53 @@ async function deployAppInner(
       }
     }
 
+    // Inbound webhooks are forwarded to the backend's `/__webhook`, so the app
+    // must stage a backend (capability AND entry) to receive them — otherwise
+    // the deploy would succeed but every webhook call would fail at runtime with
+    // no process to proxy to.
+    if (
+      build.source.capabilities.webhook &&
+      (!build.source.capabilities.backend || !build.source.backend)
+    ) {
+      throw new Error(
+        'Inbound webhooks require a backend: set capabilities.backend and ' +
+          'define backend.entry (verified webhooks are forwarded to /__webhook).',
+      );
+    }
+
     let dbName = app.dbName ?? null;
     if (build.source.capabilities.database) {
       await ensureAppDatabase(id);
       dbName = appDbName(id);
     }
 
+    // Webhook auth mode controls the shared secret: 'platform' mints + keeps a
+    // per-app secret (the platform verifies it, then forwards an HMAC-signed
+    // request). 'none' is an unauthenticated passthrough that never reads the
+    // secret — but we deliberately RETAIN any existing one rather than null it,
+    // so a later rollback to a platform-auth deployment still has its reusable
+    // secret (rollback only flips the deployment pointer and never re-mints).
+    // The secret is hidden from the UI/inspect while the live mode is 'none'.
+    const webhookAuth = build.source.webhook?.auth ?? 'platform';
     let webhookSecret = app.webhookSecret ?? null;
-    if (build.source.capabilities.webhook && !webhookSecret) {
+    if (
+      build.source.capabilities.webhook &&
+      webhookAuth === 'platform' &&
+      !webhookSecret
+    ) {
       webhookSecret = randomUUID().replaceAll('-', '');
     }
 
-    // Mint a per-app HMAC key the first time a backend-capable app deploys. The
-    // platform signs the requests it makes into the backend (cron RPC calls) so
-    // the backend can verify they came from the platform. Persisted and reused
-    // across deploys; never exposed to the browser.
+    // Mint a per-app HMAC key the first time an app needs one. The platform
+    // signs the requests it makes into the backend — cron RPC calls and
+    // platform-auth webhook forwards — so the backend can verify they came from
+    // the platform. Persisted and reused across deploys; never exposed to the
+    // browser.
+    const needsSigningKey =
+      build.source.capabilities.backend ||
+      (build.source.capabilities.webhook && webhookAuth === 'platform');
     let signingSecret = app.signingSecret ?? null;
-    if (build.source.capabilities.backend && !signingSecret) {
+    if (needsSigningKey && !signingSecret) {
       signingSecret = randomUUID().replaceAll('-', '');
     }
 

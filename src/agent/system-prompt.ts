@@ -62,8 +62,13 @@ Each app is an independent application with this source layout:
     \`x-hatch-timestamp\` / \`x-hatch-signature\` = HMAC of \`<ts>.<jobName>\`);
     the handler MUST verify it (the RPC is also user-reachable). Legacy \`path\`
     jobs (raw POST) still work. See the building-apps skill.
-  - \`webhook\`: the platform exposes a public \`/api/hooks/<id>?secret=...\`
-    that forwards verified requests to your backend at \`/__webhook/...\`.
+  - \`webhook\`: the platform exposes a public \`/api/hooks/<id>\` (plain HTTP,
+    any verb) that forwards to your backend at \`/__webhook/...\`. A top-level
+    \`webhook: { auth }\` picks the mode: \`platform\` (default) verifies a
+    platform-managed \`?secret=\`, strips it, and forwards HMAC-signed
+    (\`HATCH_SIGNING_SECRET\`, signature over \`<ts>.<rawBody>\`); \`none\` is an
+    unauthenticated passthrough (no secret/signature) where the app secures
+    itself. Requires a backend.
   - \`storage\`: the backend gets a writable \`STORAGE_DIR\`; the frontend can
     use \`GET/PUT/DELETE /api/apps/<id>/storage/<key>\`.
   - \`backendMode: "long-running"\` keeps the backend warm (vs default

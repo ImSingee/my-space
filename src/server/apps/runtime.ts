@@ -7,6 +7,11 @@ import path from 'node:path';
 import { appBuildDir, appStorageDir } from '~agent/paths';
 import { db } from '~/db';
 import { subprocessSandboxEnv } from '../sandbox-env';
+import {
+  HATCH_SIGNATURE_HEADER,
+  HATCH_TIMESTAMP_HEADER,
+  hatchSignature,
+} from '../secrets';
 import { ensureAppDatabase } from './provision';
 
 /**
@@ -486,16 +491,31 @@ export function stopApp(id: string): void {
 }
 
 /**
+ * Cap (bytes) on a webhook body the platform buffers in order to HMAC-sign it.
+ * Signed webhooks ('platform' auth) must be read fully to compute the signature,
+ * so we bound them; the unsigned passthrough path still streams without a limit.
+ */
+const MAX_SIGNED_BODY_BYTES = 1024 * 1024;
+
+/**
  * Reverse-proxy a platform request to the app's Deno backend.
  * `stripPrefix` is removed from the pathname before forwarding (e.g. the
  * `/api/apps/<id>/rpc` Connect base path).
+ *
+ * When `signWithSecret` is set the body is buffered and signed with the per-app
+ * key (HMAC over `<timestamp>.<body>`), forwarding `x-hatch-timestamp` +
+ * `x-hatch-signature` so the backend can verify the platform vetted the call.
  */
 export async function proxyAppRequest(
   id: string,
   request: Request,
   stripPrefix: string,
   prependPath = '',
-  options: { stripSecretParam?: boolean; preserveAuthorization?: boolean } = {},
+  options: {
+    stripSecretParam?: boolean;
+    preserveAuthorization?: boolean;
+    signWithSecret?: string;
+  } = {},
 ): Promise<Response> {
   const port = await ensureAppRunning(id);
   const url = new URL(request.url);
@@ -558,7 +578,49 @@ export async function proxyAppRequest(
     method: request.method,
     headers,
   };
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
+  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+  if (options.signWithSecret) {
+    // Signed forward (platform webhook): buffer the (bounded) body so we can
+    // HMAC it, then attach the platform signature headers. GET/HEAD sign over an
+    // empty payload. Reject oversize bodies rather than buffer unbounded memory.
+    // Sign the RAW bytes (not a UTF-8 decode) so binary/non-UTF-8 webhook bodies
+    // verify correctly against the exact forwarded bytes.
+    let payload = Buffer.alloc(0);
+    if (hasBody) {
+      // Reject early when Content-Length already declares an oversize body...
+      const declared = Number(request.headers.get('content-length') ?? '');
+      if (Number.isFinite(declared) && declared > MAX_SIGNED_BODY_BYTES) {
+        return new Response('Payload too large', { status: 413 });
+      }
+      // ...but a missing/incorrect Content-Length (e.g. chunked transfer) can't
+      // be trusted, so read the stream incrementally and abort the moment the
+      // running total exceeds the cap rather than buffering it all first.
+      const reader = request.body?.getReader();
+      if (reader) {
+        const parts: Buffer[] = [];
+        let total = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          total += value.byteLength;
+          if (total > MAX_SIGNED_BODY_BYTES) {
+            await reader.cancel().catch(() => {});
+            return new Response('Payload too large', { status: 413 });
+          }
+          parts.push(Buffer.from(value));
+        }
+        payload = Buffer.concat(parts, total);
+      }
+      init.body = payload;
+    }
+    const timestamp = String(Date.now());
+    headers.set(HATCH_TIMESTAMP_HEADER, timestamp);
+    headers.set(
+      HATCH_SIGNATURE_HEADER,
+      hatchSignature(options.signWithSecret, timestamp, payload),
+    );
+  } else if (hasBody) {
     // Stream the request body straight through rather than buffering the whole
     // upload in memory, so a large body can't exhaust the server process.
     // `duplex: 'half'` is required by undici when the body is a stream.

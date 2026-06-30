@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
-import type { NormalizedManifest } from './apps/manifest';
+import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
 import { authMiddleware } from './auth';
 
 export type AppListItem = {
@@ -189,7 +189,14 @@ export type AppOps = {
     running: boolean;
   };
   cron: { enabled: boolean; jobs: CronJobView[] };
-  webhook: { enabled: boolean; url: string | null; secret: string | null };
+  webhook: {
+    enabled: boolean;
+    url: string | null;
+    /** Present only in 'platform' auth mode (the verified shared secret). */
+    secret: string | null;
+    /** Platform-side auth mode: 'platform' (secret + HMAC) or 'none'. */
+    auth: WebhookAuth;
+  };
   storage: {
     enabled: boolean;
     url: string | null;
@@ -208,7 +215,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
       return {
         backend: { capable: false, mode: null, running: false },
         cron: { enabled: false, jobs: [] },
-        webhook: { enabled: false, url: null, secret: null },
+        webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false, url: null, objects: [] },
       };
     }
@@ -234,7 +241,14 @@ export const getAppOps = createServerFn({ method: 'GET' })
       webhook: {
         enabled: Boolean(caps?.webhook),
         url: manifest?.webhook?.url ?? null,
-        secret: app.webhookSecret ?? null,
+        // Only surface the secret in platform-auth mode. A secret may still be
+        // persisted on the row (kept for rollback safety) while the live mode is
+        // 'none', but it is meaningless there, so don't leak it to the browser.
+        secret:
+          (manifest?.webhook?.auth ?? 'platform') === 'platform'
+            ? (app.webhookSecret ?? null)
+            : null,
+        auth: manifest?.webhook?.auth ?? 'platform',
       },
       storage: {
         enabled: Boolean(caps?.storage),
