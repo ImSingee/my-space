@@ -240,8 +240,9 @@ not exists`). Each app has its OWN database — no cross-app access.
 ## Extended capabilities (cron, webhook, storage, long-running)
 
 Turn these on in the manifest `capabilities` block. When a backend needs to
-serve plain HTTP paths (cron/webhook) alongside Connect RPC, wrap the Connect
-adapter and handle your custom paths first:
+serve plain HTTP paths (webhook, or legacy cron `path` jobs) alongside Connect
+RPC, wrap the Connect adapter and handle your custom paths first (RPC-method
+cron jobs need no wrapper — they go straight to the Connect router):
 
 ```ts
 import http from 'node:http';
@@ -271,16 +272,65 @@ http
 ### cron
 
 Set `"cron": true` and declare jobs in the manifest. `schedule` is a standard
-5-field cron expression (`minute hour day-of-month month day-of-week`). The
-platform POSTs `path` on schedule, and a "Run now" button is available on the
-app page.
+5-field cron expression (`minute hour day-of-month month day-of-week`). A "Run
+now" button is available on the app page.
+
+Prefer declaring a proto RPC **`method`** for each job: on schedule the platform
+calls that method on your declared service (Connect, empty request) — no custom
+URL needed. The method must exist in your `proto/` service.
 
 ```json
 "capabilities": { "cron": true, "backend": true, ... },
+"rpc": { "proto": "proto/service.proto", "service": "app.v1.MyService" },
 "cron": [
-  { "name": "cleanup", "schedule": "0 3 * * *", "path": "/__cron/cleanup" }
+  { "name": "cleanup", "schedule": "0 3 * * *", "method": "RunCleanup" }
 ]
 ```
+
+**Verify the call came from the platform.** Your RPC methods are also reachable
+by logged-in users, so a cron handler must authenticate the request. The
+platform injects a per-app `HATCH_SIGNING_SECRET` env var and signs every cron
+call with these headers: `x-hatch-cron` (job name), `x-hatch-timestamp` (unix
+ms), and `x-hatch-signature` (`sha256=` + hex HMAC-SHA256 of
+`<timestamp>.<jobName>`). Verify them in the handler via its `HandlerContext`:
+
+```ts
+import { Buffer } from 'node:buffer';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { Code, ConnectError } from '@connectrpc/connect';
+
+function assertFromPlatform(headers: Headers) {
+  const secret = Deno.env.get('HATCH_SIGNING_SECRET');
+  const ts = headers.get('x-hatch-timestamp');
+  const job = headers.get('x-hatch-cron');
+  const sig = headers.get('x-hatch-signature');
+  if (!secret || !ts || !job || !sig)
+    throw new ConnectError('unsigned', Code.PermissionDenied);
+  if (Math.abs(Date.now() - Number(ts)) > 5 * 60_000)
+    throw new ConnectError('stale', Code.PermissionDenied);
+  const want =
+    'sha256=' +
+    createHmac('sha256', secret).update(`${ts}.${job}`).digest('hex');
+  const a = Buffer.from(want),
+    b = Buffer.from(sig);
+  if (a.length !== b.length || !timingSafeEqual(a, b))
+    throw new ConnectError('bad signature', Code.PermissionDenied);
+}
+
+function routes(router: ConnectRouter) {
+  router.service(MyService, {
+    async runCleanup(_req, ctx) {
+      assertFromPlatform(ctx.requestHeader);
+      /* ... scheduled work ... */
+      return {};
+    },
+  });
+}
+```
+
+Legacy: a job may instead declare a raw `path`
+(`{ name, schedule, path: "/__cron/x" }`) that the platform POSTs to (also
+signed, same headers). Prefer `method`.
 
 ### webhook
 

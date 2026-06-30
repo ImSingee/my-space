@@ -1,5 +1,10 @@
 /** Server-only: cron scheduler that triggers app backends on schedule. */
 import { db, schema } from '~/db';
+import {
+  HATCH_SIGNATURE_HEADER,
+  HATCH_TIMESTAMP_HEADER,
+  hatchSignature,
+} from '../secrets';
 import type { CronJob, NormalizedManifest } from './manifest';
 import { nextRun, parseCron } from './cron-expr';
 import { callAppBackend } from './runtime';
@@ -62,22 +67,92 @@ async function cronJobsFor(appId: string): Promise<CronJob[]> {
   return manifest?.cron ?? [];
 }
 
-async function fire(appId: string, job: CronJob): Promise<void> {
+/**
+ * Resolve what the platform needs to invoke an app's cron target: the deployed
+ * RPC service name (for `method` jobs) and the per-app signing secret used to
+ * sign the call. Read fresh at fire time so a redeploy is picked up.
+ */
+async function cronInvokeContext(
+  appId: string,
+): Promise<{ service?: string; signingSecret?: string }> {
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq }) => eq(s.id, appId),
+    columns: { signingSecret: true, currentDeploymentId: true },
+  });
+  if (!app?.currentDeploymentId) return {};
+  const deployment = await db.query.deployments.findFirst({
+    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+    columns: { manifestNormalized: true },
+  });
+  const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
+  return {
+    service: manifest?.rpc?.service,
+    signingSecret: app.signingSecret ?? undefined,
+  };
+}
+
+/**
+ * Invoke a cron job's target. Preferred `method` jobs call the app's declared
+ * Connect RPC method with an empty request; legacy `path` jobs POST the raw
+ * path with a small JSON payload. Both carry an HMAC signature (over the job
+ * name + timestamp) so the backend can verify the call came from the platform.
+ */
+async function invokeCron(
+  appId: string,
+  job: CronJob,
+): Promise<{ status: number; body: string; target: string }> {
   const firedAt = new Date().toISOString();
+  const timestamp = String(Date.now());
+  const { service, signingSecret } = await cronInvokeContext(appId);
+
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'x-hatch-cron': job.name,
+    [HATCH_TIMESTAMP_HEADER]: timestamp,
+  };
+  // Sign the job name; the backend reconstructs it from the x-hatch-cron header.
+  if (signingSecret) {
+    headers[HATCH_SIGNATURE_HEADER] = hatchSignature(
+      signingSecret,
+      timestamp,
+      job.name,
+    );
+  }
+
+  let target: string;
+  let body: string;
+  if (job.method) {
+    if (!service) {
+      throw new Error(
+        `app has no deployed RPC service to call method "${job.method}"`,
+      );
+    }
+    // Connect unary over JSON: POST /<fully-qualified-service>/<method> with an
+    // empty request. Cron handlers read metadata from the x-hatch-* headers.
+    target = `/${service}/${job.method}`;
+    headers['connect-protocol-version'] = '1';
+    body = '{}';
+  } else {
+    target = job.path as string;
+    body = JSON.stringify({ job: job.name, firedAt });
+  }
+
+  const res = await callAppBackend(appId, target, {
+    method: 'POST',
+    headers,
+    body,
+  });
+  return { ...res, target };
+}
+
+async function fire(appId: string, job: CronJob): Promise<void> {
   try {
-    const res = await callAppBackend(appId, job.path, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-hatch-cron': job.name,
-      },
-      body: JSON.stringify({ job: job.name, firedAt }),
-    });
+    const res = await invokeCron(appId, job);
     const ok = res.status >= 200 && res.status < 300;
     await log(
       appId,
       ok ? 'info' : 'error',
-      `cron "${job.name}" → ${job.path} (${res.status})`,
+      `cron "${job.name}" → ${res.target} (${res.status})`,
       { status: res.status, body: res.body.slice(0, 500) },
     );
   } catch (error) {
@@ -182,24 +257,23 @@ export async function runCronJobNow(
   const jobs = await cronJobsFor(appId);
   const job = jobs.find((j) => j.name === jobName);
   if (!job) throw new Error(`Cron job "${jobName}" not found.`);
-  const res = await callAppBackend(appId, job.path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-hatch-cron': job.name },
-    body: JSON.stringify({ job: job.name, firedAt: new Date().toISOString() }),
-  });
+  const res = await invokeCron(appId, job);
   await log(
     appId,
     res.status >= 200 && res.status < 300 ? 'info' : 'error',
     `cron "${job.name}" run manually (${res.status})`,
     { status: res.status },
   );
-  return res;
+  return { status: res.status, body: res.body };
 }
 
 export type CronJobView = {
   name: string;
   schedule: string;
-  path: string;
+  /** RPC method invoked on schedule (new-style jobs), else null. */
+  method: string | null;
+  /** Legacy raw backend path POSTed on schedule, else null. */
+  path: string | null;
   nextRun: string | null;
 };
 
@@ -216,7 +290,8 @@ export async function listCronJobs(appId: string): Promise<CronJobView[]> {
     return {
       name: job.name,
       schedule: job.schedule,
-      path: job.path,
+      method: job.method ?? null,
+      path: job.path ?? null,
       nextRun: next,
     };
   });

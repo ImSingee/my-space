@@ -5,6 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { appBuildDir, appStorageDir } from '~agent/paths';
+import { db } from '~/db';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import { ensureAppDatabase } from './provision';
 
@@ -284,6 +285,15 @@ async function startBackend(id: string): Promise<number> {
   // the backend can trigger top-level workflows through the external API.
   const workflowsEnv = await buildWorkflowsEnv(buildDir);
 
+  // Per-app HMAC key so the backend can verify platform-originated requests
+  // (cron RPC calls). Absent for apps deployed before this column existed; such
+  // backends simply can't verify and the cron call still reaches them.
+  const appRow = await db.query.apps.findFirst({
+    where: (s, { eq }) => eq(s.id, id),
+    columns: { signingSecret: true },
+  });
+  const signingSecret = appRow?.signingSecret ?? null;
+
   // Scope filesystem access to the app's own build (read) and storage
   // (read/write) so one deployed backend can't read another app's build/storage
   // or platform files. Static imports of the bundled entry aren't gated by
@@ -349,6 +359,7 @@ async function startBackend(id: string): Promise<number> {
       DATABASE_URL: databaseUrl,
       STORAGE_DIR: storageDir,
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
+      ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -511,6 +522,12 @@ export async function proxyAppRequest(
     'host',
     'cookie',
     'x-hatch-secret',
+    // Platform→backend signature headers (cron RPC). Strip them from proxied
+    // (browser) requests so a client can never present forged signing headers;
+    // only the platform's direct callAppBackend path attaches them.
+    'x-hatch-timestamp',
+    'x-hatch-signature',
+    'x-hatch-cron',
     'connection',
     'keep-alive',
     'proxy-authenticate',

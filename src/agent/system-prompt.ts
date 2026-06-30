@@ -55,15 +55,20 @@ Each app is an independent application with this source layout:
   given element and returns an unmount function. Widgets bundle their own
   React, so just write normal React inside.
 - **Extended capabilities** (opt in via manifest \`capabilities\`):
-  - \`cron\`: declare jobs (\`{ name, schedule, path }\`, 5-field cron) in a
-    top-level \`cron\` array; the platform POSTs \`path\` on schedule.
+  - \`cron\`: declare jobs (\`{ name, schedule, method }\`, 5-field cron) in a
+    top-level \`cron\` array; on schedule the platform calls that proto RPC
+    \`method\` on your declared service (Connect, empty request). The platform
+    signs each call (env \`HATCH_SIGNING_SECRET\`; headers \`x-hatch-cron\` /
+    \`x-hatch-timestamp\` / \`x-hatch-signature\` = HMAC of \`<ts>.<jobName>\`);
+    the handler MUST verify it (the RPC is also user-reachable). Legacy \`path\`
+    jobs (raw POST) still work. See the building-apps skill.
   - \`webhook\`: the platform exposes a public \`/api/hooks/<id>?secret=...\`
     that forwards verified requests to your backend at \`/__webhook/...\`.
   - \`storage\`: the backend gets a writable \`STORAGE_DIR\`; the frontend can
     use \`GET/PUT/DELETE /api/apps/<id>/storage/<key>\`.
   - \`backendMode: "long-running"\` keeps the backend warm (vs default
-    \`serverless\`). Handle \`/__cron/*\` and \`/__webhook\` by wrapping the
-    Connect adapter (see the building-apps skill).
+    \`serverless\`). Handle \`/__webhook\` (and legacy \`/__cron/*\` paths) by
+    wrapping the Connect adapter (see the building-apps skill).
 - **Calling workflows** (top-level \`workflows\` array, not a capability flag):
   an app's backend can invoke top-level Workflows. The app does NOT define
   them — they are created in the Workflow module. Add a top-level

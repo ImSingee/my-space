@@ -224,6 +224,50 @@ async function deployAppInner(
       }
     }
 
+    // Validate cron jobs that target an RPC method. The app must stage a backend
+    // (capability AND a backend.entry) to receive the call, and the method must
+    // exist in the deployed proto service AND be unary — `invokeCron()` always
+    // sends a single unary Connect JSON request with an empty body. Without these
+    // checks an unsupported target would record a successful deployment yet fail
+    // only when the scheduler / "Run now" later invokes it. Legacy `path` jobs
+    // need no API. (Jobs only run when the cron capability is on, so we validate
+    // the effective normalized list.)
+    const methodCronJobs = (build.normalized.cron ?? []).filter(
+      (j) => j.method,
+    );
+    if (methodCronJobs.length > 0) {
+      if (!build.source.capabilities.backend || !build.source.backend) {
+        throw new Error(
+          'Cron jobs that call an RPC method require a backend: set ' +
+            'capabilities.backend and define backend.entry.',
+        );
+      }
+      const service = build.normalized.rpc?.service;
+      const methods = new Map(
+        (build.normalized.api?.services ?? [])
+          .filter((s) => !service || s.name === service)
+          .flatMap((s) => s.methods)
+          .map((m) => [m.name, m] as const),
+      );
+      for (const job of methodCronJobs) {
+        const method = service ? methods.get(job.method as string) : undefined;
+        if (!method) {
+          throw new Error(
+            `Cron job "${job.name}" targets RPC method "${job.method}", which ` +
+              "is not defined in the app's proto service. Add the method to the " +
+              'proto (and declare an rpc service), then redeploy.',
+          );
+        }
+        if (method.clientStreaming || method.serverStreaming) {
+          throw new Error(
+            `Cron job "${job.name}" targets RPC method "${job.method}", which ` +
+              'is a streaming method. Cron invokes a single unary request, so ' +
+              'the target must be a unary RPC method.',
+          );
+        }
+      }
+    }
+
     let dbName = app.dbName ?? null;
     if (build.source.capabilities.database) {
       await ensureAppDatabase(id);
@@ -233,6 +277,15 @@ async function deployAppInner(
     let webhookSecret = app.webhookSecret ?? null;
     if (build.source.capabilities.webhook && !webhookSecret) {
       webhookSecret = randomUUID().replaceAll('-', '');
+    }
+
+    // Mint a per-app HMAC key the first time a backend-capable app deploys. The
+    // platform signs the requests it makes into the backend (cron RPC calls) so
+    // the backend can verify they came from the platform. Persisted and reused
+    // across deploys; never exposed to the browser.
+    let signingSecret = app.signingSecret ?? null;
+    if (build.source.capabilities.backend && !signingSecret) {
+      signingSecret = randomUUID().replaceAll('-', '');
     }
 
     const artifact = deploymentArtifactDir(id, deploymentId);
@@ -291,6 +344,7 @@ async function deployAppInner(
           currentSourceCommit: published.commit,
           dbName,
           webhookSecret,
+          signingSecret,
           currentDeploymentId: deploymentId,
         })
         .where(eq(schema.apps.id, id));

@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Center,
@@ -247,12 +248,21 @@ export function OperationsPanel({
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs" c="dimmed" truncate>
-                            {job.path}
-                            {job.nextRun
-                              ? ` · next ${dayjs(job.nextRun).fromNow()}`
-                              : ''}
-                          </Text>
+                          <Group gap={6} wrap="nowrap" align="center">
+                            <Badge
+                              size="xs"
+                              variant="light"
+                              color={job.method ? 'blue' : 'gray'}
+                            >
+                              {job.method ? 'rpc' : 'path'}
+                            </Badge>
+                            <Text size="xs" c="dimmed" ff="monospace" truncate>
+                              {job.method ?? job.path}
+                              {job.nextRun
+                                ? ` · next ${dayjs(job.nextRun).fromNow()}`
+                                : ''}
+                            </Text>
+                          </Group>
                         </Table.Td>
                         <Table.Td w={110}>
                           <Button

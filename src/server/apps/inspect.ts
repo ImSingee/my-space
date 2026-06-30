@@ -84,7 +84,8 @@ export type AppRuntimeOps = {
     jobs: {
       name: string;
       schedule: string;
-      path: string;
+      method: string | null;
+      path: string | null;
       nextRun: string | null;
     }[];
   };

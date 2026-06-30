@@ -80,13 +80,27 @@ export const widgetSchema = z.object({
   defaultSize: widgetSizeSchema.default({ w: 4, h: 3 }),
 });
 
-export const cronJobSchema = z.object({
-  name: z.string().min(1),
-  /** Standard 5-field cron expression: minute hour day-of-month month day-of-week. */
-  schedule: z.string().min(1),
-  /** Backend path the platform POSTs to on schedule (e.g. "/__cron/cleanup"). */
-  path: z.string().min(1),
-});
+export const cronJobSchema = z
+  .object({
+    name: z.string().min(1),
+    /** Standard 5-field cron expression: minute hour day-of-month month day-of-week. */
+    schedule: z.string().min(1),
+    /**
+     * Preferred: the name of an RPC method on the app's declared service (e.g.
+     * `RunCleanup`). On schedule the platform invokes that method through Connect
+     * with an empty request and signs the call (HMAC) so the backend can trust
+     * it came from the platform. The method must exist in the app's proto.
+     */
+    method: z.string().min(1).optional(),
+    /**
+     * Legacy: a raw backend path the platform POSTs to (e.g. "/__cron/cleanup").
+     * Kept so apps authored before the RPC switch keep working; prefer `method`.
+     */
+    path: z.string().min(1).optional(),
+  })
+  .refine((j) => Boolean(j.method) !== Boolean(j.path), {
+    message: 'each cron job must declare exactly one of "method" or "path"',
+  });
 
 export type CronJob = z.infer<typeof cronJobSchema>;
 

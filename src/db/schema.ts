@@ -142,6 +142,14 @@ export const apps = pgTable(
     dbName: text(),
     /** Shared secret for verifying inbound webhook calls (webhook capability). */
     webhookSecret: text(),
+    /**
+     * Per-app HMAC key the platform uses to sign requests it makes INTO the
+     * backend (cron RPC calls today; reused by authenticated webhooks/KV). The
+     * backend gets it as `HATCH_SIGNING_SECRET` and verifies the signature so it
+     * can trust a request originated from the platform. Generated on the first
+     * deploy of a backend-capable app; never exposed to the browser.
+     */
+    signingSecret: text(),
     currentDeploymentId: ulid(),
     createdAt,
     updatedAt,
