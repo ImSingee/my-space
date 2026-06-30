@@ -1,0 +1,1 @@
+ALTER TABLE "dashboards" ADD COLUMN "auto_refresh" integer DEFAULT 0 NOT NULL;

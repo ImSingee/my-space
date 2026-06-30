@@ -20,6 +20,8 @@ import {
 } from '@tanstack/react-query';
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
 import {
+  IconCheck,
+  IconChevronDown,
   IconDots,
   IconFileText,
   IconPencil,
@@ -27,11 +29,15 @@ import {
   IconRefresh,
   IconTrash,
 } from '@tabler/icons-react';
-import { Suspense, useCallback, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { DashboardGrid } from '~components/dashboard/dashboard-grid';
 import { DashboardEmptyState } from '~components/dashboard/empty-state';
+import {
+  REFRESH_PRESETS,
+  formatInterval,
+} from '~components/dashboard/refresh-presets';
 import {
   appsQueryOptions,
   availableWidgetsQueryOptions,
@@ -44,6 +50,7 @@ import {
   deleteDashboard,
   removeDashboardWidget,
   renameDashboard,
+  setDashboardAutoRefresh,
   setDashboardDescription,
   updateDashboardLayout,
 } from '~server/apps';
@@ -88,6 +95,20 @@ function DashboardPage() {
   // widget refetches in place via its registered context.onRefresh handler).
   const [refreshSignal, setRefreshSignal] = useState(0);
 
+  // Grafana-style auto-refresh: when an interval is configured, tick the same
+  // refresh signal the manual button uses so every widget refetches in place.
+  // dashboardId is a dependency so switching dashboards restarts the timer with
+  // a fresh phase (otherwise a same-interval switch would inherit the old one).
+  const autoRefreshSeconds = current?.autoRefreshSeconds ?? 0;
+  useEffect(() => {
+    if (autoRefreshSeconds <= 0) return;
+    const id = setInterval(
+      () => setRefreshSignal((s) => s + 1),
+      autoRefreshSeconds * 1000,
+    );
+    return () => clearInterval(id);
+  }, [autoRefreshSeconds, dashboardId]);
+
   return (
     <Page
       title={current?.name ?? 'Dashboard'}
@@ -104,6 +125,7 @@ function DashboardPage() {
               <IconRefresh size={18} stroke={1.7} />
             </ActionIcon>
           </Tooltip>
+          {current ? <AutoRefreshMenu dashboard={current} /> : null}
           <AddWidgetMenu dashboardId={dashboardId} />
           {current ? <DashboardMenu dashboard={current} /> : null}
         </>
@@ -215,6 +237,52 @@ function DashboardWidgets({
         void flushLayout();
       }}
     />
+  );
+}
+
+function AutoRefreshMenu({ dashboard }: { dashboard: Dashboard }) {
+  const queryClient = useQueryClient();
+  const setAuto = useMutation({
+    mutationFn: (seconds: number) =>
+      setDashboardAutoRefresh({ data: { id: dashboard.id, seconds } }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({
+        queryKey: dashboardsQueryOptions.queryKey,
+      }),
+    onError: (error) => toast.error((error as Error).message),
+  });
+  const active = dashboard.autoRefreshSeconds > 0;
+
+  return (
+    <Menu position="bottom-end" withArrow shadow="md" width={160}>
+      <Menu.Target>
+        <Tooltip label="Auto refresh interval" withArrow>
+          <Button
+            type="button"
+            variant={active ? 'light' : 'default'}
+            rightSection={<IconChevronDown size={14} stroke={1.8} />}
+          >
+            {active ? formatInterval(dashboard.autoRefreshSeconds) : 'Off'}
+          </Button>
+        </Tooltip>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>Auto refresh</Menu.Label>
+        {REFRESH_PRESETS.map((preset) => (
+          <Menu.Item
+            key={preset.seconds}
+            rightSection={
+              preset.seconds === dashboard.autoRefreshSeconds ? (
+                <IconCheck size={14} stroke={2} />
+              ) : null
+            }
+            onClick={() => setAuto.mutate(preset.seconds)}
+          >
+            {preset.label}
+          </Menu.Item>
+        ))}
+      </Menu.Dropdown>
+    </Menu>
   );
 }
 

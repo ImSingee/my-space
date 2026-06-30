@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import { and, eq } from 'drizzle-orm';
+import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
 import { db, schema } from '~/db';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
 import { snapToSupportedSize } from './apps/manifest';
@@ -367,6 +368,8 @@ export type Dashboard = {
   description: string | null;
   pinned: boolean;
   sortOrder: number;
+  /** Auto-refresh interval in seconds; 0 disables auto-refresh. */
+  autoRefreshSeconds: number;
 };
 
 /** Make sure at least one dashboard always exists for the UI to land on. */
@@ -392,6 +395,7 @@ export const listDashboards = createServerFn({ method: 'GET' })
       description: d.description,
       pinned: d.pinned,
       sortOrder: d.sortOrder,
+      autoRefreshSeconds: d.autoRefresh,
     }));
   });
 
@@ -411,6 +415,7 @@ export const createDashboard = createServerFn({ method: 'POST' })
       description: row.description,
       pinned: row.pinned,
       sortOrder: row.sortOrder,
+      autoRefreshSeconds: row.autoRefresh,
     };
   });
 
@@ -446,6 +451,20 @@ export const setDashboardDescription = createServerFn({ method: 'POST' })
     await db
       .update(schema.dashboards)
       .set({ description: description || null })
+      .where(eq(schema.dashboards.id, data.id));
+    return { ok: true };
+  });
+
+export const setDashboardAutoRefresh = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; seconds: number }) => input)
+  .handler(async ({ data }) => {
+    // The UI offers a fixed preset list but we never trust the client to send a
+    // sane value, so clamp to a non-negative whole number of seconds (0 = off).
+    const seconds = clampRefreshSeconds(data.seconds);
+    await db
+      .update(schema.dashboards)
+      .set({ autoRefresh: seconds })
       .where(eq(schema.dashboards.id, data.id));
     return { ok: true };
   });

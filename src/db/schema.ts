@@ -499,6 +499,11 @@ export const dashboards = pgTable('dashboards', {
   description: text(),
   /** Whether this dashboard is pinned to the sidebar for quick access. */
   pinned: boolean().notNull().default(true),
+  /**
+   * Auto-refresh interval in seconds; 0 disables it. When > 0 the dashboard
+   * periodically refreshes every widget (Grafana-style).
+   */
+  autoRefresh: integer('auto_refresh').notNull().default(0),
   sortOrder: integer().notNull().default(0),
   createdAt,
   updatedAt,
