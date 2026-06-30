@@ -7,7 +7,12 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
-import { IconAppWindow, IconGripVertical, IconX } from '@tabler/icons-react';
+import {
+  IconAppWindow,
+  IconGripVertical,
+  IconRefresh,
+  IconX,
+} from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -21,9 +26,16 @@ import {
 export function WidgetCard({
   item,
   onRemove,
+  refreshSignal = 0,
 }: {
   item: DashboardItem;
   onRemove: () => void;
+  /**
+   * Monotonic counter bumped by the dashboard's "Refresh all" control. Each new
+   * value posts a `refresh` message to a ready widget; the initial value is
+   * ignored so a freshly mounted widget isn't refreshed redundantly.
+   */
+  refreshSignal?: number;
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
@@ -47,8 +59,21 @@ export function WidgetCard({
       if (cancelled || event.source !== frame.contentWindow) return;
       const data = event.data as { [WIDGET_CHANNEL]?: string } | null;
       if (!data || typeof data !== 'object') return;
-      if (data[WIDGET_CHANNEL] === 'ready') setStatus('ready');
-      else if (data[WIDGET_CHANNEL] === 'error') setStatus('error');
+      if (data[WIDGET_CHANNEL] === 'ready') {
+        setStatus('ready');
+        // Re-sync grid units on every (re)mount. The refresh reload fallback
+        // reuses the original srcdoc with the units inlined at load time, so a
+        // resized widget would otherwise remount with stale w/h (status stays
+        // 'ready', so the units effect below doesn't re-fire on its own).
+        frame.contentWindow?.postMessage(
+          {
+            [WIDGET_CHANNEL]: 'units',
+            w: unitsRef.current.w,
+            h: unitsRef.current.h,
+          },
+          '*',
+        );
+      } else if (data[WIDGET_CHANNEL] === 'error') setStatus('error');
     };
     window.addEventListener('message', onMessage);
 
@@ -84,6 +109,33 @@ export function WidgetCard({
     );
   }, [item.w, item.h, status]);
 
+  // Ask the widget to refetch in place (it must register context.onRefresh).
+  const requestRefresh = () => {
+    if (status !== 'ready') return;
+    frameRef.current?.contentWindow?.postMessage(
+      { [WIDGET_CHANNEL]: 'refresh' },
+      '*',
+    );
+  };
+
+  // Fan a dashboard-wide refresh out to this widget. Skip the first run so a
+  // freshly mounted card isn't refreshed immediately, and read status via a ref
+  // so this fires only when the signal changes — not on every ready transition.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const refreshMounted = useRef(false);
+  useEffect(() => {
+    if (!refreshMounted.current) {
+      refreshMounted.current = true;
+      return;
+    }
+    if (statusRef.current !== 'ready') return;
+    frameRef.current?.contentWindow?.postMessage(
+      { [WIDGET_CHANNEL]: 'refresh' },
+      '*',
+    );
+  }, [refreshSignal]);
+
   return (
     <Card
       withBorder
@@ -111,6 +163,18 @@ export function WidgetCard({
           </Text>
         </Group>
         <Group gap={2} wrap="nowrap" className="widget-no-drag">
+          <Tooltip label="Refresh" withArrow>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
+              aria-label="Refresh widget"
+              disabled={status !== 'ready'}
+              onClick={requestRefresh}
+            >
+              <IconRefresh size={15} />
+            </ActionIcon>
+          </Tooltip>
           <Tooltip label="Open app" withArrow>
             <ActionIcon
               variant="subtle"

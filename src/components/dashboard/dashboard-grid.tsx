@@ -41,10 +41,13 @@ export function DashboardGrid({
   items,
   onRemove,
   onLayoutChange,
+  refreshSignal,
 }: {
   items: DashboardItem[];
   onRemove: (id: string) => void;
   onLayoutChange: (layout: Layout[]) => void;
+  /** Bumped by the dashboard "Refresh all" control; forwarded to every widget. */
+  refreshSignal?: number;
 }) {
   // react-grid-layout measures container width on the client, so render it only
   // after mount to avoid SSR/hydration position mismatches.
@@ -131,7 +134,11 @@ export function DashboardGrid({
     >
       {items.map((item) => (
         <div key={item.id} className={classes.cell}>
-          <WidgetCard item={item} onRemove={() => onRemove(item.id)} />
+          <WidgetCard
+            item={item}
+            onRemove={() => onRemove(item.id)}
+            refreshSignal={refreshSignal}
+          />
         </div>
       ))}
     </ResponsiveGrid>

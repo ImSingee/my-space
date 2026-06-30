@@ -239,6 +239,7 @@ type WidgetSize = { w: number; h: number; width: number; height: number };
 type WidgetContext = {
   size: WidgetSize;
   onResize: (cb: (size: WidgetSize) => void) => () => void;
+  onRefresh: (cb: () => void) => () => void;
 };
 
 export function mount(
@@ -256,8 +257,11 @@ export function mount(
 Make widgets size-aware: use `context.size` / `context.onResize` to adapt the
 layout (e.g. hide labels when narrow, switch to a compact view at small pixel
 sizes). If you only support a few footprints, declare `supportedSizes` in the
-manifest (see above) so the dashboard snaps resizes to them. Widgets can also
-use the same Connect client pattern as the app.
+manifest (see above) so the dashboard snaps resizes to them. Register
+`context.onRefresh(() => …)` to refetch in place when the user refreshes the
+widget (per-widget button) or the whole dashboard — typically invalidate your
+TanStack Query keys. Widgets can also use the same Connect client pattern as the
+app.
 
 ## Database
 

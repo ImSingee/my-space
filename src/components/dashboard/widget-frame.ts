@@ -32,11 +32,16 @@ export function toModuleDataUrl(code: string): string {
  * Build the sandboxed document that mounts a widget bundle inside the iframe.
  *
  * The bootstrap calls `mount(element, context)` where `context` exposes the
- * widget's current {@link WidgetSize} and an `onResize` subscription:
+ * widget's current {@link WidgetSize}, an `onResize` subscription, and an
+ * `onRefresh` subscription:
  * - grid units (`w`/`h`) are inlined here and refreshed by `units` messages
  *   the host posts when the placement changes;
  * - pixel dimensions are measured in-frame with a ResizeObserver, so they stay
- *   accurate across responsive reflows without the host measuring anything.
+ *   accurate across responsive reflows without the host measuring anything;
+ * - `onRefresh` callbacks run when the host posts a `refresh` message (a
+ *   per-widget or dashboard-wide refresh), letting a widget refetch its data
+ *   in place without a remount; a widget that registers none is reloaded
+ *   instead, so the host's refresh control always does something.
  *
  * `moduleUrl` is a base64 `data:` URL (no quotes / `</script`), so inlining it
  * is safe.
@@ -74,6 +79,7 @@ body{font:14px/1.5 system-ui,-apple-system,sans-serif}
     let px = { width: Math.round(el.clientWidth), height: Math.round(el.clientHeight) };
     let size = { w: units.w, h: units.h, width: px.width, height: px.height };
     const listeners = new Set();
+    const refreshListeners = new Set();
     const same = (a, b) =>
       a.w === b.w && a.h === b.h && a.width === b.width && a.height === b.height;
     const recompute = () => {
@@ -94,9 +100,30 @@ body{font:14px/1.5 system-ui,-apple-system,sans-serif}
     window.addEventListener('message', (event) => {
       if (event.source !== parent) return;
       const data = event.data;
-      if (!data || data[channel] !== 'units') return;
-      units = { w: Number(data.w), h: Number(data.h) };
-      recompute();
+      if (!data) return;
+      if (data[channel] === 'units') {
+        units = { w: Number(data.w), h: Number(data.h) };
+        recompute();
+      } else if (data[channel] === 'refresh') {
+        const runRefresh = () => {
+          if (refreshListeners.size === 0) return false;
+          for (const cb of refreshListeners) {
+            try { cb(); } catch (e) {}
+          }
+          return true;
+        };
+        if (!runRefresh()) {
+          // No handler registered yet. React widgets register onRefresh from an
+          // effect that runs after mount() returned (and after we posted
+          // 'ready'), so give late registrations a tick before falling back to a
+          // full re-mount. The srcdoc + inlined data: module persist across the
+          // reload; the host re-sends current units on the new 'ready' so the
+          // remounted widget can't keep stale grid units.
+          setTimeout(() => {
+            if (!runRefresh()) location.reload();
+          }, 60);
+        }
+      }
     });
     const context = {
       get size() { return size; },
@@ -105,6 +132,11 @@ body{font:14px/1.5 system-ui,-apple-system,sans-serif}
         listeners.add(cb);
         try { cb(size); } catch (e) {}
         return () => { listeners.delete(cb); };
+      },
+      onRefresh(cb) {
+        if (typeof cb !== 'function') return () => {};
+        refreshListeners.add(cb);
+        return () => { refreshListeners.delete(cb); };
       },
     };
     const m = await import(${JSON.stringify(moduleUrl)});

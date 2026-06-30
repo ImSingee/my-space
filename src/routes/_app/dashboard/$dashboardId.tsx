@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  Tooltip,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import {
@@ -23,6 +24,7 @@ import {
   IconFileText,
   IconPencil,
   IconPlus,
+  IconRefresh,
   IconTrash,
 } from '@tabler/icons-react';
 import { Suspense, useCallback, useRef, useState } from 'react';
@@ -82,12 +84,26 @@ function DashboardPage() {
   // falling back to a canned default.
   const description = current?.description?.trim() || undefined;
 
+  // Bumping this fans a refresh out to every widget on the dashboard (each
+  // widget refetches in place via its registered context.onRefresh handler).
+  const [refreshSignal, setRefreshSignal] = useState(0);
+
   return (
     <Page
       title={current?.name ?? 'Dashboard'}
       description={description}
       actions={
         <>
+          <Tooltip label="Refresh all widgets" withArrow>
+            <ActionIcon
+              variant="default"
+              size="input-sm"
+              aria-label="Refresh all widgets"
+              onClick={() => setRefreshSignal((s) => s + 1)}
+            >
+              <IconRefresh size={18} stroke={1.7} />
+            </ActionIcon>
+          </Tooltip>
           <AddWidgetMenu dashboardId={dashboardId} />
           {current ? <DashboardMenu dashboard={current} /> : null}
         </>
@@ -100,13 +116,23 @@ function DashboardPage() {
           </Center>
         }
       >
-        <DashboardWidgets key={dashboardId} dashboardId={dashboardId} />
+        <DashboardWidgets
+          key={dashboardId}
+          dashboardId={dashboardId}
+          refreshSignal={refreshSignal}
+        />
       </Suspense>
     </Page>
   );
 }
 
-function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
+function DashboardWidgets({
+  dashboardId,
+  refreshSignal,
+}: {
+  dashboardId: string;
+  refreshSignal: number;
+}) {
   const queryClient = useQueryClient();
   const { data: widgets } = useSuspenseQuery(
     dashboardQueryOptions(dashboardId),
@@ -161,6 +187,7 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
   return (
     <DashboardGrid
       items={widgets}
+      refreshSignal={refreshSignal}
       onRemove={(id) => remove.mutate(id)}
       onLayoutChange={(layout) => {
         const next = layout.map((l) => ({

@@ -20,6 +20,8 @@ type WidgetSize = { w: number; h: number; width: number; height: number };
 type WidgetContext = {
   size: WidgetSize;
   onResize: (cb: (size: WidgetSize) => void) => () => void;
+  /** Runs when the user refreshes this widget (or the whole dashboard). */
+  onRefresh: (cb: () => void) => () => void;
 };
 
 /** Track the widget's current size. `onResize` fires immediately, then on every
@@ -77,6 +79,17 @@ function CounterWidget({ context }: { context?: WidgetContext }) {
       countSchema.parse(await client.increment({ amount: 1 })).count,
     onSuccess: (next) => queryClient.setQueryData(queryKey, next),
   });
+
+  // Refetch the count when the platform requests a refresh (per-widget refresh
+  // button or the dashboard's "Refresh all"). A no-op subscription when the
+  // host doesn't provide a context (e.g. standalone rendering).
+  useEffect(
+    () =>
+      context?.onRefresh(() => {
+        void queryClient.invalidateQueries({ queryKey });
+      }),
+    [context, queryClient],
+  );
 
   return (
     <div style={styles.card}>
