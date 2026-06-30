@@ -48,11 +48,11 @@ import {
   type Dashboard,
   createDashboard,
   renameDashboard,
-  renameSidebarItem,
   reorderDashboards,
   reorderSidebarItems,
   setDashboardPin,
   setSidebarPin,
+  updateSidebarItem,
 } from '~server/apps';
 import { workflowsQueryOptions } from '~queries/workflows';
 import { setWorkflowPinFn } from '~server/workflows';
@@ -170,10 +170,13 @@ function PinnedRow({
   children,
   onRename,
   onUnpin,
+  renameLabel = 'Rename',
 }: {
   children: ReactNode;
   onRename: () => void;
   onUnpin: () => void;
+  /** Label for the first (edit) menu item; defaults to "Rename". */
+  renameLabel?: string;
 }) {
   return (
     <Box className={classes.item}>
@@ -197,7 +200,7 @@ function PinnedRow({
               leftSection={<IconPencil size={15} stroke={1.7} />}
               onClick={onRename}
             >
-              Rename
+              {renameLabel}
             </Menu.Item>
             <Menu.Item
               leftSection={<IconPinnedOff size={15} stroke={1.7} />}
@@ -483,11 +486,9 @@ function PinnedApps() {
   const queryClient = useQueryClient();
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
   const { data: apps } = useQuery(appsQueryOptions);
-  const [renameTarget, setRenameTarget] = useState<{
-    id: string;
-    label: string;
-  } | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  const [editTarget, setEditTarget] = useState<{ id: string } | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editHash, setEditHash] = useState('');
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -504,13 +505,13 @@ function PinnedApps() {
     onError: (error) => toast.error((error as Error).message),
   });
 
-  const rename = useMutation({
-    mutationFn: (input: { id: string; label: string }) =>
-      renameSidebarItem({ data: input }),
+  const update = useMutation({
+    mutationFn: (input: { id: string; label: string; entryHash: string }) =>
+      updateSidebarItem({ data: input }),
     onSuccess: () => {
       void invalidate();
-      setRenameTarget(null);
-      toast.success('Renamed');
+      setEditTarget(null);
+      toast.success('Pin updated');
     },
     onError: (error) => toast.error((error as Error).message),
   });
@@ -536,9 +537,13 @@ function PinnedApps() {
       !pinnedIds.has(s.id),
   );
 
-  const submitRename = () => {
-    if (renameTarget && renameValue.trim()) {
-      rename.mutate({ id: renameTarget.id, label: renameValue.trim() });
+  const submitEdit = () => {
+    if (editTarget && editLabel.trim()) {
+      update.mutate({
+        id: editTarget.id,
+        label: editLabel.trim(),
+        entryHash: editHash,
+      });
     }
   };
 
@@ -620,9 +625,11 @@ function PinnedApps() {
           onReorder={(ids) => reorder.mutate(ids)}
           renderItem={(pin) => (
             <PinnedRow
+              renameLabel="Edit"
               onRename={() => {
-                setRenameTarget({ id: pin.id, label: pin.label });
-                setRenameValue(pin.label);
+                setEditTarget({ id: pin.id });
+                setEditLabel(pin.label);
+                setEditHash(pin.entryHash ?? '');
               }}
               onUnpin={() => setPin.mutate({ appId: pin.appId, pinned: false })}
             >
@@ -631,6 +638,7 @@ function PinnedApps() {
                   <Link
                     to="/apps/$appId"
                     params={{ appId: pin.appId }}
+                    hash={pin.entryHash ?? undefined}
                     draggable={false}
                     {...props}
                   />
@@ -649,30 +657,43 @@ function PinnedApps() {
       </Stack>
 
       <Modal
-        opened={renameTarget !== null}
-        onClose={() => setRenameTarget(null)}
-        title="Rename app"
+        opened={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        title="Edit pin"
         centered
       >
         <Stack gap="sm">
           <TextInput
             data-autofocus
             label="Name"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.currentTarget.value)}
+            value={editLabel}
+            onChange={(e) => setEditLabel(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                submitRename();
+                submitEdit();
+              }
+            }}
+          />
+          <TextInput
+            label="Entry point"
+            description="Open the app at a specific page. Leave blank for the app home."
+            placeholder="/settings"
+            value={editHash}
+            onChange={(e) => setEditHash(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitEdit();
               }
             }}
           />
           <Group justify="flex-end">
             <Button
               type="button"
-              loading={rename.isPending}
-              disabled={!renameValue.trim()}
-              onClick={submitRename}
+              loading={update.isPending}
+              disabled={!editLabel.trim()}
+              onClick={submitEdit}
             >
               Save
             </Button>

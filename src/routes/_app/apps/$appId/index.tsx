@@ -10,7 +10,12 @@ import {
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
-import { Link, createFileRoute, notFound } from '@tanstack/react-router';
+import {
+  Link,
+  createFileRoute,
+  notFound,
+  useRouterState,
+} from '@tanstack/react-router';
 import {
   IconDots,
   IconExternalLink,
@@ -36,12 +41,18 @@ export const Route = createFileRoute('/_app/apps/$appId/')({
 function AppView() {
   const app = Route.useLoaderData();
   const frameRef = useRef<HTMLIFrameElement>(null);
+  // The live iframe window, tracked so a hash change on the host (e.g. clicking
+  // a sidebar pin with a custom entry point while the app is already open) can
+  // be pushed into the already-loaded app without reloading it.
+  const winRef = useRef<Window | null>(null);
   const [loading, setLoading] = useState(true);
   // The shareable app URL uses the mutable slug; the route still resolves the
   // immutable id too, so old `/app/<id>/` links keep working.
   const src = `/app/${app.slug}/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const canOpen = app.status === 'deployed' && hasFrontend;
+  // Router hash is the fragment without '#' (e.g. '/settings'); '' = root.
+  const hostHash = useRouterState({ select: (s) => s.location.hash });
 
   // Mirror the embedded app's URL hash and document title out to the host page:
   // the host URL stays shareable/refreshable (its hash deep-links into the app)
@@ -96,6 +107,7 @@ function AppView() {
       titleObserver?.disconnect();
       titleObserver = null;
       win = null;
+      winRef.current = null;
     };
 
     const onLoad = () => {
@@ -113,6 +125,7 @@ function AppView() {
       setLoading(false);
       detach();
       win = next;
+      winRef.current = next;
       try {
         const doc = frame.contentDocument;
         if (!doc) return;
@@ -151,6 +164,23 @@ function AppView() {
       document.title = hostTitle;
     };
   }, [canOpen, src]);
+
+  // Push host hash changes into the already-loaded app. The seed-on-load above
+  // covers fresh loads (and app switches, which reload the iframe via `src`);
+  // this covers re-selecting a pin for the *current* app at a different entry
+  // point, where only the hash changes and the iframe document stays put. The
+  // equality guard converges with the iframe→host mirror above (no ping-pong).
+  useEffect(() => {
+    const win = winRef.current;
+    if (!win || !canOpen) return;
+    try {
+      if (win.location.hash.replace(/^#/, '') !== hostHash) {
+        win.location.hash = hostHash;
+      }
+    } catch {
+      // cross-origin frame
+    }
+  }, [hostHash, canOpen]);
 
   const reload = () => {
     if (!frameRef.current) return;

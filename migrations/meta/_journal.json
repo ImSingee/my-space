@@ -127,6 +127,13 @@
       "when": 1782850073812,
       "tag": "0017_adorable_turbo",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782851610580,
+      "tag": "0018_fearless_wendell_vaughn",
+      "breakpoints": true
     }
   ]
 }

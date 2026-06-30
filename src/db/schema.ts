@@ -549,6 +549,12 @@ export const sidebarItems = pgTable(
       .references(() => apps.id, { onDelete: 'cascade' }),
     label: text().notNull(),
     icon: text(),
+    /**
+     * Optional hash entry point into the app (apps use hash routing), stored as
+     * the fragment without the leading '#', e.g. '/settings'. null/empty opens
+     * the app root. Lets a pin deep-link to a specific page within the app.
+     */
+    entryHash: text(),
     sortOrder: integer().notNull().default(0),
     createdAt,
   },

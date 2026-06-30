@@ -4,6 +4,7 @@ import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
 import { db, schema } from '~/db';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
 import { snapToSupportedSize } from './apps/manifest';
+import { normalizeEntryHash } from './apps/sidebar';
 import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
 
@@ -677,6 +678,8 @@ export type SidebarItem = {
   id: string;
   appId: string;
   label: string;
+  /** Hash entry point within the app (no leading '#'); null opens the root. */
+  entryHash: string | null;
   status: schema.AppStatus;
 };
 
@@ -696,6 +699,7 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
         id: pin.id,
         appId: pin.appId,
         label: pin.label || app.name,
+        entryHash: pin.entryHash ?? null,
         status: app.status,
       });
     }
@@ -737,15 +741,23 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
     return { ok: true };
   });
 
-export const renameSidebarItem = createServerFn({ method: 'POST' })
+export const updateSidebarItem = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; label: string }) => input)
+  .validator(
+    (input: { id: string; label: string; entryHash?: string }) => input,
+  )
   .handler(async ({ data }) => {
     const label = data.label.trim();
     if (!label) throw new Error('Name cannot be empty.');
+    // Normalize the entry point to the bare hash fragment we store (or null for
+    // the app root). Only update it when the caller actually sent the field.
+    const entryHash =
+      data.entryHash === undefined
+        ? undefined
+        : normalizeEntryHash(data.entryHash);
     await db
       .update(schema.sidebarItems)
-      .set({ label })
+      .set(entryHash === undefined ? { label } : { label, entryHash })
       .where(eq(schema.sidebarItems.id, data.id));
     return { ok: true };
   });
