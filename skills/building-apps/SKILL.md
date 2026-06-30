@@ -218,19 +218,35 @@ Use **TanStack Query** (`useQuery`/`useMutation`) for backend calls — never
 ## Widgets
 
 Each widget is a standalone ES module that bundles its own React. It must export
-`mount(element)` and return an unmount function:
+`mount(element, context)` and return an unmount function. The optional `context`
+gives the widget its current size — grid units (`w`/`h`) plus live pixel
+dimensions (`width`/`height`) — and an `onResize` subscription that fires
+immediately and again on every resize or placement change:
 
 ```tsx
 import { createRoot } from 'react-dom/client';
 
-export function mount(element: HTMLElement): () => void {
+type WidgetSize = { w: number; h: number; width: number; height: number };
+type WidgetContext = {
+  size: WidgetSize;
+  onResize: (cb: (size: WidgetSize) => void) => () => void;
+};
+
+export function mount(
+  element: HTMLElement,
+  context?: WidgetContext,
+): () => void {
   const root = createRoot(element);
-  root.render(<MyWidget />);
+  // Read context.size for the initial size, and context.onResize(...) to react
+  // to the user resizing the widget or the dashboard reflowing it.
+  root.render(<MyWidget context={context} />);
   return () => root.unmount();
 }
 ```
 
-Widgets can use the same Connect client pattern as the app.
+Make widgets size-aware: use `context.size` / `context.onResize` to adapt the
+layout (e.g. hide labels when narrow, switch to a compact view at small pixel
+sizes). Widgets can also use the same Connect client pattern as the app.
 
 ## Database
 

@@ -12,46 +12,11 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
 import type { DashboardItem } from '~server/apps';
-
-/** Encode widget bundle source as a `data:` module URL (UTF-8 safe). */
-function toModuleDataUrl(code: string): string {
-  const bytes = new TextEncoder().encode(code);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `data:text/javascript;base64,${btoa(binary)}`;
-}
-
-/** Build the sandboxed document that mounts a widget bundle inside the iframe. */
-function widgetFrameHtml(moduleUrl: string): string {
-  // Run the widget in its own iframe document/realm instead of the dashboard
-  // page: a crashing or DOM-mutating widget can no longer corrupt the dashboard,
-  // and top-navigation/popups stay blocked (sandbox omits those tokens). The
-  // frame stays same-origin (allow-same-origin) because widgets use the
-  // documented Connect/storage clients, which need the signed-in user's
-  // same-origin session to reach `/api/apps/<id>/rpc` and `/storage`.
-  // NOTE: same-origin means this is a robustness/blast-radius boundary, not a
-  // hard security sandbox against malicious widget code — that needs per-app
-  // origins or a scoped postMessage proxy (a platform-level change, same
-  // limitation as cross-app runtime isolation). `moduleUrl` is base64 (no
-  // quotes / `</script`), so inlining it is safe.
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-html,body{margin:0;padding:0;height:100%}
-body{font:14px/1.5 system-ui,-apple-system,sans-serif}
-#hatch-widget-root{height:100%;overflow:auto}
-</style></head><body><div id="hatch-widget-root"></div>
-<script type="module">
-(async () => {
-  try {
-    const m = await import(${JSON.stringify(moduleUrl)});
-    if (typeof m.mount !== 'function') throw new Error('widget does not export mount()');
-    m.mount(document.getElementById('hatch-widget-root'));
-    parent.postMessage({ __hatchWidget: 'ready' }, '*');
-  } catch (e) {
-    parent.postMessage({ __hatchWidget: 'error', message: String((e && e.message) || e) }, '*');
-  }
-})();
-</script></body></html>`;
-}
+import {
+  WIDGET_CHANNEL,
+  toModuleDataUrl,
+  widgetFrameHtml,
+} from './widget-frame';
 
 export function WidgetCard({
   item,
@@ -65,6 +30,12 @@ export function WidgetCard({
     'loading',
   );
 
+  // Read the latest grid units inside the (url-keyed) load effect without
+  // rebuilding the frame when only the size changes — those go down as `units`
+  // messages instead, so a resize never reloads the widget.
+  const unitsRef = useRef({ w: item.w, h: item.h });
+  unitsRef.current = { w: item.w, h: item.h };
+
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
@@ -74,10 +45,10 @@ export function WidgetCard({
     // Only accept ready/error from THIS widget's frame.
     const onMessage = (event: MessageEvent) => {
       if (cancelled || event.source !== frame.contentWindow) return;
-      const data = event.data as { __hatchWidget?: string } | null;
+      const data = event.data as { [WIDGET_CHANNEL]?: string } | null;
       if (!data || typeof data !== 'object') return;
-      if (data.__hatchWidget === 'ready') setStatus('ready');
-      else if (data.__hatchWidget === 'error') setStatus('error');
+      if (data[WIDGET_CHANNEL] === 'ready') setStatus('ready');
+      else if (data[WIDGET_CHANNEL] === 'error') setStatus('error');
     };
     window.addEventListener('message', onMessage);
 
@@ -90,7 +61,7 @@ export function WidgetCard({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const code = await res.text();
       if (cancelled) return;
-      frame.srcdoc = widgetFrameHtml(toModuleDataUrl(code));
+      frame.srcdoc = widgetFrameHtml(toModuleDataUrl(code), unitsRef.current);
     })().catch(() => {
       if (!cancelled) setStatus('error');
     });
@@ -101,6 +72,17 @@ export function WidgetCard({
       frame.srcdoc = '';
     };
   }, [item.url]);
+
+  // Push grid-unit changes (a resize that lands new w/h) to the running widget
+  // without reloading it. Pixel size is measured inside the frame, so it needs
+  // no host message. Re-sends on ready too, in case w/h changed mid-load.
+  useEffect(() => {
+    if (status !== 'ready') return;
+    frameRef.current?.contentWindow?.postMessage(
+      { [WIDGET_CHANNEL]: 'units', w: item.w, h: item.h },
+      '*',
+    );
+  }, [item.w, item.h, status]);
 
   return (
     <Card
@@ -160,35 +142,50 @@ export function WidgetCard({
         </Group>
       </Group>
 
-      <iframe
-        ref={frameRef}
-        title={item.name}
-        // allow-scripts + allow-same-origin: scripts run and the widget keeps
-        // the same-origin session its Connect/storage client needs, while the
-        // omitted tokens still block top-navigation and popups. See
-        // widgetFrameHtml for why this is a robustness — not hard-security —
-        // boundary.
-        sandbox="allow-scripts allow-same-origin"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          border: 0,
-          width: '100%',
-          display: status === 'ready' ? 'block' : 'none',
-        }}
-      />
-      {status === 'loading' ? (
-        <Stack gap="xs" px={4} py={2} style={{ flex: 1 }}>
-          <Skeleton height={26} width="55%" radius="sm" />
-          <Skeleton height={11} radius="sm" />
-          <Skeleton height={11} width="80%" radius="sm" />
-        </Stack>
-      ) : null}
-      {status === 'error' ? (
-        <Text size="xs" c="red" py="sm">
-          Failed to load widget. Try redeploying the app.
-        </Text>
-      ) : null}
+      {/* The iframe stays laid out under any loading/error overlay so the
+          widget's in-frame ResizeObserver measures its real pixel size from the
+          first mount (a display:none frame would report 0x0 until shown). */}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        <iframe
+          ref={frameRef}
+          title={item.name}
+          // allow-scripts + allow-same-origin: scripts run and the widget keeps
+          // the same-origin session its Connect/storage client needs, while the
+          // omitted tokens still block top-navigation and popups. See
+          // widgetFrameHtml for why this is a robustness — not hard-security —
+          // boundary.
+          sandbox="allow-scripts allow-same-origin"
+          style={{
+            display: 'block',
+            border: 0,
+            width: '100%',
+            height: '100%',
+            visibility: status === 'ready' ? 'visible' : 'hidden',
+          }}
+        />
+        {status === 'loading' ? (
+          <Stack
+            gap="xs"
+            px={4}
+            py={2}
+            style={{ position: 'absolute', inset: 0 }}
+          >
+            <Skeleton height={26} width="55%" radius="sm" />
+            <Skeleton height={11} radius="sm" />
+            <Skeleton height={11} width="80%" radius="sm" />
+          </Stack>
+        ) : null}
+        {status === 'error' ? (
+          <Text
+            size="xs"
+            c="red"
+            py="sm"
+            style={{ position: 'absolute', inset: 0 }}
+          >
+            Failed to load widget. Try redeploying the app.
+          </Text>
+        ) : null}
+      </div>
     </Card>
   );
 }

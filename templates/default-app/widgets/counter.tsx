@@ -1,4 +1,4 @@
-import { StrictMode, type CSSProperties } from 'react';
+import { StrictMode, type CSSProperties, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   QueryClient,
@@ -13,6 +13,24 @@ import { z } from 'zod';
 import { CounterService } from '../gen/service_pb';
 
 declare const __RPC_BASE_URL__: string;
+
+/** Size the dashboard hands a widget: grid units (w/h) + live pixel size. */
+type WidgetSize = { w: number; h: number; width: number; height: number };
+/** Second argument the platform passes to `mount` (optional for portability). */
+type WidgetContext = {
+  size: WidgetSize;
+  onResize: (cb: (size: WidgetSize) => void) => () => void;
+};
+
+/** Track the widget's current size. `onResize` fires immediately, then on every
+ * resize/placement change — a subscription, not data fetching. */
+function useWidgetSize(context?: WidgetContext): WidgetSize | null {
+  const [size, setSize] = useState<WidgetSize | null>(
+    () => context?.size ?? null,
+  );
+  useEffect(() => context?.onResize(setSize), [context]);
+  return size;
+}
 
 const client = createClient(
   CounterService,
@@ -47,8 +65,9 @@ const styles: Record<string, CSSProperties> = {
   },
 };
 
-function CounterWidget() {
+function CounterWidget({ context }: { context?: WidgetContext }) {
   const queryClient = useQueryClient();
+  const size = useWidgetSize(context);
   const { data, isPending } = useQuery({
     queryKey,
     queryFn: async () => countSchema.parse(await client.getCount({})).count,
@@ -71,18 +90,28 @@ function CounterWidget() {
       >
         Increment
       </button>
+      {size ? (
+        <span style={styles.label}>
+          {size.w}×{size.h} · {size.width}×{size.height}px
+        </span>
+      ) : null}
     </div>
   );
 }
 
-/** Mount entry used by the platform dashboard. Returns an unmount function. */
-export function mount(element: HTMLElement): () => void {
+/** Mount entry used by the platform dashboard. The platform passes a `context`
+ * with the widget's current size and an `onResize` subscription. Returns an
+ * unmount function. */
+export function mount(
+  element: HTMLElement,
+  context?: WidgetContext,
+): () => void {
   const queryClient = new QueryClient();
   const root = createRoot(element);
   root.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <CounterWidget />
+        <CounterWidget context={context} />
       </QueryClientProvider>
     </StrictMode>,
   );

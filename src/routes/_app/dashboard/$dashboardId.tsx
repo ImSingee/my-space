@@ -163,13 +163,28 @@ function DashboardWidgets({ dashboardId }: { dashboardId: string }) {
       items={widgets}
       onRemove={(id) => remove.mutate(id)}
       onLayoutChange={(layout) => {
-        pendingLayout.current = layout.map((l) => ({
+        const next = layout.map((l) => ({
           id: l.i,
           x: l.x,
           y: l.y,
           w: l.w,
           h: l.h,
         }));
+        pendingLayout.current = next;
+        // Reflect the new geometry in the cache immediately. The layout save
+        // intentionally doesn't refetch, so without this a size-aware widget
+        // (one reading context.size.w/h) would keep its stale grid units until
+        // the next reload — the resized iframe never gets the `units` message.
+        // It also matches what RGL already rendered, so it can't fight a drag.
+        const byId = new Map(next.map((n) => [n.id, n]));
+        queryClient.setQueryData(
+          dashboardQueryOptions(dashboardId).queryKey,
+          (old) =>
+            old?.map((item) => {
+              const g = byId.get(item.id);
+              return g ? { ...item, x: g.x, y: g.y, w: g.w, h: g.h } : item;
+            }),
+        );
         void flushLayout();
       }}
     />

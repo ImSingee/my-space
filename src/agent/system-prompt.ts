@@ -51,8 +51,11 @@ Each app is an independent application with this source layout:
   database. Use \`query_app_db\` to create tables and inspect data (it
   provisions the database on first use).
 - **Widgets**: standalone ES modules shown on the platform dashboard. Each
-  widget file must \`export function mount(element)\` that renders into the
-  given element and returns an unmount function. Widgets bundle their own
+  widget file must \`export function mount(element, context)\` that renders into
+  the given element and returns an unmount function. \`context\` carries the
+  widget's size — grid units (\`w\`/\`h\`) and live pixel size
+  (\`width\`/\`height\`) — via \`context.size\` and a \`context.onResize\`
+  subscription, so widgets can adapt their layout. Widgets bundle their own
   React, so just write normal React inside.
 - **Extended capabilities** (opt in via manifest \`capabilities\`):
   - \`cron\`: declare jobs (\`{ name, schedule, method }\`, 5-field cron) in a

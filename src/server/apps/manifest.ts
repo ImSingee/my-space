@@ -247,7 +247,7 @@ export type WebhookAuth = z.infer<typeof webhookConfigSchema>['auth'];
 export type NormalizedWidget = {
   id: string;
   name: string;
-  /** ESM module URL exposing `mount(element, props)`. */
+  /** ESM module URL exposing `mount(element, context)`. */
   url: string;
   defaultSize: { w: number; h: number };
 };
