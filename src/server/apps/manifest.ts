@@ -45,6 +45,21 @@ const backendEntryPath = sourceRelativePath.refine(
   { message: 'backend entry must live under the "backend/" directory' },
 );
 
+/**
+ * The proto entry must live under the fixed `proto/` tree. `buf.yaml` points the
+ * module at `proto/`, the build only uploads `.proto` files from there, and the
+ * generated `gen/` output is git-ignored — so a proto elsewhere would neither
+ * compile nor be captured. Enforcing the path keeps the app's declared API
+ * discoverable by the platform.
+ */
+const protoEntryPath = sourceRelativePath.refine(
+  (p) => {
+    const segments = p.split(/[/\\]/);
+    return segments.length >= 2 && segments[0] === 'proto';
+  },
+  { message: 'proto entry must live under the "proto/" directory' },
+);
+
 export const widgetSizeSchema = z.object({
   w: z.number().int().min(1).max(12).default(4),
   h: z.number().int().min(1).max(12).default(3),
@@ -125,7 +140,7 @@ export const sourceManifestSchema = z.object({
   capabilities: capabilitiesSchema,
   backendMode: z.enum(['serverless', 'long-running']).default('serverless'),
   rpc: z
-    .object({ proto: sourceRelativePath, service: z.string().min(1) })
+    .object({ proto: protoEntryPath, service: z.string().min(1) })
     .optional(),
   backend: z.object({ entry: backendEntryPath }).optional(),
   app: z
@@ -144,6 +159,42 @@ export type NormalizedWidget = {
   /** ESM module URL exposing `mount(element, props)`. */
   url: string;
   defaultSize: { w: number; h: number };
+};
+
+/** A single RPC method parsed from the app's compiled proto descriptor. */
+export type RpcMethodApi = {
+  name: string;
+  /** Fully-qualified input message type (leading dot stripped). */
+  inputType: string;
+  /** Fully-qualified output message type (leading dot stripped). */
+  outputType: string;
+  clientStreaming: boolean;
+  serverStreaming: boolean;
+};
+
+/** A service (and its methods) defined in the app's proto. */
+export type RpcServiceApi = {
+  /** Fully-qualified service name, e.g. `app.v1.CounterService`. */
+  name: string;
+  methods: RpcMethodApi[];
+};
+
+/** A raw proto source file uploaded to the platform on deploy. */
+export type ProtoFile = {
+  /** Source-relative path, e.g. `proto/service.proto`. */
+  path: string;
+  content: string;
+};
+
+/**
+ * The app's declared API, captured at deploy time from its proto: every service
+ * + method (so the platform knows what the app exposes) and the raw proto
+ * sources (uploaded for reference / future regeneration). Populated by the build
+ * after `buf generate`; absent for apps without an RPC service.
+ */
+export type AppApi = {
+  services: RpcServiceApi[];
+  protoFiles: ProtoFile[];
 };
 
 export type NormalizedManifest = {
@@ -166,6 +217,12 @@ export type NormalizedManifest = {
   webhook?: { url: string };
   /** Blob storage base URL, when the storage capability is enabled. */
   storage?: { url: string };
+  /**
+   * The app's declared RPC API, captured from its proto at build time. Absent
+   * for apps without an RPC service. Lets the platform (and the manage UI) know
+   * exactly which services + methods an app exposes.
+   */
+  api?: AppApi;
 };
 
 /** Root path the platform serves an app's runtime assets + RPC under. */

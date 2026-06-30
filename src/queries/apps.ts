@@ -3,6 +3,7 @@ import {
   getDashboard,
   getAppOps,
   getDeploymentBuildLog,
+  getNormalizedManifest,
   listAvailableWidgets,
   listDashboards,
   listDeployments,
@@ -57,4 +58,10 @@ export const appOpsQueryOptions = (id: string) =>
   queryOptions({
     queryKey: ['apps', id, 'ops'],
     queryFn: () => getAppOps({ data: id }),
+  });
+
+export const normalizedManifestQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ['apps', id, 'manifest'],
+    queryFn: () => getNormalizedManifest({ data: id }),
   });

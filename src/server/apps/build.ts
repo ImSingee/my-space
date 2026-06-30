@@ -11,7 +11,10 @@ import {
   appSrcDir,
 } from '~agent/paths';
 import {
+  type AppApi,
   type NormalizedManifest,
+  type ProtoFile,
+  type RpcServiceApi,
   type SourceManifest,
   normalizeManifest,
   parseSourceManifest,
@@ -76,6 +79,109 @@ async function readManifest(src: string): Promise<SourceManifest> {
   return parseSourceManifest(json);
 }
 
+/**
+ * Minimal shape of a protoc/buf JSON `FileDescriptorSet`. proto3 JSON omits
+ * fields at their default value, so streaming flags are optional (absent =
+ * false) and type references carry a leading dot we strip when displaying.
+ */
+type DescriptorMethod = {
+  name?: string;
+  inputType?: string;
+  outputType?: string;
+  clientStreaming?: boolean;
+  serverStreaming?: boolean;
+};
+type DescriptorService = { name?: string; method?: DescriptorMethod[] };
+type DescriptorFile = {
+  name?: string;
+  package?: string;
+  service?: DescriptorService[];
+};
+type FileDescriptorSet = { file?: DescriptorFile[] };
+
+function stripLeadingDot(t: string): string {
+  return t.startsWith('.') ? t.slice(1) : t;
+}
+
+/** Map a compiled descriptor set to the platform's service/method API view. */
+function parseServices(set: FileDescriptorSet): RpcServiceApi[] {
+  const services: RpcServiceApi[] = [];
+  for (const file of set.file ?? []) {
+    const pkg = file.package ? `${file.package}.` : '';
+    for (const svc of file.service ?? []) {
+      if (!svc.name) continue;
+      services.push({
+        name: `${pkg}${svc.name}`,
+        methods: (svc.method ?? []).map((m) => ({
+          name: m.name ?? '',
+          inputType: stripLeadingDot(m.inputType ?? ''),
+          outputType: stripLeadingDot(m.outputType ?? ''),
+          clientStreaming: m.clientStreaming ?? false,
+          serverStreaming: m.serverStreaming ?? false,
+        })),
+      });
+    }
+  }
+  return services;
+}
+
+/** Recursively read every `.proto` under the app's fixed `proto/` directory. */
+async function collectProtoFiles(src: string): Promise<ProtoFile[]> {
+  const protoRoot = path.join(src, 'proto');
+  if (!(await pathExists(protoRoot))) return [];
+  const files: ProtoFile[] = [];
+  async function walk(dir: string): Promise<void> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        await walk(full);
+      } else if (e.isFile() && e.name.endsWith('.proto')) {
+        files.push({
+          path: path.relative(src, full).split(path.sep).join('/'),
+          content: await fs.readFile(full, 'utf8'),
+        });
+      }
+    }
+  }
+  await walk(protoRoot);
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return files;
+}
+
+/**
+ * Capture the app's declared API: compile the proto module to a JSON descriptor
+ * set (so we enumerate services + methods exactly as the wire sees them) and
+ * collect the raw proto sources for upload. Runs alongside `buf generate` and is
+ * keyed off the same `proto/` module.
+ */
+async function extractAppApi(src: string): Promise<AppApi> {
+  // Write to a temp file (not stdout) so buf warnings on stderr never corrupt
+  // the JSON we parse. The file lives outside the staged output dir.
+  const descriptorPath = path.join(
+    BUILD_WORK_DIR,
+    `descriptor-${randomUUID()}.json`,
+  );
+  await fs.mkdir(path.dirname(descriptorPath), { recursive: true });
+  try {
+    const built = await run('buf', ['build', '-o', descriptorPath], {
+      cwd: src,
+    });
+    if (built.code !== 0) {
+      throw new Error(`buf build (API descriptor) failed:\n${built.output}`);
+    }
+    const set = JSON.parse(
+      await fs.readFile(descriptorPath, 'utf8'),
+    ) as FileDescriptorSet;
+    return {
+      services: parseServices(set),
+      protoFiles: await collectProtoFiles(src),
+    };
+  } finally {
+    await fs.rm(descriptorPath, { force: true });
+  }
+}
+
 /** Shared esbuild define for browser bundles (app + widgets). */
 function browserDefine(id: string, name: string): Record<string, string> {
   return {
@@ -124,14 +230,21 @@ export async function buildApp(
     await fs.rm(out, { recursive: true, force: true });
     await fs.mkdir(out, { recursive: true });
 
-    // 1) Connect codegen from proto (if the app has a backend RPC service).
+    // 1) Connect codegen from proto (if the app has a backend RPC service). We
+    // also compile the proto to a descriptor set so the platform records the
+    // app's declared API (services + methods) and uploads the raw proto.
     const protoPath = manifest.rpc ? path.join(src, manifest.rpc.proto) : null;
+    let api: AppApi | undefined;
     if (manifest.rpc && protoPath && (await pathExists(protoPath))) {
       const gen = await run('buf', ['generate'], { cwd: src });
       logs.push(`$ buf generate\n${gen.output.trim()}`);
       if (gen.code !== 0) {
         throw new Error(`Connect codegen failed:\n${gen.output}`);
       }
+      api = await extractAppApi(src);
+      logs.push(
+        `captured app API: ${api.services.length} service(s), ${api.protoFiles.length} proto file(s)`,
+      );
     }
 
     // 2) Install app-declared npm dependencies. A `package.json` lets the app
@@ -299,6 +412,7 @@ export async function buildApp(
     }
 
     const normalized = normalizeManifest(manifest);
+    if (api) normalized.api = api;
     await fs.writeFile(
       path.join(out, 'manifest.normalized.json'),
       JSON.stringify(normalized, null, 2),

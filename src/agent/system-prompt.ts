@@ -34,10 +34,12 @@ Each app is an independent application with this source layout:
   buf.yaml/buf.gen.yaml# Connect codegen config (don't usually need to touch)
 \`\`\`
 
-- **Codegen**: \`deploy_app\` runs \`buf generate\` to create the Connect
-  client + server stubs at \`gen/service_pb.ts\` from \`proto/service.proto\`.
-  Import them as \`../gen/service_pb\` (frontend) or \`../gen/service_pb.ts\`
-  (Deno backend). Never write \`gen/\` by hand.
+- **Codegen**: proto files MUST live under the fixed \`proto/\` directory. The
+  build runs \`buf generate\` to create the Connect client + server stubs at
+  \`gen/service_pb.ts\` from \`proto/service.proto\`. Import them as
+  \`../gen/service_pb\` (frontend) or \`../gen/service_pb.ts\` (Deno backend).
+  Never write \`gen/\` by hand — it is git-ignored and regenerated on every
+  deploy, which also uploads the proto so the platform can show the app's API.
 - **Frontend**: React SPA using TanStack Router (hash history) + TanStack Query.
   It calls the backend through a generated Connect client whose base URL is the
   injected global \`__RPC_BASE_URL__\`. The template already wires this up. Add

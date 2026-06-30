@@ -41,6 +41,7 @@ import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
+import { ApiPanel } from '~components/apps/api-panel';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
@@ -264,6 +265,13 @@ function AppDetailPage() {
           dbName={app.dbName ?? null}
           dbEnabled={Boolean(capabilities?.database) || Boolean(app.dbName)}
         />
+
+        {capabilities?.backend ? (
+          <>
+            <Divider />
+            <ApiPanel appId={app.id} />
+          </>
+        ) : null}
 
         <Divider />
 

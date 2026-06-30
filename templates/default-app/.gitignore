@@ -1,2 +1,5 @@
 # Installed by the platform build (deno install), never committed.
 node_modules/
+
+# Connect codegen output (regenerated from proto/ by the platform on build).
+gen/

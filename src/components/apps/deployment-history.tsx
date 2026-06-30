@@ -37,6 +37,7 @@ import {
   appOpsQueryOptions,
   deploymentBuildLogQueryOptions,
   deploymentsQueryOptions,
+  normalizedManifestQueryOptions,
 } from '~queries/apps';
 import type { DeploymentSummary } from '~server/apps/manage';
 import { rollbackAppFn } from '~server/apps';
@@ -295,6 +296,10 @@ export function DeploymentHistory({ appId }: { appId: string }) {
       // refresh the Operations panel on this page too; the deployments + loader
       // invalidation alone leaves its cached ops data stale.
       void qc.invalidateQueries(appOpsQueryOptions(appId));
+      // The restored deployment may declare a different RPC API (proto), so
+      // refresh the API panel's manifest cache as well — otherwise it keeps
+      // showing the previous deployment's services/proto until a focus refetch.
+      void qc.invalidateQueries(normalizedManifestQueryOptions(appId));
       void router.invalidate();
     },
     onError: (error) => toast.error((error as Error).message),
