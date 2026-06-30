@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
 import { db, schema } from '~/db';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
@@ -706,38 +706,72 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
     return items;
   });
 
+async function appendSidebarPin(appId: string) {
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq: e }) => e(s.id, appId),
+  });
+  if (!app) throw new Error('App not found.');
+  const count = await db.$count(schema.sidebarItems);
+  const [row] = await db
+    .insert(schema.sidebarItems)
+    .values({ appId, label: app.name, sortOrder: count })
+    .returning();
+  return row;
+}
+
+/**
+ * App-level pin toggle used by the app page: `pinned: true` ensures the app has
+ * at least one sidebar pin, `pinned: false` removes every pin for the app.
+ */
 export const setSidebarPin = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((input: { appId: string; pinned: boolean }) => input)
   .handler(async ({ data }) => {
-    const existing = await db.query.sidebarItems.findFirst({
-      where: (s, { eq: e }) => e(s.appId, data.appId),
-    });
     if (data.pinned) {
-      if (existing) return existing;
-      const app = await db.query.apps.findFirst({
-        where: (s, { eq: e }) => e(s.id, data.appId),
-      });
-      if (!app) throw new Error('App not found.');
-      const count = await db.query.sidebarItems.findMany();
-      const [row] = await db
-        .insert(schema.sidebarItems)
-        .values({
-          appId: data.appId,
-          label: app.name,
-          sortOrder: count.length,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (row) return row;
-      // Lost a concurrent pin race: return the existing pin.
-      return db.query.sidebarItems.findFirst({
-        where: (s, { eq: e }) => e(s.appId, data.appId),
+      // The app_id index is no longer unique (apps can be pinned many times via
+      // addSidebarItem), so guard this "ensure one pin" toggle against
+      // concurrent calls with a per-app advisory lock — otherwise two racing
+      // requests could both pass the existence check and create duplicates.
+      return db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${data.appId}))`,
+        );
+        const existing = await tx.query.sidebarItems.findFirst({
+          where: (s, { eq: e }) => e(s.appId, data.appId),
+        });
+        if (existing) return existing;
+        const app = await tx.query.apps.findFirst({
+          where: (s, { eq: e }) => e(s.id, data.appId),
+        });
+        if (!app) throw new Error('App not found.');
+        const count = await tx.$count(schema.sidebarItems);
+        const [row] = await tx
+          .insert(schema.sidebarItems)
+          .values({ appId: data.appId, label: app.name, sortOrder: count })
+          .returning();
+        return row;
       });
     }
     await db
       .delete(schema.sidebarItems)
       .where(eq(schema.sidebarItems.appId, data.appId));
+    return { ok: true };
+  });
+
+/** Always create an additional sidebar pin (apps may be pinned many times). */
+export const addSidebarItem = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { appId: string }) => input)
+  .handler(async ({ data }) => appendSidebarPin(data.appId));
+
+/** Remove a single sidebar pin by its id (leaves the app's other pins). */
+export const removeSidebarItem = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await db
+      .delete(schema.sidebarItems)
+      .where(eq(schema.sidebarItems.id, data.id));
     return { ok: true };
   });
 

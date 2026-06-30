@@ -134,6 +134,13 @@
       "when": 1782851610580,
       "tag": "0018_fearless_wendell_vaughn",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782853522919,
+      "tag": "0019_gorgeous_vampiro",
+      "breakpoints": true
     }
   ]
 }

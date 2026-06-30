@@ -46,7 +46,9 @@ import {
 } from '~queries/apps';
 import {
   type Dashboard,
+  addSidebarItem,
   createDashboard,
+  removeSidebarItem,
   renameDashboard,
   reorderDashboards,
   reorderSidebarItems,
@@ -495,12 +497,40 @@ function PinnedApps() {
       queryKey: sidebarItemsQueryOptions.queryKey,
     });
 
-  const setPin = useMutation({
-    mutationFn: (input: { appId: string; pinned: boolean }) =>
-      setSidebarPin({ data: input }),
-    onSuccess: (_res, input) => {
+  const hostHash = useRouterState({ select: (s) => s.location.hash });
+
+  // First-time pin: idempotent (server uses an advisory lock) so a double-click
+  // on an unpinned app can't create duplicate root shortcuts.
+  const pin = useMutation({
+    mutationFn: (appId: string) =>
+      setSidebarPin({ data: { appId, pinned: true } }),
+    onSuccess: () => {
       void invalidate();
-      toast.success(input.pinned ? 'Pinned to sidebar' : 'Unpinned');
+      toast.success('Pinned to sidebar');
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  // Extra shortcut for an already-pinned app: always inserts a new pin, then
+  // jumps into editing so it can be given a distinct name/entry point.
+  const add = useMutation({
+    mutationFn: (appId: string) => addSidebarItem({ data: { appId } }),
+    onSuccess: (row) => {
+      void invalidate();
+      if (row) {
+        setEditTarget({ id: row.id });
+        setEditLabel(row.label);
+        setEditHash('');
+      }
+    },
+    onError: (error) => toast.error((error as Error).message),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => removeSidebarItem({ data: { id } }),
+    onSuccess: () => {
+      void invalidate();
+      toast.success('Unpinned');
     },
     onError: (error) => toast.error((error as Error).message),
   });
@@ -528,14 +558,25 @@ function PinnedApps() {
     onSettled: () => void invalidate(),
   });
 
-  const pinnedIds = new Set((pins ?? []).map((p) => p.appId));
   // Only deployed apps with a frontend can be opened from the sidebar.
-  const candidates = (apps ?? []).filter(
-    (s) =>
-      s.status === 'deployed' &&
-      Boolean(s.capabilities?.frontend) &&
-      !pinnedIds.has(s.id),
+  const openable = (apps ?? []).filter(
+    (s) => s.status === 'deployed' && Boolean(s.capabilities?.frontend),
   );
+  const pinnedIds = new Set((pins ?? []).map((p) => p.appId));
+  const unpinnedApps = openable.filter((s) => !pinnedIds.has(s.id));
+  const pinnedApps = openable.filter((s) => pinnedIds.has(s.id));
+
+  // How many pins each app has, so a pin only needs hash-aware highlighting
+  // when its app is pinned more than once (single pins stay active app-wide).
+  const pinCountByApp = new Map<string, number>();
+  for (const p of pins ?? []) {
+    pinCountByApp.set(p.appId, (pinCountByApp.get(p.appId) ?? 0) + 1);
+  }
+  const isPinActive = (pin: { appId: string; entryHash: string | null }) => {
+    if (!isActive(`/apps/${pin.appId}`)) return false;
+    if ((pinCountByApp.get(pin.appId) ?? 0) <= 1) return true;
+    return hostHash === (pin.entryHash ?? '');
+  };
 
   const submitEdit = () => {
     if (editTarget && editLabel.trim()) {
@@ -558,7 +599,7 @@ function PinnedApps() {
       : classes.actionButton;
 
   const addControl =
-    candidates.length > 0 ? (
+    openable.length > 0 ? (
       <Menu position="right-start" withArrow shadow="md" width={240}>
         <Menu.Target>
           <ActionIcon
@@ -573,19 +614,40 @@ function PinnedApps() {
           </ActionIcon>
         </Menu.Target>
         <Menu.Dropdown>
-          <Menu.Label>Pin a deployed app</Menu.Label>
-          {candidates.map((s) => (
-            <Menu.Item
-              key={s.id}
-              leftSection={<IconAppWindow size={16} stroke={1.6} />}
-              disabled={setPin.isPending}
-              onClick={() => setPin.mutate({ appId: s.id, pinned: true })}
-            >
-              <Text size="sm" truncate>
-                {s.name}
-              </Text>
-            </Menu.Item>
-          ))}
+          {unpinnedApps.length > 0 ? (
+            <>
+              <Menu.Label>Pin a deployed app</Menu.Label>
+              {unpinnedApps.map((s) => (
+                <Menu.Item
+                  key={s.id}
+                  leftSection={<IconAppWindow size={16} stroke={1.6} />}
+                  disabled={pin.isPending}
+                  onClick={() => pin.mutate(s.id)}
+                >
+                  <Text size="sm" truncate>
+                    {s.name}
+                  </Text>
+                </Menu.Item>
+              ))}
+            </>
+          ) : null}
+          {pinnedApps.length > 0 ? (
+            <>
+              <Menu.Label>Add another shortcut</Menu.Label>
+              {pinnedApps.map((s) => (
+                <Menu.Item
+                  key={s.id}
+                  leftSection={<IconAppWindow size={16} stroke={1.6} />}
+                  disabled={add.isPending}
+                  onClick={() => add.mutate(s.id)}
+                >
+                  <Text size="sm" truncate>
+                    {s.name}
+                  </Text>
+                </Menu.Item>
+              ))}
+            </>
+          ) : null}
           <Menu.Divider />
           <Menu.Item
             leftSection={<IconSparkles size={16} stroke={1.6} />}
@@ -631,7 +693,7 @@ function PinnedApps() {
                 setEditLabel(pin.label);
                 setEditHash(pin.entryHash ?? '');
               }}
-              onUnpin={() => setPin.mutate({ appId: pin.appId, pinned: false })}
+              onUnpin={() => remove.mutate(pin.id)}
             >
               <NavLink
                 renderRoot={(props) => (
@@ -647,7 +709,7 @@ function PinnedApps() {
                 leftSection={
                   <AppGlyph name={pin.label} seed={pin.appId} size="sm" />
                 }
-                active={isActive(`/apps/${pin.appId}`)}
+                active={isPinActive(pin)}
                 variant="light"
                 pr={32}
               />

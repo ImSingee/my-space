@@ -559,9 +559,9 @@ export const sidebarItems = pgTable(
     createdAt,
   },
   (table) => [
-    // One sidebar pin per app: the pin path checks-then-inserts, so the DB must
-    // reject duplicate concurrent pins.
-    uniqueIndex('sidebar_items_app_idx').on(table.appId),
+    // Apps may be pinned multiple times (each pin carries its own label and
+    // entry hash), so this is a plain lookup index, not a unique constraint.
+    index('sidebar_items_app_idx').on(table.appId),
   ],
 );
 
