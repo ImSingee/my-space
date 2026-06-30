@@ -104,7 +104,8 @@ Keep `manifest.json` consistent with the files. Example:
     "backend": true,
     "cron": false,
     "webhook": false,
-    "storage": false
+    "storage": false,
+    "kv": false
   },
   "backendMode": "serverless",
   "rpc": { "proto": "proto/service.proto", "service": "app.v1.TodoService" },
@@ -378,6 +379,57 @@ Set `"storage": true`. The backend receives a writable `STORAGE_DIR` env var for
 blobs/files (use `node:fs/promises`). The frontend can use the authenticated
 HTTP API: `GET/PUT/DELETE /api/apps/<id>/storage/<key>`, and
 `GET /api/apps/<id>/storage/` returns a JSON list of objects.
+
+### kv (key/value store)
+
+Set `"kv": true` for a simple per-app key/value store — small durable values like
+tokens, config, or counters — kept in the PLATFORM database. Use it instead of
+the heavier `database` capability when you only need a few values, and instead of
+`storage` when the data is small text (not blobs). Limits: key ≤ 512 chars, value
+≤ 64 KB, ≤ 1000 keys per app.
+
+The backend reads/writes over an injected `HATCH_KV_URL`, signing each request
+with `HATCH_SIGNING_SECRET` (HMAC over `<timestamp>.<rawBody>`, empty body for
+GET/DELETE) — the same handshake the platform uses for cron/webhooks. Requires a
+backend (only backend-capable apps get a signing secret).
+
+```ts
+import { createHmac } from 'node:crypto';
+
+const KV = Deno.env.get('HATCH_KV_URL')!;
+const SECRET = Deno.env.get('HATCH_SIGNING_SECRET')!;
+
+function sign(body: string) {
+  const ts = String(Date.now());
+  const sig = `sha256=${createHmac('sha256', SECRET).update(`${ts}.${body}`).digest('hex')}`;
+  return { 'x-hatch-timestamp': ts, 'x-hatch-signature': sig };
+}
+
+async function kvGet(key: string): Promise<string | null> {
+  const res = await fetch(`${KV}/${encodeURIComponent(key)}`, {
+    headers: sign(''),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`KV get ${res.status}`);
+  return (await res.json()).value as string;
+}
+
+async function kvSet(key: string, value: string, secret = false) {
+  const body = JSON.stringify({ value, secret });
+  const res = await fetch(`${KV}/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...sign(body) },
+    body,
+  });
+  if (!res.ok) throw new Error(`KV set ${res.status}`);
+}
+```
+
+Endpoints: `GET {HATCH_KV_URL}` lists all entries (`{ items }`), `GET .../<key>`
+reads one, `PUT .../<key>` upserts `{ value, secret? }`, `DELETE .../<key>`
+removes. Mark a value `secret: true` to hide its plaintext in the manage UI
+(the owner can overwrite it there but not read it); your backend always reads the
+real value.
 
 ### long-running backends
 

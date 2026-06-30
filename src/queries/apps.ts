@@ -4,6 +4,7 @@ import {
   getAppOps,
   getDeploymentBuildLog,
   getNormalizedManifest,
+  listAppKvFn,
   listAvailableWidgets,
   listCronRunsFn,
   listDashboards,
@@ -77,4 +78,10 @@ export const normalizedManifestQueryOptions = (id: string) =>
   queryOptions({
     queryKey: ['apps', id, 'manifest'],
     queryFn: () => getNormalizedManifest({ data: id }),
+  });
+
+export const appKvQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ['apps', id, 'kv'],
+    queryFn: () => listAppKvFn({ data: id }),
   });

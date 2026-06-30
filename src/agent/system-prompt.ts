@@ -71,6 +71,11 @@ Each app is an independent application with this source layout:
     itself. Requires a backend.
   - \`storage\`: the backend gets a writable \`STORAGE_DIR\`; the frontend can
     use \`GET/PUT/DELETE /api/apps/<id>/storage/<key>\`.
+  - \`kv\`: a simple per-app key/value store (small tokens/config, not blobs) in
+    the platform DB. The backend reads/writes via injected \`HATCH_KV_URL\`,
+    signing each call with \`HATCH_SIGNING_SECRET\` (HMAC over \`<ts>.<rawBody>\`).
+    The manage UI shows entries; values marked \`secret\` are masked there
+    (overwrite-only). Requires a backend. See the building-apps skill.
   - \`backendMode: "long-running"\` keeps the backend warm (vs default
     \`serverless\`). Handle \`/__webhook\` (and legacy \`/__cron/*\` paths) by
     wrapping the Connect adapter (see the building-apps skill).

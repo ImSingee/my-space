@@ -182,6 +182,8 @@ export const capabilitiesSchema = z.object({
   cron: z.boolean().default(false),
   webhook: z.boolean().default(false),
   storage: z.boolean().default(false),
+  /** Simple per-app key/value store (platform DB) for small tokens/config. */
+  kv: z.boolean().default(false),
 });
 
 /**
@@ -329,6 +331,8 @@ export type NormalizedManifest = {
   webhook?: { url: string; auth: WebhookAuth };
   /** Blob storage base URL, when the storage capability is enabled. */
   storage?: { url: string };
+  /** KV REST base URL, when the kv capability is enabled. */
+  kv?: { url: string };
   /**
    * The app's declared RPC API, captured from its proto at build time. Absent
    * for apps without an RPC service. Lets the platform (and the manage UI) know
@@ -356,6 +360,11 @@ export function rpcUrl(id: string): string {
 
 export function storageUrl(id: string): string {
   return `${appBasePath(id)}/storage`;
+}
+
+/** Per-app KV REST base. The backend calls it with an HMAC signature. */
+export function kvUrl(id: string): string {
+  return `${appBasePath(id)}/kv`;
 }
 
 /** Public inbound webhook URL (token appended at call time as `?secret=`). */
@@ -404,6 +413,13 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   }
   if (src.capabilities.storage) {
     out.storage = { url: storageUrl(src.id) };
+  }
+  // KV is reachable only from the app's own backend over the HMAC-signed route
+  // (a signing secret is minted only for backend apps), so like rpc / workflow
+  // calls it's meaningful only when a backend is actually staged. Without this
+  // gate a backendless app would advertise a KV URL that always 404s.
+  if (src.capabilities.kv && src.capabilities.backend && src.backend) {
+    out.kv = { url: kvUrl(src.id) };
   }
   // Workflow calls are outbound from the backend (the platform injects each
   // target's secret into the backend env), so they only apply to apps that

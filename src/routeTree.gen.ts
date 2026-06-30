@@ -41,6 +41,7 @@ import { Route as AppWorkflowsWorkflowIdExecutionsIndexRouteImport } from './rou
 import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
 import { Route as ApiAppsAppIdStorageSplatRouteImport } from './routes/api/apps/$appId/storage/$'
 import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
+import { Route as ApiAppsAppIdKvSplatRouteImport } from './routes/api/apps/$appId/kv/$'
 import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$appId/app/$'
 import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
 import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
@@ -213,6 +214,11 @@ const ApiAppsAppIdRpcSplatRoute = ApiAppsAppIdRpcSplatRouteImport.update({
   path: '/api/apps/$appId/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAppsAppIdKvSplatRoute = ApiAppsAppIdKvSplatRouteImport.update({
+  id: '/api/apps/$appId/kv/$',
+  path: '/api/apps/$appId/kv/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAppsAppIdAppSplatRoute = ApiAppsAppIdAppSplatRouteImport.update({
   id: '/api/apps/$appId/app/$',
   path: '/api/apps/$appId/app/$',
@@ -273,6 +279,7 @@ export interface FileRoutesByFullPath {
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
+  '/api/apps/$appId/kv/$': typeof ApiAppsAppIdKvSplatRoute
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
   '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
@@ -309,6 +316,7 @@ export interface FileRoutesByTo {
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
+  '/api/apps/$appId/kv/$': typeof ApiAppsAppIdKvSplatRoute
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
   '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
@@ -349,6 +357,7 @@ export interface FileRoutesById {
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
+  '/api/apps/$appId/kv/$': typeof ApiAppsAppIdKvSplatRoute
   '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
   '/api/apps/$appId/storage/$': typeof ApiAppsAppIdStorageSplatRoute
   '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
@@ -389,6 +398,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/events'
     | '/api/apps/$appId/app/$'
+    | '/api/apps/$appId/kv/$'
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
     | '/api/apps/$appId/widget/$widgetId'
@@ -425,6 +435,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/events'
     | '/api/apps/$appId/app/$'
+    | '/api/apps/$appId/kv/$'
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
     | '/api/apps/$appId/widget/$widgetId'
@@ -464,6 +475,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/events'
     | '/api/apps/$appId/app/$'
+    | '/api/apps/$appId/kv/$'
     | '/api/apps/$appId/rpc/$'
     | '/api/apps/$appId/storage/$'
     | '/api/apps/$appId/widget/$widgetId'
@@ -483,6 +495,7 @@ export interface RootRouteChildren {
   ApiWorkflowHooksWorkflowIdSplatRoute: typeof ApiWorkflowHooksWorkflowIdSplatRoute
   ApiWorkflowsWorkflowIdDownloadRoute: typeof ApiWorkflowsWorkflowIdDownloadRoute
   ApiAppsAppIdAppSplatRoute: typeof ApiAppsAppIdAppSplatRoute
+  ApiAppsAppIdKvSplatRoute: typeof ApiAppsAppIdKvSplatRoute
   ApiAppsAppIdRpcSplatRoute: typeof ApiAppsAppIdRpcSplatRoute
   ApiAppsAppIdStorageSplatRoute: typeof ApiAppsAppIdStorageSplatRoute
   ApiAppsAppIdWidgetWidgetIdRoute: typeof ApiAppsAppIdWidgetWidgetIdRoute
@@ -714,6 +727,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppsAppIdRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/apps/$appId/kv/$': {
+      id: '/api/apps/$appId/kv/$'
+      path: '/api/apps/$appId/kv/$'
+      fullPath: '/api/apps/$appId/kv/$'
+      preLoaderRoute: typeof ApiAppsAppIdKvSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/apps/$appId/app/$': {
       id: '/api/apps/$appId/app/$'
       path: '/api/apps/$appId/app/$'
@@ -849,6 +869,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiWorkflowHooksWorkflowIdSplatRoute: ApiWorkflowHooksWorkflowIdSplatRoute,
   ApiWorkflowsWorkflowIdDownloadRoute: ApiWorkflowsWorkflowIdDownloadRoute,
   ApiAppsAppIdAppSplatRoute: ApiAppsAppIdAppSplatRoute,
+  ApiAppsAppIdKvSplatRoute: ApiAppsAppIdKvSplatRoute,
   ApiAppsAppIdRpcSplatRoute: ApiAppsAppIdRpcSplatRoute,
   ApiAppsAppIdStorageSplatRoute: ApiAppsAppIdStorageSplatRoute,
   ApiAppsAppIdWidgetWidgetIdRoute: ApiAppsAppIdWidgetWidgetIdRoute,

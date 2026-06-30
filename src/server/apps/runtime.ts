@@ -291,13 +291,23 @@ async function startBackend(id: string): Promise<number> {
   const workflowsEnv = await buildWorkflowsEnv(buildDir);
 
   // Per-app HMAC key so the backend can verify platform-originated requests
-  // (cron RPC calls). Absent for apps deployed before this column existed; such
-  // backends simply can't verify and the cron call still reaches them.
+  // (cron RPC calls) AND sign its own calls into platform APIs (KV). Absent for
+  // apps deployed before this column existed; such backends simply can't verify
+  // and the cron call still reaches them.
   const appRow = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.id, id),
-    columns: { signingSecret: true },
+    columns: { signingSecret: true, capabilities: true },
   });
   const signingSecret = appRow?.signingSecret ?? null;
+
+  // KV is stored in the platform DB (not reachable from the sandboxed
+  // subprocess), so a KV-capable backend talks to it over HTTP at an absolute
+  // URL, signing each request with HATCH_SIGNING_SECRET. Inject the endpoint so
+  // the app doesn't hardcode the platform origin. Relative URLs have no host
+  // inside the subprocess, so resolve against the configured platform origin.
+  const kvUrl = appRow?.capabilities?.kv
+    ? `${(process.env.BETTER_AUTH_URL ?? '').replace(/\/+$/, '')}/api/apps/${id}/kv`
+    : null;
 
   // Scope filesystem access to the app's own build (read) and storage
   // (read/write) so one deployed backend can't read another app's build/storage
@@ -365,6 +375,7 @@ async function startBackend(id: string): Promise<number> {
       STORAGE_DIR: storageDir,
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
+      ...(kvUrl ? { HATCH_KV_URL: kvUrl } : {}),
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });

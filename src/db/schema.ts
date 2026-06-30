@@ -60,6 +60,8 @@ export type AppCapabilities = {
   cron: boolean;
   webhook: boolean;
   storage: boolean;
+  /** Simple per-app key/value store (platform DB) for small tokens/config. */
+  kv: boolean;
 };
 
 export type AppStatus =
@@ -230,6 +232,39 @@ export const appCronRuns = pgTable(
   (table) => [
     // Listing is always "newest first for one app", so index that access path.
     index('app_cron_runs_app_created_idx').on(table.appId, table.createdAt),
+  ],
+);
+
+/** ================== app key/value store ================== */
+
+/**
+ * A simple per-app key/value store kept in the PLATFORM database (not the app's
+ * optional per-app Postgres), so an app can persist small bits of state — tokens,
+ * config, counters — without provisioning the full database capability. Inspired
+ * by Cloudflare Workers KV / Deno KV but deliberately minimal: no TTL/caching,
+ * just durable string values keyed per app.
+ *
+ * Values are stored as text (the app serializes its own JSON). A row may be
+ * flagged `secret`, which hides its plaintext in the manage UI (overwrite-only)
+ * while the app backend still reads it normally via the signed KV API.
+ */
+export const appKv = pgTable(
+  'app_kv',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    appId: text()
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    key: text().notNull(),
+    value: text().notNull(),
+    /** When true, the manage UI masks the value (overwrite-only); app still reads it. */
+    secret: boolean().notNull().default(false),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    // One value per (app, key); also the lookup path for get/set/delete.
+    uniqueIndex('app_kv_app_key_idx').on(table.appId, table.key),
   ],
 );
 

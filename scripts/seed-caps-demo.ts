@@ -41,6 +41,7 @@ const MANIFEST = {
     cron: true,
     webhook: true,
     storage: true,
+    kv: true,
   },
   backendMode: 'long-running',
   backend: { entry: 'backend/main.ts' },
@@ -49,12 +50,42 @@ const MANIFEST = {
 };
 
 const BACKEND = `import http from 'node:http';
+import { createHmac } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const storageDir = Deno.env.get('STORAGE_DIR') ?? './storage';
 await mkdir(storageDir, { recursive: true });
 const beatFile = path.join(storageDir, 'heartbeats.txt');
+
+// --- KV helpers: sign every call with HATCH_SIGNING_SECRET (HMAC of ts.body) ---
+const KV = Deno.env.get('HATCH_KV_URL');
+const SIGNING = Deno.env.get('HATCH_SIGNING_SECRET');
+function kvHeaders(body) {
+  const ts = String(Date.now());
+  const sig =
+    'sha256=' + createHmac('sha256', SIGNING).update(ts + '.' + body).digest('hex');
+  return { 'x-hatch-timestamp': ts, 'x-hatch-signature': sig };
+}
+async function kvGet(key) {
+  if (!KV || !SIGNING) return null;
+  const res = await fetch(KV + '/' + encodeURIComponent(key), {
+    headers: kvHeaders(''),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('kv get ' + res.status);
+  return (await res.json()).value;
+}
+async function kvSet(key, value, secret = false) {
+  if (!KV || !SIGNING) return;
+  const body = JSON.stringify({ value, secret });
+  const res = await fetch(KV + '/' + encodeURIComponent(key), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...kvHeaders(body) },
+    body,
+  });
+  if (!res.ok) throw new Error('kv set ' + res.status);
+}
 
 async function readBeats() {
   try {
@@ -81,6 +112,11 @@ http
       if (req.method === 'POST' && url.startsWith('/__cron/beat')) {
         const next = (await readBeats()) + 1;
         await writeFile(beatFile, String(next), 'utf8');
+        // Mirror the beat into KV (counter + timestamp + a secret token) so the
+        // manage panel shows live KV data and the signed KV path is exercised.
+        await kvSet('beats', String(next));
+        await kvSet('last-beat-at', new Date().toISOString());
+        await kvSet('demo-secret', 'token-' + next, true);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ beats: next, at: new Date().toISOString() }));
         return;

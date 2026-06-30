@@ -13,6 +13,7 @@ const CAPABILITY_KEYS = [
   'cron',
   'webhook',
   'storage',
+  'kv',
 ] as const satisfies readonly (keyof AppCapabilities)[];
 
 function enabledCapabilities(
@@ -97,6 +98,7 @@ export type AppRuntimeOps = {
     auth: WebhookAuth;
   };
   storage: { enabled: boolean; url: string | null; objectCount: number };
+  kv: { enabled: boolean; url: string | null; entryCount: number };
 };
 
 export type AppDetail = {
@@ -150,6 +152,9 @@ export async function getAppDetailForAgent(
     caps?.storage && app.status === 'deployed'
       ? await import('./storage').then((m) => m.listObjects(id))
       : [];
+  const kvCount = caps?.kv
+    ? await import('./kv').then((m) => m.countKv(id))
+    : 0;
   const deployments = await listDeployments(id);
 
   return {
@@ -188,6 +193,11 @@ export async function getAppDetailForAgent(
         enabled: Boolean(caps?.storage),
         url: manifest?.storage?.url ?? null,
         objectCount: objects.length,
+      },
+      kv: {
+        enabled: Boolean(caps?.kv),
+        url: manifest?.kv?.url ?? null,
+        entryCount: kvCount,
       },
     },
     deployments: deployments.map((d) => ({

@@ -185,6 +185,14 @@ export type StorageObjectView = {
   updatedAt: string;
 };
 
+export type AppKvEntryView = {
+  key: string;
+  /** Plaintext value, or null when secret (hidden from the UI; overwrite-only). */
+  value: string | null;
+  secret: boolean;
+  updatedAt: string;
+};
+
 export type AppOps = {
   backend: {
     capable: boolean;
@@ -205,6 +213,8 @@ export type AppOps = {
     url: string | null;
     objects: StorageObjectView[];
   };
+  /** KV entries are fetched separately (they mutate live); this just gates the UI. */
+  kv: { enabled: boolean };
 };
 
 export const getAppOps = createServerFn({ method: 'GET' })
@@ -220,6 +230,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false, url: null, objects: [] },
+        kv: { enabled: false },
       };
     }
     const caps = app.capabilities;
@@ -258,6 +269,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
         url: manifest?.storage?.url ?? null,
         objects,
       },
+      kv: { enabled: Boolean(caps?.kv) },
     };
   });
 
@@ -284,6 +296,66 @@ export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
     const { deleteObject } = await import('./apps/storage');
     const ok = await deleteObject(data.id, data.key);
     return { ok };
+  });
+
+/** ================== app KV (manage UI) ================== */
+
+/**
+ * Guard for the KV management server fns. These are plain authenticated RPCs, so
+ * the UI only rendering the KV panel for kv-capable apps is not a real boundary —
+ * a crafted call could otherwise read/write `app_kv` for an arbitrary id. Re-check
+ * here that the target app exists, isn't archived, and actually has the `kv`
+ * capability before touching the table. (Single-tenant: a valid session is the
+ * owner, so this is existence/capability gating, not cross-user authorization.)
+ */
+async function requireKvApp(id: string): Promise<void> {
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq: e }) => e(s.id, id),
+    columns: { status: true, capabilities: true },
+  });
+  if (!app || app.status === 'archived' || !app.capabilities?.kv) {
+    throw new Error('App not found');
+  }
+}
+
+export const listAppKvFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .validator((id: string) => id)
+  .handler(async ({ data: id }): Promise<AppKvEntryView[]> => {
+    await requireKvApp(id);
+    const { listKv } = await import('./apps/kv');
+    const records = await listKv(id);
+    // Mask secret values: the manage UI may overwrite them but never read them.
+    return records.map((r) => ({
+      key: r.key,
+      value: r.secret ? null : r.value,
+      secret: r.secret,
+      updatedAt: r.updatedAt,
+    }));
+  });
+
+export const setAppKvFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator(
+    (input: { id: string; key: string; value: string; secret?: boolean }) =>
+      input,
+  )
+  .handler(async ({ data }) => {
+    await requireKvApp(data.id);
+    const { setKv } = await import('./apps/kv');
+    const rec = await setKv(data.id, data.key, data.value, {
+      secret: data.secret,
+    });
+    return { ok: true, secret: rec.secret };
+  });
+
+export const deleteAppKvFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; key: string }) => input)
+  .handler(async ({ data }) => {
+    await requireKvApp(data.id);
+    const { deleteKv } = await import('./apps/kv');
+    return { ok: await deleteKv(data.id, data.key) };
   });
 
 /** ================== dashboards ================== */
