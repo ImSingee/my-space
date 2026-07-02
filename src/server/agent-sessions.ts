@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
@@ -23,16 +23,30 @@ export type SessionSummary = {
 export const listSessions = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async (): Promise<SessionSummary[]> => {
-    const rows = await db.query.agentSessions.findMany({
-      orderBy: (s, { desc }) => [desc(s.updatedAt)],
-    });
+    // Count messages in SQL: pulling every session's full messages JSONB just
+    // to call .length made this list scale with total chat history size.
+    const rows = await db
+      .select({
+        id: schema.agentSessions.id,
+        title: schema.agentSessions.title,
+        appId: schema.agentSessions.appId,
+        providerId: schema.agentSessions.providerId,
+        modelId: schema.agentSessions.modelId,
+        messageCount: sql<number>`case
+          when jsonb_typeof(${schema.agentSessions.messages}) = 'array'
+          then jsonb_array_length(${schema.agentSessions.messages})
+          else 0 end`,
+        updatedAt: schema.agentSessions.updatedAt,
+      })
+      .from(schema.agentSessions)
+      .orderBy(desc(schema.agentSessions.updatedAt));
     return rows.map((s) => ({
       id: s.id,
       title: s.title,
       appId: s.appId,
       providerId: s.providerId,
       modelId: s.modelId,
-      messageCount: Array.isArray(s.messages) ? s.messages.length : 0,
+      messageCount: s.messageCount,
       updatedAt: s.updatedAt.toISOString(),
     }));
   });

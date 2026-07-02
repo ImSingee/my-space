@@ -1,21 +1,9 @@
 import { Box, Center, Group, Loader, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { formatDuration, formatRelative } from '~lib/format';
 import { workflowRunsQueryOptions } from '~queries/workflows';
 import { RunStatusBadge } from './run-status';
-
-dayjs.extend(relativeTime);
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '—';
-  if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
-}
 
 export function WorkflowRunList({ workflowId }: { workflowId: string }) {
   const navigate = useNavigate();
@@ -81,7 +69,18 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
                 }
               >
                 <Table.Td>
-                  <RunStatusBadge status={run.status} />
+                  {/* Real link (not just the row onClick) so open-in-new-tab
+                      and keyboard navigation work. stopPropagation keeps a
+                      modified click from ALSO firing the row's onClick and
+                      navigating the current tab. */}
+                  <Link
+                    to="/workflows/$workflowId/executions/$runId"
+                    params={{ workflowId, runId: run.id }}
+                    style={{ textDecoration: 'none' }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <RunStatusBadge status={run.status} />
+                  </Link>
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm" c="dimmed" tt="capitalize">
@@ -100,7 +99,7 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm" c="dimmed">
-                    {dayjs(run.startedAt ?? run.createdAt).fromNow()}
+                    {formatRelative(run.startedAt ?? run.createdAt)}
                   </Text>
                 </Table.Td>
               </Table.Tr>

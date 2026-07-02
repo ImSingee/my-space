@@ -44,6 +44,13 @@ export const requireSession = createServerOnlyFn(async () => {
  * guard does NOT protect them — without this, anyone could call the data RPCs
  * directly. Attach it to every data server function (everything except the
  * public {@link fetchSession} probe used to determine auth state).
+ *
+ * SINGLE-TENANT BY DESIGN: the platform is one person's personal space, so
+ * authentication is the only boundary — once signed in, a session can see and
+ * manage everything (apps, dashboards, agent chats, providers). No table
+ * carries an owner column and no query filters by user id. If multi-user
+ * support is ever added, every server function behind this middleware needs
+ * per-user scoping, not just this comment updated.
  */
 export const authMiddleware = createMiddleware({ type: 'function' }).server(
   async ({ next }) => {

@@ -33,10 +33,14 @@ import {
   IconWebhook,
 } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import {
+  formatBytes,
+  formatDuration,
+  formatExact,
+  formatRelative,
+} from '~lib/format';
 import {
   appKvQueryOptions,
   appOpsQueryOptions,
@@ -49,23 +53,6 @@ import {
   runCronJobFn,
   setAppKvFn,
 } from '~server/apps';
-
-dayjs.extend(relativeTime);
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '—';
-  if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 
 // Recent cron-trigger history (scheduled fires + manual "Run now"), newest
 // first. Distinct from the backend log stream: structured per-run rows with
@@ -136,12 +123,12 @@ function CronHistory({ appId }: { appId: string }) {
                 </Table.Td>
                 <Table.Td>
                   <Tooltip
-                    label={dayjs(run.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                    label={formatExact(run.createdAt)}
                     withArrow
                     position="left"
                   >
                     <Text size="xs" c="dimmed">
-                      {dayjs(run.createdAt).fromNow()}
+                      {formatRelative(run.createdAt)}
                     </Text>
                   </Tooltip>
                 </Table.Td>
@@ -387,7 +374,7 @@ function KvStore({ appId }: { appId: string }) {
                 </Table.Td>
                 <Table.Td>
                   <Text size="xs" c="dimmed" truncate>
-                    {dayjs(entry.updatedAt).fromNow()}
+                    {formatRelative(entry.updatedAt)}
                   </Text>
                 </Table.Td>
                 <Table.Td>
@@ -609,7 +596,7 @@ export function OperationsPanel({
                             <Text size="xs" c="dimmed" ff="monospace" truncate>
                               {job.method ?? job.path}
                               {job.nextRun
-                                ? ` · next ${dayjs(job.nextRun).fromNow()}`
+                                ? ` · next ${formatRelative(job.nextRun)}`
                                 : ''}
                             </Text>
                           </Group>
@@ -746,7 +733,7 @@ export function OperationsPanel({
                         </Table.Td>
                         <Table.Td w={120}>
                           <Text size="xs" c="dimmed" truncate>
-                            {dayjs(obj.updatedAt).fromNow()}
+                            {formatRelative(obj.updatedAt)}
                           </Text>
                         </Table.Td>
                         <Table.Td w={76}>

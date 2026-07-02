@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
 import { db, schema } from '~/db';
@@ -610,16 +610,13 @@ export const getDashboard = createServerFn({ method: 'GET' })
     // Resolve through the LIVE manifest (non-archived, widgets-capable) so a
     // placement for an archived/retired app is dropped rather than rendered as a
     // permanently failing card — the widget bundle route rejects those too.
-    const { liveAppManifest } = await import('./apps/access');
-    const manifests = new Map<string, NormalizedManifest | null>();
+    const { liveAppManifests } = await import('./apps/access');
+    const manifests = await liveAppManifests(
+      placements.map((p) => p.appId),
+      'widgets',
+    );
     const items: DashboardItem[] = [];
     for (const placement of placements) {
-      if (!manifests.has(placement.appId)) {
-        manifests.set(
-          placement.appId,
-          await liveAppManifest(placement.appId, 'widgets'),
-        );
-      }
       const manifest = manifests.get(placement.appId);
       const widget = manifest?.widgets.find((w) => w.id === placement.widgetId);
       if (!manifest || !widget) continue;
@@ -669,10 +666,16 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' })
   .handler(async (): Promise<AvailableWidget[]> => {
     const deployed = await db.query.apps.findMany({
       where: (s, { eq: e }) => e(s.status, 'deployed'),
+      columns: { id: true },
     });
+    const { liveAppManifests } = await import('./apps/access');
+    const manifests = await liveAppManifests(
+      deployed.map((app) => app.id),
+      'widgets',
+    );
     const items: AvailableWidget[] = [];
     for (const app of deployed) {
-      const manifest = await normalizedManifestFor(app.id);
+      const manifest = manifests.get(app.id);
       if (!manifest) continue;
       for (const widget of manifest.widgets) {
         items.push({
@@ -779,11 +782,15 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
     const pins = await db.query.sidebarItems.findMany({
       orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
     });
+    if (pins.length === 0) return [];
+    const apps = await db.query.apps.findMany({
+      where: inArray(schema.apps.id, [...new Set(pins.map((p) => p.appId))]),
+      columns: { id: true, name: true, status: true },
+    });
+    const appById = new Map(apps.map((app) => [app.id, app]));
     const items: SidebarItem[] = [];
     for (const pin of pins) {
-      const app = await db.query.apps.findFirst({
-        where: (s, { eq: e }) => e(s.id, pin.appId),
-      });
+      const app = appById.get(pin.appId);
       if (!app) continue;
       items.push({
         id: pin.id,

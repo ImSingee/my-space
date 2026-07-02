@@ -1,5 +1,6 @@
 /** Server-only: cron scheduler that starts workflow runs on schedule. */
-import { db } from '~/db';
+import { inArray } from 'drizzle-orm';
+import { db, schema } from '~/db';
 import { nextRun, parseCron } from '~server/apps/cron-expr';
 import { startWorkflowRun } from './execute';
 import type { NormalizedWorkflowManifest, WorkflowCronJob } from './manifest';
@@ -124,9 +125,29 @@ function clearAll(): void {
 async function loadAll(): Promise<void> {
   const workflows = await db.query.workflows.findMany({
     where: (s, { eq }) => eq(s.status, 'deployed'),
+    columns: { id: true, currentDeploymentId: true },
   });
-  for (const workflow of workflows) {
-    const jobs = await cronJobsFor(workflow.id);
+  const deployed = workflows.filter((w) => w.currentDeploymentId);
+  if (deployed.length === 0) return;
+  // One batched manifest lookup instead of cronJobsFor()'s 2 queries per flow.
+  const deployments = await db.query.workflowDeployments.findMany({
+    where: inArray(
+      schema.workflowDeployments.id,
+      deployed.map((w) => w.currentDeploymentId as string),
+    ),
+    columns: { id: true, manifestNormalized: true },
+  });
+  const manifestByDeploymentId = new Map(
+    deployments.map((d) => [
+      d.id,
+      d.manifestNormalized as NormalizedWorkflowManifest | null,
+    ]),
+  );
+  for (const workflow of deployed) {
+    const manifest = manifestByDeploymentId.get(
+      workflow.currentDeploymentId as string,
+    );
+    const jobs = manifest?.triggers?.cron ?? [];
     jobs.forEach((job, index) => scheduleOne(workflow.id, job, index));
   }
 }

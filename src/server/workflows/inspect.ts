@@ -1,5 +1,6 @@
 /** Server-only: read-only workflow views for the Agent (list + detail). */
-import { db } from '~/db';
+import { inArray } from 'drizzle-orm';
+import { db, schema } from '~/db';
 import type { WorkflowStatus } from '~/db/schema';
 import type { NormalizedWorkflowManifest } from './manifest';
 import { listWorkflowDeployments, listWorkflowRuns } from './manage';
@@ -21,15 +22,24 @@ export async function listWorkflowsForAgent(): Promise<
   const rows = await db.query.workflows.findMany({
     orderBy: (s, { desc }) => [desc(s.updatedAt)],
   });
+  const deploymentIds = rows
+    .map((w) => w.currentDeploymentId)
+    .filter((id): id is string => Boolean(id));
+  const deployments =
+    deploymentIds.length === 0
+      ? []
+      : await db.query.workflowDeployments.findMany({
+          where: inArray(schema.workflowDeployments.id, deploymentIds),
+          columns: { id: true, version: true, manifestNormalized: true },
+        });
+  const deploymentById = new Map(deployments.map((d) => [d.id, d]));
   const result: WorkflowSummaryForAgent[] = [];
   for (const w of rows) {
     let liveVersion: number | null = null;
     let webhook = false;
     let cronCount = 0;
     if (w.currentDeploymentId) {
-      const deployment = await db.query.workflowDeployments.findFirst({
-        where: (d, { eq }) => eq(d.id, w.currentDeploymentId as string),
-      });
+      const deployment = deploymentById.get(w.currentDeploymentId);
       liveVersion = deployment?.version ?? null;
       const manifest =
         deployment?.manifestNormalized as NormalizedWorkflowManifest | null;

@@ -1,4 +1,5 @@
 /** Server-only: cron scheduler that triggers app backends on schedule. */
+import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import {
   HATCH_SIGNATURE_HEADER,
@@ -262,11 +263,31 @@ function clearAll(): void {
 async function loadAll(): Promise<void> {
   const apps = await db.query.apps.findMany({
     where: (s, { eq }) => eq(s.status, 'deployed'),
+    columns: { id: true, capabilities: true, currentDeploymentId: true },
   });
-  for (const app of apps) {
-    if (!app.capabilities?.cron) continue;
-    const jobs = await cronJobsFor(app.id);
-    for (const job of jobs) scheduleOne(app.id, job);
+  const cronApps = apps.filter(
+    (app) => app.capabilities?.cron && app.currentDeploymentId,
+  );
+  if (cronApps.length === 0) return;
+  // One batched manifest lookup instead of cronJobsFor()'s 2 queries per app.
+  const deployments = await db.query.deployments.findMany({
+    where: inArray(
+      schema.deployments.id,
+      cronApps.map((app) => app.currentDeploymentId as string),
+    ),
+    columns: { id: true, manifestNormalized: true },
+  });
+  const manifestByDeploymentId = new Map(
+    deployments.map((d) => [
+      d.id,
+      d.manifestNormalized as NormalizedManifest | null,
+    ]),
+  );
+  for (const app of cronApps) {
+    const manifest = manifestByDeploymentId.get(
+      app.currentDeploymentId as string,
+    );
+    for (const job of manifest?.cron ?? []) scheduleOne(app.id, job);
   }
 }
 

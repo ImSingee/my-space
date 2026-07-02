@@ -78,6 +78,7 @@
 }
 
 .item:hover .itemAction,
+.itemAction:focus-visible,
 .itemAction[aria-expanded='true'],
 .itemAction[data-expanded] {
   opacity: 1;

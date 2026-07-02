@@ -15,15 +15,12 @@ import {
   IconSettings,
   IconTimeline,
 } from '@tabler/icons-react';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { WorkflowStatusBadge } from '~components/workflows/status-badge';
+import { formatRelative } from '~lib/format';
 import { listWorkflows } from '~server/workflows';
 import classes from '../apps/apps.module.css';
-
-dayjs.extend(relativeTime);
 
 export const Route = createFileRoute('/_app/workflows/')({
   loader: () => listWorkflows(),
@@ -120,7 +117,7 @@ function WorkflowsPage() {
               </Text>
               <Group justify="space-between" align="center" mt="auto" pt="md">
                 <Text size="xs" c="dimmed">
-                  Updated {dayjs(workflow.updatedAt).fromNow()}
+                  Updated {formatRelative(workflow.updatedAt)}
                 </Text>
                 <Tooltip label="Manage workflow" position="top" withArrow>
                   <Button

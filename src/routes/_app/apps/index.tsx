@@ -10,15 +10,12 @@ import {
 } from '@mantine/core';
 import { Link, createFileRoute } from '@tanstack/react-router';
 import { IconPlus, IconSettings, IconStack2 } from '@tabler/icons-react';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { StatusBadge } from '~components/apps/status-badge';
+import { formatRelative } from '~lib/format';
 import { listApps } from '~server/apps';
 import classes from './apps.module.css';
-
-dayjs.extend(relativeTime);
 
 export const Route = createFileRoute('/_app/apps/')({
   loader: () => listApps(),
@@ -104,7 +101,7 @@ function AppsPage() {
               </Text>
               <Group justify="space-between" align="center" mt="auto" pt="md">
                 <Text size="xs" c="dimmed">
-                  Updated {dayjs(app.updatedAt).fromNow()}
+                  Updated {formatRelative(app.updatedAt)}
                 </Text>
                 <Tooltip label="Manage app" position="top" withArrow>
                   <Button

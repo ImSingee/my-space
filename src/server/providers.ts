@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { ProviderApiType } from '~/db/schema';
@@ -46,13 +46,26 @@ export const listProviders = createServerFn({ method: 'GET' })
     const providers = await db.query.agentProviders.findMany({
       orderBy: (p, { asc }) => [asc(p.sortOrder), asc(p.createdAt)],
     });
+    const allModels =
+      providers.length === 0
+        ? []
+        : await db.query.agentModels.findMany({
+            where: inArray(
+              schema.agentModels.providerId,
+              providers.map((p) => p.id),
+            ),
+            orderBy: (m, { asc }) => [asc(m.sortOrder), asc(m.createdAt)],
+          });
+    const modelsByProvider = new Map<string, typeof allModels>();
+    for (const model of allModels) {
+      const list = modelsByProvider.get(model.providerId) ?? [];
+      list.push(model);
+      modelsByProvider.set(model.providerId, list);
+    }
 
     const result: ProviderWithModels[] = [];
     for (const p of providers) {
-      const models = await db.query.agentModels.findMany({
-        where: (m, { eq: e }) => e(m.providerId, p.id),
-        orderBy: (m, { asc }) => [asc(m.sortOrder), asc(m.createdAt)],
-      });
+      const models = modelsByProvider.get(p.id) ?? [];
       result.push({
         id: p.id,
         name: p.name,

@@ -1,5 +1,6 @@
 /** Server-only: authorize runtime serving of a deployed app's built assets. */
-import { db } from '~/db';
+import { inArray } from 'drizzle-orm';
+import { db, schema } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
 import type { NormalizedManifest } from './manifest';
 
@@ -69,19 +70,46 @@ export async function liveAppManifest(
   id: string,
   capability: keyof AppCapabilities,
 ): Promise<NormalizedManifest | null> {
-  const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+  const result = await liveAppManifests([id], capability);
+  return result.get(id) ?? null;
+}
+
+/**
+ * Batch form of {@link liveAppManifest}: resolves many apps with two queries
+ * instead of 2-per-app, for list endpoints (dashboard, sidebar). Apps that are
+ * missing/archived/undeployed or lack the capability are simply absent from
+ * the returned map.
+ */
+export async function liveAppManifests(
+  ids: string[],
+  capability: keyof AppCapabilities,
+): Promise<Map<string, NormalizedManifest>> {
+  const result = new Map<string, NormalizedManifest>();
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return result;
+
+  const apps = await db.query.apps.findMany({
+    where: inArray(schema.apps.id, unique),
   });
-  if (
-    !app ||
-    app.status === 'archived' ||
-    !app.currentDeploymentId ||
-    !app.capabilities?.[capability]
-  ) {
-    return null;
+  const servable = apps.filter(
+    (app) =>
+      app.status !== 'archived' &&
+      app.currentDeploymentId &&
+      app.capabilities?.[capability],
+  );
+  if (servable.length === 0) return result;
+
+  const deployments = await db.query.deployments.findMany({
+    where: inArray(
+      schema.deployments.id,
+      servable.map((app) => app.currentDeploymentId as string),
+    ),
+  });
+  const byDeploymentId = new Map(deployments.map((d) => [d.id, d]));
+  for (const app of servable) {
+    const manifest = byDeploymentId.get(app.currentDeploymentId as string)
+      ?.manifestNormalized as NormalizedManifest | null;
+    if (manifest) result.set(app.id, manifest);
   }
-  const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
-  });
-  return (deployment?.manifestNormalized ?? null) as NormalizedManifest | null;
+  return result;
 }

@@ -18,12 +18,9 @@ import {
   IconWebhook,
 } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import { toast } from 'sonner';
+import { formatRelative } from '~lib/format';
 import { workflowOpsQueryOptions } from '~queries/workflows';
-
-dayjs.extend(relativeTime);
 
 function SectionHeader({
   icon,
@@ -109,7 +106,7 @@ export function WorkflowTriggersPanel({ workflowId }: { workflowId: string }) {
                     <Table.Td>
                       <Text size="xs" c="dimmed" truncate>
                         {job.nextRun
-                          ? `next ${dayjs(job.nextRun).fromNow()}`
+                          ? `next ${formatRelative(job.nextRun)}`
                           : 'not scheduled'}
                       </Text>
                     </Table.Td>

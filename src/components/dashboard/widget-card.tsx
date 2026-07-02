@@ -13,6 +13,7 @@ import {
   IconRefresh,
   IconX,
 } from '@tabler/icons-react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -48,9 +49,32 @@ export function WidgetCard({
   const unitsRef = useRef({ w: item.w, h: item.h });
   unitsRef.current = { w: item.w, h: item.h };
 
+  // Fetch the (authenticated, same-origin) bundle in the host, then hand it to
+  // the iframe as an inlined `data:` module. Fetching here keeps the request
+  // out of the dev module pipeline (which intercepts a direct import of the
+  // served URL); the widget still executes inside its own iframe document.
+  // useQuery dedupes concurrent mounts of the same widget and paints instantly
+  // from cache, while the default staleTime (0) still revalidates on every
+  // mount — the URL is stable across redeploys, so a longer staleTime would
+  // serve a stale bundle right after a deploy. The reload effect below keys on
+  // the code string itself, so a revalidation that returns unchanged code
+  // never reloads the frame (string deps compare by value); only a genuinely
+  // new bundle does. Focus refetches stay off so a mounted widget is not
+  // reloaded just by switching windows.
+  const bundle = useQuery({
+    queryKey: ['widget-bundle', item.url],
+    queryFn: async () => {
+      const res = await fetch(item.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.text();
+    },
+    refetchOnWindowFocus: false,
+  });
+  const code = bundle.data;
+
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame) return;
+    if (!frame || code === undefined) return;
     let cancelled = false;
     setStatus('loading');
 
@@ -76,27 +100,16 @@ export function WidgetCard({
       } else if (data[WIDGET_CHANNEL] === 'error') setStatus('error');
     };
     window.addEventListener('message', onMessage);
-
-    // Fetch the (authenticated, same-origin) bundle in the host, then hand it to
-    // the iframe as an inlined `data:` module. Fetching here keeps the request
-    // out of the dev module pipeline (which intercepts a direct import of the
-    // served URL); the widget still executes inside its own iframe document.
-    void (async () => {
-      const res = await fetch(item.url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const code = await res.text();
-      if (cancelled) return;
-      frame.srcdoc = widgetFrameHtml(toModuleDataUrl(code), unitsRef.current);
-    })().catch(() => {
-      if (!cancelled) setStatus('error');
-    });
+    frame.srcdoc = widgetFrameHtml(toModuleDataUrl(code), unitsRef.current);
 
     return () => {
       cancelled = true;
       window.removeEventListener('message', onMessage);
       frame.srcdoc = '';
     };
-  }, [item.url]);
+  }, [code]);
+
+  const effectiveStatus = bundle.isError ? 'error' : status;
 
   // Push grid-unit changes (a resize that lands new w/h) to the running widget
   // without reloading it. Pixel size is measured inside the frame, so it needs
@@ -169,7 +182,7 @@ export function WidgetCard({
               color="gray"
               size="sm"
               aria-label="Refresh widget"
-              disabled={status !== 'ready'}
+              disabled={effectiveStatus !== 'ready'}
               onClick={requestRefresh}
             >
               <IconRefresh size={15} />
@@ -224,10 +237,10 @@ export function WidgetCard({
             border: 0,
             width: '100%',
             height: '100%',
-            visibility: status === 'ready' ? 'visible' : 'hidden',
+            visibility: effectiveStatus === 'ready' ? 'visible' : 'hidden',
           }}
         />
-        {status === 'loading' ? (
+        {effectiveStatus === 'loading' ? (
           <Stack
             gap="xs"
             px={4}
@@ -239,7 +252,7 @@ export function WidgetCard({
             <Skeleton height={11} width="80%" radius="sm" />
           </Stack>
         ) : null}
-        {status === 'error' ? (
+        {effectiveStatus === 'error' ? (
           <Text
             size="xs"
             c="red"

@@ -29,10 +29,9 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
+import { formatRelative } from '~lib/format';
 import {
   appOpsQueryOptions,
   deploymentBuildLogQueryOptions,
@@ -42,8 +41,6 @@ import {
 import type { DeploymentSummary } from '~server/apps/manage';
 import { rollbackAppFn } from '~server/apps';
 import classes from './deployment-history.module.css';
-
-dayjs.extend(relativeTime);
 
 const STATUS_META: Record<
   DeploymentSummary['status'],
@@ -116,7 +113,7 @@ function DeploymentItem({
           ) : null}
           <MetaDot />
           <Text size="xs" c="dimmed" truncate>
-            {dayjs(deployment.createdAt).fromNow()}
+            {formatRelative(deployment.createdAt)}
           </Text>
         </Group>
         {deployment.canRollback ? (

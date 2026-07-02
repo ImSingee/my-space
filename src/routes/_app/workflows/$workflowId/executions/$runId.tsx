@@ -12,22 +12,19 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createFileRoute, notFound } from '@tanstack/react-router';
 import { IconArrowLeft, IconPlayerStop } from '@tabler/icons-react';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import {
   RunStatusBadge,
   RunStatusBullet,
 } from '~components/workflows/run-status';
+import { formatDuration, formatExact } from '~lib/format';
 import {
   workflowRunQueryOptions,
   workflowRunsQueryOptions,
 } from '~queries/workflows';
 import { cancelWorkflowRunFn, getWorkflowRun } from '~server/workflows';
 import type { WorkflowRunStepView } from '~server/workflows/manage';
-
-dayjs.extend(relativeTime);
 
 export const Route = createFileRoute(
   '/_app/workflows/$workflowId/executions/$runId',
@@ -41,15 +38,6 @@ export const Route = createFileRoute(
   },
   component: WorkflowExecutionPage,
 });
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '—';
-  if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
-}
 
 function pretty(value: unknown): string {
   try {
@@ -154,8 +142,8 @@ function WorkflowExecutionPage() {
         <>
           {run.trigger} trigger
           {run.version != null ? ` · v${run.version}` : ''} ·{' '}
-          {dayjs(run.startedAt ?? run.createdAt).format('YYYY-MM-DD HH:mm:ss')}{' '}
-          · {formatDuration(run.durationMs)}
+          {formatExact(run.startedAt ?? run.createdAt)} ·{' '}
+          {formatDuration(run.durationMs)}
         </>
       }
       actions={

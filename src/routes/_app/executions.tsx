@@ -10,29 +10,17 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { IconTimeline } from '@tabler/icons-react';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { RunStatusBadge } from '~components/workflows/run-status';
+import { formatDuration, formatRelative } from '~lib/format';
 import { allWorkflowRunsQueryOptions } from '~queries/workflows';
 import { listAllWorkflowRuns } from '~server/workflows';
-
-dayjs.extend(relativeTime);
 
 export const Route = createFileRoute('/_app/executions')({
   loader: () => listAllWorkflowRuns(),
   component: ExecutionsPage,
 });
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '—';
-  if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
-}
 
 function ExecutionsPage() {
   const initial = Route.useLoaderData();
@@ -100,7 +88,30 @@ function ExecutionsPage() {
                   }
                 >
                   <Table.Td>
-                    <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                    {/* Real link (not just the row onClick) so open-in-new-tab
+                        and keyboard navigation work. stopPropagation keeps a
+                        modified click from ALSO firing the row's onClick and
+                        navigating the current tab. */}
+                    <Group
+                      gap="sm"
+                      wrap="nowrap"
+                      style={{
+                        minWidth: 0,
+                        color: 'inherit',
+                        textDecoration: 'none',
+                      }}
+                      renderRoot={(props) => (
+                        <Link
+                          {...props}
+                          to="/workflows/$workflowId/executions/$runId"
+                          params={{
+                            workflowId: run.workflowId,
+                            runId: run.id,
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      )}
+                    >
                       <AppGlyph
                         name={run.workflowName}
                         seed={run.workflowId}
@@ -131,7 +142,7 @@ function ExecutionsPage() {
                   </Table.Td>
                   <Table.Td>
                     <Text size="sm" c="dimmed">
-                      {dayjs(run.startedAt ?? run.createdAt).fromNow()}
+                      {formatRelative(run.startedAt ?? run.createdAt)}
                     </Text>
                   </Table.Td>
                 </Table.Tr>

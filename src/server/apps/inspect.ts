@@ -1,5 +1,6 @@
 /** Server-only: read-only app inventory + details for Agent tools. */
-import { db } from '~/db';
+import { inArray } from 'drizzle-orm';
+import { db, schema } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { listDeployments } from './manage';
 import type { NormalizedManifest, WebhookAuth } from './manifest';
@@ -23,16 +24,6 @@ function enabledCapabilities(
   return CAPABILITY_KEYS.filter((key) => caps[key]);
 }
 
-async function deploymentVersion(
-  deploymentId: string | null,
-): Promise<number | null> {
-  if (!deploymentId) return null;
-  const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq }) => eq(d.id, deploymentId),
-  });
-  return deployment?.version ?? null;
-}
-
 export type AppSummary = {
   id: string;
   slug: string;
@@ -50,18 +41,31 @@ export async function listAppsForAgent(): Promise<AppSummary[]> {
   const apps = await db.query.apps.findMany({
     orderBy: (s, { desc }) => [desc(s.updatedAt)],
   });
-  return Promise.all(
-    apps.map(async (app) => ({
-      id: app.id,
-      slug: app.slug,
-      name: app.name,
-      description: app.description,
-      status: app.status,
-      currentVersion: await deploymentVersion(app.currentDeploymentId),
-      capabilities: enabledCapabilities(app.capabilities),
-      updatedAt: app.updatedAt.toISOString(),
-    })),
+  const deploymentIds = apps
+    .map((app) => app.currentDeploymentId)
+    .filter((id): id is string => Boolean(id));
+  const deployments =
+    deploymentIds.length === 0
+      ? []
+      : await db.query.deployments.findMany({
+          where: inArray(schema.deployments.id, deploymentIds),
+          columns: { id: true, version: true },
+        });
+  const versionByDeploymentId = new Map(
+    deployments.map((d) => [d.id, d.version]),
   );
+  return apps.map((app) => ({
+    id: app.id,
+    slug: app.slug,
+    name: app.name,
+    description: app.description,
+    status: app.status,
+    currentVersion: app.currentDeploymentId
+      ? (versionByDeploymentId.get(app.currentDeploymentId) ?? null)
+      : null,
+    capabilities: enabledCapabilities(app.capabilities),
+    updatedAt: app.updatedAt.toISOString(),
+  }));
 }
 
 export type AgentDeploymentSummary = {
