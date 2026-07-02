@@ -2,39 +2,9 @@
 import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import { nextRun, parseCron } from '~server/apps/cron-expr';
+import { createCronScheduler } from '~server/cron-scheduler';
 import { startWorkflowRun } from './execute';
 import type { NormalizedWorkflowManifest, WorkflowCronJob } from './manifest';
-
-type SchedulerGlobal = typeof globalThis & {
-  __hatchWorkflowScheduler__?: {
-    timers: Map<string, ReturnType<typeof setTimeout>>;
-    started: boolean;
-    /**
-     * Bumped on every clearAll() so stale timer callbacks can self-cancel.
-     * Optional because a hot reload can leave an older-shaped object on
-     * globalThis; readers treat a missing value as 0 so `++` never yields NaN
-     * (which would compare unequal to every captured generation and silently
-     * stop all timers from firing).
-     */
-    generation?: number;
-  };
-};
-
-function state() {
-  const g = globalThis as SchedulerGlobal;
-  g.__hatchWorkflowScheduler__ ??= {
-    timers: new Map(),
-    started: false,
-    generation: 0,
-  };
-  return g.__hatchWorkflowScheduler__;
-}
-
-// Index is part of the key so two cron jobs that share a `name` get distinct
-// timers instead of the second clobbering the first.
-function jobKey(workflowId: string, index: number, jobName: string): string {
-  return `${workflowId}::${index}::${jobName}`;
-}
 
 /** Read cron jobs from a workflow's current deployment normalized manifest. */
 async function cronJobsFor(workflowId: string): Promise<WorkflowCronJob[]> {
@@ -67,118 +37,51 @@ async function fire(workflowId: string, job: WorkflowCronJob): Promise<void> {
   }
 }
 
-function scheduleOne(
-  workflowId: string,
-  job: WorkflowCronJob,
-  index: number,
-): void {
-  const s = state();
-  // Capture the generation this timer belongs to. A reload (clearAll) bumps it;
-  // a timer that already fired before its clearTimeout ran would otherwise keep
-  // a removed/changed cron definition alive by rescheduling itself.
-  const generation = s.generation ?? 0;
-  const key = jobKey(workflowId, index, job.name);
-  const existing = s.timers.get(key);
-  if (existing) clearTimeout(existing);
-
-  let spec: ReturnType<typeof parseCron>;
-  try {
-    spec = parseCron(job.schedule);
-  } catch {
-    return;
-  }
-  const next = nextRun(spec);
-  if (!next) return;
-
-  const maxDelay = 6 * 60 * 60 * 1000;
-  const delay = Math.min(Math.max(next.getTime() - Date.now(), 1000), maxDelay);
-  const timer = setTimeout(() => {
-    // Superseded by a reload between firing and clearTimeout: do nothing so we
-    // neither fire nor reschedule the stale job onto the rebuilt schedule.
-    if ((state().generation ?? 0) !== generation) return;
-    const reached = nextRun(spec, new Date(Date.now() - 60_000));
-    const due = !reached || reached.getTime() <= Date.now() + 1000;
-    const reschedule = () => {
-      if ((state().generation ?? 0) === generation) {
-        scheduleOne(workflowId, job, index);
-      }
-    };
-    if (due) {
-      void fire(workflowId, job).finally(reschedule);
-    } else {
-      reschedule();
-    }
-  }, delay);
-  if (typeof timer.unref === 'function') timer.unref();
-  s.timers.set(key, timer);
-}
-
-function clearAll(): void {
-  const s = state();
-  for (const timer of s.timers.values()) clearTimeout(timer);
-  s.timers.clear();
-  // Invalidate any timer callback already in flight (fired but not yet cleared)
-  // so it can't reschedule itself after the upcoming reload rebuilds the map.
-  s.generation = (s.generation ?? 0) + 1;
-}
-
-async function loadAll(): Promise<void> {
-  const workflows = await db.query.workflows.findMany({
-    where: (s, { eq }) => eq(s.status, 'deployed'),
-    columns: { id: true, currentDeploymentId: true },
-  });
-  const deployed = workflows.filter((w) => w.currentDeploymentId);
-  if (deployed.length === 0) return;
-  // One batched manifest lookup instead of cronJobsFor()'s 2 queries per flow.
-  const deployments = await db.query.workflowDeployments.findMany({
-    where: inArray(
-      schema.workflowDeployments.id,
-      deployed.map((w) => w.currentDeploymentId as string),
-    ),
-    columns: { id: true, manifestNormalized: true },
-  });
-  const manifestByDeploymentId = new Map(
-    deployments.map((d) => [
-      d.id,
-      d.manifestNormalized as NormalizedWorkflowManifest | null,
-    ]),
-  );
-  for (const workflow of deployed) {
-    const manifest = manifestByDeploymentId.get(
-      workflow.currentDeploymentId as string,
+const scheduler = createCronScheduler<WorkflowCronJob>({
+  globalKey: '__hatchWorkflowScheduler__',
+  // Index is part of the key so two cron jobs that share a `name` get distinct
+  // timers instead of the second clobbering the first.
+  jobKey: (workflowId, job, index) => `${workflowId}::${index}::${job.name}`,
+  schedule: (job) => job.schedule,
+  fire,
+  loadJobs: async () => {
+    const workflows = await db.query.workflows.findMany({
+      where: (s, { eq }) => eq(s.status, 'deployed'),
+      columns: { id: true, currentDeploymentId: true },
+    });
+    const deployed = workflows.filter((w) => w.currentDeploymentId);
+    if (deployed.length === 0) return [];
+    // One batched manifest lookup instead of cronJobsFor()'s 2 queries per flow.
+    const deployments = await db.query.workflowDeployments.findMany({
+      where: inArray(
+        schema.workflowDeployments.id,
+        deployed.map((w) => w.currentDeploymentId as string),
+      ),
+      columns: { id: true, manifestNormalized: true },
+    });
+    const manifestByDeploymentId = new Map(
+      deployments.map((d) => [
+        d.id,
+        d.manifestNormalized as NormalizedWorkflowManifest | null,
+      ]),
     );
-    const jobs = manifest?.triggers?.cron ?? [];
-    jobs.forEach((job, index) => scheduleOne(workflow.id, job, index));
-  }
-}
+    return deployed.map((workflow) => ({
+      ownerId: workflow.id,
+      jobs:
+        manifestByDeploymentId.get(workflow.currentDeploymentId as string)
+          ?.triggers?.cron ?? [],
+    }));
+  },
+});
 
 /** Start the scheduler once (idempotent). Safe to call from any server entry. */
 export function ensureWorkflowScheduler(): void {
-  const s = state();
-  if (s.started) return;
-  s.started = true;
-  // Allow a retry if the very first load fails (e.g. called at boot before the
-  // database is reachable); a later deploy/rollback or page load re-runs it.
-  void loadAll().catch(() => {
-    s.started = false;
-  });
+  scheduler.ensure();
 }
 
 /** Reload all schedules (call after a deploy/rollback/delete). */
 export async function reloadWorkflowScheduler(): Promise<void> {
-  const s = state();
-  s.started = true;
-  clearAll();
-  try {
-    await loadAll();
-  } catch (error) {
-    // The old timers are already cleared; a transient DB/load failure would
-    // otherwise leave every cron trigger disabled with `started` stuck true so
-    // ensureWorkflowScheduler() never retries. Reset it so a later boot/reload
-    // rebuilds the schedule, then surface the failure to the caller.
-    s.started = false;
-    throw error;
-  }
+  await scheduler.reload();
 }
 
 export type WorkflowCronView = {

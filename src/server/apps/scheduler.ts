@@ -1,6 +1,7 @@
 /** Server-only: cron scheduler that triggers app backends on schedule. */
 import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
+import { createCronScheduler } from '~server/cron-scheduler';
 import {
   HATCH_SIGNATURE_HEADER,
   HATCH_TIMESTAMP_HEADER,
@@ -9,25 +10,6 @@ import {
 import type { CronJob, NormalizedManifest } from './manifest';
 import { nextRun, parseCron } from './cron-expr';
 import { callAppBackend } from './runtime';
-
-type SchedulerGlobal = typeof globalThis & {
-  __hatchScheduler__?: {
-    timers: Map<string, ReturnType<typeof setTimeout>>;
-    started: boolean;
-    /** Bumped on every clear/reload to invalidate in-flight reschedules. */
-    generation: number;
-  };
-};
-
-function state() {
-  const g = globalThis as SchedulerGlobal;
-  g.__hatchScheduler__ ??= { timers: new Map(), started: false, generation: 0 };
-  return g.__hatchScheduler__;
-}
-
-function jobKey(appId: string, jobName: string): string {
-  return `${appId}::${jobName}`;
-}
 
 async function log(
   appId: string,
@@ -210,115 +192,57 @@ async function fire(appId: string, job: CronJob): Promise<void> {
   }
 }
 
-function scheduleOne(appId: string, job: CronJob): void {
-  const s = state();
-  // Capture the generation this timer belongs to. A clearAll()/reload bumps the
-  // generation, so a fire() that was already in flight when the reload happened
-  // must not re-add a timer for a job that may no longer exist.
-  const gen = s.generation;
-  const key = jobKey(appId, job.name);
-  const existing = s.timers.get(key);
-  if (existing) clearTimeout(existing);
-
-  let spec: ReturnType<typeof parseCron>;
-  try {
-    spec = parseCron(job.schedule);
-  } catch (error) {
+const scheduler = createCronScheduler<CronJob>({
+  globalKey: '__hatchScheduler__',
+  jobKey: (appId, job) => `${appId}::${job.name}`,
+  schedule: (job) => job.schedule,
+  fire,
+  onInvalidSchedule: (appId, job, error) => {
     void log(appId, 'error', `invalid cron for "${job.name}"`, {
       schedule: job.schedule,
-      error: (error as Error).message,
+      error: error.message,
     });
-    return;
-  }
-  const next = nextRun(spec);
-  if (!next) return;
-
-  // Cap individual sleeps so very distant jobs still re-evaluate periodically.
-  const maxDelay = 6 * 60 * 60 * 1000;
-  const delay = Math.min(Math.max(next.getTime() - Date.now(), 1000), maxDelay);
-  const timer = setTimeout(() => {
-    if (s.generation !== gen) return;
-    const reached = nextRun(spec, new Date(Date.now() - 60_000));
-    const due = !reached || reached.getTime() <= Date.now() + 1000;
-    if (due) {
-      void fire(appId, job).finally(() => {
-        if (s.generation === gen) scheduleOne(appId, job);
-      });
-    } else {
-      scheduleOne(appId, job);
-    }
-  }, delay);
-  if (typeof timer.unref === 'function') timer.unref();
-  s.timers.set(key, timer);
-}
-
-function clearAll(): void {
-  const s = state();
-  // Invalidate any reschedule that a still-running fire() might attempt.
-  s.generation++;
-  for (const timer of s.timers.values()) clearTimeout(timer);
-  s.timers.clear();
-}
-
-async function loadAll(): Promise<void> {
-  const apps = await db.query.apps.findMany({
-    where: (s, { eq }) => eq(s.status, 'deployed'),
-    columns: { id: true, capabilities: true, currentDeploymentId: true },
-  });
-  const cronApps = apps.filter(
-    (app) => app.capabilities?.cron && app.currentDeploymentId,
-  );
-  if (cronApps.length === 0) return;
-  // One batched manifest lookup instead of cronJobsFor()'s 2 queries per app.
-  const deployments = await db.query.deployments.findMany({
-    where: inArray(
-      schema.deployments.id,
-      cronApps.map((app) => app.currentDeploymentId as string),
-    ),
-    columns: { id: true, manifestNormalized: true },
-  });
-  const manifestByDeploymentId = new Map(
-    deployments.map((d) => [
-      d.id,
-      d.manifestNormalized as NormalizedManifest | null,
-    ]),
-  );
-  for (const app of cronApps) {
-    const manifest = manifestByDeploymentId.get(
-      app.currentDeploymentId as string,
+  },
+  loadJobs: async () => {
+    const apps = await db.query.apps.findMany({
+      where: (s, { eq }) => eq(s.status, 'deployed'),
+      columns: { id: true, capabilities: true, currentDeploymentId: true },
+    });
+    const cronApps = apps.filter(
+      (app) => app.capabilities?.cron && app.currentDeploymentId,
     );
-    for (const job of manifest?.cron ?? []) scheduleOne(app.id, job);
-  }
-}
+    if (cronApps.length === 0) return [];
+    // One batched manifest lookup instead of cronJobsFor()'s 2 queries per app.
+    const deployments = await db.query.deployments.findMany({
+      where: inArray(
+        schema.deployments.id,
+        cronApps.map((app) => app.currentDeploymentId as string),
+      ),
+      columns: { id: true, manifestNormalized: true },
+    });
+    const manifestByDeploymentId = new Map(
+      deployments.map((d) => [
+        d.id,
+        d.manifestNormalized as NormalizedManifest | null,
+      ]),
+    );
+    return cronApps.map((app) => ({
+      ownerId: app.id,
+      jobs:
+        manifestByDeploymentId.get(app.currentDeploymentId as string)?.cron ??
+        [],
+    }));
+  },
+});
 
 /** Start the scheduler once (idempotent). Safe to call from any server entry. */
 export function ensureScheduler(): void {
-  const s = state();
-  if (s.started) return;
-  s.started = true;
-  // Allow a retry if the very first load fails (e.g. called at boot before the
-  // database is reachable); a later deploy/rollback or app-list load re-runs it.
-  void loadAll().catch(() => {
-    s.started = false;
-  });
+  scheduler.ensure();
 }
 
 /** Reload all schedules (call after a deploy/rollback/delete). */
 export async function reloadScheduler(): Promise<void> {
-  const s = state();
-  s.started = true;
-  clearAll();
-  try {
-    await loadAll();
-  } catch (error) {
-    // Timers are already cleared; a transient DB/read failure would otherwise
-    // leave every cron job unscheduled with `started` stuck true so
-    // ensureScheduler() never retries (and deploy suppresses this error). Reset
-    // it so a later boot/app-list load rebuilds the schedule, then surface the
-    // failure to the caller.
-    s.started = false;
-    throw error;
-  }
+  await scheduler.reload();
 }
 
 /** Manually trigger a single cron job now. */
