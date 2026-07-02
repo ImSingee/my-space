@@ -35,6 +35,22 @@ export type BuildAppOptions = {
 
 const BIN_DIR = path.join(REPO_ROOT, 'node_modules', '.bin');
 
+/**
+ * The only codegen config `buf generate` ever runs with. App sources carry a
+ * copy for local iteration, but the build overwrites it (see below) because
+ * buf `local:` plugins are arbitrary commands. Must mirror the scaffold
+ * template so agent-side and platform-side codegen agree.
+ */
+const PLATFORM_BUF_GEN_YAML = `version: v2
+clean: true
+plugins:
+  - local: protoc-gen-es
+    out: gen
+    opt:
+      - target=ts
+      - import_extension=none
+`;
+
 function run(
   cmd: string,
   args: string[],
@@ -166,6 +182,7 @@ async function extractAppApi(src: string): Promise<AppApi> {
   try {
     const built = await run('buf', ['build', '-o', descriptorPath], {
       cwd: src,
+      env: subprocessSandboxEnv(),
     });
     if (built.code !== 0) {
       throw new Error(`buf build (API descriptor) failed:\n${built.output}`);
@@ -236,7 +253,17 @@ export async function buildApp(
     const protoPath = manifest.rpc ? path.join(src, manifest.rpc.proto) : null;
     let api: AppApi | undefined;
     if (manifest.rpc && protoPath && (await pathExists(protoPath))) {
-      const gen = await run('buf', ['generate'], { cwd: src });
+      // `buf generate` executes the plugins listed in buf.gen.yaml, and `local:`
+      // plugins are arbitrary commands. The file ships with the app source, so
+      // an app could point it at `sh` and run code at build time. Overwrite it
+      // (we build from a temp copy) with the platform's fixed codegen config so
+      // only the sanctioned plugin ever runs, and withhold platform secrets
+      // from the plugin's environment like every other build subprocess.
+      await fs.writeFile(path.join(src, 'buf.gen.yaml'), PLATFORM_BUF_GEN_YAML);
+      const gen = await run('buf', ['generate'], {
+        cwd: src,
+        env: subprocessSandboxEnv(),
+      });
       logs.push(`$ buf generate\n${gen.output.trim()}`);
       if (gen.code !== 0) {
         throw new Error(`Connect codegen failed:\n${gen.output}`);

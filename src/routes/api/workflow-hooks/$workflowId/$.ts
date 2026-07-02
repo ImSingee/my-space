@@ -105,6 +105,7 @@ async function handle({ request }: { request: Request }): Promise<Response> {
   }
 
   const { startWorkflowRun } = await import('~server/workflows/execute');
+  const { AppError } = await import('~server/errors');
   try {
     const result = await startWorkflowRun(id, { trigger: 'webhook', input });
     return new Response(
@@ -112,10 +113,17 @@ async function handle({ request }: { request: Request }): Promise<Response> {
       { status: 202, headers: { 'content-type': 'application/json' } },
     );
   } catch (error) {
-    return new Response(
-      error instanceof Error ? error.message : 'Workflow error',
-      { status: 502 },
+    // Structured 4xx errors (e.g. input validation) are written for the
+    // caller; anything else is internal detail this unauthenticated-ish
+    // endpoint must not echo. Log it server-side instead.
+    if (error instanceof AppError && error.status < 500) {
+      return new Response(error.message, { status: error.status });
+    }
+    console.error(
+      `[workflow-hooks] workflow ${id} run failed to start:`,
+      error,
     );
+    return new Response('Workflow error', { status: 502 });
   }
 }
 

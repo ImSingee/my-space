@@ -53,10 +53,14 @@ export async function handle({
 
   const { proxyAppRequest } = await import('~server/apps/runtime');
   const base = `/api/hooks/${id}`;
-  const fail = (error: unknown) =>
-    new Response(error instanceof Error ? error.message : 'App backend error', {
-      status: 502,
-    });
+  // This endpoint is reachable without a session, so never echo internal error
+  // detail (backend start failures embed the process log tail — stack traces,
+  // absolute paths, whatever the app printed). Log it server-side instead;
+  // the owner sees the full story on the authenticated manage surfaces.
+  const fail = (error: unknown) => {
+    console.error(`[hooks] app ${id} webhook forward failed:`, error);
+    return new Response('App backend error', { status: 502 });
+  };
 
   if (auth === 'none') {
     // Unauthenticated passthrough. The app self-secures; proxyAppRequest still

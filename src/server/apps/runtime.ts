@@ -347,7 +347,10 @@ async function startBackend(id: string): Promise<number> {
     `--allow-write=${allowWrite.join(',')}`,
     // Outbound network stays open: apps legitimately call external APIs and
     // their own per-app Postgres. The env is sandboxed below, so --allow-env
-    // exposes only the app's own variables, not platform secrets.
+    // exposes only the app's own variables, not platform secrets. Localhost is
+    // reachable too (other apps' ports, Postgres), so the DB credentials are a
+    // per-app restricted role and platform-forwarded RPC carries a per-app
+    // signature a sibling app cannot forge.
     '--allow-net',
     '--allow-env',
     '--no-prompt',
@@ -553,9 +556,9 @@ export async function proxyAppRequest(
     'host',
     'cookie',
     'x-hatch-secret',
-    // Platform→backend signature headers (cron RPC). Strip them from proxied
-    // (browser) requests so a client can never present forged signing headers;
-    // only the platform's direct callAppBackend path attaches them.
+    // Platform→backend signature headers. Strip them from inbound requests so
+    // a client can never present forged signing headers; the platform re-signs
+    // below (signWithSecret) or via the direct callAppBackend path.
     'x-hatch-timestamp',
     'x-hatch-signature',
     'x-hatch-cron',

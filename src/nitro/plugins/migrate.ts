@@ -1,6 +1,7 @@
 import { definePlugin } from 'nitro';
 import { runMigrations } from '~db/migrate.ts';
 import { interruptStaleAgentRuns } from '~server/agent-runs';
+import { hardenPlatformDatabase } from '~server/apps/provision';
 import { ensureScheduler } from '~server/apps/scheduler';
 import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
@@ -15,6 +16,9 @@ export default definePlugin(async () => {
   }
 
   await runMigrations();
+  // Lock down PUBLIC connect on the platform DB so per-app roles (same server)
+  // can't open a connection to it. Independent of the rest of boot.
+  await hardenPlatformDatabase();
   await interruptStaleAgentRuns();
 
   // Recover orphaned workflow runs first (the in-memory run registry doesn't

@@ -364,6 +364,14 @@ Legacy: a job may instead declare a raw `path`
 (`{ name, schedule, path: "/__cron/x" }`) that the platform POSTs to (also
 signed, same headers). Prefer `method`.
 
+**All platform-forwarded RPC calls are signed too.** Regular user RPC requests
+(proxied through `/api/apps/<id>/rpc`) carry `x-hatch-timestamp` +
+`x-hatch-signature`, where the HMAC is over `<timestamp>.<rawBodyBytes>` (like
+webhooks, not like cron). Backends listen on localhost, so another app's
+backend could reach your port directly — but it cannot forge this signature.
+For sensitive RPC methods, verify the signature to accept only platform-vetted
+callers.
+
 ### webhook
 
 Set `"webhook": true` (requires a `backend`). The platform exposes a PUBLIC

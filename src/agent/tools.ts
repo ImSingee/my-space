@@ -418,7 +418,11 @@ export function createTools(
           onUpdate?.(live);
         }
       };
-      const res = await env.exec(params.command, {
+      // wrapShellCommand adds the macOS seatbelt deny-list (platform env
+      // files, host credential dirs); the env allowlist alone doesn't stop a
+      // command from reading those by path.
+      const { wrapShellCommand } = await import('./shell-sandbox');
+      const res = await env.exec(wrapShellCommand(params.command), {
         timeout: 120,
         abortSignal: signal,
         onStdout: stream,

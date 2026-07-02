@@ -30,7 +30,15 @@ async function handle({ request }: { request: Request }): Promise<Response> {
   }
   const { proxyAppRequest } = await import('~server/apps/runtime');
   try {
-    return await proxyAppRequest(id, request, `/api/apps/${id}/rpc`);
+    // Sign the forward with the per-app key so the backend can distinguish
+    // platform-vetted calls from direct localhost traffic (another app's
+    // backend can reach this backend's port; it cannot forge the signature).
+    // Signing buffers the (bounded) request body — Connect unary messages are
+    // small, and blobs belong in the storage API. Apps deployed before signing
+    // keys existed have no secret and are forwarded unsigned.
+    return await proxyAppRequest(id, request, `/api/apps/${id}/rpc`, '', {
+      signWithSecret: app.signingSecret ?? undefined,
+    });
   } catch (error) {
     return new Response(
       error instanceof Error ? error.message : 'App backend error',

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import {
   mkdtemp,
   mkdir,
@@ -172,5 +173,35 @@ describe('agent file tools', () => {
     } finally {
       await rm(outsidePath, { force: true });
     }
+  });
+});
+
+describe('run_command sandbox', () => {
+  it('runs ordinary commands (wrapped when the sandbox is available)', async () => {
+    const { getTool } = await setup();
+    const result = await getTool('run_command').execute('cmd', {
+      command: 'echo sandbox-ok',
+    });
+    expect(textOf(result)).toContain('sandbox-ok');
+    expect(textOf(result)).toContain('exit code: 0');
+  });
+
+  it('denies reading platform env files when the seatbelt is active', async () => {
+    const { wrapShellCommand } = await import('./shell-sandbox');
+    const { REPO_ROOT } = await import('./paths');
+    const envFile = path.join(REPO_ROOT, '.env');
+    const seatbeltActive = wrapShellCommand('true') !== 'true';
+    if (!seatbeltActive || !existsSync(envFile)) {
+      // Non-darwin (container boundary applies) or no .env checked out here.
+      return;
+    }
+
+    const { getTool } = await setup();
+    const result = await getTool('run_command').execute('cmd', {
+      command: `cat ${JSON.stringify(envFile)}`,
+    });
+    const body = textOf(result);
+    expect(body).not.toContain('exit code: 0');
+    expect(body).toMatch(/Operation not permitted|not permitted/i);
   });
 });
