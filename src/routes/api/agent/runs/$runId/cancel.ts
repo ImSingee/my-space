@@ -19,8 +19,17 @@ export const Route = createFileRoute('/api/agent/runs/$runId/cancel')({
         if (!runId) return new Response('Not found', { status: 404 });
 
         const { cancelAgentRun } = await import('~server/agent-runs');
-        await cancelAgentRun(runId);
-        return Response.json({ ok: true });
+        const { errorResponse } = await import('~server/errors');
+        try {
+          await cancelAgentRun(runId);
+          return Response.json({ ok: true });
+        } catch (error) {
+          // A cancel racing the run's own event writes can surface a transient
+          // DB error; the client refetches regardless, so map it to a status
+          // instead of a raw 500 (and don't wedge deleteSession, which cancels
+          // first).
+          return errorResponse(error, 500);
+        }
       },
     },
   },

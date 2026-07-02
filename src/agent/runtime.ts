@@ -92,6 +92,10 @@ export async function runAgentTurn(
     ...(opts.ask ? { ask: opts.ask } : {}),
     sessionId,
   });
+  // Server-side source of truth for tool display labels. Emitting the label on
+  // tool_start lets the client show it without maintaining a second copy of
+  // every tool name (which drifted out of date and showed raw snake_case).
+  const labelByName = new Map(tools.map((tool) => [tool.name, tool.label]));
 
   const harness = new AgentHarness({
     env,
@@ -105,7 +109,9 @@ export async function runAgentTurn(
   });
 
   const onAbort = () => {
-    void harness.abort();
+    // Swallow abort rejections: a rejected abort() would otherwise become a
+    // process-level unhandledRejection that can crash the server.
+    void Promise.resolve(harness.abort()).catch(() => {});
   };
   signal.addEventListener('abort', onAbort);
   if (signal.aborted) {
@@ -152,10 +158,12 @@ export async function runAgentTurn(
         break;
       }
       case 'tool_execution_start': {
+        const label = labelByName.get(event.toolName);
         emit({
           type: 'tool_start',
           id: event.toolCallId,
           name: event.toolName,
+          ...(label ? { label } : {}),
           args: (event.args ?? {}) as JsonValue,
         });
         break;

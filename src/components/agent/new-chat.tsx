@@ -11,7 +11,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { IconPlugConnected, IconSparkles } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
 import { createSession } from '~server/agent-sessions';
@@ -44,6 +44,9 @@ export function NewChat({
   const { groups, first } = useModelOptions();
   const [model, setModel] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Reuse a session created by a failed first attempt so a retry doesn't leave
+  // a trail of empty "New chat" shells in the sidebar.
+  const createdSessionRef = useRef<string | null>(null);
   const [seed, setSeed] = useState({
     text: initialPrompt ?? '',
     nonce: initialPrompt ? 1 : 0,
@@ -61,7 +64,10 @@ export function NewChat({
 
     setCreating(true);
     try {
-      const { id } = await createSession({ data: { providerId, modelId } });
+      const id =
+        createdSessionRef.current ??
+        (await createSession({ data: { providerId, modelId } })).id;
+      createdSessionRef.current = id;
       await startAgentRunRequest({
         sessionId: id,
         userText: text,
@@ -74,6 +80,8 @@ export function NewChat({
       return true;
     } catch {
       // Keep the draft (return false) so the user can retry without retyping.
+      // The created session id is retained (createdSessionRef) so the retry
+      // reuses it instead of creating another empty session.
       toast.error('Could not start the chat.');
       setCreating(false);
       return false;

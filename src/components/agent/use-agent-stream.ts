@@ -6,11 +6,12 @@ import type {
   AskAnswer,
   AskQuestion,
 } from '~agent/events';
-import type { ChatMessage } from './types';
 
 export type StreamTool = {
   id: string;
   name: string;
+  /** Display label sent by the server on tool_start (avoids raw snake_case). */
+  label?: string;
   args?: Record<string, unknown>;
   done: boolean;
   isError?: boolean;
@@ -131,6 +132,7 @@ export function reduceStreamState(
             tool: {
               id: event.id,
               name: event.name,
+              ...(event.label ? { label: event.label } : {}),
               args: (event.args ?? undefined) as
                 | Record<string, unknown>
                 | undefined,
@@ -211,10 +213,11 @@ async function answerAgentRunRequest(
 }
 
 export function useAgentStream(
-  onDone: (messages: ChatMessage[], title: string) => void,
+  onDone: () => void,
   onTerminal?: () => void,
   onDisconnect?: (runId: string) => void,
   onSessionChanged?: () => void,
+  onConnected?: () => void,
 ) {
   const [state, setState] = useState<StreamState>(IDLE);
   const abortRef = useRef<AbortController | null>(null);
@@ -229,10 +232,12 @@ export function useAgentStream(
   const onTerminalRef = useRef(onTerminal);
   const onDisconnectRef = useRef(onDisconnect);
   const onSessionChangedRef = useRef(onSessionChanged);
+  const onConnectedRef = useRef(onConnected);
   onDoneRef.current = onDone;
   onTerminalRef.current = onTerminal;
   onDisconnectRef.current = onDisconnect;
   onSessionChangedRef.current = onSessionChanged;
+  onConnectedRef.current = onConnected;
 
   const handleEvent = useCallback((event: AgentStreamEvent) => {
     switch (event.type) {
@@ -249,10 +254,7 @@ export function useAgentStream(
       case 'done':
         runIdRef.current = null;
         setState(IDLE);
-        onDoneRef.current(
-          event.messages as unknown as ChatMessage[],
-          event.title,
-        );
+        onDoneRef.current();
         break;
       case 'cancelled':
         runIdRef.current = null;
@@ -296,6 +298,8 @@ export function useAgentStream(
           if (!res.ok || !res.body) {
             throw new Error(`Request failed (${res.status})`);
           }
+          // A healthy connection: let the caller reset any reconnect backoff.
+          onConnectedRef.current?.();
 
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
@@ -321,12 +325,12 @@ export function useAgentStream(
             setState(IDLE);
             onDisconnectRef.current?.(runId);
           }
-        } catch (error) {
+        } catch {
+          // A dropped/failed stream isn't fatal: the run keeps executing on the
+          // server. Reconnect silently (the caller backs off and only surfaces a
+          // toast after repeated failures) instead of alarming on every blip.
           if (!ac.signal.aborted && runIdRef.current === runId) {
             runIdRef.current = null;
-            toast.error(
-              error instanceof Error ? error.message : 'Stream failed',
-            );
             setState(IDLE);
             onDisconnectRef.current?.(runId);
           }

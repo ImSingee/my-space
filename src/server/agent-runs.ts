@@ -1,5 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import { and, eq, gt, inArray } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
+import { ulid } from 'ulid';
 import { db, schema } from '~/db';
 import type { AgentRunStatus, JsonObject, JsonValue } from '~/db/schema';
 import { submitAnswer, waitForAnswer } from '~agent/ask-registry';
@@ -106,24 +107,28 @@ function publish(runId: string, event: AgentRunStreamEvent): void {
   }
 }
 
-async function nextSeq(runId: string): Promise<number> {
-  const last = await db.query.agentRunEvents.findFirst({
-    where: (e, { eq: equals }) => equals(e.runId, runId),
-    orderBy: (e, { desc: descending }) => [descending(e.seq)],
-  });
-  return (last?.seq ?? 0) + 1;
-}
-
+/**
+ * Append an event, allocating its `seq` as `max(seq)+1` for the run. A per-run
+ * advisory lock (held to the end of the transaction) serializes concurrent
+ * allocations across connections/processes, so the ordered pipeline and any
+ * standalone insert (e.g. a cancel that lands before the pipeline exists) can
+ * never read the same max and collide on the (run_id, seq) unique index.
+ */
 async function appendEvent(
   runId: string,
-  seq: number,
   event: AgentStreamEvent,
 ): Promise<AgentRunStreamEvent> {
-  await db.insert(schema.agentRunEvents).values({
-    runId,
-    seq,
-    type: event.type,
-    payload: event as unknown as JsonObject,
+  const payload = JSON.stringify(event);
+  const seq = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${runId}))`);
+    const rows = await tx.execute<{ seq: number }>(sql`
+      insert into agent_run_events (id, run_id, seq, type, payload)
+      select ${ulid().toLowerCase()}, ${runId},
+             coalesce(max(seq), 0) + 1, ${event.type}, ${payload}::jsonb
+      from agent_run_events where run_id = ${runId}
+      returning seq
+    `);
+    return Number((rows as unknown as { seq: number }[])[0].seq);
   });
   const stored = { seq, event };
   publish(runId, stored);
@@ -134,31 +139,31 @@ async function appendStandaloneEvent(
   runId: string,
   event: AgentStreamEvent,
 ): Promise<AgentRunStreamEvent> {
-  return appendEvent(runId, await nextSeq(runId), event);
+  return appendEvent(runId, event);
 }
 
-async function createEventPipeline(runId: string): Promise<{
+/**
+ * Serialize a run's streamed events onto one promise chain so they persist in
+ * arrival order (seq is allocated atomically per insert; the chain only fixes
+ * ordering). `flush` surfaces the first append failure to the caller.
+ */
+function createEventPipeline(runId: string): {
   emit: (event: AgentStreamEvent) => void;
   emitAsync: (event: AgentStreamEvent) => Promise<AgentRunStreamEvent>;
   flush: () => Promise<void>;
-}> {
-  let seq = await nextSeq(runId);
-  let tail = Promise.resolve();
+} {
+  let tail: Promise<unknown> = Promise.resolve();
   let failure: unknown;
 
   const enqueue = (event: AgentStreamEvent) => {
-    const runSeq = seq;
-    seq += 1;
-    tail = tail
-      .then(() => appendEvent(runId, runSeq, event))
-      .then(
-        () => undefined,
-        (error) => {
-          failure = error;
-          throw error;
-        },
-      );
-    return tail.then(() => ({ seq: runSeq, event }));
+    const result = tail.then(() => appendEvent(runId, event));
+    tail = result.then(
+      () => undefined,
+      (error) => {
+        failure ??= error;
+      },
+    );
+    return result;
   };
 
   return {
@@ -336,9 +341,12 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         providerId: picked.providerId,
         modelId: picked.model.id,
         status: 'running',
+        // Diagnostics only (no reader reconstructs the run from this). Store
+        // image metadata, not the base64 payloads — those already live in the
+        // persisted session message, and duplicating them here bloated the row.
         input: {
           userText: input.userText,
-          images,
+          images: images.map((image) => ({ mimeType: image.mimeType })),
         },
       })
       .returning();
@@ -372,15 +380,19 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
 
   // Hold the run's completion so cancel can wait for the partial reply to be
   // persisted before returning (the client refetches right after cancelling).
+  // executeRun handles its own failures (finishRun + cleanup in its finally);
+  // this catch only guards against an unexpected escape, which we log rather
+  // than swallow silently so a wedged run leaves a trace.
   live.finished = executeRun(run.id, live, {
     sessionId: input.sessionId,
     userText: input.userText,
     images,
     baseMessages,
-    title,
     models,
     picked,
-  }).catch(() => {});
+  }).catch((error) => {
+    console.error(`[agent-runs] run ${run.id} crashed unexpectedly:`, error);
+  });
 
   return { runId: run.id };
 }
@@ -393,13 +405,15 @@ async function executeRun(
     userText: string;
     images: SendImage[];
     baseMessages: AgentMessage[];
-    title: string;
     models: Awaited<ReturnType<typeof loadAgentModels>>['models'];
     picked: NonNullable<ReturnType<typeof pickModel>>;
   },
 ): Promise<void> {
-  const pipeline = await createEventPipeline(runId);
-  live.pipeline = pipeline;
+  // The pipeline (and its first DB query) is created *inside* the try below so a
+  // failure there still finishes the run and cleans up `liveRuns` — otherwise a
+  // transient DB error would wedge the session forever (the partial unique index
+  // keeps rejecting new turns and the SSE stream hangs on "Thinking…").
+  let pipeline: ReturnType<typeof createEventPipeline> | undefined;
 
   const emitTerminal = async (
     status: AgentRunStatus,
@@ -407,48 +421,53 @@ async function executeRun(
     error?: string,
   ) => {
     if (await finishRun(runId, status, error)) {
-      await pipeline.emitAsync(event);
+      if (pipeline) await pipeline.emitAsync(event);
+      else await appendStandaloneEvent(runId, event);
     }
   };
 
   const isCancelled = () => live.cancelled || live.controller.signal.aborted;
 
-  const ask = async (
-    questions: AskQuestion[],
-    askSignal?: AbortSignal,
-  ): Promise<AskAnswer[]> => {
-    if (isCancelled()) {
-      throw new Error('Agent run was cancelled.');
-    }
-    const askId = crypto.randomUUID();
-    const pendingAsk = { askId, questions };
-    if (!(await updateActiveRunStatus(runId, 'blocked', { pendingAsk }))) {
-      throw new Error('Agent run is no longer active.');
-    }
-    if (isCancelled()) {
-      throw new Error('Agent run was cancelled.');
-    }
-    await pipeline.emitAsync({ type: 'ask', askId, questions });
-    const answers = await waitForAnswer(
-      runId,
-      askId,
-      askSignal ?? live.controller.signal,
-    );
-    if (
-      !(await updateActiveRunStatus(runId, 'running', {
-        pendingAsk: null,
-      }))
-    ) {
-      throw new Error('Agent run is no longer active.');
-    }
-    if (isCancelled()) {
-      throw new Error('Agent run was cancelled.');
-    }
-    await pipeline.emitAsync({ type: 'ask_answered', askId });
-    return answers;
-  };
-
   try {
+    pipeline = createEventPipeline(runId);
+    live.pipeline = pipeline;
+    const pipe = pipeline;
+
+    const ask = async (
+      questions: AskQuestion[],
+      askSignal?: AbortSignal,
+    ): Promise<AskAnswer[]> => {
+      if (isCancelled()) {
+        throw new Error('Agent run was cancelled.');
+      }
+      const askId = crypto.randomUUID();
+      const pendingAsk = { askId, questions };
+      if (!(await updateActiveRunStatus(runId, 'blocked', { pendingAsk }))) {
+        throw new Error('Agent run is no longer active.');
+      }
+      if (isCancelled()) {
+        throw new Error('Agent run was cancelled.');
+      }
+      await pipe.emitAsync({ type: 'ask', askId, questions });
+      const answers = await waitForAnswer(
+        runId,
+        askId,
+        askSignal ?? live.controller.signal,
+      );
+      if (
+        !(await updateActiveRunStatus(runId, 'running', {
+          pendingAsk: null,
+        }))
+      ) {
+        throw new Error('Agent run is no longer active.');
+      }
+      if (isCancelled()) {
+        throw new Error('Agent run was cancelled.');
+      }
+      await pipe.emitAsync({ type: 'ask_answered', askId });
+      return answers;
+    };
+
     if (isCancelled()) {
       await emitTerminal('cancelled', { type: 'cancelled' });
       return;
@@ -463,22 +482,20 @@ async function executeRun(
       picked: opts.picked,
       signal: live.controller.signal,
       ask,
-      emit: pipeline.emit,
+      emit: pipe.emit,
     });
-    await pipeline.flush();
+    await pipe.flush();
 
     // Persist whatever the turn produced — including a reply that was only
     // partially streamed before the user stopped the run (or before it errored).
     // runAgentTurn returns the messages accumulated so far on abort, so saving
-    // here keeps already-shown output in history instead of discarding it.
+    // here keeps already-shown output in history instead of discarding it. Only
+    // `messages` is written back: title/provider/model were set at run start, so
+    // re-applying the start-time snapshot here would silently revert a rename or
+    // model switch the user made mid-run.
     await db
       .update(schema.agentSessions)
-      .set({
-        messages: result.messages,
-        title: opts.title,
-        providerId: opts.picked.providerId,
-        modelId: opts.picked.model.id,
-      })
+      .set({ messages: result.messages })
       .where(eq(schema.agentSessions.id, opts.sessionId));
 
     if (live.cancelled || live.controller.signal.aborted) {
@@ -493,11 +510,10 @@ async function executeRun(
         result.error,
       );
     } else {
-      await emitTerminal('completed', {
-        type: 'done',
-        messages: result.messages,
-        title: opts.title,
-      });
+      // The done event no longer carries the full transcript (it grew O(N²) in
+      // storage and bloated every SSE replay); the client revalidates the
+      // session instead, reading the messages just persisted above.
+      await emitTerminal('completed', { type: 'done' });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -508,7 +524,7 @@ async function executeRun(
     }
   } finally {
     try {
-      await pipeline.flush();
+      if (pipeline) await pipeline.flush();
     } finally {
       live.pipeline = undefined;
       liveRuns().delete(runId);

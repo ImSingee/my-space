@@ -15,6 +15,7 @@ import {
 } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import {
   providersQueryOptions,
   sessionQueryOptions,
@@ -106,6 +107,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const [reconnectToken, setReconnectToken] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const RECONNECT_TOAST_ID = 'agent-reconnect';
 
   const clearReconnectTimer = useCallback(() => {
     if (!reconnectTimerRef.current) return;
@@ -113,13 +116,31 @@ export function Chat({ sessionId }: { sessionId: string }) {
     reconnectTimerRef.current = null;
   }, []);
 
+  // Exponential backoff so a server restart / flaky link doesn't hammer the
+  // endpoint (and spam toasts) every 750ms. Attempts reset once a connection
+  // succeeds (onConnected) or the run ends.
   const scheduleReconnect = useCallback(() => {
     clearReconnectTimer();
+    const attempt = reconnectAttemptsRef.current;
+    reconnectAttemptsRef.current = attempt + 1;
+    const delay = Math.min(15000, 750 * 2 ** attempt);
+    // Only surface a toast once the blips look like a real outage, and reuse a
+    // stable id so it never stacks.
+    if (attempt === 3) {
+      toast.error('Reconnecting to the agent…', { id: RECONNECT_TOAST_ID });
+    }
     reconnectTimerRef.current = setTimeout(() => {
       reconnectTimerRef.current = null;
       setReconnectToken((value) => value + 1);
-    }, 750);
+    }, delay);
   }, [clearReconnectTimer]);
+
+  const onStreamConnected = useCallback(() => {
+    if (reconnectAttemptsRef.current > 0) {
+      reconnectAttemptsRef.current = 0;
+      toast.dismiss(RECONNECT_TOAST_ID);
+    }
+  }, []);
 
   const revalidateSession = useCallback(() => {
     void qc.invalidateQueries({
@@ -130,6 +151,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   const clearActiveRun = () => {
     clearReconnectTimer();
+    reconnectAttemptsRef.current = 0;
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
       old
         ? {
@@ -142,23 +164,20 @@ export function Chat({ sessionId }: { sessionId: string }) {
   };
 
   const stream = useAgentStream(
-    (messages, title) => {
+    () => {
+      // `done` no longer ships the transcript; refetch the session to read the
+      // messages + title the server just persisted, and drop the active run.
       clearReconnectTimer();
+      reconnectAttemptsRef.current = 0;
       qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
-        old
-          ? {
-              ...old,
-              title,
-              activeRun: null,
-              messages: messages as unknown as typeof old.messages,
-            }
-          : old,
+        old ? { ...old, activeRun: null } : old,
       );
-      void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
+      revalidateSession();
     },
     clearActiveRun,
     scheduleReconnect,
     revalidateSession,
+    onStreamConnected,
   );
   const {
     state: streamState,
@@ -272,10 +291,36 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
 
+  // Track whether the viewport is pinned near the bottom. While streaming we
+  // only auto-follow when it is, so a user who scrolls up to read earlier
+  // output isn't yanked back down on every token.
+  const stickToBottomRef = useRef(true);
   useEffect(() => {
     const el = viewportRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance < 80;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // A new message (user send / finished turn) always scrolls to the bottom and
+  // re-pins follow; this also covers the initial load.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    stickToBottomRef.current = true;
+    el.scrollTo({ top: el.scrollHeight });
+  }, [messages.length]);
+
+  // Streaming tokens follow only when pinned to the bottom.
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    const el = viewportRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [messages.length, streamState]);
+  }, [streamState]);
 
   return (
     <Box className={classes.chat}>

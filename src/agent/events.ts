@@ -52,7 +52,9 @@ export type AgentStreamEvent =
     }
   | { type: 'turn_end' }
   | { type: 'cancelled' }
-  | { type: 'done'; messages: JsonValue[]; title: string }
+  // The client revalidates the session on `done` (reads the just-persisted
+  // messages + title) rather than carrying the whole transcript in the event.
+  | { type: 'done' }
   | { type: 'error'; message: string };
 
 export type AgentRunStreamEvent = {

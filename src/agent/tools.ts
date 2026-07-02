@@ -692,20 +692,38 @@ export function createTools(
       id: Type.String({ description: 'App id or slug.' }),
       sql: Type.String({ description: 'SQL statement to execute.' }),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const id = await resolveAppHandle(params.id);
       const { ensureAppDatabase } = await import('~server/apps/provision');
       const postgres = (await import('postgres')).default;
       const url = await ensureAppDatabase(id);
-      const sql = postgres(url, { max: 1 });
+      // Bound the statement so a runaway query (e.g. an accidental cross join or
+      // `pg_sleep`) can't hang the tool — and thus the whole agent turn — for
+      // minutes. Abort tears the connection down promptly on cancel.
+      const sql = postgres(url, {
+        max: 1,
+        connection: { statement_timeout: 30000 },
+      });
+      const onAbort = () => {
+        void sql.end({ timeout: 0 }).catch(() => {});
+      };
+      signal?.addEventListener('abort', onAbort);
       try {
         const rows = await sql.unsafe(params.sql);
-        const body =
+        const full =
           rows.length > 0
             ? JSON.stringify(rows.slice(0, 100), null, 2)
             : `OK (${rows.count} row(s) affected).`;
+        // Cap by size too, not just row count: a few rows of large JSON/blobs
+        // could otherwise dump megabytes into the model context (and persist
+        // there for every later turn). Other tools already cap at MAX_FILE_CHARS.
+        const body =
+          full.length > MAX_FILE_CHARS
+            ? `${full.slice(0, MAX_FILE_CHARS)}\n… (truncated)`
+            : full;
         return text(body, { rowCount: rows.length });
       } finally {
+        signal?.removeEventListener('abort', onAbort);
         await sql.end({ timeout: 5 });
       }
     },

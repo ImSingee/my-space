@@ -74,23 +74,40 @@ export function partsToImages(content: string | ContentPart[]): string[] {
     .map((p) => `data:${p.mimeType ?? 'image/png'};base64,${p.data}`);
 }
 
-/** Human-readable labels for tools the Agent can call. */
+/**
+ * Fallback labels for persisted tool calls (historical messages carry no
+ * label). Live runs send the authoritative label on the `tool_start` event, so
+ * this map only needs to cover tools that may appear in saved transcripts; keep
+ * it in rough sync with the server tool definitions.
+ */
 export const TOOL_LABELS: Record<string, string> = {
   list_files: 'List files',
   read_file: 'Read file',
   edit_file: 'Edit file',
   write_file: 'Write file',
   run_command: 'Run command',
+  list_apps: 'List apps',
+  get_app: 'Get app',
   checkout_app: 'Checkout app',
   create_app: 'Create app',
   deploy_app: 'Deploy app',
   rollback_app: 'Rollback app',
-  query_app_db: 'Query DB',
+  query_app_db: 'Query app DB',
+  list_workflows: 'List workflows',
+  get_workflow: 'Get workflow',
+  checkout_workflow: 'Checkout workflow',
+  create_workflow: 'Create workflow',
+  deploy_workflow: 'Deploy workflow',
+  rollback_workflow: 'Rollback workflow',
   ask: 'Ask the user',
 };
 
-export function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name;
+/**
+ * Prefer the label the server sent with the event; fall back to the static map
+ * for persisted calls, then to the raw tool name.
+ */
+export function toolLabel(name: string, label?: string): string {
+  return label ?? TOOL_LABELS[name] ?? name;
 }
 
 /** A short argument hint shown next to a tool chip, e.g. the path or id. */

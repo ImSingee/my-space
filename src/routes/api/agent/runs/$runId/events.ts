@@ -54,10 +54,12 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
             let closed = false;
             let lastSeq = parsed.after;
             let unsubscribe = () => {};
+            let heartbeat: ReturnType<typeof setInterval> | undefined;
 
             const close = () => {
               if (closed) return;
               closed = true;
+              if (heartbeat) clearInterval(heartbeat);
               unsubscribe();
               request.signal.removeEventListener('abort', close);
               try {
@@ -67,6 +69,19 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
               }
             };
             closeStream = close;
+
+            // Comment-only heartbeat: a long-idle run (e.g. run_command working
+            // silently for minutes) can otherwise have its connection dropped by
+            // an intermediary proxy, forcing a needless reconnect. SSE ignores
+            // `:`-prefixed lines, so this is invisible to the client parser.
+            heartbeat = setInterval(() => {
+              if (closed) return;
+              try {
+                controller.enqueue(encoder.encode(': ping\n\n'));
+              } catch {
+                close();
+              }
+            }, 20000);
 
             // Attach abort handling BEFORE any await: if the client disconnects
             // during async setup (slow replay, immediate tab close) the signal

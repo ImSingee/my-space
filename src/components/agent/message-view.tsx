@@ -449,12 +449,13 @@ function StreamingToolStep({ tool }: { tool: StreamTool }) {
     <IconCheck size={14} stroke={2} />
   );
   const detail = toolDetail(tool.name, tool.args);
+  const label = toolLabel(tool.name, tool.label);
   const header = (
     <>
       <span className={isError ? classes.stepIconError : classes.stepIcon}>
         {icon}
       </span>
-      <span className={classes.stepLabel}>{toolLabel(tool.name)}</span>
+      <span className={classes.stepLabel}>{label}</span>
       {detail ? <span className={classes.stepDetail}>{detail}</span> : null}
       {expandable ? (
         <IconChevronRight
