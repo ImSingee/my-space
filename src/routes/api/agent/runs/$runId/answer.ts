@@ -41,14 +41,14 @@ export const Route = createFileRoute('/api/agent/runs/$runId/answer')({
         }
 
         const { answerAgentRun } = await import('~server/agent-runs');
+        const { errorResponse } = await import('~server/errors');
         try {
           await answerAgentRun(runId, parsed.askId, parsed.answers);
           return Response.json({ ok: true });
         } catch (error) {
-          return new Response(
-            error instanceof Error ? error.message : String(error),
-            { status: 409 },
-          );
+          // Answer failures are conflicts by default (run/question no longer
+          // waiting); an AppError can carry a more specific status.
+          return errorResponse(error, 409);
         }
       },
     },

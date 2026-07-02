@@ -13,6 +13,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
+import { AppError } from '~server/errors';
 
 /** Max key length (chars). Keys travel in a URL path segment on the backend API. */
 export const KV_KEY_MAX = 512;
@@ -37,12 +38,10 @@ export type KvRecord = {
 };
 
 /** An error carrying the HTTP status the KV route should map it to. */
-export class KvError extends Error {
-  status: number;
+export class KvError extends AppError {
   constructor(message: string, status = 400) {
-    super(message);
+    super(message, status);
     this.name = 'KvError';
-    this.status = status;
   }
 }
 

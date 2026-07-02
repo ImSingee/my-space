@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import { and, eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
 import { db, schema } from '~/db';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
@@ -9,6 +10,19 @@ import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
 
 export type { AppCronRunView } from './apps/scheduler';
+
+// Runtime validation for these HTTP-exposed RPCs: authMiddleware only gates
+// *who* may call them, and the TS parameter types enforce nothing at runtime,
+// so every payload is parsed before it reaches a handler.
+const idSchema = z.string().min(1).max(200);
+const idListSchema = z.array(idSchema).max(1000);
+const nameSchema = z.string().max(500);
+const keySchema = z.string().min(1).max(1024);
+const idAndDeploymentSchema = z.object({
+  id: idSchema,
+  deploymentId: idSchema,
+});
+const idAndKeySchema = z.object({ id: idSchema, key: keySchema });
 
 export type AppListItem = {
   id: string;
@@ -65,7 +79,7 @@ export type AppDetail = {
 
 export const getApp = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: idOrSlug }): Promise<AppDetail | null> => {
     // Project to a display view: the raw row carries secrets/internal columns
     // (webhookSecret, repoPath, raw manifest, currentDeploymentId) the app
@@ -120,12 +134,12 @@ async function normalizedManifestFor(
 
 export const getNormalizedManifest = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => normalizedManifestFor(id));
 
 export const listDeployments = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     const { listDeployments: list } = await import('./apps/manage');
     return list(id);
@@ -133,7 +147,9 @@ export const listDeployments = createServerFn({ method: 'GET' })
 
 export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; deploymentId: string }) => input)
+  .validator((input: { id: string; deploymentId: string }) =>
+    idAndDeploymentSchema.parse(input),
+  )
   .handler(async ({ data }) => {
     const { deploymentBuildLog } = await import('./apps/manage');
     return deploymentBuildLog(data.id, data.deploymentId);
@@ -141,7 +157,9 @@ export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
 
 export const rollbackAppFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; deploymentId: string }) => input)
+  .validator((input: { id: string; deploymentId: string }) =>
+    idAndDeploymentSchema.parse(input),
+  )
   .handler(async ({ data }) => {
     const { rollbackApp } = await import('./apps/manage');
     return rollbackApp(data.id, data.deploymentId);
@@ -149,7 +167,9 @@ export const rollbackAppFn = createServerFn({ method: 'POST' })
 
 export const archiveAppFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; archived: boolean }) => input)
+  .validator((input: { id: string; archived: boolean }) =>
+    z.object({ id: idSchema, archived: z.boolean() }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { setAppArchived } = await import('./apps/manage');
     return setAppArchived(data.id, data.archived);
@@ -157,7 +177,7 @@ export const archiveAppFn = createServerFn({ method: 'POST' })
 
 export const deleteAppFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     const { deleteApp } = await import('./apps/manage');
     return deleteApp(id);
@@ -165,7 +185,9 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
 
 export const setAppSlugFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; slug: string }) => input)
+  .validator((input: { id: string; slug: string }) =>
+    z.object({ id: idSchema, slug: z.string().max(200) }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { renameAppSlug } = await import('./apps/manage');
     return renameAppSlug(data.id, data.slug);
@@ -222,7 +244,7 @@ export type AppOps = {
 
 export const getAppOps = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<AppOps> => {
     const app = await db.query.apps.findFirst({
       where: (s, { eq: e }) => e(s.id, id),
@@ -278,7 +300,9 @@ export const getAppOps = createServerFn({ method: 'GET' })
 
 export const runCronJobFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; name: string }) => input)
+  .validator((input: { id: string; name: string }) =>
+    z.object({ id: idSchema, name: nameSchema }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { runCronJobNow } = await import('./apps/scheduler');
     return runCronJobNow(data.id, data.name);
@@ -286,7 +310,7 @@ export const runCronJobFn = createServerFn({ method: 'POST' })
 
 export const listCronRunsFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<AppCronRunView[]> => {
     const { listCronRuns } = await import('./apps/scheduler');
     return listCronRuns(id);
@@ -294,7 +318,13 @@ export const listCronRunsFn = createServerFn({ method: 'GET' })
 
 export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; key: string }) => input)
+  .validator((input: { id: string; key: string }) =>
+    // Storage keys have no write-side length cap (the storage route accepts
+    // whatever safeKey normalizes), so this must accept anything the API could
+    // have stored — the bound only exceeds PATH_MAX so no on-disk key is ever
+    // rejected here. Path safety itself is enforced by safeKey/resolvePaths.
+    z.object({ id: idSchema, key: z.string().min(1).max(8192) }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { deleteObject } = await import('./apps/storage');
     const ok = await deleteObject(data.id, data.key);
@@ -323,7 +353,7 @@ async function requireKvApp(id: string): Promise<void> {
 
 export const listAppKvFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<AppKvEntryView[]> => {
     await requireKvApp(id);
     const { listKv } = await import('./apps/kv');
@@ -341,7 +371,16 @@ export const setAppKvFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(
     (input: { id: string; key: string; value: string; secret?: boolean }) =>
-      input,
+      // Key/value length limits live in the KV module (KvError with proper
+      // messages); this only guards shape and types.
+      z
+        .object({
+          id: idSchema,
+          key: z.string(),
+          value: z.string(),
+          secret: z.boolean().optional(),
+        })
+        .parse(input),
   )
   .handler(async ({ data }) => {
     await requireKvApp(data.id);
@@ -354,7 +393,9 @@ export const setAppKvFn = createServerFn({ method: 'POST' })
 
 export const deleteAppKvFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; key: string }) => input)
+  .validator((input: { id: string; key: string }) =>
+    idAndKeySchema.parse(input),
+  )
   .handler(async ({ data }) => {
     await requireKvApp(data.id);
     const { deleteKv } = await import('./apps/kv');
@@ -431,7 +472,9 @@ export const listDashboards = createServerFn({ method: 'GET' })
 
 export const createDashboard = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { name: string }) => input)
+  .validator((input: { name: string }) =>
+    z.object({ name: nameSchema }).parse(input),
+  )
   .handler(async ({ data }): Promise<Dashboard> => {
     const name = data.name.trim() || 'Untitled';
     const [row] = await db
@@ -456,7 +499,9 @@ export const createDashboard = createServerFn({ method: 'POST' })
 
 export const setDashboardPin = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; pinned: boolean }) => input)
+  .validator((input: { id: string; pinned: boolean }) =>
+    z.object({ id: idSchema, pinned: z.boolean() }).parse(input),
+  )
   .handler(async ({ data }) => {
     await db
       .update(schema.dashboards)
@@ -467,7 +512,9 @@ export const setDashboardPin = createServerFn({ method: 'POST' })
 
 export const renameDashboard = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; name: string }) => input)
+  .validator((input: { id: string; name: string }) =>
+    z.object({ id: idSchema, name: nameSchema }).parse(input),
+  )
   .handler(async ({ data }) => {
     const name = data.name.trim();
     if (!name) throw new Error('Dashboard name cannot be empty.');
@@ -480,7 +527,9 @@ export const renameDashboard = createServerFn({ method: 'POST' })
 
 export const setDashboardDescription = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; description: string }) => input)
+  .validator((input: { id: string; description: string }) =>
+    z.object({ id: idSchema, description: z.string().max(4000) }).parse(input),
+  )
   .handler(async ({ data }) => {
     const description = data.description.trim();
     await db
@@ -492,7 +541,9 @@ export const setDashboardDescription = createServerFn({ method: 'POST' })
 
 export const setDashboardAutoRefresh = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; seconds: number }) => input)
+  .validator((input: { id: string; seconds: number }) =>
+    z.object({ id: idSchema, seconds: z.number() }).parse(input),
+  )
   .handler(async ({ data }) => {
     // The UI offers a fixed preset list but we never trust the client to send a
     // sane value, so clamp to a non-negative whole number of seconds (0 = off).
@@ -506,7 +557,7 @@ export const setDashboardAutoRefresh = createServerFn({ method: 'POST' })
 
 export const deleteDashboard = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     // Count and delete under one lock: two concurrent deletes could otherwise
     // both see count=2, both pass the check, and leave zero dashboards.
@@ -525,7 +576,7 @@ export const deleteDashboard = createServerFn({ method: 'POST' })
 
 export const reorderDashboards = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((orderedIds: string[]) => orderedIds)
+  .validator((orderedIds: string[]) => idListSchema.parse(orderedIds))
   .handler(async ({ data: orderedIds }) => {
     await persistSortOrder(schema.dashboards, orderedIds);
     return { ok: true };
@@ -550,7 +601,7 @@ export type DashboardItem = {
 
 export const getDashboard = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((dashboardId: string) => dashboardId)
+  .validator((dashboardId: string) => idSchema.parse(dashboardId))
   .handler(async ({ data: dashboardId }): Promise<DashboardItem[]> => {
     const placements = await db.query.dashboardWidgets.findMany({
       where: (w, { eq: e }) => e(w.dashboardId, dashboardId),
@@ -640,7 +691,10 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' })
 export const addDashboardWidget = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator(
-    (input: { dashboardId: string; appId: string; widgetId: string }) => input,
+    (input: { dashboardId: string; appId: string; widgetId: string }) =>
+      z
+        .object({ dashboardId: idSchema, appId: idSchema, widgetId: idSchema })
+        .parse(input),
   )
   .handler(async ({ data }) => {
     const manifest = await normalizedManifestFor(data.appId);
@@ -700,7 +754,7 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
 
 export const removeDashboardWidget = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     await db
       .delete(schema.dashboardWidgets)
@@ -771,7 +825,9 @@ async function appendSidebarPin(appId: string) {
  */
 export const setSidebarPin = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { appId: string; pinned: boolean }) => input)
+  .validator((input: { appId: string; pinned: boolean }) =>
+    z.object({ appId: idSchema, pinned: z.boolean() }).parse(input),
+  )
   .handler(async ({ data }) => {
     if (data.pinned) {
       // The app_id index is no longer unique (apps can be pinned many times via
@@ -812,13 +868,15 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
 /** Always create an additional sidebar pin (apps may be pinned many times). */
 export const addSidebarItem = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { appId: string }) => input)
+  .validator((input: { appId: string }) =>
+    z.object({ appId: idSchema }).parse(input),
+  )
   .handler(async ({ data }) => appendSidebarPin(data.appId));
 
 /** Remove a single sidebar pin by its id (leaves the app's other pins). */
 export const removeSidebarItem = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string }) => input)
+  .validator((input: { id: string }) => z.object({ id: idSchema }).parse(input))
   .handler(async ({ data }) => {
     await db
       .delete(schema.sidebarItems)
@@ -828,8 +886,15 @@ export const removeSidebarItem = createServerFn({ method: 'POST' })
 
 export const updateSidebarItem = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator(
-    (input: { id: string; label: string; entryHash?: string }) => input,
+  .validator((input: { id: string; label: string; entryHash?: string }) =>
+    z
+      .object({
+        id: idSchema,
+        label: nameSchema,
+        // normalizeEntryHash caps the stored length; this only bounds the input.
+        entryHash: z.string().max(2048).optional(),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
     const label = data.label.trim();
@@ -849,7 +914,7 @@ export const updateSidebarItem = createServerFn({ method: 'POST' })
 
 export const reorderSidebarItems = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((orderedIds: string[]) => orderedIds)
+  .validator((orderedIds: string[]) => idListSchema.parse(orderedIds))
   .handler(async ({ data: orderedIds }) => {
     await persistSortOrder(schema.sidebarItems, orderedIds);
     return { ok: true };
@@ -874,7 +939,20 @@ function clampInt(
 
 export const updateDashboardLayout = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((items: LayoutPatch[]) => items)
+  .validator((items: LayoutPatch[]) =>
+    z
+      .array(
+        z.object({
+          id: idSchema,
+          x: z.number(),
+          y: z.number(),
+          w: z.number(),
+          h: z.number(),
+        }),
+      )
+      .max(1000)
+      .parse(items),
+  )
   .handler(async ({ data: items }) => {
     // Clamp before writing: never persist client-supplied coords verbatim — a
     // crafted call could otherwise store negative or out-of-grid values that

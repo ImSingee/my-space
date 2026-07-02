@@ -163,10 +163,9 @@ export async function handle({
 
     return new Response('Method not allowed', { status: 405 });
   } catch (error) {
-    const status = error instanceof kv.KvError ? error.status : 400;
-    return new Response(error instanceof Error ? error.message : 'KV error', {
-      status,
-    });
+    // KvError extends AppError, so its status flows through automatically.
+    const { errorResponse } = await import('~server/errors');
+    return errorResponse(error, 400);
   }
 }
 

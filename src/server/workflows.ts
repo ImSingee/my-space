@@ -1,8 +1,17 @@
 import { createServerFn } from '@tanstack/react-start';
+import { z } from 'zod';
 import { db } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
 import { authMiddleware } from './auth';
 import { workflowWebhookUrl } from './workflows/manifest';
+
+// Runtime validation for these HTTP-exposed RPCs (mirrors apps.ts): the TS
+// parameter types enforce nothing at runtime.
+const idSchema = z.string().min(1).max(200);
+const idAndDeploymentSchema = z.object({
+  id: idSchema,
+  deploymentId: idSchema,
+});
 
 /** Public list projection: never includes `webhookSecret`/`repoPath`/manifest. */
 export type WorkflowListItem = {
@@ -62,7 +71,7 @@ export type WorkflowDetail = {
 
 export const getWorkflow = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<WorkflowDetail | null> => {
     const row = await db.query.workflows.findFirst({
       where: (s, { eq: e }) => e(s.id, id),
@@ -91,7 +100,7 @@ export type WorkflowRow = NonNullable<Awaited<ReturnType<typeof getWorkflow>>>;
 
 export const listWorkflowDeployments = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     const { listWorkflowDeployments: list } =
       await import('./workflows/manage');
@@ -100,7 +109,9 @@ export const listWorkflowDeployments = createServerFn({ method: 'GET' })
 
 export const getWorkflowDeploymentBuildLog = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; deploymentId: string }) => input)
+  .validator((input: { id: string; deploymentId: string }) =>
+    idAndDeploymentSchema.parse(input),
+  )
   .handler(async ({ data }) => {
     const { workflowDeploymentBuildLog } = await import('./workflows/manage');
     return workflowDeploymentBuildLog(data.id, data.deploymentId);
@@ -108,7 +119,9 @@ export const getWorkflowDeploymentBuildLog = createServerFn({ method: 'GET' })
 
 export const rollbackWorkflowFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; deploymentId: string }) => input)
+  .validator((input: { id: string; deploymentId: string }) =>
+    idAndDeploymentSchema.parse(input),
+  )
   .handler(async ({ data }) => {
     const { rollbackWorkflow } = await import('./workflows/manage');
     return rollbackWorkflow(data.id, data.deploymentId);
@@ -116,7 +129,9 @@ export const rollbackWorkflowFn = createServerFn({ method: 'POST' })
 
 export const archiveWorkflowFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; archived: boolean }) => input)
+  .validator((input: { id: string; archived: boolean }) =>
+    z.object({ id: idSchema, archived: z.boolean() }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { setWorkflowArchived } = await import('./workflows/manage');
     return setWorkflowArchived(data.id, data.archived);
@@ -124,7 +139,7 @@ export const archiveWorkflowFn = createServerFn({ method: 'POST' })
 
 export const deleteWorkflowFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     const { deleteWorkflow } = await import('./workflows/manage');
     return deleteWorkflow(id);
@@ -132,7 +147,9 @@ export const deleteWorkflowFn = createServerFn({ method: 'POST' })
 
 export const setWorkflowPinFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; pinned: boolean }) => input)
+  .validator((input: { id: string; pinned: boolean }) =>
+    z.object({ id: idSchema, pinned: z.boolean() }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { eq } = await import('drizzle-orm');
     const { schema } = await import('~/db');
@@ -159,7 +176,7 @@ export type WorkflowOps = {
 
 export const getWorkflowOps = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<WorkflowOps> => {
     const workflow = await db.query.workflows.findFirst({
       where: (s, { eq: e }) => e(s.id, id),
@@ -202,7 +219,9 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
 
 export const runWorkflowFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; input?: unknown }) => input)
+  .validator((input: { id: string; input?: unknown }) =>
+    z.object({ id: idSchema, input: z.unknown().optional() }).parse(input),
+  )
   .handler(async ({ data }) => {
     const { startWorkflowRun } = await import('./workflows/execute');
     return startWorkflowRun(data.id, {
@@ -213,7 +232,7 @@ export const runWorkflowFn = createServerFn({ method: 'POST' })
 
 export const listWorkflowRuns = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => id)
+  .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     const { listWorkflowRuns: list } = await import('./workflows/manage');
     return list(id);
@@ -228,7 +247,7 @@ export const listAllWorkflowRuns = createServerFn({ method: 'GET' })
 
 export const getWorkflowRun = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((runId: string) => runId)
+  .validator((runId: string) => idSchema.parse(runId))
   .handler(async ({ data: runId }) => {
     const { getWorkflowRun: get } = await import('./workflows/manage');
     return get(runId);
@@ -236,7 +255,7 @@ export const getWorkflowRun = createServerFn({ method: 'GET' })
 
 export const cancelWorkflowRunFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((runId: string) => runId)
+  .validator((runId: string) => idSchema.parse(runId))
   .handler(async ({ data: runId }) => {
     const { cancelWorkflowRun } = await import('./workflows/execute');
     return cancelWorkflowRun(runId);

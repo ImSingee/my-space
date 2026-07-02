@@ -96,14 +96,14 @@ export const Route = createFileRoute('/api/agent/runs')({
         }
 
         const { startAgentRun } = await import('~server/agent-runs');
+        const { errorResponse } = await import('~server/errors');
         try {
           const result = await startAgentRun(parsed);
           return Response.json(result);
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          const status = message.includes('already has a running') ? 409 : 400;
-          return new Response(message, { status });
+          // AppError carries its own status (409 for an already-running turn,
+          // 404 for a missing session); anything untagged is a bad request.
+          return errorResponse(error, 400);
         }
       },
     },

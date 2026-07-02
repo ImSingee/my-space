@@ -11,6 +11,7 @@ import type {
   AskQuestion,
 } from '~agent/events';
 import { runAgentTurn } from '~agent/runtime';
+import { AppError } from '~server/errors';
 
 type SendImage = { data: string; mimeType: string };
 
@@ -298,11 +299,11 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
   const sessionRow = await db.query.agentSessions.findFirst({
     where: (s, { eq: equals }) => equals(s.id, input.sessionId),
   });
-  if (!sessionRow) throw new Error('Session not found.');
+  if (!sessionRow) throw new AppError('Session not found.', 404);
 
   const activeRun = await getActiveAgentRun(input.sessionId);
   if (activeRun) {
-    throw new Error('This chat already has a running Agent turn.');
+    throw new AppError('This chat already has a running Agent turn.', 409);
   }
 
   const { models, list } = await loadAgentModels();
@@ -343,7 +344,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       .returning();
   } catch (error) {
     if (isActiveRunConflict(error)) {
-      throw new Error('This chat already has a running Agent turn.');
+      throw new AppError('This chat already has a running Agent turn.', 409);
     }
     throw error;
   }

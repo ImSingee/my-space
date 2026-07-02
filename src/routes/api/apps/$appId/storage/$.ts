@@ -64,10 +64,8 @@ async function handle({ request }: { request: Request }): Promise<Response> {
 
     return new Response('Method not allowed', { status: 405 });
   } catch (error) {
-    return new Response(
-      error instanceof Error ? error.message : 'Storage error',
-      { status: 400 },
-    );
+    const { errorResponse } = await import('~server/errors');
+    return errorResponse(error, 400);
   }
 }
 
