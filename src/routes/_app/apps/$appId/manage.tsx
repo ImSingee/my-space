@@ -46,18 +46,10 @@ import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
 import { StatusBadge } from '~components/apps/status-badge';
-import {
-  appOpsQueryOptions,
-  appsQueryOptions,
-  sidebarItemsQueryOptions,
-} from '~queries/apps';
-import {
-  archiveAppFn,
-  deleteAppFn,
-  getApp,
-  setAppSlugFn,
-  setSidebarPin,
-} from '~server/apps';
+import { appOpsQueryOptions, appsQueryOptions } from '~queries/apps';
+import { sidebarItemsQueryOptions } from '~queries/sidebar';
+import { archiveAppFn, deleteAppFn, getApp, setAppSlugFn } from '~server/apps';
+import { setSidebarPin } from '~server/sidebar';
 
 export const Route = createFileRoute('/_app/apps/$appId/manage')({
   loader: async ({ params }) => {

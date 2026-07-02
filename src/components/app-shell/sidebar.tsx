@@ -39,23 +39,23 @@ import {
 import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
-import {
-  dashboardsQueryOptions,
-  sidebarItemsQueryOptions,
-  appsQueryOptions,
-} from '~queries/apps';
+import { appsQueryOptions } from '~queries/apps';
+import { dashboardsQueryOptions } from '~queries/dashboards';
+import { sidebarItemsQueryOptions } from '~queries/sidebar';
 import {
   type Dashboard,
-  addSidebarItem,
   createDashboard,
-  removeSidebarItem,
   renameDashboard,
   reorderDashboards,
-  reorderSidebarItems,
   setDashboardPin,
+} from '~server/dashboards';
+import {
+  addSidebarItem,
+  removeSidebarItem,
+  reorderSidebarItems,
   setSidebarPin,
   updateSidebarItem,
-} from '~server/apps';
+} from '~server/sidebar';
 import { workflowsQueryOptions } from '~queries/workflows';
 import { setWorkflowPinFn } from '~server/workflows';
 import { AppGlyph } from '~components/apps/app-glyph';

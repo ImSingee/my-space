@@ -6,7 +6,7 @@ import {
   Responsive,
   WidthProvider,
 } from 'react-grid-layout';
-import type { DashboardItem } from '~server/apps';
+import type { DashboardItem } from '~server/dashboards';
 import { buildWidgetLayout, snapUnits } from './dashboard-layout';
 import { WidgetCard } from './widget-card';
 import 'react-grid-layout/css/styles.css';

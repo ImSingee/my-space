@@ -3,15 +3,8 @@ import { z } from 'zod';
 import { db } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
 import { authMiddleware } from './auth';
+import { idAndDeploymentSchema, idSchema } from './validation';
 import { workflowWebhookUrl } from './workflows/manifest';
-
-// Runtime validation for these HTTP-exposed RPCs (mirrors apps.ts): the TS
-// parameter types enforce nothing at runtime.
-const idSchema = z.string().min(1).max(200);
-const idAndDeploymentSchema = z.object({
-  id: idSchema,
-  deploymentId: idSchema,
-});
 
 /** Public list projection: never includes `webhookSecret`/`repoPath`/manifest. */
 export type WorkflowListItem = {

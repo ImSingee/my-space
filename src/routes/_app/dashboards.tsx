@@ -23,7 +23,7 @@ import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { SortableList, sortByIds } from '~components/app-shell/sortable-list';
 import { openTextPromptModal } from '~components/system/text-prompt-modal';
-import { dashboardsQueryOptions } from '~queries/apps';
+import { dashboardsQueryOptions } from '~queries/dashboards';
 import {
   createDashboard,
   type Dashboard,
@@ -31,7 +31,7 @@ import {
   renameDashboard,
   reorderDashboards,
   setDashboardPin,
-} from '~server/apps';
+} from '~server/dashboards';
 import classes from './dashboards.module.css';
 
 export const Route = createFileRoute('/_app/dashboards')({

@@ -17,7 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
-import type { DashboardItem } from '~server/apps';
+import type { DashboardItem } from '~server/dashboards';
 import {
   WIDGET_CHANNEL,
   toModuleDataUrl,

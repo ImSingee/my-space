@@ -56,6 +56,27 @@ export async function slugConflictExists(
 }
 
 /**
+ * The current deployment's normalized manifest regardless of app status —
+ * unlike {@link liveAppManifest} this does NOT gate on archived/capability, so
+ * the manage UI can still inspect an archived app. Null when the app doesn't
+ * exist or has never deployed.
+ */
+export async function normalizedManifestFor(
+  id: string,
+): Promise<NormalizedManifest | null> {
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq }) => eq(s.id, id),
+    columns: { currentDeploymentId: true },
+  });
+  if (!app?.currentDeploymentId) return null;
+  const deployment = await db.query.deployments.findFirst({
+    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+    columns: { manifestNormalized: true },
+  });
+  return (deployment?.manifestNormalized ?? null) as NormalizedManifest | null;
+}
+
+/**
  * Resolve an app that is currently allowed to serve runtime assets for the
  * given capability and return its live normalized manifest, or null when it
  * isn't servable.

@@ -34,12 +34,12 @@ import {
   formatInterval,
 } from '~components/dashboard/refresh-presets';
 import { openTextPromptModal } from '~components/system/text-prompt-modal';
+import { appsQueryOptions } from '~queries/apps';
 import {
-  appsQueryOptions,
   availableWidgetsQueryOptions,
   dashboardQueryOptions,
   dashboardsQueryOptions,
-} from '~queries/apps';
+} from '~queries/dashboards';
 import {
   type Dashboard,
   addDashboardWidget,
@@ -49,7 +49,7 @@ import {
   setDashboardAutoRefresh,
   setDashboardDescription,
   updateDashboardLayout,
-} from '~server/apps';
+} from '~server/dashboards';
 
 const DEFAULT_DASHBOARD_DESCRIPTION =
   'A home for the widgets and apps you care about.';
