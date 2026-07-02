@@ -275,7 +275,11 @@ export function ensureScheduler(): void {
   const s = state();
   if (s.started) return;
   s.started = true;
-  void loadAll();
+  // Allow a retry if the very first load fails (e.g. called at boot before the
+  // database is reachable); a later deploy/rollback or app-list load re-runs it.
+  void loadAll().catch(() => {
+    s.started = false;
+  });
 }
 
 /** Reload all schedules (call after a deploy/rollback/delete). */

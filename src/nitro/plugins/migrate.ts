@@ -1,6 +1,7 @@
 import { definePlugin } from 'nitro';
 import { runMigrations } from '~db/migrate.ts';
 import { interruptStaleAgentRuns } from '~server/agent-runs';
+import { ensureScheduler } from '~server/apps/scheduler';
 import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
 
@@ -21,4 +22,7 @@ export default definePlugin(async () => {
   // after a restart without waiting for someone to open the workflows page.
   await interruptStaleWorkflowRuns();
   ensureWorkflowScheduler();
+  // Same for app cron jobs: without this they would only start once someone
+  // happened to call listApps (its fire-and-forget side effect).
+  ensureScheduler();
 });

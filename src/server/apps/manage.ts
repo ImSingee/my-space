@@ -1,7 +1,7 @@
 /** Server-only: app lifecycle management — archive, rollback, delete. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   deploymentBuildDir,
   appBuildDir,
@@ -14,6 +14,7 @@ import {
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
+import { APP_DEPLOY_LOCK_NS, withAppDeployLock } from './deploy';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
 import {
   type NormalizedManifest,
@@ -176,8 +177,19 @@ export async function renameAppSlug(
  * Roll an app back to a previous deployment by restoring its build snapshot
  * and re-pointing the live build dir + current deployment. Serving reads the
  * normalized manifest from the current deployment, so URLs follow automatically.
+ * Serialized with deploys via the shared per-app lock so a rollback and a
+ * deploy can't interleave their artifact/Git/row mutations and leave the DB
+ * pointing at one version while the live dir/`master` points at another
+ * (mirrors rollbackWorkflow).
  */
-export async function rollbackApp(
+export function rollbackApp(
+  id: string,
+  deploymentId: string,
+): Promise<{ version: number }> {
+  return withAppDeployLock(id, () => rollbackAppInner(id, deploymentId));
+}
+
+async function rollbackAppInner(
   id: string,
   deploymentId: string,
 ): Promise<{ version: number }> {
@@ -211,34 +223,40 @@ export async function rollbackApp(
         'restore source. Run the app Git migration first.',
     );
   }
-
-  const live = appBuildDir(id);
-  await fs.rm(live, { recursive: true, force: true });
-  await fs.mkdir(live, { recursive: true });
-  await fs.cp(snapshot, live, { recursive: true });
-  const sourceCommit = await moveMasterToDeploymentTag(
-    id,
-    deployment.sourceTag,
-  );
-
+  const sourceTag = deployment.sourceTag;
   const manifest = deployment.manifestNormalized as NormalizedManifest | null;
-  await db
-    .update(schema.apps)
-    .set({
-      status: 'deployed',
-      currentDeploymentId: deployment.id,
-      currentSourceCommit: sourceCommit,
-      name: manifest?.name ?? app.name,
-      // Restore the rolled-back version's full metadata too. Otherwise the row
-      // keeps the newer deployment's capabilities/backendMode/description — e.g.
-      // the cron scheduler reads app.capabilities.cron and would skip jobs the
-      // restored version actually defines (mirrors what the deploy path writes).
-      description: manifest?.description || null,
-      capabilities: manifest?.capabilities ?? app.capabilities,
-      backendMode: manifest?.backendMode ?? app.backendMode,
-      manifest: deployment.manifestNormalized ?? app.manifest,
-    })
-    .where(eq(schema.apps.id, id));
+
+  // Mutate the live build dir, Git master, and the app row under the same
+  // advisory lock deploy holds for its version→tag→record step, so a concurrent
+  // deploy on another process blocks until we finish (and vice versa).
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
+    );
+    const live = appBuildDir(id);
+    await fs.rm(live, { recursive: true, force: true });
+    await fs.mkdir(live, { recursive: true });
+    await fs.cp(snapshot, live, { recursive: true });
+    const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
+
+    await tx
+      .update(schema.apps)
+      .set({
+        status: 'deployed',
+        currentDeploymentId: deployment.id,
+        currentSourceCommit: sourceCommit,
+        name: manifest?.name ?? app.name,
+        // Restore the rolled-back version's full metadata too. Otherwise the row
+        // keeps the newer deployment's capabilities/backendMode/description — e.g.
+        // the cron scheduler reads app.capabilities.cron and would skip jobs the
+        // restored version actually defines (mirrors what the deploy path writes).
+        description: manifest?.description || null,
+        capabilities: manifest?.capabilities ?? app.capabilities,
+        backendMode: manifest?.backendMode ?? app.backendMode,
+        manifest: deployment.manifestNormalized ?? app.manifest,
+      })
+      .where(eq(schema.apps.id, id));
+  });
 
   // Force the backend to restart from the restored build, then re-apply the
   // keep-alive contract for the *restored* manifest: rolling back to/from a

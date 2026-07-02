@@ -363,6 +363,35 @@ export const deleteAppKvFn = createServerFn({ method: 'POST' })
 
 /** ================== dashboards ================== */
 
+// Advisory-lock namespaces for the (int, int) form of pg_advisory_xact_lock.
+// Existing namespaces elsewhere: APP_DEPLOY_LOCK_NS=1 (apps/deploy.ts),
+// WORKFLOW_DEPLOY_LOCK_NS=2 (workflows/deploy.ts), APP_KV_LOCK_NS=3 (apps/kv.ts).
+const SIDEBAR_PIN_LOCK_NS = 4;
+const DASHBOARDS_LOCK_NS = 5;
+
+type SortableTable = typeof schema.dashboards | typeof schema.sidebarItems;
+
+/**
+ * Persist a drag-reorder as one transaction: a mid-flight failure must not
+ * leave half the rows on the new order and half on the old. Rows are updated
+ * in id order so two concurrent reorders acquire row locks in the same
+ * sequence (no deadlock); final values depend only on each row's target index,
+ * so whichever transaction commits last wins wholesale.
+ */
+async function persistSortOrder(
+  table: SortableTable,
+  orderedIds: string[],
+): Promise<void> {
+  const targets = orderedIds
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  await db.transaction(async (tx) => {
+    for (const { id, index } of targets) {
+      await tx.update(table).set({ sortOrder: index }).where(eq(table.id, id));
+    }
+  });
+}
+
 export type Dashboard = {
   id: string;
   name: string;
@@ -405,10 +434,15 @@ export const createDashboard = createServerFn({ method: 'POST' })
   .validator((input: { name: string }) => input)
   .handler(async ({ data }): Promise<Dashboard> => {
     const name = data.name.trim() || 'Untitled';
-    const all = await db.query.dashboards.findMany();
     const [row] = await db
       .insert(schema.dashboards)
-      .values({ name, pinned: true, sortOrder: all.length })
+      .values({
+        name,
+        pinned: true,
+        // Append at the end via max+1, not a row count: counts shrink after
+        // deletions and would hand out an order a surviving row already uses.
+        sortOrder: sql`(select coalesce(max(${schema.dashboards.sortOrder}), -1) + 1 from ${schema.dashboards})`,
+      })
       .returning();
     return {
       id: row.id,
@@ -474,26 +508,26 @@ export const deleteDashboard = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {
-    const all = await db.query.dashboards.findMany();
-    if (all.length <= 1) {
-      throw new Error('You must keep at least one dashboard.');
-    }
-    await db.delete(schema.dashboards).where(eq(schema.dashboards.id, id));
-    return { ok: true };
+    // Count and delete under one lock: two concurrent deletes could otherwise
+    // both see count=2, both pass the check, and leave zero dashboards.
+    return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(${DASHBOARDS_LOCK_NS}, 0)`,
+      );
+      const count = await tx.$count(schema.dashboards);
+      if (count <= 1) {
+        throw new Error('You must keep at least one dashboard.');
+      }
+      await tx.delete(schema.dashboards).where(eq(schema.dashboards.id, id));
+      return { ok: true };
+    });
   });
 
 export const reorderDashboards = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((orderedIds: string[]) => orderedIds)
   .handler(async ({ data: orderedIds }) => {
-    await Promise.all(
-      orderedIds.map((id, index) =>
-        db
-          .update(schema.dashboards)
-          .set({ sortOrder: index })
-          .where(eq(schema.dashboards.id, id)),
-      ),
-    );
+    await persistSortOrder(schema.dashboards, orderedIds);
     return { ok: true };
   });
 
@@ -625,7 +659,9 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
     if (existing) return existing;
 
     // Place the new widget in a tidy grid flow (12 cols) so multiple widgets
-    // don't all pile up at (0,0) before the user arranges them.
+    // don't all pile up at (0,0) before the user arranges them. The flow index
+    // is only a placement heuristic — react-grid-layout resolves any overlap on
+    // render — but sortOrder must not collide, so it's assigned max+1 in SQL.
     const all = await db.query.dashboardWidgets.findMany({
       where: (w, { eq: e }) => e(w.dashboardId, data.dashboardId),
     });
@@ -646,7 +682,7 @@ export const addDashboardWidget = createServerFn({ method: 'POST' })
         y,
         w,
         h,
-        sortOrder: index,
+        sortOrder: sql`(select coalesce(max(${schema.dashboardWidgets.sortOrder}), -1) + 1 from ${schema.dashboardWidgets} where ${schema.dashboardWidgets.dashboardId} = ${data.dashboardId})`,
       })
       .onConflictDoNothing()
       .returning();
@@ -706,17 +742,27 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
     return items;
   });
 
+/** Next sidebar sortOrder: max+1, so deletions never cause collisions. */
+const nextSidebarSortOrder = sql`(select coalesce(max(${schema.sidebarItems.sortOrder}), -1) + 1 from ${schema.sidebarItems})`;
+
 async function appendSidebarPin(appId: string) {
-  const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, appId),
+  // One global sidebar-insert lock (not per-app): it serializes this insert
+  // against setSidebarPin AND makes the max+1 sortOrder allocation safe across
+  // concurrent pins of *different* apps. Pin writes are rare; contention is nil.
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${SIDEBAR_PIN_LOCK_NS}, 0)`,
+    );
+    const app = await tx.query.apps.findFirst({
+      where: (s, { eq: e }) => e(s.id, appId),
+    });
+    if (!app) throw new Error('App not found.');
+    const [row] = await tx
+      .insert(schema.sidebarItems)
+      .values({ appId, label: app.name, sortOrder: nextSidebarSortOrder })
+      .returning();
+    return row;
   });
-  if (!app) throw new Error('App not found.');
-  const count = await db.$count(schema.sidebarItems);
-  const [row] = await db
-    .insert(schema.sidebarItems)
-    .values({ appId, label: app.name, sortOrder: count })
-    .returning();
-  return row;
 }
 
 /**
@@ -730,11 +776,13 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
     if (data.pinned) {
       // The app_id index is no longer unique (apps can be pinned many times via
       // addSidebarItem), so guard this "ensure one pin" toggle against
-      // concurrent calls with a per-app advisory lock — otherwise two racing
-      // requests could both pass the existence check and create duplicates.
+      // concurrent calls with the global sidebar-insert advisory lock —
+      // otherwise two racing requests could both pass the existence check and
+      // create duplicates. The lock is global (not per-app) so the max+1
+      // sortOrder allocation is also collision-free across different apps.
       return db.transaction(async (tx) => {
         await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${data.appId}))`,
+          sql`select pg_advisory_xact_lock(${SIDEBAR_PIN_LOCK_NS}, 0)`,
         );
         const existing = await tx.query.sidebarItems.findFirst({
           where: (s, { eq: e }) => e(s.appId, data.appId),
@@ -744,10 +792,13 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
           where: (s, { eq: e }) => e(s.id, data.appId),
         });
         if (!app) throw new Error('App not found.');
-        const count = await tx.$count(schema.sidebarItems);
         const [row] = await tx
           .insert(schema.sidebarItems)
-          .values({ appId: data.appId, label: app.name, sortOrder: count })
+          .values({
+            appId: data.appId,
+            label: app.name,
+            sortOrder: nextSidebarSortOrder,
+          })
           .returning();
         return row;
       });
@@ -800,14 +851,7 @@ export const reorderSidebarItems = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((orderedIds: string[]) => orderedIds)
   .handler(async ({ data: orderedIds }) => {
-    await Promise.all(
-      orderedIds.map((id, index) =>
-        db
-          .update(schema.sidebarItems)
-          .set({ sortOrder: index })
-          .where(eq(schema.sidebarItems.id, id)),
-      ),
-    );
+    await persistSortOrder(schema.sidebarItems, orderedIds);
     return { ok: true };
   });
 
@@ -832,20 +876,31 @@ export const updateDashboardLayout = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((items: LayoutPatch[]) => items)
   .handler(async ({ data: items }) => {
-    await Promise.all(
-      items.map((item, index) => {
-        // Never persist client-supplied coords verbatim: a crafted call could
-        // otherwise store negative or out-of-grid values that break later
-        // react-grid-layout renders. Clamp to the same bounds the UI produces.
-        const w = clampInt(item.w, 1, DASHBOARD_GRID_COLS, 1);
-        const x = clampInt(item.x, 0, DASHBOARD_GRID_COLS - w, 0);
-        const y = clampInt(item.y, 0, DASHBOARD_MAX_Y, 0);
-        const h = clampInt(item.h, 1, DASHBOARD_MAX_H, 1);
-        return db
+    // Clamp before writing: never persist client-supplied coords verbatim — a
+    // crafted call could otherwise store negative or out-of-grid values that
+    // break later react-grid-layout renders.
+    const patches = items.map((item, index) => {
+      const w = clampInt(item.w, 1, DASHBOARD_GRID_COLS, 1);
+      return {
+        id: item.id,
+        w,
+        x: clampInt(item.x, 0, DASHBOARD_GRID_COLS - w, 0),
+        y: clampInt(item.y, 0, DASHBOARD_MAX_Y, 0),
+        h: clampInt(item.h, 1, DASHBOARD_MAX_H, 1),
+        sortOrder: index,
+      };
+    });
+    // One transaction, rows updated in id order: a mid-flight failure can't
+    // strand half the grid on the old layout, and two concurrent saves take
+    // row locks in the same sequence instead of deadlocking.
+    await db.transaction(async (tx) => {
+      const ordered = [...patches].sort((a, b) => a.id.localeCompare(b.id));
+      for (const { id, ...patch } of ordered) {
+        await tx
           .update(schema.dashboardWidgets)
-          .set({ x, y, w, h, sortOrder: index })
-          .where(eq(schema.dashboardWidgets.id, item.id));
-      }),
-    );
+          .set(patch)
+          .where(eq(schema.dashboardWidgets.id, id));
+      }
+    });
     return { ok: true };
   });

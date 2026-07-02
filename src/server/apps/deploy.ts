@@ -114,12 +114,19 @@ async function restoreLiveBuild(
 
 // Advisory-lock namespace for app deploys (distinct from workflows) so version
 // allocation is serialized across server processes, not just within one.
-const APP_DEPLOY_LOCK_NS = 1;
+export const APP_DEPLOY_LOCK_NS = 1;
 
 const appDeployChains = new Map<string, Promise<unknown>>();
 
-/** Run `fn` only after any in-flight deploy for the same app id has settled. */
-function withAppDeployLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+/**
+ * Run `fn` only after any in-flight deploy (or rollback) for the same app id
+ * has settled. Rollback shares this lock so its artifact/Git/row mutations
+ * can't interleave with a concurrent deploy's.
+ */
+export function withAppDeployLock<T>(
+  id: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   const prev = appDeployChains.get(id) ?? Promise.resolve();
   // Chain regardless of the previous deploy's outcome — a failed deploy must not
   // wedge later attempts for the same app.
