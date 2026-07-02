@@ -80,9 +80,39 @@ function DashboardsManagePage() {
     });
 
   const setPin = useMutation({
+    mutationKey: ['dashboard-pin'],
     mutationFn: (input: { id: string; pinned: boolean }) =>
       setDashboardPin({ data: input }),
-    onSuccess: () => void invalidate(),
+    // Flip the switch immediately; roll back if the server rejects it (the
+    // global mutation error toast reports the failure).
+    onMutate: async ({ id, pinned }) => {
+      await queryClient.cancelQueries({
+        queryKey: dashboardsQueryOptions.queryKey,
+      });
+      const previous = queryClient.getQueryData<Dashboard[]>(
+        dashboardsQueryOptions.queryKey,
+      );
+      queryClient.setQueryData<Dashboard[]>(
+        dashboardsQueryOptions.queryKey,
+        (old) => old?.map((d) => (d.id === id ? { ...d, pinned } : d)),
+      );
+      return { previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          dashboardsQueryOptions.queryKey,
+          context.previous,
+        );
+      }
+    },
+    // Only refetch once the LAST in-flight pin toggle settles: an earlier
+    // toggle's refetch would otherwise overwrite a newer optimistic flip.
+    onSettled: () => {
+      if (queryClient.isMutating({ mutationKey: ['dashboard-pin'] }) === 1) {
+        void invalidate();
+      }
+    },
   });
 
   const remove = useMutation({

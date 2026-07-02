@@ -318,9 +318,37 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
     qc.invalidateQueries({ queryKey: providersQueryOptions.queryKey });
 
   const toggleEnabled = useMutation({
+    mutationKey: ['provider-enabled', provider.id],
     mutationFn: (enabled: boolean) =>
       updateProvider({ data: { id: provider.id, enabled } }),
-    onSuccess: invalidate,
+    // Flip the switch immediately; roll back if the server rejects it (the
+    // global mutation error toast reports the failure).
+    onMutate: async (enabled) => {
+      await qc.cancelQueries({ queryKey: providersQueryOptions.queryKey });
+      const previous = qc.getQueryData<ProviderWithModels[]>(
+        providersQueryOptions.queryKey,
+      );
+      qc.setQueryData<ProviderWithModels[]>(
+        providersQueryOptions.queryKey,
+        (old) =>
+          old?.map((p) => (p.id === provider.id ? { ...p, enabled } : p)),
+      );
+      return { previous };
+    },
+    onError: (_error, _enabled, context) => {
+      if (context?.previous) {
+        qc.setQueryData(providersQueryOptions.queryKey, context.previous);
+      }
+    },
+    // Only refetch once the LAST in-flight toggle settles: an earlier
+    // toggle's refetch would otherwise overwrite a newer optimistic flip.
+    onSettled: () => {
+      if (
+        qc.isMutating({ mutationKey: ['provider-enabled', provider.id] }) === 1
+      ) {
+        void invalidate();
+      }
+    },
   });
 
   const removeProvider = useMutation({
@@ -445,7 +473,21 @@ function ProviderCard({ provider }: { provider: ProviderWithModels }) {
                     color="red"
                     size="sm"
                     aria-label="Remove model"
-                    onClick={() => removeModel.mutate(m.id)}
+                    onClick={() =>
+                      modals.openConfirmModal({
+                        title: 'Remove model',
+                        centered: true,
+                        children: (
+                          <Text size="sm">
+                            Remove <b>{m.name}</b>? Sessions using it will fall
+                            back to another model.
+                          </Text>
+                        ),
+                        labels: { confirm: 'Remove', cancel: 'Cancel' },
+                        confirmProps: { color: 'red' },
+                        onConfirm: () => removeModel.mutate(m.id),
+                      })
+                    }
                   >
                     <IconTrash size={15} stroke={1.6} />
                   </ActionIcon>

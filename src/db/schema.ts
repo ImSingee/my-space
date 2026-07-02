@@ -341,27 +341,39 @@ export const workflowDeployments = pgTable(
 
 /** ================== workflow runs ================== */
 
-export const workflowRuns = pgTable('workflow_runs', {
-  id: ulid().$defaultFn(genUlid).primaryKey(),
-  workflowId: text()
-    .notNull()
-    .references(() => workflows.id, { onDelete: 'cascade' }),
-  /** Deployment (version) this run executed. */
-  deploymentId: ulid('deployment_id'),
-  version: integer(),
-  trigger: text().$type<WorkflowTrigger>().notNull(),
-  status: text().$type<WorkflowRunStatus>().notNull().default('queued'),
-  /** Validated input the run was started with. */
-  input: jsonb().$type<JsonValue>(),
-  /** Value returned by the workflow's run() on success. */
-  output: jsonb().$type<JsonValue>(),
-  error: text(),
-  /** Captured stdout/stderr that wasn't part of the structured event stream. */
-  log: text(),
-  startedAt: timestamp('started_at'),
-  finishedAt: timestamp('finished_at'),
-  createdAt,
-});
+export const workflowRuns = pgTable(
+  'workflow_runs',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    workflowId: text()
+      .notNull()
+      .references(() => workflows.id, { onDelete: 'cascade' }),
+    /** Deployment (version) this run executed. */
+    deploymentId: ulid('deployment_id'),
+    version: integer(),
+    trigger: text().$type<WorkflowTrigger>().notNull(),
+    status: text().$type<WorkflowRunStatus>().notNull().default('queued'),
+    /** Validated input the run was started with. */
+    input: jsonb().$type<JsonValue>(),
+    /** Value returned by the workflow's run() on success. */
+    output: jsonb().$type<JsonValue>(),
+    error: text(),
+    /** Captured stdout/stderr that wasn't part of the structured event stream. */
+    log: text(),
+    startedAt: timestamp('started_at'),
+    finishedAt: timestamp('finished_at'),
+    createdAt,
+  },
+  (table) => [
+    // Run listings are always "newest first for one workflow" (plus the global
+    // executions view sorted by createdAt); index the per-workflow access path
+    // like app_cron_runs does.
+    index('workflow_runs_workflow_created_idx').on(
+      table.workflowId,
+      table.createdAt,
+    ),
+  ],
+);
 
 export const workflowRunSteps = pgTable(
   'workflow_run_steps',
