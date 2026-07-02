@@ -2,11 +2,9 @@ import {
   ActionIcon,
   Button,
   Group,
-  Modal,
   Stack,
   Switch,
   Text,
-  TextInput,
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
@@ -21,10 +19,10 @@ import {
   IconPlus,
   IconTrash,
 } from '@tabler/icons-react';
-import { useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { SortableList, sortByIds } from '~components/app-shell/sortable-list';
+import { openTextPromptModal } from '~components/system/text-prompt-modal';
 import { dashboardsQueryOptions } from '~queries/apps';
 import {
   createDashboard,
@@ -46,8 +44,6 @@ function DashboardsManagePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: dashboards } = useQuery(dashboardsQueryOptions);
-  const [renameTarget, setRenameTarget] = useState<Dashboard | null>(null);
-  const [renameValue, setRenameValue] = useState('');
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -64,7 +60,6 @@ function DashboardsManagePage() {
       void invalidate();
       toast.success('Dashboard created');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const rename = useMutation({
@@ -72,17 +67,22 @@ function DashboardsManagePage() {
       renameDashboard({ data: input }),
     onSuccess: () => {
       void invalidate();
-      setRenameTarget(null);
       toast.success('Dashboard renamed');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
+
+  const openRename = (d: Dashboard) =>
+    openTextPromptModal({
+      title: 'Rename dashboard',
+      label: 'Name',
+      initialValue: d.name,
+      onSubmit: (name) => rename.mutateAsync({ id: d.id, name }),
+    });
 
   const setPin = useMutation({
     mutationFn: (input: { id: string; pinned: boolean }) =>
       setDashboardPin({ data: input }),
     onSuccess: () => void invalidate(),
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const remove = useMutation({
@@ -91,7 +91,6 @@ function DashboardsManagePage() {
       void invalidate();
       toast.success('Dashboard deleted');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const reorder = useMutation({
@@ -103,7 +102,6 @@ function DashboardsManagePage() {
         (old) => sortByIds(old, orderedIds),
       );
     },
-    onError: (error) => toast.error((error as Error).message),
     onSettled: () => void invalidate(),
   });
 
@@ -121,12 +119,6 @@ function DashboardsManagePage() {
       confirmProps: { color: 'red' },
       onConfirm: () => remove.mutate(d.id),
     });
-
-  const submitRename = () => {
-    if (renameTarget && renameValue.trim()) {
-      rename.mutate({ id: renameTarget.id, name: renameValue.trim() });
-    }
-  };
 
   return (
     <Page
@@ -186,10 +178,7 @@ function DashboardsManagePage() {
                   <ActionIcon
                     variant="subtle"
                     color="gray"
-                    onClick={() => {
-                      setRenameTarget(d);
-                      setRenameValue(d.name);
-                    }}
+                    onClick={() => openRename(d)}
                     aria-label="Rename dashboard"
                   >
                     <IconPencil size={17} stroke={1.7} />
@@ -224,39 +213,6 @@ function DashboardsManagePage() {
           )}
         />
       </Stack>
-
-      <Modal
-        opened={renameTarget !== null}
-        onClose={() => setRenameTarget(null)}
-        title="Rename dashboard"
-        centered
-      >
-        <Stack gap="sm">
-          <TextInput
-            data-autofocus
-            label="Name"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitRename();
-              }
-            }}
-          />
-          <Group justify="flex-end">
-            <Button
-              type="button"
-              color="ember"
-              loading={rename.isPending}
-              disabled={!renameValue.trim()}
-              onClick={submitRename}
-            >
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
     </Page>
   );
 }

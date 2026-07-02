@@ -95,7 +95,6 @@ function AppDetailPage() {
       void queryClient.invalidateQueries(appOpsQueryOptions(app.id));
       void router.invalidate();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const remove = useMutation({
@@ -113,7 +112,6 @@ function AppDetailPage() {
       });
       void navigate({ to: '/apps' });
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const pin = useMutation({
@@ -125,7 +123,6 @@ function AppDetailPage() {
         queryKey: sidebarItemsQueryOptions.queryKey,
       });
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const confirmDelete = () =>
@@ -318,7 +315,6 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
       });
       void router.invalidate();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const submit = () => {

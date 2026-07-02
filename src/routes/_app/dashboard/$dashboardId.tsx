@@ -2,14 +2,9 @@ import {
   ActionIcon,
   Button,
   Center,
-  Group,
   Loader,
   Menu,
-  Modal,
-  Stack,
   Text,
-  TextInput,
-  Textarea,
   Tooltip,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
@@ -38,6 +33,7 @@ import {
   REFRESH_PRESETS,
   formatInterval,
 } from '~components/dashboard/refresh-presets';
+import { openTextPromptModal } from '~components/system/text-prompt-modal';
 import {
   appsQueryOptions,
   availableWidgetsQueryOptions,
@@ -169,7 +165,6 @@ function DashboardWidgets({
   const remove = useMutation({
     mutationFn: (id: string) => removeDashboardWidget({ data: id }),
     onSuccess: () => void invalidate(),
-    onError: (error) => toast.error((error as Error).message),
   });
 
   // Persist layout saves one at a time, always sending the most recent layout
@@ -249,7 +244,6 @@ function AutoRefreshMenu({ dashboard }: { dashboard: Dashboard }) {
       void queryClient.invalidateQueries({
         queryKey: dashboardsQueryOptions.queryKey,
       }),
-    onError: (error) => toast.error((error as Error).message),
   });
   const active = dashboard.autoRefreshSeconds > 0;
 
@@ -299,7 +293,6 @@ function AddWidgetMenu({ dashboardId }: { dashboardId: string }) {
       });
       toast.success('Widget added to dashboard');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   return (
@@ -343,10 +336,6 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: dashboards } = useSuspenseQuery(dashboardsQueryOptions);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [descOpen, setDescOpen] = useState(false);
-  const [nameValue, setNameValue] = useState(dashboard.name);
-  const [descValue, setDescValue] = useState(dashboard.description ?? '');
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -358,10 +347,8 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
       renameDashboard({ data: { id: dashboard.id, name } }),
     onSuccess: async () => {
       await invalidate();
-      setRenameOpen(false);
       toast.success('Dashboard renamed');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const saveDescription = useMutation({
@@ -369,10 +356,8 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
       setDashboardDescription({ data: { id: dashboard.id, description } }),
     onSuccess: async () => {
       await invalidate();
-      setDescOpen(false);
       toast.success('Description updated');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const remove = useMutation({
@@ -388,12 +373,26 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
       await invalidate();
       toast.success('Dashboard deleted');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
-  const submitRename = () => {
-    if (nameValue.trim()) rename.mutate(nameValue.trim());
-  };
+  const openRename = () =>
+    openTextPromptModal({
+      title: 'Rename dashboard',
+      label: 'Name',
+      initialValue: dashboard.name,
+      onSubmit: (name) => rename.mutateAsync(name),
+    });
+
+  const openDescription = () =>
+    openTextPromptModal({
+      title: 'Edit description',
+      label: 'Description',
+      placeholder: DEFAULT_DASHBOARD_DESCRIPTION,
+      initialValue: dashboard.description ?? '',
+      multiline: true,
+      allowEmpty: true,
+      onSubmit: (description) => saveDescription.mutateAsync(description),
+    });
 
   const confirmDelete = () =>
     modals.openConfirmModal({
@@ -424,19 +423,13 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
         <Menu.Dropdown>
           <Menu.Item
             leftSection={<IconPencil size={15} stroke={1.7} />}
-            onClick={() => {
-              setNameValue(dashboard.name);
-              setRenameOpen(true);
-            }}
+            onClick={openRename}
           >
             Rename
           </Menu.Item>
           <Menu.Item
             leftSection={<IconFileText size={15} stroke={1.7} />}
-            onClick={() => {
-              setDescValue(dashboard.description ?? '');
-              setDescOpen(true);
-            }}
+            onClick={openDescription}
           >
             Edit description
           </Menu.Item>
@@ -451,67 +444,6 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
-
-      <Modal
-        opened={renameOpen}
-        onClose={() => setRenameOpen(false)}
-        title="Rename dashboard"
-        centered
-      >
-        <Stack gap="sm">
-          <TextInput
-            data-autofocus
-            label="Name"
-            value={nameValue}
-            onChange={(e) => setNameValue(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitRename();
-              }
-            }}
-          />
-          <Group justify="flex-end">
-            <Button
-              type="button"
-              loading={rename.isPending}
-              disabled={!nameValue.trim()}
-              onClick={submitRename}
-            >
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={descOpen}
-        onClose={() => setDescOpen(false)}
-        title="Edit description"
-        centered
-      >
-        <Stack gap="sm">
-          <Textarea
-            data-autofocus
-            label="Description"
-            placeholder={DEFAULT_DASHBOARD_DESCRIPTION}
-            autosize
-            minRows={3}
-            maxRows={6}
-            value={descValue}
-            onChange={(e) => setDescValue(e.currentTarget.value)}
-          />
-          <Group justify="flex-end">
-            <Button
-              type="button"
-              loading={saveDescription.isPending}
-              onClick={() => saveDescription.mutate(descValue)}
-            >
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
     </>
   );
 }

@@ -1,7 +1,8 @@
 import { createRouter } from '@tanstack/react-router';
 import { nprogress } from '@mantine/nprogress';
-import { QueryClient } from '@tanstack/react-query';
+import { MutationCache, QueryClient } from '@tanstack/react-query';
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query';
+import { toast } from 'sonner';
 
 // Import the generated route tree
 import { routeTree } from './routeTree.gen';
@@ -10,7 +11,15 @@ import { NotFoundElement } from '~components/system/not-found.tsx';
 
 // Create a new router instance
 export const getRouter = () => {
-  const queryClient = new QueryClient();
+  const queryClient = new QueryClient({
+    // Every failed mutation surfaces its message as an error toast, so
+    // individual useMutation calls don't need (and shouldn't add) their own
+    // onError toast — a local onError would run in addition and double-toast.
+    // Mutations never run during SSR, so the toast call is client-only.
+    mutationCache: new MutationCache({
+      onError: (error) => toast.error(error.message),
+    }),
+  });
 
   const router = createRouter({
     routeTree,

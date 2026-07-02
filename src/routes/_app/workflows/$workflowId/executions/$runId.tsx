@@ -139,7 +139,6 @@ function WorkflowExecutionPage() {
       void queryClient.invalidateQueries(workflowRunQueryOptions(runId));
       void queryClient.invalidateQueries(workflowRunsQueryOptions(workflowId));
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   return (

@@ -286,7 +286,6 @@ export function WorkflowDeploymentHistory({
       void qc.invalidateQueries(workflowOpsQueryOptions(workflowId));
       void router.invalidate();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const deployments = query.data ?? [];

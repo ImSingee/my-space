@@ -217,7 +217,6 @@ function KvForm({ appId, entry }: { appId: string; entry?: AppKvEntryView }) {
       void qc.invalidateQueries(appKvQueryOptions(appId));
       modals.closeAll();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   // A new key always needs a value; editing a secret also does (it's hidden, so
@@ -286,7 +285,6 @@ function KvStore({ appId }: { appId: string }) {
   const remove = useMutation({
     mutationFn: (key: string) => deleteAppKvFn({ data: { id: appId, key } }),
     onSuccess: () => toast.success('Deleted key'),
-    onError: (error) => toast.error((error as Error).message),
     onSettled: () => {
       void qc.invalidateQueries(appKvQueryOptions(appId));
     },
@@ -451,7 +449,6 @@ export function OperationsPanel({
         toast.error(`"${name}" returned ${res.status}`);
       }
     },
-    onError: (error) => toast.error((error as Error).message),
     // A manual run records a history row on BOTH paths: success returns an HTTP
     // status, but a thrown failure (backend unreachable) also writes a `manual`
     // row and rethrows into onError. Invalidate in onSettled so the new row
@@ -469,7 +466,6 @@ export function OperationsPanel({
       toast.success('Deleted object');
       void qc.invalidateQueries(appOpsQueryOptions(appId));
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const confirmDeleteObject = (key: string) =>

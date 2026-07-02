@@ -148,7 +148,6 @@ export function ProviderFormModal({
       form.reset();
       onClose();
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed'),
   });
 
   return (
@@ -249,7 +248,6 @@ function ModelFormModal({
       form.reset();
       onClose();
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed'),
   });
 
   return (

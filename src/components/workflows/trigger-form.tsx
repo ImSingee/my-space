@@ -159,7 +159,6 @@ export function TriggerForm({
         params: { workflowId, runId: result.runId },
       });
     },
-    onError: (err) => toast.error((err as Error).message),
   });
 
   const setValue = (key: string, value: unknown) =>

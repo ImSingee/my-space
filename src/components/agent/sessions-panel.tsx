@@ -4,11 +4,9 @@ import {
   Button,
   Group,
   Menu,
-  Modal,
   ScrollArea,
   Stack,
   Text,
-  TextInput,
   UnstyledButton,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
@@ -18,8 +16,8 @@ import {
   useSuspenseQuery,
 } from '@tanstack/react-query';
 import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
-import { useState } from 'react';
 import { toast } from 'sonner';
+import { openTextPromptModal } from '~components/system/text-prompt-modal';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import { deleteSession, renameSession } from '~server/agent-sessions';
 import classes from './chat.module.css';
@@ -33,11 +31,6 @@ export function SessionsPanel({
 }) {
   const qc = useQueryClient();
   const { data: sessions } = useSuspenseQuery(sessionsQueryOptions);
-  const [renameTarget, setRenameTarget] = useState<{
-    id: string;
-    title: string;
-  } | null>(null);
-  const [renameValue, setRenameValue] = useState('');
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
@@ -64,17 +57,17 @@ export function SessionsPanel({
       await qc.invalidateQueries({
         queryKey: sessionQueryOptions(variables.id).queryKey,
       });
-      setRenameTarget(null);
       toast.success('Chat renamed');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
-  const submitRename = () => {
-    if (renameTarget && renameValue.trim()) {
-      rename.mutate({ id: renameTarget.id, title: renameValue.trim() });
-    }
-  };
+  const openRename = (s: { id: string; title: string }) =>
+    openTextPromptModal({
+      title: 'Rename chat',
+      label: 'Title',
+      initialValue: s.title,
+      onSubmit: (title) => rename.mutateAsync({ id: s.id, title }),
+    });
 
   const confirmDelete = (id: string, title: string) =>
     modals.openConfirmModal({
@@ -144,10 +137,7 @@ export function SessionsPanel({
                   <Menu.Dropdown>
                     <Menu.Item
                       leftSection={<IconPencil size={15} stroke={1.7} />}
-                      onClick={() => {
-                        setRenameTarget({ id: s.id, title: s.title });
-                        setRenameValue(s.title);
-                      }}
+                      onClick={() => openRename(s)}
                     >
                       Rename
                     </Menu.Item>
@@ -165,38 +155,6 @@ export function SessionsPanel({
           )}
         </Stack>
       </ScrollArea>
-
-      <Modal
-        opened={renameTarget !== null}
-        onClose={() => setRenameTarget(null)}
-        title="Rename chat"
-        centered
-      >
-        <Stack gap="sm">
-          <TextInput
-            data-autofocus
-            label="Title"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitRename();
-              }
-            }}
-          />
-          <Group justify="flex-end">
-            <Button
-              type="button"
-              loading={rename.isPending}
-              disabled={!renameValue.trim()}
-              onClick={submitRename}
-            >
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
     </Box>
   );
 }

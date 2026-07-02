@@ -302,7 +302,6 @@ export function DeploymentHistory({ appId }: { appId: string }) {
       void qc.invalidateQueries(normalizedManifestQueryOptions(appId));
       void router.invalidate();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const deployments = query.data ?? [];

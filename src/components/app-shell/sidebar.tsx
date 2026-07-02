@@ -59,6 +59,7 @@ import {
 import { workflowsQueryOptions } from '~queries/workflows';
 import { setWorkflowPinFn } from '~server/workflows';
 import { AppGlyph } from '~components/apps/app-glyph';
+import { openTextPromptModal } from '~components/system/text-prompt-modal';
 import { Brand } from './brand';
 import { SortableList, sortByIds } from './sortable-list';
 import classes from './sidebar.module.css';
@@ -270,11 +271,6 @@ function PinnedDashboards() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: dashboards } = useQuery(dashboardsQueryOptions);
-  const [renameTarget, setRenameTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
-  const [renameValue, setRenameValue] = useState('');
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -285,7 +281,6 @@ function PinnedDashboards() {
     mutationFn: (input: { id: string; pinned: boolean }) =>
       setDashboardPin({ data: input }),
     onSuccess: () => void invalidate(),
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const rename = useMutation({
@@ -293,11 +288,17 @@ function PinnedDashboards() {
       renameDashboard({ data: input }),
     onSuccess: () => {
       void invalidate();
-      setRenameTarget(null);
       toast.success('Dashboard renamed');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
+
+  const openRename = (d: { id: string; name: string }) =>
+    openTextPromptModal({
+      title: 'Rename dashboard',
+      label: 'Name',
+      initialValue: d.name,
+      onSubmit: (name) => rename.mutateAsync({ id: d.id, name }),
+    });
 
   const create = useMutation({
     mutationFn: () => createDashboard({ data: { name: 'New dashboard' } }),
@@ -313,7 +314,6 @@ function PinnedDashboards() {
         params: { dashboardId: d.id },
       });
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const reorder = useMutation({
@@ -324,7 +324,6 @@ function PinnedDashboards() {
         sortByIds(old, orderedIds),
       );
     },
-    onError: (error) => toast.error((error as Error).message),
     onSettled: () => void invalidate(),
   });
 
@@ -338,12 +337,6 @@ function PinnedDashboards() {
     let pi = 0;
     const full = all.map((d) => (d.pinned ? orderedPinnedIds[pi++] : d.id));
     reorder.mutate(full);
-  };
-
-  const submitRename = () => {
-    if (renameTarget && renameValue.trim()) {
-      rename.mutate({ id: renameTarget.id, name: renameValue.trim() });
-    }
   };
 
   const addBtnClass =
@@ -421,10 +414,7 @@ function PinnedDashboards() {
           onReorder={onReorder}
           renderItem={(d) => (
             <PinnedRow
-              onRename={() => {
-                setRenameTarget({ id: d.id, name: d.name });
-                setRenameValue(d.name);
-              }}
+              onRename={() => openRename(d)}
               onUnpin={() => setPin.mutate({ id: d.id, pinned: false })}
             >
               <NavLink
@@ -446,38 +436,6 @@ function PinnedDashboards() {
           )}
         />
       </Stack>
-
-      <Modal
-        opened={renameTarget !== null}
-        onClose={() => setRenameTarget(null)}
-        title="Rename dashboard"
-        centered
-      >
-        <Stack gap="sm">
-          <TextInput
-            data-autofocus
-            label="Name"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitRename();
-              }
-            }}
-          />
-          <Group justify="flex-end">
-            <Button
-              type="button"
-              loading={rename.isPending}
-              disabled={!renameValue.trim()}
-              onClick={submitRename}
-            >
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
     </>
   );
 }
@@ -508,7 +466,6 @@ function PinnedApps() {
       void invalidate();
       toast.success('Pinned to sidebar');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   // Extra shortcut for an already-pinned app: always inserts a new pin, then
@@ -523,7 +480,6 @@ function PinnedApps() {
         setEditHash('');
       }
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const remove = useMutation({
@@ -532,7 +488,6 @@ function PinnedApps() {
       void invalidate();
       toast.success('Unpinned');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const update = useMutation({
@@ -543,7 +498,6 @@ function PinnedApps() {
       setEditTarget(null);
       toast.success('Pin updated');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const reorder = useMutation({
@@ -554,7 +508,6 @@ function PinnedApps() {
         sortByIds(old, orderedIds),
       );
     },
-    onError: (error) => toast.error((error as Error).message),
     onSettled: () => void invalidate(),
   });
 
@@ -784,7 +737,6 @@ function PinnedWorkflows() {
       void invalidate();
       toast.success(input.pinned ? 'Pinned to sidebar' : 'Unpinned');
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const all = workflows ?? [];

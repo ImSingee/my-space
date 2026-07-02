@@ -78,7 +78,6 @@ function WorkflowManagePage() {
       void queryClient.invalidateQueries(workflowsQueryOptions);
       void router.invalidate();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const remove = useMutation({
@@ -88,7 +87,6 @@ function WorkflowManagePage() {
       void queryClient.invalidateQueries(workflowsQueryOptions);
       void navigate({ to: '/workflows' });
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const pin = useMutation({
@@ -99,7 +97,6 @@ function WorkflowManagePage() {
       void queryClient.invalidateQueries(workflowsQueryOptions);
       void router.invalidate();
     },
-    onError: (error) => toast.error((error as Error).message),
   });
 
   const confirmDelete = () =>
