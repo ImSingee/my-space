@@ -12,7 +12,7 @@ import { Link, createFileRoute } from '@tanstack/react-router';
 import { IconPlus, IconSettings, IconStack2 } from '@tabler/icons-react';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { StatusBadge } from '~components/apps/status-badge';
+import { StatusBadge } from '~components/system/status-badge';
 import { formatRelative } from '~lib/format';
 import { listApps } from '~server/apps';
 import classes from './apps.module.css';

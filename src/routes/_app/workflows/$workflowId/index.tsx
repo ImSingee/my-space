@@ -3,7 +3,7 @@ import { createFileRoute, notFound } from '@tanstack/react-router';
 import { IconInfoCircle } from '@tabler/icons-react';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { WorkflowStatusBadge } from '~components/workflows/status-badge';
+import { StatusBadge } from '~components/system/status-badge';
 import { TriggerForm } from '~components/workflows/trigger-form';
 import { WorkflowTabs } from '~components/workflows/workflow-tabs';
 import { getWorkflow } from '~server/workflows';
@@ -32,7 +32,7 @@ function WorkflowRunPage() {
         <Group gap="sm" align="center" wrap="nowrap">
           <AppGlyph name={workflow.name} seed={workflow.id} size="md" />
           {workflow.name}
-          <WorkflowStatusBadge status={workflow.status} />
+          <StatusBadge status={workflow.status} />
         </Group>
       }
       description={workflow.description || `Workflow · ${workflow.id}`}

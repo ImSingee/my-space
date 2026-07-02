@@ -10,7 +10,6 @@ import {
   Text,
   TextInput,
   Tooltip,
-  UnstyledButton,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,7 +35,6 @@ import {
   IconTrash,
   IconX,
 } from '@tabler/icons-react';
-import copy from 'copy-to-clipboard';
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -45,7 +43,8 @@ import { ApiPanel } from '~components/apps/api-panel';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
-import { StatusBadge } from '~components/apps/status-badge';
+import { Field } from '~components/system/field';
+import { StatusBadge } from '~components/system/status-badge';
 import { appOpsQueryOptions, appsQueryOptions } from '~queries/apps';
 import { sidebarItemsQueryOptions } from '~queries/sidebar';
 import { archiveAppFn, deleteAppFn, getApp, setAppSlugFn } from '~server/apps';
@@ -398,49 +397,6 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
             </ActionIcon>
           </Tooltip>
         </Group>
-      )}
-    </Group>
-  );
-}
-
-/** One metadata row: a fixed-width dimmed label with its value alongside — one
- * pair per line, no box chrome. */
-function Field({
-  label,
-  value,
-  mono,
-  copyValue,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  /** When set, the value becomes a button that copies this text to clipboard. */
-  copyValue?: string;
-}) {
-  const valueText = (
-    <Text size="sm" ff={mono ? 'monospace' : undefined} truncate>
-      {value}
-    </Text>
-  );
-  return (
-    <Group gap="md" wrap="nowrap" align="baseline">
-      <Text size="sm" c="dimmed" style={{ width: 96, flex: 'none' }}>
-        {label}
-      </Text>
-      {copyValue ? (
-        <Tooltip label="Copy" withArrow position="top">
-          <UnstyledButton
-            onClick={() => {
-              copy(copyValue);
-              toast.success('Copied');
-            }}
-            style={{ minWidth: 0, maxWidth: 'fit-content' }}
-          >
-            {valueText}
-          </UnstyledButton>
-        </Tooltip>
-      ) : (
-        valueText
       )}
     </Group>
   );

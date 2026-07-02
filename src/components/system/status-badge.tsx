@@ -1,7 +1,10 @@
 import { Badge } from '@mantine/core';
-import type { AppStatus } from '~/db/schema';
+import type { AppStatus, WorkflowStatus } from '~/db/schema';
 
-export const statusMeta: Record<AppStatus, { label: string; color: string }> = {
+/** Apps and workflows share the same lifecycle states (and badge styling). */
+type LifecycleStatus = AppStatus | WorkflowStatus;
+
+const statusMeta: Record<LifecycleStatus, { label: string; color: string }> = {
   draft: { label: 'Draft', color: 'gray' },
   building: { label: 'Building', color: 'ember' },
   deployed: { label: 'Live', color: 'ember' },
@@ -9,7 +12,7 @@ export const statusMeta: Record<AppStatus, { label: string; color: string }> = {
   archived: { label: 'Archived', color: 'gray' },
 };
 
-export function StatusBadge({ status }: { status: AppStatus }) {
+export function StatusBadge({ status }: { status: LifecycleStatus }) {
   // "Live" is the expected healthy state, so we don't badge it — only surface
   // statuses that actually need attention (draft / building / failed / archived).
   if (status === 'deployed') return null;

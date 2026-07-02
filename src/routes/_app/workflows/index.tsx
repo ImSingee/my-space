@@ -17,7 +17,7 @@ import {
 } from '@tabler/icons-react';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { WorkflowStatusBadge } from '~components/workflows/status-badge';
+import { StatusBadge } from '~components/system/status-badge';
 import { formatRelative } from '~lib/format';
 import { listWorkflows } from '~server/workflows';
 import classes from '../apps/apps.module.css';
@@ -110,7 +110,7 @@ function WorkflowsPage() {
                     {workflow.name}
                   </Text>
                 </Group>
-                <WorkflowStatusBadge status={workflow.status} />
+                <StatusBadge status={workflow.status} />
               </Group>
               <Text size="sm" c="dimmed" mt="sm" lineClamp={2}>
                 {workflow.description || 'No description yet.'}
