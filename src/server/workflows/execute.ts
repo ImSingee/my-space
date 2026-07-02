@@ -23,6 +23,10 @@ const MAX_LOG = 100_000;
 // that streams megabytes on one line would grow the buffer until the Node
 // process runs out of memory, long before the run timeout fires.
 const MAX_STDOUT_BUFFER = 1_000_000;
+// Cap persisted step events per run. Each step attempt inserts a row, so a
+// workflow calling ctx.step() in a tight loop would otherwise flood
+// workflow_run_steps with an unbounded number of rows before the timeout.
+const MAX_STEP_EVENTS = 2000;
 
 type RuntimeGlobal = typeof globalThis & {
   __hatchWorkflowRuns__?: Map<string, ChildProcess>;
@@ -292,6 +296,8 @@ async function executeRun(
   // let-narrowing (which would otherwise widen reads to `never`).
   const outcome: { end: RunEndEvent | null } = { end: null };
   let chain: Promise<void> = Promise.resolve();
+  let stepEvents = 0;
+  let stepsOverflowed = false;
 
   const handleLine = async (line: string): Promise<void> => {
     if (!line.startsWith(SENTINEL)) {
@@ -304,6 +310,22 @@ async function executeRun(
     } catch {
       appendLog(line + '\n');
       return;
+    }
+    if (event.t === 'step:start' || event.t === 'step:end') {
+      stepEvents += 1;
+      if (stepEvents > MAX_STEP_EVENTS) {
+        // Stop persisting and kill the child: a step loop this hot is a bug
+        // (or abuse), and every further event would be another DB insert.
+        if (!stepsOverflowed) {
+          stepsOverflowed = true;
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* best-effort */
+          }
+        }
+        return;
+      }
     }
     if (event.t === 'step:start') {
       await upsertStepStart(runId, event as StepStartEvent);
@@ -379,17 +401,21 @@ async function executeRun(
     return;
   }
 
-  const runEnd = outcome.end;
+  // A step-overflow kill may race the child's own run:end; the overflow
+  // verdict wins so the failure cause is reported, not a bogus success.
+  const runEnd = stepsOverflowed ? null : outcome.end;
   const succeeded = runEnd?.status === 'succeeded';
   const finalStatus: WorkflowRunStatus = succeeded ? 'succeeded' : 'failed';
   const error = succeeded
     ? null
     : (runEnd?.error ??
-      (overflowed
-        ? 'Workflow produced too much output on a single line'
-        : timedOut
-          ? 'Run timed out'
-          : 'Workflow exited before completing (see log).'));
+      (stepsOverflowed
+        ? `Workflow exceeded ${MAX_STEP_EVENTS} step events`
+        : overflowed
+          ? 'Workflow produced too much output on a single line'
+          : timedOut
+            ? 'Run timed out'
+            : 'Workflow exited before completing (see log).'));
   if (!succeeded) {
     await failRunningSteps(runId, error ?? 'Run failed');
   }

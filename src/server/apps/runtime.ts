@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { appBuildDir, appStorageDir } from '~agent/paths';
-import { db } from '~/db';
+import { db, schema } from '~/db';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import {
   HATCH_SIGNATURE_HEADER,
@@ -123,6 +123,7 @@ type RuntimeGlobal = typeof globalThis & {
   __hatchAppStarting__?: Map<string, Promise<number>>;
   __hatchAppStopEpoch__?: Map<string, number>;
   __hatchAppKeepAlive__?: Set<string>;
+  __hatchAppRestarts__?: Map<string, number>;
   __hatchAppCleanup__?: boolean;
 };
 
@@ -163,6 +164,41 @@ function keepAliveSet(): Set<string> {
   return g.__hatchAppKeepAlive__;
 }
 
+/** Consecutive fast-crash count per app, driving the restart backoff. */
+function restartCounts(): Map<string, number> {
+  const g = globalThis as RuntimeGlobal;
+  g.__hatchAppRestarts__ ??= new Map<string, number>();
+  return g.__hatchAppRestarts__;
+}
+
+/** A process that stayed up this long is considered healthy: backoff resets. */
+const RESTART_HEALTHY_UPTIME_MS = 30_000;
+const RESTART_BASE_DELAY_MS = 1000;
+const RESTART_MAX_DELAY_MS = 60_000;
+
+/**
+ * Persist a backend lifecycle event to the `logs` table so a crash leaves a
+ * durable trace (the in-memory log ring dies with the process). Best-effort.
+ */
+async function recordBackendLog(
+  id: string,
+  level: 'info' | 'error',
+  message: string,
+  data?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await db.insert(schema.logs).values({
+      appId: id,
+      source: 'backend',
+      level,
+      message,
+      data: (data ?? null) as never,
+    });
+  } catch {
+    /* logging is best-effort */
+  }
+}
+
 /**
  * Mark an app's backend as long-running. While marked, the platform restarts
  * it automatically if the process exits unexpectedly.
@@ -171,6 +207,41 @@ export function setKeepAlive(id: string, on: boolean): void {
   const set = keepAliveSet();
   if (on) set.add(id);
   else set.delete(id);
+}
+
+/**
+ * Boot every deployed long-running backend and re-arm its keep-alive mark.
+ * The keep-alive registry is in-memory, so after a server restart these
+ * backends would otherwise stay down (and stop self-healing) until the first
+ * request happens to hit them. Called once at server startup; each app's boot
+ * is independent and best-effort.
+ */
+export async function warmLongRunningBackends(): Promise<void> {
+  const apps = await db.query.apps.findMany({
+    where: (s, { eq }) => eq(s.status, 'deployed'),
+    columns: {
+      id: true,
+      backendMode: true,
+      capabilities: true,
+      currentDeploymentId: true,
+    },
+  });
+  for (const app of apps) {
+    if (
+      app.backendMode !== 'long-running' ||
+      !app.capabilities?.backend ||
+      !app.currentDeploymentId
+    ) {
+      continue;
+    }
+    setKeepAlive(app.id, true);
+    void ensureAppRunning(app.id).catch((error) => {
+      console.error(
+        `[runtime] warm start of long-running backend "${app.id}" failed:`,
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }
 }
 
 function installCleanup(): void {
@@ -436,18 +507,47 @@ async function startBackend(id: string): Promise<number> {
   };
   backend.ready = Promise.race([waitForPort(port, 20000), spawnFailure]);
   reg.set(id, backend);
-  proc.on('exit', () => {
+  proc.on('exit', (code, signal) => {
     if (reg.get(id) === backend) reg.delete(id);
+    const uptimeMs = Date.now() - backend.startedAt;
+    const willRestart = keepAliveSet().has(id);
+    // A self-exit (no signal) is always unexpected — backends are servers.
+    // Signal kills are usually our own stop/redeploy SIGKILL, so don't log
+    // those; a keep-alive crash is logged by the restart branch below.
+    if (!willRestart && signal === null && code !== null && code !== 0) {
+      void recordBackendLog(id, 'error', `backend exited with code ${code}`, {
+        uptimeMs,
+        log: log.slice(-2000),
+      });
+    }
     // Long-running backends self-heal: if still marked keep-alive (i.e. not
-    // intentionally stopped), restart after a short backoff.
-    if (keepAliveSet().has(id)) {
-      setTimeout(() => {
+    // intentionally stopped), restart with exponential backoff so a build
+    // that crashes on boot doesn't hot-loop a restart every second forever.
+    if (willRestart) {
+      const counts = restartCounts();
+      const attempt =
+        uptimeMs >= RESTART_HEALTHY_UPTIME_MS ? 0 : (counts.get(id) ?? 0);
+      counts.set(id, attempt + 1);
+      const delayMs = Math.min(
+        RESTART_BASE_DELAY_MS * 2 ** attempt,
+        RESTART_MAX_DELAY_MS,
+      );
+      void recordBackendLog(
+        id,
+        'error',
+        `long-running backend exited (${signal ?? code}); restarting in ${delayMs}ms`,
+        { uptimeMs, attempt: attempt + 1, log: log.slice(-2000) },
+      );
+      const timer = setTimeout(() => {
         if (keepAliveSet().has(id) && !registry().has(id)) {
           void ensureAppRunning(id).catch(() => {
             /* will retry on next exit / request */
           });
         }
-      }, 1000);
+      }, delayMs);
+      if (typeof timer.unref === 'function') timer.unref();
+    } else {
+      restartCounts().delete(id);
     }
   });
 

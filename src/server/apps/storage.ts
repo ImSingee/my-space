@@ -69,6 +69,32 @@ export async function putObject(
   return object;
 }
 
+/**
+ * Read an object's metadata without touching its body: the meta sidecar when
+ * present, else a stat()-derived fallback (files written before sidecars, or
+ * dropped into the dir out-of-band). The stat also proves the body still
+ * exists, so a delete racing a listing can't surface a phantom entry backed
+ * only by a leftover sidecar; it throws when the body is gone.
+ */
+async function readObjectMeta(
+  file: string,
+  meta: string,
+  key: string,
+): Promise<StorageObject> {
+  const info = await stat(file);
+  try {
+    const parsed = JSON.parse(await readFile(meta, 'utf8')) as StorageObject;
+    return { ...parsed, key };
+  } catch {
+    return {
+      key,
+      size: info.size,
+      contentType: 'application/octet-stream',
+      updatedAt: info.mtime.toISOString(),
+    };
+  }
+}
+
 export async function getObject(
   id: string,
   key: string,
@@ -76,18 +102,7 @@ export async function getObject(
   const { file, meta, safe } = resolvePaths(id, key);
   try {
     const body = await readFile(file);
-    let object: StorageObject;
-    try {
-      object = JSON.parse(await readFile(meta, 'utf8')) as StorageObject;
-    } catch {
-      const info = await stat(file);
-      object = {
-        key: safe,
-        size: info.size,
-        contentType: 'application/octet-stream',
-        updatedAt: info.mtime.toISOString(),
-      };
-    }
+    const object = await readObjectMeta(file, meta, safe);
     return { body: new Uint8Array(body), object };
   } catch {
     return null;
@@ -127,8 +142,13 @@ export async function listObjects(
       if (entry.name.endsWith(META_SUFFIX)) continue;
       const rel = path.relative(root, full).split(path.sep).join('/');
       if (prefix && !rel.startsWith(prefix)) continue;
-      const got = await getObject(id, rel);
-      if (got) out.push(got.object);
+      // Metadata only — reading each body would pull every stored blob into
+      // memory just to render a listing.
+      try {
+        out.push(await readObjectMeta(full, `${full}${META_SUFFIX}`, rel));
+      } catch {
+        /* raced with a concurrent delete; skip */
+      }
     }
   }
   await walk(root);

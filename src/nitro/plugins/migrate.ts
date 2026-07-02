@@ -2,7 +2,9 @@ import { definePlugin } from 'nitro';
 import { runMigrations } from '~db/migrate.ts';
 import { interruptStaleAgentRuns } from '~server/agent-runs';
 import { hardenPlatformDatabase } from '~server/apps/provision';
+import { warmLongRunningBackends } from '~server/apps/runtime';
 import { ensureScheduler } from '~server/apps/scheduler';
+import { ensureRetentionSweep } from '~server/retention';
 import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
 
@@ -29,4 +31,10 @@ export default definePlugin(async () => {
   // Same for app cron jobs: without this they would only start once someone
   // happened to call listApps (its fire-and-forget side effect).
   ensureScheduler();
+  // The keep-alive registry is in-memory, so long-running backends stay down
+  // after a restart until their first request; boot them proactively.
+  await warmLongRunningBackends();
+  // Trim unbounded history tables (logs, cron runs, workflow runs, agent run
+  // events) daily so a long-lived install doesn't grow without bound.
+  ensureRetentionSweep();
 });
