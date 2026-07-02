@@ -1,6 +1,5 @@
 /** Server-only: compile an app source tree into deployable artifacts. */
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
@@ -21,6 +20,7 @@ import {
   rpcUrl,
 } from './manifest';
 import { subprocessSandboxEnv } from '../sandbox-env';
+import { run as runSubprocess } from '../subprocess';
 
 export type BuildResult = {
   source: SourceManifest;
@@ -51,25 +51,19 @@ plugins:
       - import_extension=none
 `;
 
+/**
+ * Bounded build-step runner (shared timeout + output cap) with the platform's
+ * node_modules/.bin prepended so buf can resolve the protoc-gen-es plugin.
+ */
 function run(
   cmd: string,
   args: string[],
   opts: { cwd: string; env?: NodeJS.ProcessEnv },
 ): Promise<{ code: number; output: string }> {
-  return new Promise((resolve) => {
-    const baseEnv = opts.env ?? process.env;
-    const child = spawn(cmd, args, {
-      cwd: opts.cwd,
-      env: { ...baseEnv, PATH: `${BIN_DIR}:${baseEnv.PATH ?? ''}` },
-    });
-    let output = '';
-    child.stdout.on('data', (d) => (output += d.toString()));
-    child.stderr.on('data', (d) => (output += d.toString()));
-    child.on('error', (err) => {
-      output += `\n${cmd} failed to start: ${err.message}`;
-      resolve({ code: 1, output });
-    });
-    child.on('close', (code) => resolve({ code: code ?? 0, output }));
+  const baseEnv = opts.env ?? process.env;
+  return runSubprocess(cmd, args, {
+    cwd: opts.cwd,
+    env: { ...baseEnv, PATH: `${BIN_DIR}:${baseEnv.PATH ?? ''}` },
   });
 }
 

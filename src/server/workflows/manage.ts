@@ -122,10 +122,10 @@ export async function setWorkflowArchived(
 }
 
 /**
- * Roll a workflow back to a previous deployment by restoring its artifact.
- * Serialized with deploys via the shared per-workflow lock so a rollback and a
- * deploy can't interleave their artifact/Git/row mutations and leave the DB
- * pointing at one version while `master`/`workflow-current` points at another.
+ * Roll a workflow back to a previous deployment by flipping the deployment
+ * pointer. Serialized with deploys via the shared per-workflow lock so a
+ * rollback and a deploy can't interleave their Git/row mutations and leave the
+ * DB pointing at one version while `master` points at another.
  */
 export function rollbackWorkflow(
   id: string,
@@ -172,17 +172,15 @@ async function rollbackWorkflowInner(
   } | null;
   const sourceTag = deployment.sourceTag;
 
-  // Mutate the live artifact, Git master, and the workflow row under the same
-  // advisory lock deploy holds for its version→tag→record step, so a concurrent
-  // deploy on another process blocks until we finish (and vice versa).
+  // Mutate Git master and the workflow row under the same advisory lock deploy
+  // holds for its version→tag→record step, so a concurrent deploy on another
+  // process blocks until we finish (and vice versa). Runs execute the immutable
+  // per-deployment artifact directly (see execute.ts), so flipping
+  // `currentDeploymentId` is what makes this version live.
   await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
     );
-    const live = workflowCurrentDir(id);
-    await fs.rm(live, { recursive: true, force: true });
-    await fs.mkdir(live, { recursive: true });
-    await fs.cp(artifact, live, { recursive: true });
     const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
 
     await tx
@@ -241,6 +239,9 @@ export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   // against the not-yet-deleted repo or a stale worktree would be left behind.
   await deleteAgentWorktrees(id);
   await Promise.all([
+    // Legacy live-bundle dir: older deploys mirrored the artifact into
+    // workflow-current/<id>. Nothing writes or reads it anymore, but sweep it
+    // for workflows created before it was retired.
     fs.rm(workflowCurrentDir(id), { recursive: true, force: true }),
     fs.rm(workflowArtifactsDir(id), { recursive: true, force: true }),
     fs.rm(workflowRepoDir(id), { recursive: true, force: true }),

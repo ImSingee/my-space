@@ -232,10 +232,9 @@ async function executeRun(
   deploymentId: string,
   input: unknown,
 ): Promise<void> {
-  // Run the exact artifact this run was queued against. The live
-  // `workflow-current/<id>` dir is mutable (a concurrent deploy/rollback can
-  // swap it), which would otherwise run a different version than the run row
-  // and its validated input claim.
+  // Run the exact immutable artifact this run was queued against, so a
+  // concurrent deploy/rollback can never swap in a different version than the
+  // run row and its validated input claim.
   const dir = workflowDeploymentArtifactDir(workflowId, deploymentId);
   const bundle = path.join(dir, 'workflow.js');
   if (!existsSync(bundle)) {

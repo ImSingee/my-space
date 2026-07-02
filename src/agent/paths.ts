@@ -115,7 +115,11 @@ export const WORKFLOW_ARTIFACTS_DIR = path.resolve(
   WORKSPACE_ROOT,
   'workflow-artifacts',
 );
-/** Live bundle executed on trigger: workspace/workflow-current/<id>/workflow.js. */
+/**
+ * Legacy live-bundle mirror (workspace/workflow-current/<id>). Runs always
+ * execute the immutable per-deployment artifact, so nothing writes here
+ * anymore; kept only so deleteWorkflow can sweep dirs from older deploys.
+ */
 export const WORKFLOW_CURRENT_DIR = path.resolve(
   WORKSPACE_ROOT,
   'workflow-current',
@@ -150,7 +154,7 @@ export function workflowDeploymentArtifactDir(
   return path.resolve(WORKFLOW_ARTIFACTS_DIR, id, deploymentId);
 }
 
-/** Live directory holding the current bundled program for a workflow. */
+/** Legacy live-bundle dir for a workflow (cleanup-only; see above). */
 export function workflowCurrentDir(id: string): string {
   return path.resolve(WORKFLOW_CURRENT_DIR, id);
 }

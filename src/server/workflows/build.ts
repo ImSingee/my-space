@@ -1,9 +1,9 @@
 /** Server-only: compile a workflow source tree into a single-file program. */
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { WORKFLOW_BUILD_WORK_DIR } from '~agent/paths';
+import { run } from '../subprocess';
 import {
   type NormalizedWorkflowManifest,
   type SourceWorkflowManifest,
@@ -28,78 +28,6 @@ export type BuildWorkflowOptions = {
 };
 
 const SENTINEL = '[[hatch]]';
-
-// A build step (deno bundle / describe) runs untrusted authored code and fetches
-// dependencies. Bound it so top-level code that hangs, or a stalled dependency
-// fetch, can't wedge the deploy in `building` forever with a live Deno child.
-const BUILD_STEP_TIMEOUT_MS = 5 * 60 * 1000;
-// Cap captured output so a runaway build that spews logs can't exhaust memory.
-const MAX_CAPTURED_OUTPUT = 1_000_000;
-
-type RunResult = { code: number; stdout: string; stderr: string };
-
-/** Append `chunk` to `buf`, stopping once the captured-output cap is reached. */
-function appendCapped(buf: string, chunk: string): string {
-  if (buf.length >= MAX_CAPTURED_OUTPUT) return buf;
-  const next = buf + chunk;
-  return next.length > MAX_CAPTURED_OUTPUT
-    ? `${next.slice(0, MAX_CAPTURED_OUTPUT)}\n…output truncated…`
-    : next;
-}
-
-function run(
-  cmd: string,
-  args: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv; input?: string },
-): Promise<RunResult> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
-      cwd: opts.cwd,
-      env: opts.env ?? process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const finish = (result: RunResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
-    const timer = setTimeout(() => {
-      stderr = appendCapped(
-        stderr,
-        `\n${cmd} timed out after ${BUILD_STEP_TIMEOUT_MS}ms`,
-      );
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* best-effort */
-      }
-      finish({ code: 1, stdout, stderr });
-    }, BUILD_STEP_TIMEOUT_MS);
-    if (typeof timer.unref === 'function') timer.unref();
-    child.stdout.on(
-      'data',
-      (d) => (stdout = appendCapped(stdout, d.toString())),
-    );
-    child.stderr.on(
-      'data',
-      (d) => (stderr = appendCapped(stderr, d.toString())),
-    );
-    child.on('error', (err) => {
-      stderr = appendCapped(stderr, `\n${cmd} failed to start: ${err.message}`);
-      finish({ code: 1, stdout, stderr });
-    });
-    child.on('close', (code) => finish({ code: code ?? 0, stdout, stderr }));
-    if (opts.input !== undefined) {
-      child.stdin.end(opts.input);
-    } else {
-      child.stdin.end();
-    }
-  });
-}
 
 async function pathExists(p: string): Promise<boolean> {
   try {

@@ -467,6 +467,16 @@ async function deployAppInner(
     if (liveTouched && !recorded) {
       await restoreLiveBuild(id, prevDeploymentId, liveBackup).catch(() => {});
     }
+    // The artifact snapshot was staged before the release was recorded; with no
+    // deployment row referencing it, it would sit orphaned on disk forever.
+    if (!recorded) {
+      await fs
+        .rm(deploymentArtifactDir(id, deploymentId), {
+          recursive: true,
+          force: true,
+        })
+        .catch(() => {});
+    }
     // Restore the app's status: a recorded release stays deployed; otherwise an
     // archived app stays archived (a failed redeploy must not re-enable it), one
     // with a live deployment keeps serving it, and a never-deployed app fails.

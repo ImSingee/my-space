@@ -390,6 +390,27 @@ async function startBackend(id: string): Promise<number> {
   proc.stdout?.on('data', appendLog);
   proc.stderr?.on('data', appendLog);
 
+  // A ChildProcess 'error' with no listener is an uncaught exception that
+  // would crash the whole server (e.g. deno missing from PATH). Capture it —
+  // and an exit that happens before the port ever opens — as a fast readiness
+  // failure instead of burning the full 20s port-wait.
+  const spawnFailure = new Promise<never>((_, reject) => {
+    proc.once('error', (err) => {
+      reject(new Error(`backend process failed to start: ${err.message}`));
+    });
+    proc.once('exit', (code, signal) => {
+      reject(
+        new Error(
+          `backend process exited before becoming ready (${signal ?? code})`,
+        ),
+      );
+    });
+  });
+  // Pre-attach a no-op handler: the rejection also fires when nothing is
+  // racing against it (a normal stop after ready, or the epoch-superseded
+  // kill below) and must not surface as an unhandled rejection.
+  spawnFailure.catch(() => {});
+
   // A stop/redeploy landed while we were awaiting db/port allocation: abort
   // before registering this now-stale process (which a concurrent warm start
   // could otherwise pick up and serve). This check runs *before* we create
@@ -413,7 +434,7 @@ async function startBackend(id: string): Promise<number> {
     ready: Promise.resolve(),
     getLog: () => log,
   };
-  backend.ready = waitForPort(port, 20000);
+  backend.ready = Promise.race([waitForPort(port, 20000), spawnFailure]);
   reg.set(id, backend);
   proc.on('exit', () => {
     if (reg.get(id) === backend) reg.delete(id);
@@ -459,6 +480,16 @@ async function startBackend(id: string): Promise<number> {
 }
 
 /**
+ * Cap on how long a backend may take to answer a platform-initiated request.
+ * Backends are untrusted code; without a bound, one hung handler pins the
+ * platform-side request (a cron slot, a proxied client connection) forever.
+ * Applied fully to `callAppBackend` (which buffers the body) and to
+ * `proxyAppRequest` only until response headers arrive, so long-lived
+ * streaming responses keep working.
+ */
+const BACKEND_RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
  * Server-initiated call into an app backend (used by the cron scheduler).
  * Lazily starts the backend, then issues a direct HTTP request to `pathAndQuery`.
  */
@@ -469,7 +500,10 @@ export async function callAppBackend(
 ): Promise<{ status: number; body: string }> {
   const port = await ensureAppRunning(id);
   const path = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
-  const upstream = await fetch(`http://127.0.0.1:${port}${path}`, init);
+  const upstream = await fetch(`http://127.0.0.1:${port}${path}`, {
+    ...init,
+    signal: AbortSignal.timeout(BACKEND_RESPONSE_TIMEOUT_MS),
+  });
   const body = await upstream.text();
   return { status: upstream.status, body };
 }
@@ -642,7 +676,22 @@ export async function proxyAppRequest(
     init.duplex = 'half';
   }
 
-  const upstream = await fetch(target, init);
+  // Bound only the time to response headers: abort if the backend never
+  // answers, but clear the timer once headers arrive so streaming bodies
+  // (server-streaming RPCs, long downloads) are not cut off mid-flight.
+  const headerTimeout = new AbortController();
+  const headerTimer = setTimeout(
+    () => headerTimeout.abort(new Error('app backend response timed out')),
+    BACKEND_RESPONSE_TIMEOUT_MS,
+  );
+  if (typeof headerTimer.unref === 'function') headerTimer.unref();
+  init.signal = headerTimeout.signal;
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, init);
+  } finally {
+    clearTimeout(headerTimer);
+  }
   const responseHeaders = new Headers();
   const contentType = upstream.headers.get('content-type');
   if (contentType) responseHeaders.set('content-type', contentType);

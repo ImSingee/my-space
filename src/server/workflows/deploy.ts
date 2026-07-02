@@ -7,7 +7,6 @@ import { ulid } from 'ulid';
 import {
   WORKFLOW_BUILD_WORK_DIR,
   WORKSPACE_ROOT,
-  workflowCurrentDir,
   workflowDeploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
@@ -182,11 +181,6 @@ async function deployWorkflowInner(
       const published = await publishDeploymentSource(id, sourceDir, version);
       publishedTag = published.tag;
 
-      const live = workflowCurrentDir(id);
-      await fs.rm(live, { recursive: true, force: true });
-      await fs.mkdir(live, { recursive: true });
-      await fs.cp(tempBuild, live, { recursive: true });
-
       await tx.insert(schema.workflowDeployments).values({
         id: deploymentId,
         workflowId: id,
@@ -254,6 +248,16 @@ async function deployWorkflowInner(
           if (!owner) {
             await deleteDeploymentTag(id, tag).catch(() => {});
           }
+        })
+        .catch(() => {});
+    }
+    // The artifact snapshot was staged before the release was recorded; with no
+    // deployment row referencing it, it would sit orphaned on disk forever.
+    if (!recorded) {
+      await fs
+        .rm(workflowDeploymentArtifactDir(id, deploymentId), {
+          recursive: true,
+          force: true,
         })
         .catch(() => {});
     }
