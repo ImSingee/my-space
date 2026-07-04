@@ -1,7 +1,7 @@
 /** Server-only: workflow lifecycle management + run inspection views. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import {
   AGENTS_DIR,
   workflowArtifactsDir,
@@ -18,7 +18,7 @@ import type {
   WorkflowStatus,
   WorkflowTrigger,
 } from '~/db/schema';
-import { WORKFLOW_DEPLOY_LOCK_NS, withWorkflowDeployLock } from './deploy';
+import { workflowDeployLock } from './deploy';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
 import { isValidWorkflowId } from './manifest';
 import { reloadWorkflowScheduler } from './scheduler';
@@ -131,7 +131,7 @@ export function rollbackWorkflow(
   id: string,
   deploymentId: string,
 ): Promise<{ version: number }> {
-  return withWorkflowDeployLock(id, () =>
+  return workflowDeployLock.withLock(id, () =>
     rollbackWorkflowInner(id, deploymentId),
   );
 }
@@ -178,9 +178,7 @@ async function rollbackWorkflowInner(
   // per-deployment artifact directly (see execute.ts), so flipping
   // `currentDeploymentId` is what makes this version live.
   await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-    );
+    await workflowDeployLock.acquire(tx, id);
     const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
 
     await tx

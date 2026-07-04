@@ -1,7 +1,7 @@
 /** Server-only: app lifecycle management — archive, rollback, delete. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import {
   deploymentBuildDir,
   appBuildDir,
@@ -14,7 +14,7 @@ import {
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
-import { APP_DEPLOY_LOCK_NS, withAppDeployLock } from './deploy';
+import { appDeployLock } from './deploy';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
 import {
   type NormalizedManifest,
@@ -186,7 +186,7 @@ export function rollbackApp(
   id: string,
   deploymentId: string,
 ): Promise<{ version: number }> {
-  return withAppDeployLock(id, () => rollbackAppInner(id, deploymentId));
+  return appDeployLock.withLock(id, () => rollbackAppInner(id, deploymentId));
 }
 
 async function rollbackAppInner(
@@ -230,9 +230,7 @@ async function rollbackAppInner(
   // advisory lock deploy holds for its version→tag→record step, so a concurrent
   // deploy on another process blocks until we finish (and vice versa).
   await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-    );
+    await appDeployLock.acquire(tx, id);
     const live = appBuildDir(id);
     await fs.rm(live, { recursive: true, force: true });
     await fs.mkdir(live, { recursive: true });

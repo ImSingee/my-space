@@ -23,7 +23,8 @@ import {
 } from '~queries/agent';
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
-import { MessageView, StreamingBubble } from './message-view';
+import { MessageView } from './message-view';
+import { StreamingBubble } from './streaming-bubble';
 import {
   type AssistantBlock,
   type ChatMessage,

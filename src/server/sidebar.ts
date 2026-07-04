@@ -9,8 +9,8 @@ import { persistSortOrder } from './sort-order';
 import { idListSchema, idSchema, nameSchema } from './validation';
 
 // Advisory-lock namespace for the (int, int) form of pg_advisory_xact_lock.
-// Existing namespaces elsewhere: APP_DEPLOY_LOCK_NS=1 (apps/deploy.ts),
-// WORKFLOW_DEPLOY_LOCK_NS=2 (workflows/deploy.ts), APP_KV_LOCK_NS=3
+// Existing namespaces elsewhere: appDeployLock=1 (apps/deploy.ts),
+// workflowDeployLock=2 (workflows/deploy.ts), APP_KV_LOCK_NS=3
 // (apps/kv.ts), DASHBOARDS_LOCK_NS=5 (dashboards.ts).
 const SIDEBAR_PIN_LOCK_NS = 4;
 

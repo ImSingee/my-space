@@ -2,17 +2,17 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import {
   BUILD_WORK_DIR,
-  WORKSPACE_ROOT,
   appBuildDir,
   deploymentArtifactDir,
   deploymentBuildDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
+import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
 import { buildApp } from './build';
 import {
   assertDeployableWorktree,
@@ -37,10 +37,6 @@ export type DeployAppOptions = {
   /** Required release note recorded on the deployment (e.g. what changed). */
   message: string;
 };
-
-function workspaceRelative(p: string): string {
-  return path.relative(WORKSPACE_ROOT, p).split(path.sep).join('/');
-}
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -71,9 +67,7 @@ async function restoreLiveBuild(
   liveBackup: string,
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-    );
+    await appDeployLock.acquire(tx, id);
     const current = await tx.query.apps.findFirst({
       where: (s, { eq: e }) => e(s.id, id),
       columns: { currentDeploymentId: true },
@@ -112,32 +106,12 @@ async function restoreLiveBuild(
   });
 }
 
-// Advisory-lock namespace for app deploys (distinct from workflows) so version
-// allocation is serialized across server processes, not just within one.
-export const APP_DEPLOY_LOCK_NS = 1;
-
-const appDeployChains = new Map<string, Promise<unknown>>();
-
 /**
- * Run `fn` only after any in-flight deploy (or rollback) for the same app id
- * has settled. Rollback shares this lock so its artifact/Git/row mutations
- * can't interleave with a concurrent deploy's.
+ * Deploy serialization for apps (advisory-lock namespace 1, distinct from
+ * workflows). Rollback (manage.ts) shares this lock so its artifact/Git/row
+ * mutations can't interleave with a concurrent deploy's.
  */
-export function withAppDeployLock<T>(
-  id: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const prev = appDeployChains.get(id) ?? Promise.resolve();
-  // Chain regardless of the previous deploy's outcome — a failed deploy must not
-  // wedge later attempts for the same app.
-  const run = prev.then(fn, fn);
-  const tail = run.catch(() => {});
-  appDeployChains.set(id, tail);
-  void tail.finally(() => {
-    if (appDeployChains.get(id) === tail) appDeployChains.delete(id);
-  });
-  return run;
-}
+export const appDeployLock = createDeployLock(1);
 
 /**
  * Build + record a deployment and flip the app live. Serialized per app so two
@@ -148,7 +122,7 @@ export function deployApp(
   id: string,
   options: DeployAppOptions,
 ): Promise<DeployResult> {
-  return withAppDeployLock(id, () => deployAppInner(id, options));
+  return appDeployLock.withLock(id, () => deployAppInner(id, options));
 }
 
 async function deployAppInner(
@@ -338,9 +312,7 @@ async function deployAppInner(
     // takes the next number. Versions derive from successful releases only.
     let version = 0;
     await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-      );
+      await appDeployLock.acquire(tx, id);
       const last = await tx.query.deployments.findFirst({
         where: (d, { eq: e }) => e(d.appId, id),
         orderBy: (d, { desc }) => [desc(d.version)],
@@ -447,9 +419,7 @@ async function deployAppInner(
       const tag = publishedTag;
       await db
         .transaction(async (tx) => {
-          await tx.execute(
-            sql`SELECT pg_advisory_xact_lock(${APP_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-          );
+          await appDeployLock.acquire(tx, id);
           const owner = await tx.query.deployments.findFirst({
             where: (d, { eq: e, and: a }) =>
               a(e(d.appId, id), e(d.sourceTag, tag)),

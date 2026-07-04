@@ -2,16 +2,16 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import {
   WORKFLOW_BUILD_WORK_DIR,
-  WORKSPACE_ROOT,
   workflowDeploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
 import { validateCron } from '~server/apps/cron-expr';
+import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
 import { buildWorkflow } from './build';
 import {
   assertDeployableWorktree,
@@ -37,37 +37,12 @@ export type DeployWorkflowOptions = {
   message: string;
 };
 
-function workspaceRelative(p: string): string {
-  return path.relative(WORKSPACE_ROOT, p).split(path.sep).join('/');
-}
-
-// Advisory-lock namespace for workflow deploys (distinct from apps) so version
-// allocation is serialized across server processes, not just within one. Shared
-// with rollback (see manage.ts) so the two can't interleave their artifact/Git/
-// row mutations.
-export const WORKFLOW_DEPLOY_LOCK_NS = 2;
-
-const workflowDeployChains = new Map<string, Promise<unknown>>();
-
 /**
- * Run `fn` only after any in-flight deploy (or rollback) for the same workflow
- * has settled. Exported so rollback shares the same in-process serialization.
+ * Deploy serialization for workflows (advisory-lock namespace 2, distinct from
+ * apps). Rollback (manage.ts) shares this lock so the two can't interleave
+ * their artifact/Git/row mutations.
  */
-export function withWorkflowDeployLock<T>(
-  id: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const prev = workflowDeployChains.get(id) ?? Promise.resolve();
-  // Chain regardless of the previous deploy's outcome — a failed deploy must not
-  // wedge later attempts for the same workflow.
-  const run = prev.then(fn, fn);
-  const tail = run.catch(() => {});
-  workflowDeployChains.set(id, tail);
-  void tail.finally(() => {
-    if (workflowDeployChains.get(id) === tail) workflowDeployChains.delete(id);
-  });
-  return run;
-}
+export const workflowDeployLock = createDeployLock(2);
 
 /**
  * Build + record a workflow deployment and flip it live. Serialized per workflow
@@ -79,7 +54,9 @@ export function deployWorkflow(
   id: string,
   options: DeployWorkflowOptions,
 ): Promise<DeployWorkflowResult> {
-  return withWorkflowDeployLock(id, () => deployWorkflowInner(id, options));
+  return workflowDeployLock.withLock(id, () =>
+    deployWorkflowInner(id, options),
+  );
 }
 
 async function deployWorkflowInner(
@@ -169,9 +146,7 @@ async function deployWorkflowInner(
     // commits; the loser blocks, then takes the next number.
     let version = 0;
     await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-      );
+      await workflowDeployLock.acquire(tx, id);
       const last = await tx.query.workflowDeployments.findFirst({
         where: (d, { eq: e }) => e(d.workflowId, id),
         orderBy: (d, { desc }) => [desc(d.version)],
@@ -238,9 +213,7 @@ async function deployWorkflowInner(
       const tag = publishedTag;
       await db
         .transaction(async (tx) => {
-          await tx.execute(
-            sql`SELECT pg_advisory_xact_lock(${WORKFLOW_DEPLOY_LOCK_NS}, hashtext(${id}))`,
-          );
+          await workflowDeployLock.acquire(tx, id);
           const owner = await tx.query.workflowDeployments.findFirst({
             where: (d, { eq: e, and: a }) =>
               a(e(d.workflowId, id), e(d.sourceTag, tag)),
