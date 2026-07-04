@@ -390,6 +390,38 @@ export async function buildApp(
       }
     }
 
+    // 4b) Bundle each userscript -> a single self-contained browser IIFE. The
+    // request-time route prepends the Tampermonkey metadata block, so here we
+    // only emit the executable body. IIFE (not ESM) because Tampermonkey injects
+    // a classic script — top-level `import`/`export` would not run — while GM_*
+    // grants stay reachable as globals inside the IIFE.
+    if (manifest.capabilities.userscripts && manifest.userscripts.length > 0) {
+      await fs.mkdir(path.join(out, 'userscripts'), { recursive: true });
+      for (const script of manifest.userscripts) {
+        const entry = path.join(src, script.entry);
+        if (!(await pathExists(entry))) {
+          throw new Error(`userscript entry not found: ${script.entry}`);
+        }
+        await esbuild.build({
+          ...esbuildResolve,
+          entryPoints: [entry],
+          outfile: path.join(out, 'userscripts', `${script.id}.js`),
+          bundle: true,
+          format: 'iife',
+          platform: 'browser',
+          target: 'es2022',
+          jsx: 'automatic',
+          minify: true,
+          sourcemap: false,
+          define,
+          logLevel: 'silent',
+        });
+        logs.push(
+          `bundled userscript ${script.id} -> userscripts/${script.id}.js`,
+        );
+      }
+    }
+
     // 5) Stage the Deno backend + generated stubs + dependency manifest for the
     // runtime. We stage package.json + deno.lock (not node_modules): the backend
     // runs with --node-modules-dir=none and resolves deps from Deno's module

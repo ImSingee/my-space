@@ -15,6 +15,7 @@ const CAPABILITY_KEYS = [
   'webhook',
   'storage',
   'kv',
+  'userscripts',
 ] as const satisfies readonly (keyof AppCapabilities)[];
 
 function enabledCapabilities(

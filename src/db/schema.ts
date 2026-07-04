@@ -62,6 +62,8 @@ export type AppCapabilities = {
   storage: boolean;
   /** Simple per-app key/value store (platform DB) for small tokens/config. */
   kv: boolean;
+  /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
+  userscripts: boolean;
 };
 
 export type AppStatus =
@@ -156,6 +158,23 @@ export const apps = pgTable(
      * deploy of a backend-capable app; never exposed to the browser.
      */
     signingSecret: text(),
+    /**
+     * Opaque app-level token embedded in `.user.js` download/update URLs so
+     * Tampermonkey can subscribe + auto-update without a platform session.
+     * Minted on the first deploy that ships userscripts; retained across
+     * redeploys and disable/reenable cycles so existing subscriptions keep
+     * updating. Never exposed to the browser except on the authenticated
+     * manage page (as the install link).
+     */
+    userscriptSecret: text(),
+    /**
+     * Monotonic revision served as the userscript `@version`. Bumped on every
+     * activation event — deploy AND rollback — because Tampermonkey only
+     * fetches an update when the remote version increases: serving the
+     * deployment version would make a rollback (v3 → v2) look older than what
+     * clients already have and never propagate.
+     */
+    userscriptRevision: integer().notNull().default(0),
     currentDeploymentId: ulid(),
     createdAt,
     updatedAt,

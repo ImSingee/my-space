@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import {
   BUILD_WORK_DIR,
@@ -299,6 +299,19 @@ async function deployAppInner(
       signingSecret = randomUUID().replaceAll('-', '');
     }
 
+    // Mint the app-level userscript token the first time an app ships scripts.
+    // It authorizes the public `.user.js` download/update route (no session), so
+    // like the webhook secret we RETAIN any existing one across redeploys and
+    // disable cycles — otherwise a redeploy would rotate the token baked into
+    // every already-installed subscription and silently break auto-update.
+    const shipsUserscripts =
+      build.source.capabilities.userscripts &&
+      build.source.userscripts.length > 0;
+    let userscriptSecret = app.userscriptSecret ?? null;
+    if (shipsUserscripts && !userscriptSecret) {
+      userscriptSecret = randomUUID().replaceAll('-', '');
+    }
+
     const artifact = deploymentArtifactDir(id, deploymentId);
     await fs.rm(artifact, { recursive: true, force: true });
     await fs.mkdir(artifact, { recursive: true });
@@ -354,6 +367,12 @@ async function deployAppInner(
           dbName,
           webhookSecret,
           signingSecret,
+          userscriptSecret,
+          // Served as the userscript `@version`. Bumped on every activation
+          // (deploy AND rollback) so Tampermonkey always sees a higher version
+          // and re-fetches — the deployment version alone would go backwards
+          // on rollback and installed scripts would never pick up the change.
+          userscriptRevision: sql`${schema.apps.userscriptRevision} + 1`,
           currentDeploymentId: deploymentId,
         })
         .where(eq(schema.apps.id, id));

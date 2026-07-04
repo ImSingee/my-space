@@ -60,6 +60,24 @@ const protoEntryPath = sourceRelativePath.refine(
   { message: 'proto entry must live under the "proto/" directory' },
 );
 
+/**
+ * A metadata value that must stay on one line. Userscript metadata is emitted
+ * as `// @key value` comment lines, so a CR/LF in a value would let a manifest
+ * inject additional directives (e.g. a rogue `@grant`) or break out of the
+ * metadata block. Reject line breaks up front so the request-time generator
+ * only ever concatenates safe single-line values.
+ */
+const hasNoLineBreak = (s: string): boolean => !/[\r\n]/.test(s);
+
+const singleLineString = z
+  .string()
+  .refine(hasNoLineBreak, { message: 'must not contain line breaks' });
+
+const singleLineNonEmpty = z
+  .string()
+  .min(1)
+  .refine(hasNoLineBreak, { message: 'must not contain line breaks' });
+
 export const widgetSizeSchema = z.object({
   w: z.number().int().min(1).max(12).default(4),
   h: z.number().int().min(1).max(12).default(3),
@@ -86,6 +104,133 @@ export const widgetSchema = z.object({
    */
   supportedSizes: z.array(widgetSizeSchema).default([]),
 });
+
+/** Tampermonkey `@run-at` phases. Mirrors the values the extension accepts. */
+export const USERSCRIPT_RUN_AT = [
+  'document-start',
+  'document-body',
+  'document-end',
+  'document-idle',
+  'context-menu',
+] as const;
+
+export type UserscriptRunAt = (typeof USERSCRIPT_RUN_AT)[number];
+
+/**
+ * Metadata directives the platform owns and always generates itself, so a
+ * manifest's `extraMetadata` may never set them: `@name`/`@namespace`/`@version`
+ * identify the script to Tampermonkey; `@updateURL`/`@downloadURL` drive the
+ * subscription + auto-update loop and must point at the tokenized platform
+ * route; `@match` and the other structured directives below are derived from
+ * dedicated manifest fields, so allowing a second copy here would duplicate or
+ * silently override them. The `include`/`exclude` family is also reserved:
+ * those directives change which pages the script runs on, so allowing them in
+ * `extraMetadata` would let a manifest widen (or quietly alter) the scope the
+ * UI shows from `matches`. Compared case-insensitively without the leading `@`.
+ */
+const RESERVED_USERSCRIPT_METADATA = new Set([
+  'name',
+  'namespace',
+  'version',
+  'updateurl',
+  'downloadurl',
+  'match',
+  'include',
+  'exclude',
+  'exclude-match',
+  'grant',
+  'connect',
+  'run-at',
+  'noframes',
+  'description',
+]);
+
+/** A single advanced `@key value(s)` directive for `extraMetadata`. */
+const extraMetadataValue = z.union([
+  singleLineString,
+  z.array(singleLineString),
+]);
+
+export const userscriptSchema = z.object({
+  // Used both as a URL path segment (`<id>.user.js`) and as the built
+  // `<id>.js` filename, so it must be a safe slug — never a value with path
+  // separators or `..`. Mirrors the widget id constraint.
+  id: z
+    .string()
+    .min(1)
+    .regex(
+      /^[a-zA-Z0-9_-]+$/,
+      'userscript id must contain only letters, digits, hyphens, or underscores',
+    ),
+  name: singleLineNonEmpty,
+  entry: sourceRelativePath,
+  /** Tampermonkey `@match` patterns; at least one so the script targets a page. */
+  matches: z.array(singleLineNonEmpty).min(1, 'at least one match is required'),
+  description: singleLineString.optional(),
+  /**
+   * Tampermonkey `@grant`s. Empty (default) omits the directive so Tampermonkey
+   * auto-detects; `['none']` runs the script in page context; otherwise each
+   * value becomes a `@grant`. `none` can't be combined with real grants.
+   */
+  grants: z
+    .array(singleLineNonEmpty)
+    .default([])
+    .refine((g) => !(g.includes('none') && g.length > 1), {
+      message: '"none" cannot be combined with other grants',
+    }),
+  /** `@connect` hosts the script may reach via `GM_xmlhttpRequest`. */
+  connects: z.array(singleLineNonEmpty).default([]),
+  runAt: z.enum(USERSCRIPT_RUN_AT).optional(),
+  noframes: z.boolean().default(false),
+  /**
+   * Escape hatch for advanced Tampermonkey directives (`@require`, `@resource`,
+   * `@icon`, …). Keys are directive names without the leading `@`; values are a
+   * string or list of strings. Platform-owned/structured keys are rejected (see
+   * RESERVED_USERSCRIPT_METADATA) so the generated block stays authoritative.
+   */
+  extraMetadata: z
+    .record(
+      z
+        .string()
+        .regex(
+          /^[a-zA-Z][a-zA-Z0-9-]*$/,
+          'metadata key must be a directive name (letters, digits, hyphens)',
+        ),
+      extraMetadataValue,
+    )
+    .default({})
+    .superRefine((meta, ctx) => {
+      for (const key of Object.keys(meta)) {
+        if (RESERVED_USERSCRIPT_METADATA.has(key.toLowerCase())) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `extraMetadata cannot set the platform-managed key "${key}"`,
+            path: [key],
+          });
+        }
+      }
+    }),
+});
+
+export type Userscript = z.infer<typeof userscriptSchema>;
+
+/** Userscripts with unique ids (each becomes a filename + URL segment). */
+const userscriptsSchema = z
+  .array(userscriptSchema)
+  .default([])
+  .superRefine((scripts, ctx) => {
+    const seen = new Set<string>();
+    for (const [i, script] of scripts.entries()) {
+      if (seen.has(script.id)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `duplicate userscript id "${script.id}"`,
+          path: [i, 'id'],
+        });
+      }
+      seen.add(script.id);
+    }
+  });
 
 export const cronJobSchema = z
   .object({
@@ -191,6 +336,8 @@ export const capabilitiesSchema = z.object({
   storage: z.boolean().default(false),
   /** Simple per-app key/value store (platform DB) for small tokens/config. */
   kv: z.boolean().default(false),
+  /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
+  userscripts: z.boolean().default(false),
 });
 
 /**
@@ -218,33 +365,55 @@ export function isValidAppSlug(slug: string): boolean {
   return APP_SLUG_RE.test(slug);
 }
 
-export const sourceManifestSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .regex(
-      APP_ID_RE,
-      'id must be lowercase letters, digits, and hyphens (a ULID or kebab slug)',
-    ),
-  name: z.string().min(1),
-  description: z.string().default(''),
-  version: z.number().int().min(1).default(1),
-  capabilities: capabilitiesSchema,
-  backendMode: z.enum(['serverless', 'long-running']).default('serverless'),
-  rpc: z
-    .object({ proto: protoEntryPath, service: z.string().min(1) })
-    .optional(),
-  backend: z.object({ entry: backendEntryPath }).optional(),
-  app: z
-    .object({ entry: sourceRelativePath, html: sourceRelativePath.optional() })
-    .optional(),
-  widgets: z.array(widgetSchema).default([]),
-  cron: z.array(cronJobSchema).default([]),
-  /** Inbound webhook auth mode (see webhookConfigSchema); defaults to platform. */
-  webhook: webhookConfigSchema.optional(),
-  /** Top-level workflows this app's backend may invoke (see appWorkflowRefSchema). */
-  workflows: appWorkflowsSchema,
-});
+export const sourceManifestSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .regex(
+        APP_ID_RE,
+        'id must be lowercase letters, digits, and hyphens (a ULID or kebab slug)',
+      ),
+    name: z.string().min(1),
+    description: z.string().default(''),
+    version: z.number().int().min(1).default(1),
+    capabilities: capabilitiesSchema,
+    backendMode: z.enum(['serverless', 'long-running']).default('serverless'),
+    rpc: z
+      .object({ proto: protoEntryPath, service: z.string().min(1) })
+      .optional(),
+    backend: z.object({ entry: backendEntryPath }).optional(),
+    app: z
+      .object({
+        entry: sourceRelativePath,
+        html: sourceRelativePath.optional(),
+      })
+      .optional(),
+    widgets: z.array(widgetSchema).default([]),
+    cron: z.array(cronJobSchema).default([]),
+    /** Inbound webhook auth mode (see webhookConfigSchema); defaults to platform. */
+    webhook: webhookConfigSchema.optional(),
+    /** Top-level workflows this app's backend may invoke (see appWorkflowRefSchema). */
+    workflows: appWorkflowsSchema,
+    /** Browser userscripts (see userscriptSchema); served as `.user.js`. */
+    userscripts: userscriptsSchema,
+  })
+  .superRefine((manifest, ctx) => {
+    // A userscript-capable app with no scripts would advertise the capability but
+    // serve nothing — almost always a manifest mistake, so reject it (mirrors how
+    // an enabled capability without its backing declaration is caught elsewhere).
+    if (
+      manifest.capabilities.userscripts &&
+      manifest.userscripts.length === 0
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'capabilities.userscripts is true but no userscripts are declared',
+        path: ['userscripts'],
+      });
+    }
+  });
 
 export type SourceManifest = z.infer<typeof sourceManifestSchema>;
 export type AppCapabilitiesShape = z.infer<typeof capabilitiesSchema>;
@@ -291,6 +460,26 @@ export function snapToSupportedSize<T extends GridSize>(
   }
   return best;
 }
+
+/**
+ * A userscript as resolved for a deployment. Carries everything the request-time
+ * `.user.js` generator needs to build the Tampermonkey metadata block plus the
+ * data the manage UI shows. `url` is the tokenless download path — the app-level
+ * secret is appended by the manage UI / verified by the route, never stored in
+ * the (browser-visible) normalized manifest.
+ */
+export type NormalizedUserscript = {
+  id: string;
+  name: string;
+  url: string;
+  matches: string[];
+  description?: string;
+  grants: string[];
+  connects: string[];
+  runAt?: UserscriptRunAt;
+  noframes: boolean;
+  extraMetadata: Record<string, string | string[]>;
+};
 
 /** A single RPC method parsed from the app's compiled proto descriptor. */
 export type RpcMethodApi = {
@@ -358,6 +547,11 @@ export type NormalizedManifest = {
   /** Scheduled jobs the platform triggers against the backend. */
   cron: CronJob[];
   /**
+   * Browser userscripts served as `.user.js`. Present only when the userscripts
+   * capability is enabled and at least one script is declared.
+   */
+  userscripts?: NormalizedUserscript[];
+  /**
    * Top-level workflows this app's backend may invoke. Present only when the
    * app has a backend and declares workflow calls. The runtime injects the
    * matching URL + secret per alias into the backend env (`HATCH_WORKFLOWS`).
@@ -392,6 +586,25 @@ export function appUrl(id: string): string {
 
 export function widgetUrl(id: string, widgetId: string): string {
   return `${appBasePath(id)}/widget/${widgetId}`;
+}
+
+/**
+ * Tokenless `.user.js` download path for a userscript. The app-level userscript
+ * secret is appended as `?token=` by the manage UI and verified by the route —
+ * it is deliberately absent here so the normalized manifest (shipped to the
+ * browser) never carries the secret.
+ */
+export function userscriptDownloadPath(id: string, scriptId: string): string {
+  return `${appBasePath(id)}/userscripts/${scriptId}.user.js`;
+}
+
+/**
+ * Stable Tampermonkey `@namespace` for a userscript. Independent of the serving
+ * origin so the script keeps its identity (Tampermonkey keys installs on
+ * name+namespace) across origin changes and redeploys.
+ */
+export function userscriptNamespace(id: string, scriptId: string): string {
+  return `hatch/app/${id}/${scriptId}`;
 }
 
 export function rpcUrl(id: string): string {
@@ -452,6 +665,26 @@ function normalizeWidget(
   };
 }
 
+/** Resolve a source userscript into its deploy-time shape (download URL + metadata). */
+function normalizeUserscript(
+  appId: string,
+  script: Userscript,
+): NormalizedUserscript {
+  const out: NormalizedUserscript = {
+    id: script.id,
+    name: script.name,
+    url: userscriptDownloadPath(appId, script.id),
+    matches: [...script.matches],
+    grants: [...script.grants],
+    connects: [...script.connects],
+    noframes: script.noframes,
+    extraMetadata: script.extraMetadata,
+  };
+  if (script.description) out.description = script.description;
+  if (script.runAt) out.runAt = script.runAt;
+  return out;
+}
+
 /** Produce the deploy-time manifest with concrete platform URLs. */
 export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   const out: NormalizedManifest = {
@@ -500,6 +733,14 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
       alias: w.alias ?? w.workflow,
       workflow: w.workflow,
     }));
+  }
+  // Userscripts are browser assets (no backend needed): a userscript calls out
+  // to third-party pages via GM_xmlhttpRequest, so the capability alone is
+  // enough. Only surface them when the capability is on and scripts exist.
+  if (src.capabilities.userscripts && src.userscripts.length > 0) {
+    out.userscripts = src.userscripts.map((s) =>
+      normalizeUserscript(src.id, s),
+    );
   }
   return out;
 }

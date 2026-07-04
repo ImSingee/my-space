@@ -82,6 +82,11 @@ Each app is an independent application with this source layout:
     signing each call with \`HATCH_SIGNING_SECRET\` (HMAC over \`<ts>.<rawBody>\`).
     The manage UI shows entries; values marked \`secret\` are masked there
     (overwrite-only). Requires a backend. See the building-apps skill.
+  - \`userscripts\`: publish Tampermonkey userscripts. Declare a top-level
+    \`userscripts\` array (each \`{ id, name, entry, matches, ... }\`); the build
+    bundles each \`entry\` to a browser script and the platform serves a
+    tokenized \`.user.js\` install/subscription URL on the manage page's Browser
+    scripts panel. No backend required. See the building-apps skill.
   - \`backendMode: "long-running"\` keeps the backend warm (vs default
     \`serverless\`). Handle \`/__webhook\` (and legacy \`/__cron/*\` paths) by
     wrapping the Connect adapter (see the building-apps skill).

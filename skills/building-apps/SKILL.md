@@ -105,7 +105,8 @@ Keep `manifest.json` consistent with the files. Example:
     "cron": false,
     "webhook": false,
     "storage": false,
-    "kv": false
+    "kv": false,
+    "userscripts": false
   },
   "backendMode": "serverless",
   "rpc": { "proto": "proto/service.proto", "service": "app.v1.TodoService" },
@@ -469,6 +470,59 @@ reads one, `PUT .../<key>` upserts `{ value, secret? }`, `DELETE .../<key>`
 removes. Mark a value `secret: true` to hide its plaintext in the manage UI
 (the owner can overwrite it there but not read it); your backend always reads the
 real value.
+
+### userscripts (Tampermonkey)
+
+Set `"userscripts": true` and declare a top-level `userscripts` array to publish
+browser userscripts. Each entry is bundled (esbuild, IIFE) into a single
+`.user.js` the platform serves as a tokenized install/subscription link on the
+app's manage page (Browser scripts panel). No backend is required — a userscript
+runs on a third-party page.
+
+```json
+"capabilities": { "userscripts": true, ... },
+"userscripts": [
+  {
+    "id": "price-watch",
+    "name": "Price Watch",
+    "entry": "userscripts/price-watch.ts",
+    "matches": ["https://example.com/*"],
+    "description": "Highlight price drops",
+    "grants": ["GM_xmlhttpRequest", "GM_setValue", "GM_getValue"],
+    "connects": ["api.example.com"],
+    "runAt": "document-idle",
+    "noframes": true,
+    "extraMetadata": { "require": "https://code.jquery.com/jquery-3.7.1.min.js" }
+  }
+]
+```
+
+Field notes:
+
+- `id` is a safe slug (letters/digits/`-`/`_`) used as the URL segment + built
+  filename; `matches` needs at least one `@match` pattern.
+- `entry` is bundled like a widget — write a normal browser script and `import`
+  npm packages freely (they're bundled in). Do NOT write a Tampermonkey metadata
+  block yourself; the platform generates it.
+- `grants` maps to `@grant` (omit/empty → Tampermonkey auto-detects; `["none"]`
+  → page context; `none` can't mix with real grants). `connects` → `@connect`
+  hosts for `GM_xmlhttpRequest`. `runAt` → `@run-at`; `noframes` → `@noframes`;
+  `description` → `@description`.
+- `extraMetadata` is an escape hatch for other directives (`@require`,
+  `@resource`, `@icon`, …), a string or list per key. It CANNOT set the
+  platform-owned/structured keys: `@name`, `@namespace`, `@version`,
+  `@updateURL`, `@downloadURL`, `@match`, `@include`, `@exclude`,
+  `@exclude-match`, `@grant`, `@connect`, `@run-at`, `@noframes`,
+  `@description`. Page scope comes exclusively from `matches`.
+- The platform sets `@version` to a monotonic per-app revision that increases
+  on every deploy AND rollback, so installed subscriptions auto-update in both
+  directions. The install URL carries a private per-app token (auto-update
+  works without a platform login) and is not enumerable from the app id alone
+  — treat it as a secret.
+
+To send data back to the app, call the app's absolute URL via
+`GM_xmlhttpRequest` and add its host to `connects` (a userscript runs on another
+site's origin, so relative URLs won't reach the app).
 
 ### long-running backends
 

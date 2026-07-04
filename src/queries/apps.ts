@@ -7,6 +7,7 @@ import {
   listApps,
   listCronRunsFn,
   listDeployments,
+  listUserscriptInstallLinksFn,
 } from '~server/apps';
 
 export const appsQueryOptions = queryOptions({
@@ -59,4 +60,10 @@ export const appKvQueryOptions = (id: string) =>
   queryOptions({
     queryKey: ['apps', id, 'kv'],
     queryFn: () => listAppKvFn({ data: id }),
+  });
+
+export const userscriptInstallLinksQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ['apps', id, 'userscripts'],
+    queryFn: () => listUserscriptInstallLinksFn({ data: id }),
   });
