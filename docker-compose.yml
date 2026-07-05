@@ -1,4 +1,4 @@
-# Hatch — one-command deploy: `docker compose up --build`
+# Hatch — one-command deploy: `docker compose up -d`
 # Brings up Postgres + the platform. The platform image bundles Node, Deno,
 # buf and esbuild, so it can build and run AI-generated apps on its own.
 
@@ -24,9 +24,8 @@ services:
       retries: 12
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${HATCH_IMAGE:-ghcr.io/imsingee/my-space:master}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       db:

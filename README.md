@@ -260,10 +260,17 @@ apps (Node, Deno, buf and esbuild) — ships as a single image alongside
 Postgres. Bring it all up with:
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
 Then open [http://localhost:3700](http://localhost:3700).
+
+If the GHCR package is private, log in first with an account/token that can read
+the package:
+
+```bash
+docker login ghcr.io
+```
 
 What the compose stack provides:
 
@@ -288,7 +295,7 @@ upgrade). Start by writing a strong session secret:
 
 ```bash
 echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" > .env
-docker compose up --build -d
+docker compose up -d
 ```
 
 **Create the owner account, then lock sign-up.** Hatch is single-tenant: the
@@ -300,8 +307,12 @@ the secret above stays in place):
 
 ```bash
 echo 'HATCH_ALLOW_SIGNUP=false' >> .env
-docker compose up --build -d
+docker compose up -d
 ```
+
+`docker-compose.yml` pulls `ghcr.io/imsingee/my-space:master` by default.
+Override it with `HATCH_IMAGE=ghcr.io/imsingee/my-space:<tag>` in `.env` when
+you want a specific release or SHA tag.
 
 The image bundles dev dependencies on purpose: `buf` + `protoc-gen-es` (Connect
 codegen) and `esbuild` (bundling) run on every app deploy.
