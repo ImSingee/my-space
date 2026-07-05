@@ -44,7 +44,7 @@ Dockerfile
 AGENTS.md
 CLAUDE.md
 README.md
-LICENSE
+LICENSE.md
 
 # Test and coverage
 coverage
