@@ -169,6 +169,13 @@
       "when": 1783264745145,
       "tag": "0023_rich_maggott",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783340057716,
+      "tag": "0024_bumpy_klaw",
+      "breakpoints": true
     }
   ]
 }

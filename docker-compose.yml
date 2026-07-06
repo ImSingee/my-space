@@ -49,10 +49,9 @@ services:
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
       # CHANGE THIS in production: signs auth sessions.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-please-change-this-to-a-long-random-string}
-      # Self-service sign-up. Open on first run so you can create the owner
-      # account; set HATCH_ALLOW_SIGNUP=false and redeploy once it exists to lock
-      # registration on this single-tenant instance.
-      HATCH_ALLOW_SIGNUP: ${HATCH_ALLOW_SIGNUP:-true}
+      # Self-service sign-up is a runtime platform setting (Settings → Users),
+      # not an env var. It starts open so you can create the owner account;
+      # turn it off there once your account exists.
     ports:
       # Host port is configurable (HATCH_PORT) to avoid clashing with a local dev server.
       - '${HATCH_PORT:-3700}:3700'

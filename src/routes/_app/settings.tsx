@@ -1,6 +1,6 @@
 import { Box } from '@mantine/core';
 import { Link, Outlet, createFileRoute } from '@tanstack/react-router';
-import { IconPalette, IconServer2 } from '@tabler/icons-react';
+import { IconPalette, IconServer2, IconUsers } from '@tabler/icons-react';
 import { Page } from '~components/app-shell/page';
 import classes from './settings.module.css';
 
@@ -10,6 +10,7 @@ export const Route = createFileRoute('/_app/settings')({
 
 const SECTIONS = [
   { to: '/settings/providers', label: 'AI Providers', icon: IconServer2 },
+  { to: '/settings/users', label: 'Users', icon: IconUsers },
   { to: '/settings/appearance', label: 'Appearance', icon: IconPalette },
 ] as const;
 

@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { authClient } from '~auth/client';
 import { Brand } from '~components/app-shell/brand';
 import { fetchSession } from '~server/auth';
+import { getSignupConfig } from '~server/users';
 import classes from './login.module.css';
 
 /**
@@ -37,6 +38,9 @@ export const Route = createFileRoute('/login')({
       throw redirect({ href: safeRedirect(search.redirect) });
     }
   },
+  // Whether to offer "Create account" is a runtime platform setting — the
+  // server enforces it either way; this only keeps the UI honest.
+  loader: () => getSignupConfig(),
   component: LoginPage,
 });
 
@@ -45,7 +49,11 @@ type Mode = 'signin' | 'signup';
 function LoginPage() {
   const router = useRouter();
   const { redirect: redirectTo } = Route.useSearch();
-  const [mode, setMode] = useState<Mode>('signin');
+  const { allowSignup } = Route.useLoaderData();
+  const [rawMode, setRawMode] = useState<Mode>('signin');
+  // When sign-up is closed there is nothing to switch to — pin sign-in even if
+  // a signup mode was selected before the config loaded.
+  const mode: Mode = allowSignup ? rawMode : 'signin';
   const [loading, setLoading] = useState(false);
 
   const form = useForm({
@@ -105,15 +113,17 @@ function LoginPage() {
 
           <Paper withBorder radius="lg" p="xl" className={classes.card}>
             <Stack gap="lg">
-              <SegmentedControl
-                fullWidth
-                value={mode}
-                onChange={(v) => setMode(v as Mode)}
-                data={[
-                  { label: 'Sign in', value: 'signin' },
-                  { label: 'Create account', value: 'signup' },
-                ]}
-              />
+              {allowSignup && (
+                <SegmentedControl
+                  fullWidth
+                  value={mode}
+                  onChange={(v) => setRawMode(v as Mode)}
+                  data={[
+                    { label: 'Sign in', value: 'signin' },
+                    { label: 'Create account', value: 'signup' },
+                  ]}
+                />
+              )}
               <form onSubmit={submit}>
                 <Stack gap="md">
                   {mode === 'signup' ? (
@@ -148,9 +158,11 @@ function LoginPage() {
           </Paper>
 
           <Text c="dimmed" size="xs" ta="center">
-            {mode === 'signin'
-              ? 'New here? Switch to Create account above.'
-              : 'Already have an account? Switch to Sign in above.'}
+            {!allowSignup
+              ? 'Sign-up is disabled. Ask the owner of this space for access.'
+              : mode === 'signin'
+                ? 'New here? Switch to Create account above.'
+                : 'Already have an account? Switch to Sign in above.'}
           </Text>
         </Stack>
       </div>

@@ -5,27 +5,33 @@ import { tanstackStartCookies } from 'better-auth/tanstack-start';
 // FIXME: We have to use ../db (rather than ~db) here to make @better-auth/cli happy
 // See https://github.com/better-auth/better-auth/issues/6373
 import { db } from '../db';
+import { assertSignupAllowed } from './signup-gate';
 
-// Single-tenant platform: self-service sign-up is closed in production so a
-// public URL can't be used to register into the shared workspace. Open it
-// explicitly (e.g. to bootstrap the owner account) with HATCH_ALLOW_SIGNUP=true.
-// Local development keeps sign-up open for a frictionless first run; sign-in for
-// the existing owner is always available regardless of this setting.
+// Single-tenant platform: self-service sign-up is a runtime platform setting
+// (`auth.allowSignup` in platform_config), toggled from Settings → Users, not
+// a build-time env var. Sign-in for existing users always works regardless.
 //
-// A config-level gate (rather than a read-before-create count check) is
-// intentional: it has no empty-table bootstrap race because nothing reads the
-// user count before inserting.
-const signupEnabled =
-  process.env.HATCH_ALLOW_SIGNUP === 'true' ||
-  process.env.NODE_ENV !== 'production';
-
+// The gate is enforced in `databaseHooks.user.create.before` rather than via
+// Better Auth's static `disableSignUp` so a toggle takes effect immediately
+// without a restart (the static option is fixed when `auth` is constructed).
+// It also has no empty-table bootstrap race: the check reads a config row, not
+// the user count, so a fresh deploy defaults to open and can create its owner.
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: 'pg',
   }),
   emailAndPassword: {
     enabled: true,
-    disableSignUp: !signupEnabled,
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          await assertSignupAllowed();
+          return { data: user };
+        },
+      },
+    },
   },
   experimental: { joins: true },
   // advanced: {

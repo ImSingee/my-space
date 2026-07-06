@@ -68,13 +68,9 @@ Then open [http://localhost:3700](http://localhost:3700) and:
 
 1. **Create your account** — sign-up is open on first launch so the owner
    (you) can register.
-2. **Lock the door** — once your account exists, close registration for good:
-
-   ```bash
-   echo 'HATCH_ALLOW_SIGNUP=false' >> .env
-   docker compose up -d
-   ```
-
+2. **Lock the door** — once your account exists, go to **Settings → Users**
+   and turn off **Allow sign-up**. It takes effect immediately, no redeploy
+   needed — and you can reopen it from the same place to invite someone.
 3. **Connect your AI** — go to **Settings → Providers** and add your model
    provider API key.
 4. **Build your first app** — open the agent and ask for something you have

@@ -643,3 +643,18 @@ export const logs = pgTable('logs', {
   data: jsonb().$type<JsonObject>(),
   createdAt,
 });
+
+/** ================== platform config ================== */
+
+/**
+ * Global, mutable platform settings as a small key/value store (e.g. whether
+ * self-service sign-up is open). The DB layer keeps `value` as free-form
+ * jsonb so new settings never need a migration; the application layer gates
+ * every read/write through a typed, Zod-validated registry
+ * (`~server/platform-config`), so this never becomes an arbitrary state bag.
+ */
+export const platformConfig = pgTable('platform_config', {
+  key: text().primaryKey(),
+  value: jsonb().$type<JsonValue>().notNull(),
+  updatedAt,
+});
