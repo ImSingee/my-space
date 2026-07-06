@@ -35,6 +35,9 @@ const config = defineConfig({
     viteReact(),
   ],
   nitro: {
+    output: {
+      dir: 'dist/platform',
+    },
     plugins: ['src/nitro/plugins/migrate.ts'],
   },
 });

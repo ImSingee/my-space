@@ -76,7 +76,7 @@ services:
     image: ${HATCH_IMAGE:-ghcr.io/imsingee/my-space:master}
     pull_policy: always
     restart: unless-stopped
-    command: ['node', 'dist-runner/main.mjs']
+    command: ['node', 'dist/runner/main.mjs']
     depends_on:
       - app
     environment:

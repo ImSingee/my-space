@@ -12,7 +12,7 @@
     "build": "pnpm build:platform && pnpm build:runner",
     "build:platform": "vite build",
     "build:runner": "tsx scripts/build-runner.ts",
-    "preview": "HATCH_DATA_DIR=../my-space-data node .output/server/index.mjs",
+    "preview": "HATCH_DATA_DIR=../my-space-data node dist/platform/server/index.mjs",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:browser": "vitest run --project browser",

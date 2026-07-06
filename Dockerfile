@@ -55,10 +55,9 @@ COPY --from=deno /deno /usr/local/bin/deno
 # buf/protoc-gen-es codegen happen on every deploy), the scaffold template, the
 # agent skills, and the SQL migrations applied on startup.
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/.output ./.output
+COPY --from=build /app/dist ./dist
 # The Agent Runner service: same image, alternate entrypoint
-# (`node dist-runner/main.mjs`), no DB credentials.
-COPY --from=build /app/dist-runner ./dist-runner
+# (`node dist/runner/main.mjs`), no DB credentials.
 COPY package.json ./
 COPY migrations ./migrations
 COPY templates ./templates
@@ -69,5 +68,5 @@ RUN mkdir -p /app/workspace /app/.deno
 
 EXPOSE 3700
 # Platform (default). The Agent Runner runs the same image with
-# `command: ["node", "dist-runner/main.mjs"]` (see docker-compose.yml).
-CMD ["node", ".output/server/index.mjs"]
+# `command: ["node", "dist/runner/main.mjs"]` (see docker-compose.yml).
+CMD ["node", "dist/platform/server/index.mjs"]

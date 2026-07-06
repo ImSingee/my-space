@@ -10,7 +10,7 @@ const MIGRATION_LOCK_KEY = 0x4d494752;
 /**
  * Resolve the SQL migrations directory to an absolute path. The built server is
  * shipped alongside a `migrations/` folder at its working directory (the Docker
- * image copies it, and `node .output/server/index.mjs` runs from the repo root),
+ * image copies it, and the platform server runs from the repo root),
  * but the bundle itself doesn't contain it — so resolve from cwd and fail with a
  * clear, actionable error rather than a cryptic ENOENT if it can't be found.
  * `HATCH_MIGRATIONS_DIR` overrides the location for non-standard layouts.
