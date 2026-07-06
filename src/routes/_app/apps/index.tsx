@@ -9,7 +9,12 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { Link, createFileRoute } from '@tanstack/react-router';
-import { IconPlus, IconSettings, IconStack2 } from '@tabler/icons-react';
+import {
+  IconPlus,
+  IconServerBolt,
+  IconSettings,
+  IconStack2,
+} from '@tabler/icons-react';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { StatusBadge } from '~components/system/status-badge';
@@ -30,13 +35,23 @@ function AppsPage() {
       title="Apps"
       description="Independent apps the Agent has created for you."
       actions={
-        <Button
-          component={Link}
-          to="/agent"
-          leftSection={<IconPlus size={16} stroke={1.8} />}
-        >
-          New app
-        </Button>
+        <>
+          <Button
+            component={Link}
+            to="/backends"
+            variant="default"
+            leftSection={<IconServerBolt size={16} stroke={1.8} />}
+          >
+            Backends
+          </Button>
+          <Button
+            component={Link}
+            to="/agent"
+            leftSection={<IconPlus size={16} stroke={1.8} />}
+          >
+            New app
+          </Button>
+        </>
       }
     >
       {apps.length === 0 ? (

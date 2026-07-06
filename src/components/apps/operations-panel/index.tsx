@@ -28,7 +28,7 @@ function BackendSection({ backend }: { backend: AppOps['backend'] }) {
       <Text size="xs" c="dimmed">
         {backend.mode === 'long-running'
           ? 'Kept warm by the platform and restarted automatically if it exits.'
-          : 'Booted on demand for each request, then idles down.'}
+          : 'Started on demand, then reused by later requests in this platform process; not kept warm.'}
       </Text>
     </Stack>
   );

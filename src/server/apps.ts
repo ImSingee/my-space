@@ -22,6 +22,7 @@ import {
 } from './validation';
 
 export type { AppCronRunView } from './apps/scheduler';
+export type { AppBackendRuntime, AppBackendView } from './apps/backends';
 
 export type AppListItem = {
   id: string;
@@ -282,6 +283,39 @@ export const getAppOps = createServerFn({ method: 'GET' })
       },
       kv: { enabled: Boolean(caps?.kv) },
     };
+  });
+
+/** ================== backends page (list + start/stop/restart) ========= */
+
+export const listAppBackendsFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const { listAppBackends } = await import('./apps/backends');
+    return listAppBackends();
+  });
+
+export const startAppBackendFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((id: string) => idSchema.parse(id))
+  .handler(async ({ data: id }) => {
+    const { startBackendForApp } = await import('./apps/backends');
+    return startBackendForApp(id);
+  });
+
+export const stopAppBackendFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((id: string) => idSchema.parse(id))
+  .handler(async ({ data: id }) => {
+    const { stopBackendForApp } = await import('./apps/backends');
+    return stopBackendForApp(id);
+  });
+
+export const restartAppBackendFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((id: string) => idSchema.parse(id))
+  .handler(async ({ data: id }) => {
+    const { restartBackendForApp } = await import('./apps/backends');
+    return restartBackendForApp(id);
   });
 
 export const runCronJobFn = createServerFn({ method: 'POST' })

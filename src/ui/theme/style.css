@@ -315,6 +315,12 @@
   &:where(:disabled:not([data-loading]), [data-disabled]:not([data-loading])) {
     border: var(--ai-bd);
     opacity: 0.5;
+    background-color: transparent;
+
+    &:hover,
+    &:active {
+      background-color: transparent;
+    }
 
     &:active {
       transform: none;
@@ -339,6 +345,31 @@
   }
 }
 
+/* -------------------------------------------------------------------------
+ * Link states — suppress UA :visited recoloring
+ *
+ * Browsers paint followed <a> links a different color (typically purple).
+ * In-app navigation (card titles, table rows, sidebar rows) is styled to
+ * match surrounding text, so that recolor reads as a bug. Pin foreground
+ * across interaction states here instead of per-component :visited overrides.
+ * ------------------------------------------------------------------------- */
+
+/* Mantine Text rendered as an anchor (renderRoot + router Link) */
+a.mantine-Text-root,
+a.mantine-Text-root:visited,
+a.mantine-Text-root:hover,
+a.mantine-Text-root:active,
+a.mantine-Text-root:focus-visible {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+/* Mantine Anchor keeps the themed tone before and after the link is followed */
+.mantine-Anchor-root,
+.mantine-Anchor-root:visited {
+  color: var(--mantine-color-anchor);
+}
+
 /* NavLink */
 .mantine-NavLink-root {
   /* Override Mantine's default [aria-current='page'] active styling */
@@ -346,6 +377,10 @@
   /* We only want active styling controlled by the `active` prop (data-active attribute) */
   &:where([aria-current='page']:not([data-active])) {
     background-color: transparent;
+    color: inherit;
+  }
+
+  &:where(:any-link):visited {
     color: inherit;
   }
 

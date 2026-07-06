@@ -3,6 +3,7 @@ import {
   getAppOps,
   getDeploymentBuildLog,
   getNormalizedManifest,
+  listAppBackendsFn,
   listAppKvFn,
   listApps,
   listCronRunsFn,
@@ -13,6 +14,16 @@ import {
 export const appsQueryOptions = queryOptions({
   queryKey: ['apps'],
   queryFn: () => listApps(),
+});
+
+export const appBackendsQueryOptions = queryOptions({
+  queryKey: ['apps', 'backends'],
+  queryFn: () => listAppBackendsFn(),
+  // Backend state lives in platform memory and changes without client events
+  // (serverless boots on request, keep-alive restarts after a crash), so poll
+  // fast while the page is open. Paused when the tab is hidden
+  // (refetchIntervalInBackground defaults to false).
+  refetchInterval: 2000,
 });
 
 export const deploymentsQueryOptions = (id: string) =>

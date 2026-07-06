@@ -13,6 +13,16 @@ import {
   hatchSignature,
 } from '../secrets';
 import { ensureAppDatabase } from './provision';
+import {
+  type BackendRuntimeSnapshot,
+  getBackendSnapshot,
+  recordBackendAutoRestart,
+  recordBackendExit,
+  recordBackendReady,
+  recordBackendSpawn,
+  recordBackendStartFailure,
+  recordBackendStopped,
+} from './runtime-state';
 
 /**
  * Resolve the backend's source-relative entry file from the staged normalized
@@ -507,10 +517,21 @@ async function startBackend(id: string): Promise<number> {
   };
   backend.ready = Promise.race([waitForPort(port, 20000), spawnFailure]);
   reg.set(id, backend);
+  recordBackendSpawn(id, {
+    pid: proc.pid ?? null,
+    port,
+    startedAt: backend.startedAt,
+  });
   proc.on('exit', (code, signal) => {
+    recordBackendExit(id, { pid: proc.pid ?? null, code, signal });
     if (reg.get(id) === backend) reg.delete(id);
     const uptimeMs = Date.now() - backend.startedAt;
-    const willRestart = keepAliveSet().has(id);
+    // Restart only on an *unexpected* exit. An epoch bump means this process
+    // was superseded by an explicit stop/restart/redeploy — its exit event
+    // often lands after the caller has already re-armed keep-alive for the
+    // replacement, which used to schedule a spurious restart, log a phantom
+    // crash, and inflate the auto-restart count.
+    const willRestart = stopEpoch(id) === epoch && keepAliveSet().has(id);
     // A self-exit (no signal) is always unexpected — backends are servers.
     // Signal kills are usually our own stop/redeploy SIGKILL, so don't log
     // those; a keep-alive crash is logged by the restart branch below.
@@ -524,6 +545,7 @@ async function startBackend(id: string): Promise<number> {
     // intentionally stopped), restart with exponential backoff so a build
     // that crashes on boot doesn't hot-loop a restart every second forever.
     if (willRestart) {
+      recordBackendAutoRestart(id);
       const counts = restartCounts();
       const attempt =
         uptimeMs >= RESTART_HEALTHY_UPTIME_MS ? 0 : (counts.get(id) ?? 0);
@@ -561,6 +583,13 @@ async function startBackend(id: string): Promise<number> {
     }
     if (reg.get(id) === backend) reg.delete(id);
     const message = error instanceof Error ? error.message : String(error);
+    // Only record a *real* boot failure. If the epoch moved, an intentional
+    // stop/restart/redeploy killed this start mid-boot — the resulting
+    // SIGKILL/timeout rejection is expected, not a crash, and recording it
+    // would show a phantom "failed to start" on the Backends page.
+    if (stopEpoch(id) === epoch) {
+      recordBackendStartFailure(id, proc.pid ?? null, message);
+    }
     throw new Error(`Failed to start app "${id}": ${message}\n${log}`);
   }
 
@@ -576,6 +605,7 @@ async function startBackend(id: string): Promise<number> {
     throw new Error(`App "${id}" start was superseded by a stop/redeploy.`);
   }
 
+  recordBackendReady(id, proc.pid ?? null);
   return port;
 }
 
@@ -617,6 +647,83 @@ export function isAppRunning(id: string): boolean {
 }
 
 /**
+ * Point-in-time runtime view of one app backend, merging the live process
+ * registry (is it running/starting right now?) with the memory-only lifecycle
+ * snapshot (when did it last start/stop, how did it exit). Everything here
+ * describes the current platform process only — nothing is read from or
+ * persisted to the database.
+ */
+export type BackendRuntimeView = {
+  state: 'running' | 'starting' | 'stopped';
+  /** pid/port of the live process; null unless `state === 'running'`. */
+  pid: number | null;
+  port: number | null;
+  /** Start of the current run when running, else of the most recent one. */
+  startedAt: number | null;
+  stoppedAt: number | null;
+  lastExitCode: number | null;
+  lastExitSignal: string | null;
+  lastError: string | null;
+  restartCount: number;
+  /** Whether the platform auto-restarts this backend if it exits. */
+  keepAlive: boolean;
+};
+
+export function getBackendRuntimeView(id: string): BackendRuntimeView {
+  const snap: BackendRuntimeSnapshot | null = getBackendSnapshot(id);
+  const backend = registry().get(id);
+  const live = Boolean(
+    backend && backend.proc.exitCode === null && !backend.proc.killed,
+  );
+  // Check the in-flight start first: a cold start registers its process
+  // before the readiness wait completes, so "in registry" alone would report
+  // `running` for a backend that isn't reachable yet.
+  const state = startingRegistry().has(id)
+    ? 'starting'
+    : live
+      ? 'running'
+      : 'stopped';
+  const running = state === 'running';
+  return {
+    state,
+    pid: running ? (backend?.proc.pid ?? null) : null,
+    port: running ? (backend?.port ?? null) : null,
+    startedAt: running
+      ? (backend?.startedAt ?? null)
+      : (snap?.startedAt ?? null),
+    stoppedAt: snap?.stoppedAt ?? null,
+    lastExitCode: snap?.lastExitCode ?? null,
+    lastExitSignal: snap?.lastExitSignal ?? null,
+    lastError: snap?.lastError ?? null,
+    restartCount: snap?.restartCount ?? 0,
+    keepAlive: keepAliveSet().has(id),
+  };
+}
+
+/**
+ * Explicitly start an app backend (Backends page). `keepAlive` re-arms the
+ * auto-restart mark for long-running apps — set before the boot (matching
+ * deploy/warm-start behavior) so a backend that crashes right after becoming
+ * ready still self-heals.
+ */
+export async function startAppBackend(
+  id: string,
+  opts: { keepAlive: boolean },
+): Promise<void> {
+  if (opts.keepAlive) setKeepAlive(id, true);
+  await ensureAppRunning(id);
+}
+
+/** Stop-then-start an app backend (Backends page restart action). */
+export async function restartAppBackend(
+  id: string,
+  opts: { keepAlive: boolean },
+): Promise<void> {
+  stopApp(id);
+  await startAppBackend(id, opts);
+}
+
+/**
  * Stop a running app backend (no-op if not running). Clears the keep-alive
  * mark so long-running backends are not auto-restarted by an intentional stop.
  */
@@ -636,6 +743,9 @@ export function stopApp(id: string): void {
     /* best-effort */
   }
   reg.delete(id);
+  // The kill's exit event (matching pid) fills in the exit signal moments
+  // later; record the stop itself so the moment is never lost.
+  recordBackendStopped(id);
 }
 
 /**

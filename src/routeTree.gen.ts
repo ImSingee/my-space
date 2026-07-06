@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
+import { Route as AppBackendsRouteImport } from './routes/_app/backends'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
 import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
@@ -82,6 +83,11 @@ const AppExecutionsRoute = AppExecutionsRouteImport.update({
 const AppDashboardsRoute = AppDashboardsRouteImport.update({
   id: '/dashboards',
   path: '/dashboards',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBackendsRoute = AppBackendsRouteImport.update({
+  id: '/backends',
+  path: '/backends',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAgentRoute = AppAgentRouteImport.update({
@@ -264,6 +270,7 @@ export interface FileRoutesByFullPath {
   '/404': typeof R404Route
   '/login': typeof LoginRoute
   '/agent': typeof AppAgentRouteWithChildren
+  '/backends': typeof AppBackendsRoute
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/settings': typeof AppSettingsRouteWithChildren
@@ -304,6 +311,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
+  '/backends': typeof AppBackendsRoute
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
@@ -346,6 +354,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/_app/agent': typeof AppAgentRouteWithChildren
+  '/_app/backends': typeof AppBackendsRoute
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/executions': typeof AppExecutionsRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
@@ -389,6 +398,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/login'
     | '/agent'
+    | '/backends'
     | '/dashboards'
     | '/executions'
     | '/settings'
@@ -429,6 +439,7 @@ export interface FileRouteTypes {
     | '/'
     | '/404'
     | '/login'
+    | '/backends'
     | '/dashboards'
     | '/executions'
     | '/agent/$threadId'
@@ -470,6 +481,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/login'
     | '/_app/agent'
+    | '/_app/backends'
     | '/_app/dashboards'
     | '/_app/executions'
     | '/_app/settings'
@@ -576,6 +588,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboards'
       fullPath: '/dashboards'
       preLoaderRoute: typeof AppDashboardsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/backends': {
+      id: '/_app/backends'
+      path: '/backends'
+      fullPath: '/backends'
+      preLoaderRoute: typeof AppBackendsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/agent': {
@@ -846,6 +865,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAgentRoute: typeof AppAgentRouteWithChildren
+  AppBackendsRoute: typeof AppBackendsRoute
   AppDashboardsRoute: typeof AppDashboardsRoute
   AppExecutionsRoute: typeof AppExecutionsRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
@@ -863,6 +883,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAgentRoute: AppAgentRouteWithChildren,
+  AppBackendsRoute: AppBackendsRoute,
   AppDashboardsRoute: AppDashboardsRoute,
   AppExecutionsRoute: AppExecutionsRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,

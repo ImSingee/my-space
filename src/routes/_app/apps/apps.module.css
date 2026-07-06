@@ -35,18 +35,6 @@
   border-radius: inherit;
 }
 
-/*
- * Pin the title color across all link states; otherwise the UA :visited style
- * repaints it once the app has been opened.
- */
-.primaryLink,
-.primaryLink:hover,
-.primaryLink:focus,
-.primaryLink:visited,
-.primaryLink:active {
-  color: inherit;
-}
-
 .cardAction {
   position: relative;
   z-index: 1;
