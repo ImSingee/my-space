@@ -39,7 +39,6 @@ services:
       APP_DATABASE_URL: postgres://postgres@db:5432/postgres
       PORT: '3700'
       HOST: 0.0.0.0
-      NODE_ENV: production
       DENO_DIR: /app/.deno
       # Runner-facing internal server (WS control channel + internal REST API).
       # Listens on the compose network only — never publish port 3701.
@@ -81,7 +80,6 @@ services:
     depends_on:
       - app
     environment:
-      NODE_ENV: production
       HATCH_PLATFORM_URL: http://app:3701
       HATCH_RUNNER_ID: runner-1
       # Must match the platform's AGENT_RUNNER_TOKEN above.

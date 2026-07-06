@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "HATCH_DATA_DIR=../my-space-data vite dev --port 3700",
     "dev:runner": "HATCH_DATA_DIR=../my-space-runner-data tsx watch src/runner/main.ts",
-    "build": "SKIP_DATABASE_MIGRATIONS=true vite build",
+    "build": "pnpm build:platform && pnpm build:runner",
+    "build:platform": "vite build",
     "build:runner": "tsx scripts/build-runner.ts",
     "preview": "HATCH_DATA_DIR=../my-space-data node .output/server/index.mjs",
     "test": "vitest run",

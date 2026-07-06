@@ -13,14 +13,6 @@ import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
 
 export default definePlugin(async () => {
-  // Skipped only during `pnpm build` (no database yet); at real server startup
-  // the flag is unset so migrations run. Everything below touches the database,
-  // so it must stay behind this guard or a fresh/preview boot would crash
-  // querying tables that don't exist yet.
-  if (process.env.SKIP_DATABASE_MIGRATIONS === 'true') {
-    return;
-  }
-
   await runMigrations();
   // Lock down PUBLIC connect on the platform DB so per-app roles (same server)
   // can't open a connection to it. Independent of the rest of boot.

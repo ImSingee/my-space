@@ -25,7 +25,7 @@ FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Migrations run at server startup (nitro plugin), not during the build.
-RUN SKIP_DATABASE_MIGRATIONS=true pnpm build && pnpm build:runner
+RUN pnpm build
 
 # --- Runtime image -----------------------------------------------------------
 FROM node:24-slim AS runner
