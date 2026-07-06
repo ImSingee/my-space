@@ -95,7 +95,7 @@
     "nitro": "3.0.260603-beta",
     "oxfmt": "^0.56.0",
     "oxlint": "^1.71.0",
-    "playwright": "^1.60.0",
+    "playwright": "^1.61.1",
     "postcss": "^8.5.15",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
