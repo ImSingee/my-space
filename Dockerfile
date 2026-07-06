@@ -33,8 +33,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3700
-# Deno caches npm: dependencies here (mount a volume to persist across restarts).
-ENV DENO_DIR=/app/.deno
+ENV AGENT_INTERNAL_HOST=0.0.0.0
+ENV AGENT_INTERNAL_PORT=3701
+# Deno caches npm: dependencies here (mount /cache to persist across restarts).
+ENV DENO_DIR=/cache/deno
 
 # git: the platform keeps canonical app/workflow repos (bundle import/export)
 # and the Agent Runner clones/commits local worktrees.
@@ -63,8 +65,8 @@ COPY migrations ./migrations
 COPY templates ./templates
 COPY skills ./skills
 
-# The agent authors apps under /app/workspace; mount a volume to persist it.
-RUN mkdir -p /app/workspace /app/.deno
+# Runtime data lives in /app/workspace; dependency/tool caches live in /cache.
+RUN mkdir -p /app/workspace /cache/deno
 
 EXPOSE 3700
 # Platform (default). The Agent Runner runs the same image with

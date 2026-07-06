@@ -15,7 +15,7 @@ services:
       # to the host by default; uncomment the ports mapping below to inspect it.
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
-      - hatch_pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     # ports:
     #   - "5544:5432" # optional: expose for debugging (avoid clashing with a local PG)
     healthcheck:
@@ -37,13 +37,11 @@ services:
       # Admin connection used to create/drop a database per app. Each app's
       # DATABASE_URL (host, port, credentials) is derived from this URL.
       APP_DATABASE_URL: postgres://postgres@db:5432/postgres
-      PORT: '3700'
-      HOST: 0.0.0.0
-      DENO_DIR: /app/.deno
-      # Runner-facing internal server (WS control channel + internal REST API).
-      # Listens on the compose network only — never publish port 3701.
-      AGENT_INTERNAL_HOST: 0.0.0.0
-      AGENT_INTERNAL_PORT: '3701'
+      # Image defaults; uncomment to override.
+      # PORT: '3700'
+      # HOST: 0.0.0.0
+      # AGENT_INTERNAL_HOST: 0.0.0.0
+      # AGENT_INTERNAL_PORT: '3701'
       # REQUIRED: shared secret the Agent Runner authenticates with (no
       # default on purpose — a guessable token would let any process that can
       # reach 3701, including generated app backends, impersonate the runner).
@@ -60,9 +58,9 @@ services:
       - '${HATCH_PORT:-3700}:3700'
     volumes:
       # Persist agent-authored app source, builds, versions and storage.
-      - hatch_workspace:/app/workspace
-      # Persist Deno's npm cache so app backends start fast after the first run.
-      - hatch_deno:/app/.deno
+      - platform_workspace:/app/workspace
+      # Persist dependency/tool caches, including Deno's npm cache.
+      - platform_cache:/cache
 
   # The Agent Runner: executes LLM turns and the agent's shell/file sandbox in
   # its own container. It only opens OUTBOUND connections to the platform's
@@ -87,14 +85,13 @@ services:
       # Runner-local worktrees + sandbox HOME (separate volume from the
       # platform's workspace on purpose).
       HATCH_DATA_DIR: /app/workspace
-      DENO_DIR: /app/.deno
     volumes:
-      - hatch_agent_workspace:/app/workspace
-      - hatch_agent_deno:/app/.deno
+      - agent_workspace:/app/workspace
+      - agent_cache:/cache
 
 volumes:
-  hatch_pgdata:
-  hatch_workspace:
-  hatch_deno:
-  hatch_agent_workspace:
-  hatch_agent_deno:
+  pgdata:
+  platform_workspace:
+  platform_cache:
+  agent_workspace:
+  agent_cache:
