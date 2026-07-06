@@ -18,8 +18,10 @@ import {
   appStorageDir,
   appVersionsDir,
 } from '../src/agent/paths';
+import { writeScaffoldFiles } from '../src/agent/scaffold-files';
 import { db, schema } from '../src/db';
 import { deployApp } from '../src/server/apps/deploy';
+import { checkoutAppForAgent } from '../src/server/apps/git';
 import { dropAppDatabase } from '../src/server/apps/provision';
 import { stopApp } from '../src/server/apps/runtime';
 import { createApp } from '../src/server/apps/scaffold';
@@ -191,16 +193,17 @@ async function main() {
   }
   await fs.rm(agentWorkDir(SESSION_ID), { recursive: true, force: true });
 
-  const { id } = await createApp(
-    {
-      slug: SLUG,
-      name: 'Capabilities Demo',
-      description: 'demo',
-    },
-    { sessionId: SESSION_ID },
-  );
+  const { id, files } = await createApp({
+    slug: SLUG,
+    name: 'Capabilities Demo',
+    description: 'demo',
+  });
   MANIFEST.id = id;
   const worktree = agentAppWorkDir(SESSION_ID, id);
+  // createApp only registers the app and returns the rendered scaffold; the
+  // caller (normally the Agent Runner) materializes it into a worktree.
+  await checkoutAppForAgent(SESSION_ID, id);
+  await writeScaffoldFiles(worktree, files);
   await fs.writeFile(
     path.join(worktree, 'manifest.json'),
     JSON.stringify(MANIFEST, null, 2),

@@ -1,26 +1,41 @@
 /**
- * Server-only: best-effort filesystem containment for the Agent's run_command.
+ * Best-effort containment for agent-controlled subprocesses (the run_command
+ * shell and the runner's worktree git commands).
  *
- * The shell env allowlist (shell-env.ts) strips secrets from the environment
- * and redirects HOME, but a spawned shell can still read arbitrary paths —
- * `cat <repo>/.env.local` or `cat ~/.ssh/id_rsa` would hand a prompt-injected
- * command the platform's own secrets. On macOS we wrap every command in
- * `sandbox-exec` with a deny-list profile covering the platform's env files
- * and the host user's credential directories.
+ * The shell env allowlist (shell-env.ts) strips secrets from the child
+ * environment and redirects HOME, but that alone leaves two gaps:
  *
- * This is defense in depth, not a full boundary: it blocks the realistic
- * "read the platform secrets by path" payloads (including via symlinks, which
- * the kernel resolves before the check) but does not confine reads to the
- * workspace. On non-macOS hosts the platform is expected to run inside a
- * container, which is the actual boundary there.
+ * - macOS (local dev): a spawned shell can still read arbitrary paths —
+ *   `cat <repo>/.env.local` or `cat ~/.ssh/id_rsa` would hand a
+ *   prompt-injected command the platform's own secrets. We wrap every command
+ *   in `sandbox-exec` with a deny-list profile covering the platform's env
+ *   files and the host user's credential directories.
+ *
+ * - Linux (the Agent Runner container): children inherit the runner's UID by
+ *   default, so even with a stripped environment they could read the runner
+ *   process's own environment — including AGENT_RUNNER_TOKEN — from
+ *   `/proc/<runner-pid>/environ` and impersonate the runner against the
+ *   platform's internal API. We run every agent-controlled subprocess as a
+ *   dedicated unprivileged user (`hatch-sandbox`, created in the Dockerfile)
+ *   via `setpriv`, which makes the runner's /proc entries unreadable to them.
+ *   Worktree git commands are demoted too: the agent can write `.git/config`
+ *   (core.fsmonitor, filters, hooks…), which would otherwise execute code at
+ *   the runner's UID the next time the runner itself runs git there.
+ *
+ * This is defense in depth, not a full boundary: macOS blocks the realistic
+ * "read the platform secrets by path" payloads; Linux relies on the container
+ * for filesystem scope while the UID split protects the runner's credentials.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { REPO_ROOT } from './paths';
+import { AGENT_HOME_DIR, AGENTS_DIR, REPO_ROOT } from './paths';
 
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
+const SETPRIV = '/usr/bin/setpriv';
+/** Unprivileged user agent subprocesses are demoted to (see Dockerfile). */
+export const SANDBOX_USER = 'hatch-sandbox';
 
 /** Quote a string as a single shell word (POSIX single-quote escaping). */
 function shQuote(value: string): string {
@@ -77,18 +92,33 @@ function buildProfile(): string {
 }
 
 /**
+ * setpriv argv that drops to the sandbox user with no supplementary groups
+ * and no way to re-gain privileges, then execs `argv`.
+ */
+function setprivArgv(argv: string[]): string[] {
+  return [
+    `--reuid=${SANDBOX_USER}`,
+    `--regid=${SANDBOX_USER}`,
+    '--clear-groups',
+    '--no-new-privs',
+    '--',
+    ...argv,
+  ];
+}
+
+/**
  * Whether sandbox-exec is usable here. Probed once: the binary may be absent
  * on future macOS releases, and applying a sandbox fails when the server
  * itself already runs inside one (sandboxes don't nest) — in both cases we
  * fall back to running commands unwrapped rather than breaking the shell.
  */
-let sandboxUsable: boolean | null = null;
+let seatbeltUsable: boolean | null = null;
 
-function canSandbox(): boolean {
+function canSeatbelt(): boolean {
   if (process.platform !== 'darwin') return false;
-  if (sandboxUsable !== null) return sandboxUsable;
+  if (seatbeltUsable !== null) return seatbeltUsable;
   if (!existsSync(SANDBOX_EXEC)) {
-    sandboxUsable = false;
+    seatbeltUsable = false;
     return false;
   }
   const probe = spawnSync(
@@ -96,29 +126,131 @@ function canSandbox(): boolean {
     ['-p', '(version 1)(allow default)', '/usr/bin/true'],
     { timeout: 5000 },
   );
-  sandboxUsable = probe.status === 0;
-  return sandboxUsable;
+  seatbeltUsable = probe.status === 0;
+  return seatbeltUsable;
+}
+
+/**
+ * Whether the Linux UID sandbox is usable: needs root (setpriv must be able
+ * to change uid/gid) and the sandbox user to exist. Both hold inside the
+ * runner container; probed once with a real demoted no-op.
+ */
+let setprivUsable: boolean | null = null;
+
+function canSetpriv(): boolean {
+  if (process.platform !== 'linux') return false;
+  if (setprivUsable !== null) return setprivUsable;
+  if (process.getuid?.() !== 0 || !existsSync(SETPRIV)) {
+    setprivUsable = false;
+    return false;
+  }
+  const probe = spawnSync(SETPRIV, setprivArgv(['/bin/true']), {
+    timeout: 5000,
+  });
+  setprivUsable = probe.status === 0;
+  return setprivUsable;
 }
 
 let warnedFallback = false;
 
+function warnUnconfined(reason: string): void {
+  if (warnedFallback) return;
+  warnedFallback = true;
+  console.warn(`[shell-sandbox] ${reason}`);
+}
+
+const LINUX_FALLBACK_WARNING =
+  `UID sandboxing is unavailable (needs root, ${SETPRIV} and a ` +
+  `"${SANDBOX_USER}" user); agent subprocesses share the runner's UID and ` +
+  'can read its environment — including AGENT_RUNNER_TOKEN — via /proc.';
+
 /**
- * Wrap a shell command so it runs under the deny-list sandbox when available.
- * Returns the command unchanged on non-macOS hosts (container boundary) or
- * when sandbox-exec is unusable. On macOS specifically, an unusable
- * sandbox-exec is unexpected (the deny-list is the boundary there), so warn
- * once so the operator knows commands are running unconfined.
+ * Wrap a shell command so it runs under the platform's containment when
+ * available: the seatbelt deny-list on macOS, UID demotion on Linux.
+ * Falls back to the unwrapped command elsewhere, warning once.
  */
 export function wrapShellCommand(command: string): string {
-  if (!canSandbox()) {
-    if (process.platform === 'darwin' && !warnedFallback) {
-      warnedFallback = true;
-      console.warn(
-        '[shell-sandbox] sandbox-exec is unavailable; run_command is executing ' +
-          'without the filesystem deny-list. Secret files are not path-protected.',
+  if (process.platform === 'darwin') {
+    if (!canSeatbelt()) {
+      warnUnconfined(
+        'sandbox-exec is unavailable; run_command is executing without the ' +
+          'filesystem deny-list. Secret files are not path-protected.',
+      );
+      return command;
+    }
+    return `${SANDBOX_EXEC} -p ${shQuote(buildProfile())} /bin/sh -c ${shQuote(command)}`;
+  }
+  if (process.platform === 'linux') {
+    if (!canSetpriv()) {
+      warnUnconfined(LINUX_FALLBACK_WARNING);
+      return command;
+    }
+    const shell = existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
+    const argv = setprivArgv([shell, '-c', command]);
+    return `${SETPRIV} ${argv.map(shQuote).join(' ')}`;
+  }
+  return command;
+}
+
+export type SandboxedSpawn = { command: string; args: string[] };
+
+/**
+ * Wrap a raw argv (no shell involved) so it runs as the sandbox user when
+ * the Linux UID sandbox is active; passthrough otherwise. Used for the
+ * runner's own worktree git commands — repo config is agent-writable, so git
+ * must never execute at the runner's UID.
+ */
+export function sandboxSpawn(argv: [string, ...string[]]): SandboxedSpawn {
+  if (!canSetpriv()) {
+    const [command, ...args] = argv;
+    return { command, args };
+  }
+  return { command: SETPRIV, args: setprivArgv(argv) };
+}
+
+/**
+ * Prepare the Agent Runner process for UID-sandboxed children. Call once at
+ * runner startup, before any run executes:
+ *
+ * - umask 0: worktree files the runner (root) writes — scaffolds, bundles,
+ *   write_file output — stay writable for the demoted shell and git, and
+ *   vice versa. Scoped to the runner, whose writes all land in the agent
+ *   workspace.
+ * - chown existing agent dirs: worktrees created by earlier runner versions
+ *   are root-owned, which demoted git rejects ("dubious ownership").
+ *
+ * In production, refuses to start without the sandbox (set
+ * HATCH_ALLOW_UNSANDBOXED=true to accept token exposure explicitly).
+ */
+export function initializeAgentSandbox(): void {
+  if (process.platform === 'darwin') return; // seatbelt needs no setup
+  if (!canSetpriv()) {
+    if (
+      process.env.NODE_ENV === 'production' &&
+      process.env.HATCH_ALLOW_UNSANDBOXED !== 'true'
+    ) {
+      throw new Error(
+        `[shell-sandbox] ${LINUX_FALLBACK_WARNING} Refusing to start in ` +
+          'production; set HATCH_ALLOW_UNSANDBOXED=true to accept this risk.',
       );
     }
-    return command;
+    warnUnconfined(LINUX_FALLBACK_WARNING);
+    return;
   }
-  return `${SANDBOX_EXEC} -p ${shQuote(buildProfile())} /bin/sh -c ${shQuote(command)}`;
+  process.umask(0);
+  mkdirSync(AGENTS_DIR, { recursive: true });
+  mkdirSync(AGENT_HOME_DIR, { recursive: true });
+  const chown = spawnSync(
+    'chown',
+    ['-R', `${SANDBOX_USER}:${SANDBOX_USER}`, AGENTS_DIR, AGENT_HOME_DIR],
+    { stdio: 'ignore' },
+  );
+  if (chown.status !== 0) {
+    console.warn(
+      `[shell-sandbox] chown of agent dirs failed (exit ${chown.status})`,
+    );
+  }
+  console.log(
+    `[shell-sandbox] agent subprocesses run as "${SANDBOX_USER}" (setpriv)`,
+  );
 }

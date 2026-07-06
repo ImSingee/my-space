@@ -1,7 +1,11 @@
 /** Server functions for app management (list/detail, deployments, ops, KV). */
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { db, schema } from '~/db';
+import { db } from '~/db';
+// Type-only: a value import of `schema` used in exported type annotations
+// would survive the client transform and drag postgres-js into the browser
+// bundle (crashing hydration with "Buffer is not defined").
+import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { normalizedManifestFor } from './apps/access';
 import type {
   NormalizedManifest,
@@ -24,8 +28,8 @@ export type AppListItem = {
   slug: string;
   name: string;
   description: string | null;
-  status: schema.AppStatus;
-  capabilities: schema.AppCapabilities | null;
+  status: AppStatus;
+  capabilities: AppCapabilities | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -64,8 +68,8 @@ export type AppDetail = {
   slug: string;
   name: string;
   description: string | null;
-  status: schema.AppStatus;
-  capabilities: schema.AppCapabilities | null;
+  status: AppStatus;
+  capabilities: AppCapabilities | null;
   currentSourceCommit: string | null;
   dbName: string | null;
   createdAt: string;

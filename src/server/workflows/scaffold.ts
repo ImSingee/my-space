@@ -1,22 +1,12 @@
 /** Server-only: scaffold a new workflow source tree from the template. */
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { TEMPLATES_DIR } from '~agent/paths';
+import type { ScaffoldFile } from '~agent/protocol';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
-import { checkoutWorkflowForAgent, ensureWorkflowRepo } from './git';
+import { renderTemplate } from '../apps/scaffold';
+import { ensureWorkflowRepo } from './git';
 import { parseSourceWorkflowManifest } from './manifest';
-
-async function replaceInFile(
-  file: string,
-  replacements: Record<string, string>,
-): Promise<void> {
-  let text = await fs.readFile(file, 'utf8');
-  for (const [token, value] of Object.entries(replacements)) {
-    text = text.split(token).join(value);
-  }
-  await fs.writeFile(file, text, 'utf8');
-}
 
 /**
  * Escape a value for insertion *inside* an existing pair of JSON quotes (the
@@ -35,14 +25,22 @@ export type CreateWorkflowInput = {
   pin?: boolean;
 };
 
-export type CreateWorkflowOptions = {
-  sessionId?: string;
+export type CreateWorkflowResult = {
+  id: string;
+  name: string;
+  /** Rendered template for the caller to write into its own worktree. */
+  files: ScaffoldFile[];
 };
 
+/**
+ * Register a new workflow: validate the id, create the canonical bare repo
+ * and the database row, and render the scaffold template. The rendered files
+ * are RETURNED, not written — the Agent Runner writes them into its own
+ * checkout and commits from there.
+ */
 export async function createWorkflow(
   input: CreateWorkflowInput,
-  options: CreateWorkflowOptions = {},
-): Promise<{ id: string; name: string }> {
+): Promise<CreateWorkflowResult> {
   const { id } = input;
   if (!/^[a-z][a-z0-9-]*$/.test(id)) {
     throw new Error(
@@ -58,26 +56,27 @@ export async function createWorkflow(
   }
 
   const repoPath = await ensureWorkflowRepo(id);
-  if (!options.sessionId) {
-    throw new Error('A chat session is required to scaffold a workflow.');
-  }
-  const checkout = await checkoutWorkflowForAgent(options.sessionId, id);
-  const src = checkout.absolutePath;
-
-  const template = path.join(TEMPLATES_DIR, 'default-workflow');
-  await fs.cp(template, src, { recursive: true });
 
   const name = input.name.trim() || id;
   const description = (input.description ?? '').trim();
 
-  await replaceInFile(path.join(src, 'manifest.json'), {
-    __WORKFLOW_ID__: jsonStringInner(id),
-    __WORKFLOW_NAME__: jsonStringInner(name),
-    __WORKFLOW_DESCRIPTION__: jsonStringInner(description),
-  });
+  const files = await renderTemplate(
+    path.join(TEMPLATES_DIR, 'default-workflow'),
+    {
+      'manifest.json': {
+        __WORKFLOW_ID__: jsonStringInner(id),
+        __WORKFLOW_NAME__: jsonStringInner(name),
+        __WORKFLOW_DESCRIPTION__: jsonStringInner(description),
+      },
+    },
+  );
 
+  const manifestFile = files.find((f) => f.path === 'manifest.json');
+  if (!manifestFile) throw new Error('Template is missing manifest.json.');
   const manifest = parseSourceWorkflowManifest(
-    JSON.parse(await fs.readFile(path.join(src, 'manifest.json'), 'utf8')),
+    JSON.parse(
+      Buffer.from(manifestFile.contentBase64, 'base64').toString('utf8'),
+    ),
   );
 
   await db.insert(schema.workflows).values({
@@ -90,5 +89,5 @@ export async function createWorkflow(
     pinned: input.pin ?? true,
   });
 
-  return { id, name };
+  return { id, name, files };
 }

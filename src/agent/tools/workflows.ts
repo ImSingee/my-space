@@ -1,11 +1,26 @@
-/** Workflow lifecycle tools: list, inspect, checkout, create, deploy, rollback. */
+/**
+ * Workflow lifecycle tools: list, inspect, checkout, create, deploy, rollback.
+ * Mirrors the app tools: platform state via PlatformClient, source in
+ * runner-local worktrees fed by git bundles.
+ */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import {
+  assertWorktreeAvailable,
+  bundleWorktreeForDeploy,
+  initNewWorktree,
+  syncCheckoutFromBundle,
+} from '../local-sources';
+import type { PlatformClient } from '../platform-client';
+import { writeScaffoldFiles } from '../scaffold-files';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 export function createWorkflowTools(options: {
   sessionId?: string;
+  platform: PlatformClient;
 }): AgentTool[] {
+  const { platform } = options;
+
   const listWorkflowsTool = tool({
     name: 'list_workflows',
     label: 'List workflows',
@@ -15,9 +30,7 @@ export function createWorkflowTools(options: {
       'or checkout_workflow.',
     parameters: Type.Object({}),
     execute: async () => {
-      const { listWorkflowsForAgent } =
-        await import('~server/workflows/inspect');
-      const workflows = await listWorkflowsForAgent();
+      const workflows = await platform.listWorkflows();
       if (workflows.length === 0) {
         return text('No workflows exist yet.', { workflows });
       }
@@ -50,9 +63,7 @@ export function createWorkflowTools(options: {
     }),
     execute: async (_id, params) => {
       requireIdSlug(params.id);
-      const { getWorkflowDetailForAgent } =
-        await import('~server/workflows/inspect');
-      const detail = await getWorkflowDetailForAgent(params.id);
+      const detail = await platform.getWorkflow(params.id);
       if (!detail) throw new Error(`Workflow "${params.id}" not found.`);
       const lines: (string | null)[] = [
         `${detail.name} (${detail.id}) — ${detail.status}` +
@@ -98,9 +109,12 @@ export function createWorkflowTools(options: {
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const { checkoutWorkflowForAgent } =
-        await import('~server/workflows/git');
-      const checkout = await checkoutWorkflowForAgent(sessionId, params.id);
+      const source = await platform.getWorkflowSource(params.id);
+      const checkout = await syncCheckoutFromBundle(
+        sessionId,
+        'workflow',
+        source,
+      );
       const lines = [
         `Checked out "${params.id}" at ${checkout.path}/.`,
         checkout.headCommit
@@ -144,14 +158,20 @@ export function createWorkflowTools(options: {
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const { createWorkflow } = await import('~server/workflows/scaffold');
-      const res = await createWorkflow(params, { sessionId });
+      // The workflow id doubles as the local directory name; reserve it
+      // BEFORE the platform registers the id, or a collision here would
+      // strand an empty draft workflow on the platform.
+      await assertWorktreeAvailable(sessionId, params.id);
+      const res = await platform.createWorkflow(params);
+      await initNewWorktree(sessionId, 'workflow', res.id, (root) =>
+        writeScaffoldFiles(root, res.files),
+      );
       return text(
         `Created workflow "${res.id}". Source is at ${res.id}/.\n` +
           'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
           'and manifest.json (triggers), commit with git, then call ' +
           'deploy_workflow. Do not edit hatch/ (the platform SDK).',
-        res,
+        { id: res.id, name: res.name },
       );
     },
   });
@@ -174,11 +194,14 @@ export function createWorkflowTools(options: {
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const { agentWorkflowWorkDir } = await import('~agent/paths');
-      const { deployWorkflow } = await import('~server/workflows/deploy');
-      const res = await deployWorkflow(params.id, {
-        sourceDir: agentWorkflowWorkDir(sessionId, params.id),
+      const { bundleBase64 } = await bundleWorktreeForDeploy(
+        sessionId,
+        'workflow',
+        params.id,
+      );
+      const res = await platform.deployWorkflow(params.id, {
         message: params.message,
+        bundleBase64,
       });
       const lines = [
         `Deployed "${params.id}" (v${res.version}).`,
@@ -207,9 +230,7 @@ export function createWorkflowTools(options: {
     }),
     execute: async (_id, params) => {
       requireIdSlug(params.id);
-      const { rollbackWorkflowToVersion } =
-        await import('~server/workflows/manage');
-      const res = await rollbackWorkflowToVersion(params.id, params.version);
+      const res = await platform.rollbackWorkflow(params.id, params.version);
       return text(`Rolled "${params.id}" back to v${res.version}.`, res);
     },
   });

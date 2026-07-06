@@ -1,15 +1,42 @@
-/** App lifecycle tools: list, inspect, checkout, create, deploy, rollback, DB. */
+/**
+ * App lifecycle tools: list, inspect, checkout, create, deploy, rollback, DB.
+ * All platform state flows through the injected PlatformClient (REST to the
+ * platform's internal API); source trees live in runner-local worktrees fed
+ * by git bundles.
+ */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import {
-  MAX_FILE_CHARS,
-  requireSessionId,
-  resolveAppHandle,
-  text,
-  tool,
-} from './shared';
+  bundleWorktreeForDeploy,
+  initNewWorktree,
+  syncCheckoutFromBundle,
+  type LocalCheckout,
+} from '../local-sources';
+import type { PlatformClient } from '../platform-client';
+import { writeScaffoldFiles } from '../scaffold-files';
+import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
-export function createAppTools(options: { sessionId?: string }): AgentTool[] {
+function checkoutLines(id: string, checkout: LocalCheckout): string[] {
+  return [
+    `Checked out "${id}" at ${checkout.path}/.`,
+    checkout.headCommit
+      ? `HEAD: ${checkout.headCommit}`
+      : 'No commits yet. Create files, then run git add and git commit.',
+    checkout.remoteCommit
+      ? `Remote master: ${checkout.remoteCommit}`
+      : 'Remote master has no commits yet.',
+    checkout.dirty
+      ? `Worktree has local changes:\n${checkout.status}`
+      : 'Worktree is clean.',
+  ];
+}
+
+export function createAppTools(options: {
+  sessionId?: string;
+  platform: PlatformClient;
+}): AgentTool[] {
+  const { platform } = options;
+
   const listAppsTool = tool({
     name: 'list_apps',
     label: 'List apps',
@@ -19,8 +46,7 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
       'calling get_app or checkout_app.',
     parameters: Type.Object({}),
     execute: async () => {
-      const { listAppsForAgent } = await import('~server/apps/inspect');
-      const apps = await listAppsForAgent();
+      const apps = await platform.listApps();
       if (apps.length === 0) {
         return text('No apps exist yet.', { apps });
       }
@@ -49,9 +75,8 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
       id: Type.String({ description: 'App id or slug to inspect.' }),
     }),
     execute: async (_id, params) => {
-      const id = await resolveAppHandle(params.id);
-      const { getAppDetailForAgent } = await import('~server/apps/inspect');
-      const detail = await getAppDetailForAgent(id);
+      requireIdSlug(params.id);
+      const detail = await platform.getApp(params.id);
       if (!detail) throw new Error(`App "${params.id}" not found.`);
       const m = detail.manifest;
       const lines: (string | null)[] = [
@@ -123,22 +148,10 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
-      const id = await resolveAppHandle(params.id);
-      const { checkoutAppForAgent } = await import('~server/apps/git');
-      const checkout = await checkoutAppForAgent(sessionId, id);
-      const lines = [
-        `Checked out "${id}" at ${checkout.path}/.`,
-        checkout.headCommit
-          ? `HEAD: ${checkout.headCommit}`
-          : 'No commits yet. Create files, then run git add and git commit.',
-        checkout.remoteCommit
-          ? `Remote master: ${checkout.remoteCommit}`
-          : 'Remote master has no commits yet.',
-        checkout.dirty
-          ? `Worktree has local changes:\n${checkout.status}`
-          : 'Worktree is clean.',
-      ];
-      return text(lines.join('\n'), checkout);
+      requireIdSlug(params.id);
+      const source = await platform.getAppSource(params.id);
+      const checkout = await syncCheckoutFromBundle(sessionId, 'app', source);
+      return text(checkoutLines(source.id, checkout).join('\n'), checkout);
     },
   });
 
@@ -171,15 +184,17 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
-      const { createApp } = await import('~server/apps/scaffold');
-      const res = await createApp(params, { sessionId });
+      const res = await platform.createApp(params);
+      await initNewWorktree(sessionId, 'app', res.id, (root) =>
+        writeScaffoldFiles(root, res.files),
+      );
       return text(
         `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
           `Source is at ${res.id}/.\n` +
           'Use the id for checkout_app/deploy_app. Read the scaffolded files, ' +
           'edit proto/backend/app/widgets, then commit your changes with git ' +
           'before calling deploy_app.',
-        res,
+        { id: res.id, slug: res.slug, name: res.name },
       );
     },
   });
@@ -200,20 +215,21 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
     }),
     execute: async (_id, params) => {
       const sessionId = requireSessionId(options.sessionId);
-      const id = await resolveAppHandle(params.id);
-      const { agentAppWorkDir } = await import('~agent/paths');
-      const { deployApp } = await import('~server/apps/deploy');
-      const res = await deployApp(id, {
-        sourceDir: agentAppWorkDir(sessionId, id),
+      requireIdSlug(params.id);
+      const detail = await platform.getApp(params.id);
+      if (!detail) throw new Error(`App "${params.id}" not found.`);
+      const { bundleBase64 } = await bundleWorktreeForDeploy(
+        sessionId,
+        'app',
+        detail.id,
+      );
+      const res = await platform.deployApp(detail.id, {
         message: params.message,
+        bundleBase64,
       });
-      // The baked manifest URL is keyed by the immutable id; surface the
-      // human-facing /app/<slug>/ URL the user actually shares instead.
-      const { appSlug } = await import('~server/apps/access');
-      const slug = await appSlug(id);
       const lines = [
-        `Deployed "${id}" (v${res.version}).`,
-        res.normalized.app ? `App (iframe): /app/${slug ?? id}/` : null,
+        `Deployed "${detail.id}" (v${res.version}).`,
+        res.normalized.app ? `App (iframe): /app/${res.slug}/` : null,
         res.normalized.widgets.length > 0
           ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
           : null,
@@ -239,11 +255,10 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
       }),
     }),
     execute: async (_id, params) => {
-      const id = await resolveAppHandle(params.id);
-      const { rollbackAppToVersion } = await import('~server/apps/manage');
-      const res = await rollbackAppToVersion(id, params.version);
+      requireIdSlug(params.id);
+      const res = await platform.rollbackApp(params.id, params.version);
       return text(
-        `Rolled back "${id}" to v${res.version}. ` +
+        `Rolled back "${params.id}" to v${res.version}. ` +
           'Run checkout_app or git fetch/rebase in existing worktrees before ' +
           'making more changes.',
         res,
@@ -262,39 +277,11 @@ export function createAppTools(options: { sessionId?: string }): AgentTool[] {
       sql: Type.String({ description: 'SQL statement to execute.' }),
     }),
     execute: async (_id, params, signal) => {
-      const id = await resolveAppHandle(params.id);
-      const { ensureAppDatabase } = await import('~server/apps/provision');
-      const postgres = (await import('postgres')).default;
-      const url = await ensureAppDatabase(id);
-      // Bound the statement so a runaway query (e.g. an accidental cross join or
-      // `pg_sleep`) can't hang the tool — and thus the whole agent turn — for
-      // minutes. Abort tears the connection down promptly on cancel.
-      const sql = postgres(url, {
-        max: 1,
-        connection: { statement_timeout: 30000 },
-      });
-      const onAbort = () => {
-        void sql.end({ timeout: 0 }).catch(() => {});
-      };
-      signal?.addEventListener('abort', onAbort);
-      try {
-        const rows = await sql.unsafe(params.sql);
-        const full =
-          rows.length > 0
-            ? JSON.stringify(rows.slice(0, 100), null, 2)
-            : `OK (${rows.count} row(s) affected).`;
-        // Cap by size too, not just row count: a few rows of large JSON/blobs
-        // could otherwise dump megabytes into the model context (and persist
-        // there for every later turn). Other tools already cap at MAX_FILE_CHARS.
-        const body =
-          full.length > MAX_FILE_CHARS
-            ? `${full.slice(0, MAX_FILE_CHARS)}\n… (truncated)`
-            : full;
-        return text(body, { rowCount: rows.length });
-      } finally {
-        signal?.removeEventListener('abort', onAbort);
-        await sql.end({ timeout: 5 });
-      }
+      requireIdSlug(params.id);
+      // Forward the abort signal so cancelling the run aborts the platform
+      // request, which in turn tears down the running statement.
+      const res = await platform.queryAppDb(params.id, params.sql, signal);
+      return text(res.text, { rowCount: res.rowCount });
     },
   });
 

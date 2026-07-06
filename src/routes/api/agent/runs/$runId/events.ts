@@ -36,8 +36,8 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
 
         const {
           getAgentRun,
+          hasLiveLease,
           interruptAgentRun,
-          isAgentRunLive,
           isTerminalAgentRunStatus,
           listRunEventsAfter,
           subscribeToAgentRun,
@@ -133,10 +133,13 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
                 return;
               }
 
-              if (!isAgentRunLive(parsed.runId)) {
+              if (!hasLiveLease(current)) {
+                // No runner holds a live lease for this run (its runner went
+                // away and never reclaimed it) — unblock the session now
+                // instead of leaving the client hanging until the sweeper.
                 await interruptAgentRun(
                   parsed.runId,
-                  'Agent run is no longer active on this server.',
+                  'Agent run is no longer active (its runner went away).',
                 );
                 await replay();
                 close();

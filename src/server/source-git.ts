@@ -8,7 +8,15 @@
  */
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
-import { access, mkdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { agentWorkDir } from '~agent/paths';
 
@@ -339,6 +347,76 @@ exit 0
     });
   }
 
+  /**
+   * Export the canonical master branch as a git bundle for the Agent Runner
+   * to clone/fetch from. Returns null when the repo has no commits yet.
+   */
+  async function exportMasterBundle(id: string): Promise<Buffer | null> {
+    const repoDir = await ensureRepo(id);
+    const master = await masterCommit(id);
+    if (!master) return null;
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'hatch-bundle-'));
+    const bundleFile = path.join(tmp, 'source.bundle');
+    try {
+      await runGit([
+        '--git-dir',
+        repoDir,
+        'bundle',
+        'create',
+        bundleFile,
+        SOURCE_BRANCH,
+      ]);
+      return await readFile(bundleFile);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Stage a runner-uploaded bundle as a temporary deploy checkout: verify the
+   * bundle, clone it, and point `origin` at the canonical repo. The result
+   * plugs into the existing deploy pipeline (`deployApp(sourceDir)`), which
+   * re-runs the clean/fast-forward checks and only advances master AFTER the
+   * build succeeds — identical semantics to deploying from an agent worktree.
+   */
+  async function stageBundleCheckout(
+    id: string,
+    bundle: Buffer,
+  ): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+    const repoDir = await ensureRepo(id);
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'hatch-deploy-'));
+    const cleanup = () => rm(tmp, { recursive: true, force: true });
+    try {
+      const bundleFile = path.join(tmp, 'incoming.bundle');
+      const dir = path.join(tmp, 'src');
+      await writeFile(bundleFile, bundle);
+      const verify = await runGit(
+        ['--git-dir', repoDir, 'bundle', 'verify', bundleFile],
+        { allowFailure: true },
+      );
+      // A bundle with prerequisites missing from the canonical repo fails
+      // verify — the runner's checkout is based on history this repo doesn't
+      // have. Same guidance as the worktree path's "master advanced" error.
+      if (verify.exitCode !== 0) {
+        throw new Error(
+          `Cannot deploy ${cfg.noun} "${id}": the uploaded source bundle ` +
+            `does not apply to the canonical repository. Run checkout again ` +
+            `to sync with ${SOURCE_BRANCH}, rebase your work, then retry.\n` +
+            (verify.stderr || verify.stdout).trim(),
+        );
+      }
+      await runGit(['clone', bundleFile, dir]);
+      // Point origin at the canonical repo so the deploy pipeline's
+      // fetch + fast-forward check compare against the real master.
+      await runGit(['remote', 'set-url', 'origin', repoDir], { cwd: dir });
+      await setLocalGitIdentity(dir);
+      return { dir, cleanup };
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
+  }
+
   async function moveMasterToDeploymentTag(
     id: string,
     tag: string,
@@ -368,6 +446,8 @@ exit 0
     publishDeploymentSource,
     deleteDeploymentTag,
     moveMasterToDeploymentTag,
+    exportMasterBundle,
+    stageBundleCheckout,
   };
 }
 

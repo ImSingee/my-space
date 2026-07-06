@@ -64,16 +64,3 @@ export function requireIdSlug(id: string): string {
   }
   return id;
 }
-
-/**
- * Resolve an agent-supplied app handle (which may be the immutable id or the
- * mutable slug) to the canonical app id, after a path-safety check. Throws when
- * no app matches so callers fail fast with a clear message.
- */
-export async function resolveAppHandle(handle: string): Promise<string> {
-  requireIdSlug(handle);
-  const { resolveAppId } = await import('~server/apps/access');
-  const id = await resolveAppId(handle);
-  if (!id) throw new Error(`App "${handle}" not found.`);
-  return id;
-}

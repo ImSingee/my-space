@@ -488,6 +488,19 @@ export const agentRuns = pgTable(
     input: jsonb().$type<JsonObject>().notNull(),
     /** The currently pending ask, if the run is blocked waiting for the user. */
     pendingAsk: jsonb('pending_ask').$type<JsonObject>(),
+    /**
+     * Answer accepted while the run's Agent Runner was briefly offline; the
+     * hub delivers it when the runner reconnects and reclaims the run.
+     */
+    pendingAnswer: jsonb('pending_answer').$type<JsonObject>(),
+    /** Agent Runner executing this run (null before a runner accepted it). */
+    runnerId: text('runner_id'),
+    /**
+     * Lease expiry for the executing runner. Renewed by runner heartbeats and
+     * events; the sweeper interrupts active runs whose lease expired (runner
+     * crashed or stayed disconnected past the grace window).
+     */
+    leaseExpiresAt: timestamp('lease_expires_at'),
     error: text(),
     completedAt: timestamp('completed_at'),
     createdAt,
@@ -508,12 +521,23 @@ export const agentRunEvents = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: 'cascade' }),
     seq: integer().notNull(),
+    /**
+     * Runner-assigned per-run sequence, used to dedupe events the runner
+     * resends after a reconnect. Null for platform-originated events
+     * (cancel/interrupt); Postgres treats NULLs as distinct in the unique
+     * index, so those never collide.
+     */
+    runnerSeq: integer('runner_seq'),
     type: text().notNull(),
     payload: jsonb().$type<JsonObject>().notNull(),
     createdAt,
   },
   (table) => [
     uniqueIndex('agent_run_events_run_seq_idx').on(table.runId, table.seq),
+    uniqueIndex('agent_run_events_run_runner_seq_idx').on(
+      table.runId,
+      table.runnerSeq,
+    ),
   ],
 );
 

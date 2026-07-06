@@ -1,20 +1,35 @@
-import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import { and, eq, gt, inArray, sql } from 'drizzle-orm';
+/**
+ * Server-only: the CONTROL PLANE for agent runs.
+ *
+ * Execution happens in the separate Agent Runner service; this module owns
+ * the database state machine (run rows, event log, leases), dispatches new
+ * runs to a connected runner through the hub, ingests the runner's event
+ * stream (deduped on `runnerSeq`), and fans events out to SSE subscribers.
+ *
+ * A run's lifecycle:
+ *   startAgentRun → dispatch to runner (lease assigned)
+ *   → runner streams `run.event`s (ask/tool/text/…; each renews the lease)
+ *   → runner reports `run.finished` (messages persisted, terminal event)
+ *   Cancel/answer flow platform → runner over the same control channel.
+ *   A sweeper interrupts active runs whose lease expired (runner died).
+ */
+import { and, eq, inArray, gt, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { db, schema } from '~/db';
 import type { AgentRunStatus, JsonObject, JsonValue } from '~/db/schema';
-import { submitAnswer, waitForAnswer } from '~agent/ask-registry';
-import { loadAgentModels, pickModel } from '~agent/build-models';
 import type {
   AgentRunStreamEvent,
   AgentStreamEvent,
   AskAnswer,
   AskQuestion,
 } from '~agent/events';
-import { runAgentTurn } from '~agent/runtime';
+import {
+  LEASE_SWEEP_INTERVAL_MS,
+  RUN_LEASE_TTL_MS,
+  type RunModelConfig,
+  type SendImage,
+} from '~agent/protocol';
 import { AppError } from '~server/errors';
-
-type SendImage = { data: string; mimeType: string };
 
 export type AgentRunInput = {
   sessionId: string;
@@ -29,6 +44,11 @@ export type PendingAskPayload = {
   questions: AskQuestion[];
 };
 
+type PendingAnswerPayload = {
+  askId: string;
+  answers: AskAnswer[];
+};
+
 export type ActiveAgentRun = {
   id: string;
   status: AgentRunStatus;
@@ -37,23 +57,12 @@ export type ActiveAgentRun = {
 
 type Subscriber = (event: AgentRunStreamEvent) => void;
 
-type EventPipeline = {
-  emit: (event: AgentStreamEvent) => void;
-  emitAsync: (event: AgentStreamEvent) => Promise<AgentRunStreamEvent>;
-  flush: () => Promise<void>;
-};
-
-type LiveRun = {
-  controller: AbortController;
-  subscribers: Set<Subscriber>;
-  cancelled: boolean;
-  pipeline?: EventPipeline;
-  /** Resolves once executeRun has persisted messages and finalized the run. */
-  finished: Promise<void>;
-};
-
 type AgentRunsGlobal = typeof globalThis & {
-  __hatchAgentRuns__?: Map<string, LiveRun>;
+  /** SSE subscribers per run (control plane fan-out). */
+  __hatchAgentRunSubs__?: Map<string, Set<Subscriber>>;
+  /** Per-run ingest chains: serialize event processing in arrival order. */
+  __hatchAgentRunChains__?: Map<string, Promise<unknown>>;
+  __hatchAgentRunSweeper__?: ReturnType<typeof setInterval>;
 };
 
 const ACTIVE_STATUSES: AgentRunStatus[] = ['running', 'blocked'];
@@ -64,14 +73,31 @@ const TERMINAL_STATUSES: AgentRunStatus[] = [
   'interrupted',
 ];
 
-function liveRuns(): Map<string, LiveRun> {
+function subscriberMap(): Map<string, Set<Subscriber>> {
   const g = globalThis as AgentRunsGlobal;
-  g.__hatchAgentRuns__ ??= new Map<string, LiveRun>();
-  return g.__hatchAgentRuns__;
+  g.__hatchAgentRunSubs__ ??= new Map();
+  return g.__hatchAgentRunSubs__;
+}
+
+function chainMap(): Map<string, Promise<unknown>> {
+  const g = globalThis as AgentRunsGlobal;
+  g.__hatchAgentRunChains__ ??= new Map();
+  return g.__hatchAgentRunChains__;
 }
 
 export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
+}
+
+/** True while the run's runner lease is still valid. */
+export function hasLiveLease(run: { leaseExpiresAt: Date | null }): boolean {
+  return (
+    run.leaseExpiresAt != null && run.leaseExpiresAt.getTime() > Date.now()
+  );
+}
+
+function leaseDeadline(): Date {
+  return new Date(Date.now() + RUN_LEASE_TTL_MS);
 }
 
 function deriveTitle(userText: string): string {
@@ -99,111 +125,79 @@ function asPendingAsk(value: JsonObject | null): PendingAskPayload | null {
   return value as unknown as PendingAskPayload;
 }
 
+function asPendingAnswer(
+  value: JsonObject | null,
+): PendingAnswerPayload | null {
+  if (!value) return null;
+  return value as unknown as PendingAnswerPayload;
+}
+
 function publish(runId: string, event: AgentRunStreamEvent): void {
-  const live = liveRuns().get(runId);
-  if (!live) return;
-  for (const subscriber of live.subscribers) {
+  const set = subscriberMap().get(runId);
+  if (!set) return;
+  for (const subscriber of set) {
     subscriber(event);
   }
 }
 
 /**
+ * Serialize work for one run onto a promise chain so runner events are
+ * persisted in arrival order even though each WS message handler is async.
+ */
+function enqueueRunTask<T>(runId: string, task: () => Promise<T>): Promise<T> {
+  const chains = chainMap();
+  const tail = chains.get(runId) ?? Promise.resolve();
+  const result = tail.then(task, task);
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  chains.set(runId, settled);
+  void settled.then(() => {
+    if (chains.get(runId) === settled) chains.delete(runId);
+  });
+  return result;
+}
+
+/**
  * Append an event, allocating its `seq` as `max(seq)+1` for the run. A per-run
  * advisory lock (held to the end of the transaction) serializes concurrent
- * allocations across connections/processes, so the ordered pipeline and any
- * standalone insert (e.g. a cancel that lands before the pipeline exists) can
- * never read the same max and collide on the (run_id, seq) unique index.
+ * allocations across connections/processes. When `runnerSeq` is given, the
+ * unique (run_id, runner_seq) index dedupes resends after a runner reconnect:
+ * a duplicate inserts nothing and returns null.
  */
-async function appendEvent(
+async function persistEvent(
   runId: string,
   event: AgentStreamEvent,
-): Promise<AgentRunStreamEvent> {
+  runnerSeq?: number,
+): Promise<AgentRunStreamEvent | null> {
   const payload = JSON.stringify(event);
   const seq = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${runId}))`);
     const rows = await tx.execute<{ seq: number }>(sql`
-      insert into agent_run_events (id, run_id, seq, type, payload)
+      insert into agent_run_events (id, run_id, seq, runner_seq, type, payload)
       select ${ulid().toLowerCase()}, ${runId},
-             coalesce(max(seq), 0) + 1, ${event.type}, ${payload}::jsonb
+             coalesce(max(seq), 0) + 1, ${runnerSeq ?? null},
+             ${event.type}, ${payload}::jsonb
       from agent_run_events where run_id = ${runId}
+      on conflict (run_id, runner_seq) do nothing
       returning seq
     `);
-    return Number((rows as unknown as { seq: number }[])[0].seq);
+    const inserted = (rows as unknown as { seq: number }[])[0];
+    return inserted ? Number(inserted.seq) : null;
   });
-  const stored = { seq, event };
-  publish(runId, stored);
-  return stored;
+  if (seq == null) return null;
+  return { seq, event };
 }
 
-async function appendStandaloneEvent(
+async function appendEvent(
   runId: string,
   event: AgentStreamEvent,
-): Promise<AgentRunStreamEvent> {
-  return appendEvent(runId, event);
-}
-
-/**
- * Serialize a run's streamed events onto one promise chain so they persist in
- * arrival order (seq is allocated atomically per insert; the chain only fixes
- * ordering). `flush` surfaces the first append failure to the caller.
- */
-function createEventPipeline(runId: string): {
-  emit: (event: AgentStreamEvent) => void;
-  emitAsync: (event: AgentStreamEvent) => Promise<AgentRunStreamEvent>;
-  flush: () => Promise<void>;
-} {
-  let tail: Promise<unknown> = Promise.resolve();
-  let failure: unknown;
-
-  const enqueue = (event: AgentStreamEvent) => {
-    const result = tail.then(() => appendEvent(runId, event));
-    tail = result.then(
-      () => undefined,
-      (error) => {
-        failure ??= error;
-      },
-    );
-    return result;
-  };
-
-  return {
-    emit: (event) => {
-      void enqueue(event).catch(() => undefined);
-    },
-    emitAsync: enqueue,
-    flush: async () => {
-      await tail;
-      if (failure) throw failure;
-    },
-  };
-}
-
-async function updateActiveRunStatus(
-  runId: string,
-  status: AgentRunStatus,
-  patch: {
-    error?: string | null;
-    pendingAsk?: PendingAskPayload | null;
-    completed?: boolean;
-  } = {},
-): Promise<boolean> {
-  const rows = await db
-    .update(schema.agentRuns)
-    .set({
-      status,
-      error: patch.error ?? null,
-      pendingAsk: (patch.pendingAsk ?? null) as unknown as JsonObject | null,
-      completedAt: patch.completed ? new Date() : null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(schema.agentRuns.id, runId),
-        inArray(schema.agentRuns.status, ACTIVE_STATUSES),
-      ),
-    )
-    .returning({ id: schema.agentRuns.id });
-  return rows.length > 0;
+  runnerSeq?: number,
+): Promise<AgentRunStreamEvent | null> {
+  const stored = await persistEvent(runId, event, runnerSeq);
+  if (stored) publish(runId, stored);
+  return stored;
 }
 
 async function finishRun(
@@ -217,6 +211,7 @@ async function finishRun(
       status,
       error: error ?? null,
       pendingAsk: null,
+      pendingAnswer: null,
       completedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -286,17 +281,72 @@ export function subscribeToAgentRun(
   runId: string,
   subscriber: Subscriber,
 ): () => void {
-  const live = liveRuns().get(runId);
-  if (!live) return () => {};
-  live.subscribers.add(subscriber);
+  const map = subscriberMap();
+  const set = map.get(runId) ?? new Set<Subscriber>();
+  map.set(runId, set);
+  set.add(subscriber);
   return () => {
-    live.subscribers.delete(subscriber);
+    set.delete(subscriber);
+    if (set.size === 0 && map.get(runId) === set) map.delete(runId);
   };
 }
 
-export function isAgentRunLive(runId: string): boolean {
-  return liveRuns().has(runId);
+/** ================== model resolution ================== */
+
+/**
+ * Resolve the model for a run into the self-contained config the runner
+ * needs (including the provider API key, scoped to just this provider).
+ * Falls back to the first enabled model when the requested one is gone.
+ */
+async function resolveRunModelConfig(
+  providerId?: string | null,
+  modelId?: string | null,
+): Promise<RunModelConfig | null> {
+  const providers = await db.query.agentProviders.findMany({
+    where: (p, { eq: equals }) => equals(p.enabled, true),
+    orderBy: (p, { asc }) => [asc(p.sortOrder), asc(p.createdAt)],
+  });
+
+  type Candidate = {
+    provider: (typeof providers)[number];
+    model: typeof schema.agentModels.$inferSelect;
+  };
+  const candidates: Candidate[] = [];
+  for (const provider of providers) {
+    const models = await db.query.agentModels.findMany({
+      where: (m, { eq: equals, and: all }) =>
+        all(equals(m.providerId, provider.id), equals(m.enabled, true)),
+      orderBy: (m, { asc }) => [asc(m.sortOrder), asc(m.createdAt)],
+    });
+    for (const model of models) candidates.push({ provider, model });
+  }
+  if (candidates.length === 0) return null;
+
+  const picked =
+    (providerId && modelId
+      ? candidates.find(
+          (c) => c.provider.id === providerId && c.model.modelId === modelId,
+        )
+      : undefined) ?? candidates[0];
+
+  return {
+    providerId: picked.provider.id,
+    providerName: picked.provider.name,
+    apiType: picked.provider.apiType,
+    baseUrl: picked.provider.baseUrl,
+    apiKey: picked.provider.apiKey,
+    model: {
+      id: picked.model.modelId,
+      name: picked.model.name,
+      reasoning: picked.model.reasoning,
+      input: picked.model.input as ('text' | 'image')[],
+      contextWindow: picked.model.contextWindow,
+      maxTokens: picked.model.maxTokens,
+    },
+  };
 }
+
+/** ================== start / dispatch ================== */
 
 export async function startAgentRun(input: AgentRunInput): Promise<{
   runId: string;
@@ -311,21 +361,25 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     throw new AppError('This chat already has a running Agent turn.', 409);
   }
 
-  const { models, list } = await loadAgentModels();
-  if (list.length === 0) {
+  const model = await resolveRunModelConfig(
+    input.providerId ?? sessionRow.providerId,
+    input.modelId ?? sessionRow.modelId,
+  );
+  if (!model) {
     throw new Error(
       'No models configured. Add a provider and model in Settings first.',
     );
   }
 
-  const picked = pickModel(
-    list,
-    input.providerId ?? sessionRow.providerId,
-    input.modelId ?? sessionRow.modelId,
-  );
-  if (!picked) throw new Error('Selected model is unavailable.');
+  const hub = await import('./agent-runner/hub');
+  if (hub.connectedRunnerCount() === 0) {
+    throw new AppError(
+      'No Agent Runner is connected. Start the agent-runner service, then retry.',
+      503,
+    );
+  }
 
-  const baseMessages = (sessionRow.messages ?? []) as unknown as AgentMessage[];
+  const baseMessages = (sessionRow.messages ?? []) as JsonValue[];
   const title =
     sessionRow.title && sessionRow.title !== 'New chat'
       ? sessionRow.title
@@ -338,9 +392,11 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       .insert(schema.agentRuns)
       .values({
         sessionId: input.sessionId,
-        providerId: picked.providerId,
-        modelId: picked.model.id,
+        providerId: model.providerId,
+        modelId: model.model.id,
         status: 'running',
+        // Covers the dispatch window; the accepting runner renews from here.
+        leaseExpiresAt: leaseDeadline(),
         // Diagnostics only (no reader reconstructs the run from this). Store
         // image metadata, not the base64 payloads — those already live in the
         // persisted session message, and duplicating them here bloated the row.
@@ -360,184 +416,363 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
   await db
     .update(schema.agentSessions)
     .set({
-      messages: [
-        ...((sessionRow.messages ?? []) as JsonValue[]),
-        userMessage(input.userText, images),
-      ],
+      messages: [...baseMessages, userMessage(input.userText, images)],
       title,
-      providerId: picked.providerId,
-      modelId: picked.model.id,
+      providerId: model.providerId,
+      modelId: model.model.id,
     })
     .where(eq(schema.agentSessions.id, input.sessionId));
 
-  const live: LiveRun = {
-    controller: new AbortController(),
-    subscribers: new Set(),
-    cancelled: false,
-    finished: Promise.resolve(),
-  };
-  liveRuns().set(run.id, live);
-
-  // Hold the run's completion so cancel can wait for the partial reply to be
-  // persisted before returning (the client refetches right after cancelling).
-  // executeRun handles its own failures (finishRun + cleanup in its finally);
-  // this catch only guards against an unexpected escape, which we log rather
-  // than swallow silently so a wedged run leaves a trace.
-  live.finished = executeRun(run.id, live, {
-    sessionId: input.sessionId,
-    userText: input.userText,
-    images,
-    baseMessages,
-    models,
-    picked,
-  }).catch((error) => {
-    console.error(`[agent-runs] run ${run.id} crashed unexpectedly:`, error);
-  });
+  try {
+    await hub.dispatchRun({
+      runId: run.id,
+      sessionId: input.sessionId,
+      userText: input.userText,
+      images,
+      priorMessages: baseMessages,
+      model,
+    });
+  } catch (error) {
+    // Dispatch failed (runner vanished between the check and the send, or
+    // never accepted). Fail the run gracefully: the client's SSE connection
+    // replays the error event instead of hanging on "Thinking…". Serialized
+    // on the per-run chain against any events the runner did manage to send.
+    const message =
+      error instanceof Error ? error.message : 'Failed to dispatch the run.';
+    await enqueueRunTask(run.id, async () => {
+      if (await finishRun(run.id, 'failed', message)) {
+        await appendEvent(run.id, { type: 'error', message });
+      }
+    });
+  }
 
   return { runId: run.id };
 }
 
-async function executeRun(
+/** ================== hub callbacks (runner lifecycle) ================== */
+
+/** Record which runner owns a run and start its lease (called on dispatch). */
+export async function assignRunToRunner(
   runId: string,
-  live: LiveRun,
-  opts: {
-    sessionId: string;
-    userText: string;
-    images: SendImage[];
-    baseMessages: AgentMessage[];
-    models: Awaited<ReturnType<typeof loadAgentModels>>['models'];
-    picked: NonNullable<ReturnType<typeof pickModel>>;
-  },
+  runnerId: string,
 ): Promise<void> {
-  // The pipeline (and its first DB query) is created *inside* the try below so a
-  // failure there still finishes the run and cleans up `liveRuns` — otherwise a
-  // transient DB error would wedge the session forever (the partial unique index
-  // keeps rejecting new turns and the SSE stream hangs on "Thinking…").
-  let pipeline: ReturnType<typeof createEventPipeline> | undefined;
+  await db
+    .update(schema.agentRuns)
+    .set({ runnerId, leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
+    .where(eq(schema.agentRuns.id, runId));
+}
 
-  const emitTerminal = async (
-    status: AgentRunStatus,
-    event: AgentStreamEvent,
-    error?: string,
-  ) => {
-    if (await finishRun(runId, status, error)) {
-      if (pipeline) await pipeline.emitAsync(event);
-      else await appendStandaloneEvent(runId, event);
+/** Heartbeat: extend the lease of every active run owned by this runner. */
+export async function renewRunnerLeases(runnerId: string): Promise<void> {
+  await db
+    .update(schema.agentRuns)
+    .set({ leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.agentRuns.runnerId, runnerId),
+        inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+      ),
+    );
+}
+
+export type RunnerReconciliation = {
+  /**
+   * Runs the runner should keep reporting on: still-owned active runs (keep
+   * executing, resend outbound queues) AND owned runs that went terminal on
+   * the platform while the runner was away — those still hold an unacked
+   * final report whose resend persists the partial transcript and repairs a
+   * missing terminal stream event (crash between finishRun and appendEvent).
+   */
+  resumed: string[];
+  /** Runs this runner does not own (anymore): abort + discard locally. */
+  stale: string[];
+  /** Answers submitted while the runner was offline, to deliver now. */
+  pendingAnswers: { runId: string; askId: string; answers: AskAnswer[] }[];
+};
+
+/**
+ * Reconcile a (re)connecting runner's claimed active runs against the
+ * database: runs it still owns get their lease renewed and resume; runs the
+ * DB says it owns but it no longer claims (runner restarted and lost its
+ * memory) are interrupted so their sessions unblock.
+ */
+export async function reconcileRunnerRuns(
+  runnerId: string,
+  claimedRunIds: string[],
+): Promise<RunnerReconciliation> {
+  const resumed: string[] = [];
+  const stale: string[] = [];
+  const pendingAnswers: RunnerReconciliation['pendingAnswers'] = [];
+  const claimed = new Set(claimedRunIds);
+
+  for (const runId of claimedRunIds) {
+    const run = await getAgentRun(runId);
+    if (!run || run.runnerId !== runnerId) {
+      // Unknown or reassigned: this runner's copy must never report again.
+      stale.push(runId);
+      continue;
     }
-  };
-
-  const isCancelled = () => live.cancelled || live.controller.signal.aborted;
-
-  try {
-    pipeline = createEventPipeline(runId);
-    live.pipeline = pipeline;
-    const pipe = pipeline;
-
-    const ask = async (
-      questions: AskQuestion[],
-      askSignal?: AbortSignal,
-    ): Promise<AskAnswer[]> => {
-      if (isCancelled()) {
-        throw new Error('Agent run was cancelled.');
+    const terminal = isTerminalAgentRunStatus(run.status);
+    if (!terminal && hasLiveLease(run)) {
+      resumed.push(runId);
+      const pendingAnswer = asPendingAnswer(run.pendingAnswer ?? null);
+      if (pendingAnswer) {
+        pendingAnswers.push({
+          runId,
+          askId: pendingAnswer.askId,
+          answers: pendingAnswer.answers,
+        });
       }
-      const askId = crypto.randomUUID();
-      const pendingAsk = { askId, questions };
-      if (!(await updateActiveRunStatus(runId, 'blocked', { pendingAsk }))) {
-        throw new Error('Agent run is no longer active.');
-      }
-      if (isCancelled()) {
-        throw new Error('Agent run was cancelled.');
-      }
-      await pipe.emitAsync({ type: 'ask', askId, questions });
-      const answers = await waitForAnswer(
+      continue;
+    }
+    if (!terminal) {
+      // The claim is real but the lease lapsed: the run is past the grace
+      // window and the sweeper/SSE path may already have raced to kill it.
+      // Resuming would make the outcome depend on who runs first, so
+      // enforce the lease contract deterministically instead.
+      await interruptAgentRun(
         runId,
-        askId,
-        askSignal ?? live.controller.signal,
+        'Agent run was interrupted because its Agent Runner stayed ' +
+          'disconnected past the lease window.',
       );
-      if (
-        !(await updateActiveRunStatus(runId, 'running', {
-          pendingAsk: null,
-        }))
-      ) {
-        throw new Error('Agent run is no longer active.');
-      }
-      if (isCancelled()) {
-        throw new Error('Agent run was cancelled.');
-      }
-      await pipe.emitAsync({ type: 'ask_answered', askId });
-      return answers;
-    };
-
-    if (isCancelled()) {
-      await emitTerminal('cancelled', { type: 'cancelled' });
-      return;
     }
+    // Owned but (now) terminal: the runner only claims runs it has not had
+    // a finish ack for, so let it resend its final report instead of
+    // discarding it — completeRunFromRunner persists the partial transcript
+    // and repairs a missing done/cancelled/error stream event, then the
+    // finish ack clears the runner's buffer. Any stream events it resends
+    // first are ingested as stale (terminal status) and answered with
+    // run.cancel, so a still-executing turn also winds down here.
+    resumed.push(runId);
+  }
 
-    const result = await runAgentTurn({
-      priorMessages: opts.baseMessages,
-      sessionId: opts.sessionId,
-      userText: opts.userText,
-      images: opts.images,
-      models: opts.models,
-      picked: opts.picked,
-      signal: live.controller.signal,
-      ask,
-      emit: pipe.emit,
-    });
-    await pipe.flush();
-
-    // Persist whatever the turn produced — including a reply that was only
-    // partially streamed before the user stopped the run (or before it errored).
-    // runAgentTurn returns the messages accumulated so far on abort, so saving
-    // here keeps already-shown output in history instead of discarding it. Only
-    // `messages` is written back: title/provider/model were set at run start, so
-    // re-applying the start-time snapshot here would silently revert a rename or
-    // model switch the user made mid-run.
+  if (resumed.length > 0) {
+    // Only truly active runs get a fresh lease; terminal runs resumed for
+    // their final report must not resurface in lease bookkeeping.
     await db
-      .update(schema.agentSessions)
-      .set({ messages: result.messages })
-      .where(eq(schema.agentSessions.id, opts.sessionId));
-
-    if (live.cancelled || live.controller.signal.aborted) {
-      await emitTerminal('cancelled', { type: 'cancelled' });
-      return;
-    }
-
-    if (result.error) {
-      await emitTerminal(
-        'failed',
-        { type: 'error', message: result.error },
-        result.error,
+      .update(schema.agentRuns)
+      .set({ leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
+      .where(
+        and(
+          inArray(schema.agentRuns.id, resumed),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        ),
       );
-    } else {
-      // The done event no longer carries the full transcript (it grew O(N²) in
-      // storage and bloated every SSE replay); the client revalidates the
-      // session instead, reading the messages just persisted above.
-      await emitTerminal('completed', { type: 'done' });
+  }
+
+  const owned = await db.query.agentRuns.findMany({
+    where: (r, { and: all, eq: equals, inArray: within }) =>
+      all(equals(r.runnerId, runnerId), within(r.status, ACTIVE_STATUSES)),
+  });
+  for (const run of owned) {
+    if (!claimed.has(run.id)) {
+      await interruptAgentRun(
+        run.id,
+        'Agent run was interrupted because the Agent Runner restarted.',
+      );
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (live.cancelled || live.controller.signal.aborted) {
-      await emitTerminal('cancelled', { type: 'cancelled' });
-    } else {
-      await emitTerminal('failed', { type: 'error', message }, message);
-    }
-  } finally {
-    try {
-      if (pipeline) await pipeline.flush();
-    } finally {
-      live.pipeline = undefined;
-      liveRuns().delete(runId);
-    }
+  }
+
+  return { resumed, stale, pendingAnswers };
+}
+
+export type IngestResult = 'ok' | 'stale';
+
+/**
+ * Persist one runner stream event (deduped on runnerSeq), apply its status
+ * side effects (ask → blocked, ask_answered → running), renew the lease, and
+ * fan it out to SSE subscribers. Returns 'stale' when the run no longer
+ * belongs to this runner so the hub can tell it to abort.
+ */
+export async function ingestRunnerEvent(
+  runnerId: string,
+  message: { runId: string; runnerSeq: number; event: AgentStreamEvent },
+): Promise<IngestResult> {
+  return enqueueRunTask(message.runId, async () => {
+    const run = await getAgentRun(message.runId);
+    if (!run || run.runnerId !== runnerId) return 'stale';
+    if (isTerminalAgentRunStatus(run.status)) return 'stale';
+
+    // Persist first, publish last: subscribers must not see an `ask` before
+    // the run row records it as pending (a fast answer would 409 otherwise).
+    const stored = await persistEvent(
+      message.runId,
+      message.event,
+      message.runnerSeq,
+    );
+
+    // Apply run-row side effects even when the event itself is a duplicate
+    // resend: a crash between persistEvent and this update would otherwise
+    // skip the effect forever (the resend dedupes on runnerSeq). Resends
+    // replay as an in-order suffix (acks are cumulative), and each effect is
+    // idempotent, so replaying converges to the correct state.
+    await applyRunnerEventSideEffects(message.runId, message.event);
+
+    // Duplicate resend — already persisted and published once.
+    if (!stored) return 'ok';
+    publish(message.runId, stored);
+    return 'ok';
+  });
+}
+
+/** Run-row updates driven by a runner stream event (ask/answer/lease). */
+async function applyRunnerEventSideEffects(
+  runId: string,
+  event: AgentStreamEvent,
+): Promise<void> {
+  if (event.type === 'ask') {
+    await db
+      .update(schema.agentRuns)
+      .set({
+        status: 'blocked',
+        pendingAsk: {
+          askId: event.askId,
+          questions: event.questions,
+        } as unknown as JsonObject,
+        // Clear answers for OLDER asks, but keep one already queued for THIS
+        // ask: a replayed `ask` (lost ack) or a race with answerAgentRun must
+        // not drop the user's submitted answer while the runner is offline.
+        pendingAnswer: sql`case
+          when ${schema.agentRuns.pendingAnswer}->>'askId' = ${event.askId}
+          then ${schema.agentRuns.pendingAnswer}
+          else null
+        end`,
+        leaseExpiresAt: leaseDeadline(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.agentRuns.id, runId),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        ),
+      );
+  } else if (event.type === 'ask_answered') {
+    await db
+      .update(schema.agentRuns)
+      .set({
+        status: 'running',
+        pendingAsk: null,
+        pendingAnswer: null,
+        leaseExpiresAt: leaseDeadline(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.agentRuns.id, runId),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        ),
+      );
+  } else {
+    await db
+      .update(schema.agentRuns)
+      .set({ leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.agentRuns.id, runId),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        ),
+      );
   }
 }
 
 /**
+ * Process the runner's final report for a run: persist the transcript onto
+ * the session, then (if the run is still active) finish it and append the
+ * terminal event. Also handles the cancel race — a run the platform already
+ * cancelled still gets its partial transcript persisted here.
+ */
+export async function completeRunFromRunner(
+  runnerId: string,
+  message: {
+    runId: string;
+    status: 'completed' | 'failed' | 'cancelled';
+    error?: string;
+    messages: unknown[];
+  },
+): Promise<void> {
+  await enqueueRunTask(message.runId, async () => {
+    const run = await getAgentRun(message.runId);
+    if (!run || run.runnerId !== runnerId) return;
+
+    // Persist whatever the turn produced — including a reply that was only
+    // partially streamed before the user stopped the run (or before it
+    // errored). Only `messages` is written back: title/provider/model were
+    // set at run start, so re-applying a snapshot here would revert renames
+    // or model switches made mid-run. An empty transcript is never persisted
+    // (it would wipe the session history the run started from). A late or
+    // retried report must also never clobber a NEWER turn's history: once a
+    // more recent run exists on the session, this transcript is stale (ULIDs
+    // order by creation time, so id comparison finds newer runs).
+    const newerRun = await db.query.agentRuns.findFirst({
+      where: (r, { and: all, eq: equals, gt }) =>
+        all(equals(r.sessionId, run.sessionId), gt(r.id, run.id)),
+      columns: { id: true },
+    });
+    if (message.messages.length > 0 && !newerRun) {
+      await db
+        .update(schema.agentSessions)
+        .set({ messages: message.messages as JsonValue[] })
+        .where(eq(schema.agentSessions.id, run.sessionId));
+    }
+
+    if (isTerminalAgentRunStatus(run.status)) {
+      // Retry of a final report whose ack was lost. A crash between finishRun
+      // and appendEvent leaves the run terminal without a terminal event, so
+      // SSE clients would treat the closed stream as a disconnect — repair it.
+      await ensureTerminalEvent(message.runId, run.status, run.error);
+      return;
+    }
+
+    const finished = await finishRun(
+      message.runId,
+      message.status,
+      message.status === 'failed'
+        ? (message.error ?? 'Agent run failed.')
+        : undefined,
+    );
+    if (!finished) return;
+
+    await appendEvent(
+      message.runId,
+      terminalEventForStatus(message.status, message.error),
+    );
+  });
+}
+
+function terminalEventForStatus(
+  status: AgentRunStatus,
+  error?: string | null,
+): AgentStreamEvent {
+  if (status === 'completed') return { type: 'done' };
+  if (status === 'cancelled') return { type: 'cancelled' };
+  return { type: 'error', message: error ?? 'Agent run failed.' };
+}
+
+/** Append the terminal event for an already-terminal run if it is missing. */
+async function ensureTerminalEvent(
+  runId: string,
+  status: AgentRunStatus,
+  error?: string | null,
+): Promise<void> {
+  const existing = await db.query.agentRunEvents.findFirst({
+    where: (e, { and: all, eq: equals, inArray: within }) =>
+      all(
+        equals(e.runId, runId),
+        within(e.type, ['done', 'cancelled', 'error']),
+      ),
+  });
+  if (existing) return;
+  await appendEvent(runId, terminalEventForStatus(status, error));
+}
+
+/** ================== ask / answer ================== */
+
+/**
  * Validate the user's answers against the exact questions that are still
  * pending. The HTTP route only shape-checks the payload, so without this a
- * crafted POST could resume the run with answers for unknown questions, options
- * that were never offered, multiple picks for a single-choice question, or no
- * answer at all — feeding the agent garbage decisions.
+ * crafted POST could resume the run with answers for unknown questions,
+ * options that were never offered, multiple picks for a single-choice
+ * question, or no answer at all — feeding the agent garbage decisions.
  */
 function validateAskAnswers(
   questions: AskQuestion[],
@@ -592,6 +827,12 @@ function validateAskAnswers(
   }
 }
 
+/**
+ * Accept the user's answers: validate against the pending question set,
+ * persist them (so a disconnected runner receives them on reconnect), and
+ * forward to the runner when it is online. The run flips back to `running`
+ * only when the runner confirms with its `ask_answered` event.
+ */
 export async function answerAgentRun(
   runId: string,
   askId: string,
@@ -606,39 +847,52 @@ export async function answerAgentRun(
     throw new Error('Question is no longer waiting.');
   }
   validateAskAnswers(pendingAsk.questions, answers);
-  if (!submitAnswer(runId, askId, answers)) {
+
+  const updated = await db
+    .update(schema.agentRuns)
+    .set({
+      pendingAnswer: { askId, answers } as unknown as JsonObject,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.agentRuns.id, runId),
+        inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+      ),
+    )
+    .returning({ id: schema.agentRuns.id });
+  if (updated.length === 0) {
     throw new Error('Agent run is no longer active.');
   }
+
+  const hub = await import('./agent-runner/hub');
+  hub.sendRunAnswer(run.runnerId, runId, askId, answers);
 }
+
+/** ================== cancel / interrupt / sweep ================== */
 
 export async function cancelAgentRun(runId: string): Promise<void> {
   const run = await getAgentRun(runId);
   if (!run || isTerminalAgentRunStatus(run.status)) return;
 
-  const live = liveRuns().get(runId);
-  if (live) {
-    live.cancelled = true;
-    live.controller.abort();
+  // On the per-run chain: a runner event mid-ingest must finish persisting
+  // and publishing before the terminal event lands, because SSE clients
+  // close the stream at the first terminal event. (The hub wait below stays
+  // OFF the chain — completeRunFromRunner needs it to make progress.)
+  await enqueueRunTask(runId, async () => {
     if (await finishRun(runId, 'cancelled')) {
-      const event: AgentStreamEvent = { type: 'cancelled' };
-      if (live.pipeline) {
-        await live.pipeline.emitAsync(event);
-      } else {
-        await appendStandaloneEvent(runId, event);
-      }
+      await appendEvent(runId, { type: 'cancelled' });
     }
-    // Wait for executeRun to persist the partial reply and clean up so the
-    // client's post-cancel refetch sees the streamed-so-far output. Cap the
-    // wait so a stuck abort can't hang the cancel request indefinitely.
-    await Promise.race([
-      live.finished,
-      new Promise<void>((resolve) => setTimeout(resolve, 15000)),
-    ]);
-    return;
-  }
+  });
 
-  if (await finishRun(runId, 'cancelled')) {
-    await appendStandaloneEvent(runId, { type: 'cancelled' });
+  // Tell the runner to abort, then wait (bounded) for its final report so the
+  // client's post-cancel refetch sees the partial reply persisted onto the
+  // session. When the runner is offline the run is already terminal; whatever
+  // partial transcript arrives later is still persisted by
+  // completeRunFromRunner.
+  const hub = await import('./agent-runner/hub');
+  if (hub.sendRunCancel(run.runnerId, runId)) {
+    await hub.waitForRunFinished(runId, 15000);
   }
 }
 
@@ -648,21 +902,43 @@ export async function interruptAgentRun(
 ): Promise<void> {
   const run = await getAgentRun(runId);
   if (!run || isTerminalAgentRunStatus(run.status)) return;
-  if (await finishRun(runId, 'interrupted', message)) {
-    await appendStandaloneEvent(runId, { type: 'error', message });
-  }
+  // Same per-run serialization as cancelAgentRun (see comment there).
+  await enqueueRunTask(runId, async () => {
+    if (await finishRun(runId, 'interrupted', message)) {
+      await appendEvent(runId, { type: 'error', message });
+    }
+  });
 }
 
-export async function interruptStaleAgentRuns(): Promise<void> {
+/**
+ * Interrupt active runs whose lease expired — the runner died or stayed
+ * disconnected past the grace window. Runs with live leases are left alone
+ * (their runner may just be reconnecting), which also means agent runs now
+ * SURVIVE platform restarts as long as the runner keeps running.
+ */
+export async function sweepExpiredAgentRuns(): Promise<void> {
   const rows = await db.query.agentRuns.findMany({
     where: (r, { inArray: within }) => within(r.status, ACTIVE_STATUSES),
   });
-  await Promise.all(
-    rows.map((run) =>
-      interruptAgentRun(
-        run.id,
-        'Agent run was interrupted because the server restarted.',
-      ),
-    ),
-  );
+  const now = Date.now();
+  for (const run of rows) {
+    const expired =
+      run.leaseExpiresAt == null || run.leaseExpiresAt.getTime() <= now;
+    if (!expired) continue;
+    await interruptAgentRun(
+      run.id,
+      'Agent run was interrupted because its Agent Runner went away.',
+    );
+  }
+}
+
+/** Start the periodic lease sweeper (idempotent across dev reloads). */
+export function ensureAgentRunSweeper(): void {
+  const g = globalThis as AgentRunsGlobal;
+  if (g.__hatchAgentRunSweeper__) return;
+  g.__hatchAgentRunSweeper__ = setInterval(() => {
+    sweepExpiredAgentRuns().catch((error) => {
+      console.error('[agent-runs] lease sweep failed:', error);
+    });
+  }, LEASE_SWEEP_INTERVAL_MS);
 }

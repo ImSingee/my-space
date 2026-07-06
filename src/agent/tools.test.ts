@@ -11,7 +11,17 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { PlatformClient } from './platform-client';
 import { createTools } from './tools';
+
+/** These tests only exercise file tools; platform calls must never happen. */
+const stubPlatform = new Proxy({} as PlatformClient, {
+  get(_target, prop) {
+    return () => {
+      throw new Error(`PlatformClient.${String(prop)} called in a file test`);
+    };
+  },
+});
 
 const tempRoots: string[] = [];
 
@@ -36,7 +46,7 @@ async function setup(files: Record<string, string> = {}) {
     await writeFixture(root, filePath, content);
   }
   const env = new NodeExecutionEnv({ cwd: root });
-  const tools = createTools(env);
+  const tools = createTools(env, { platform: stubPlatform });
   const getTool = (name: string) => {
     const found = tools.find((tool) => tool.name === name);
     if (!found) throw new Error(`Missing tool ${name}`);

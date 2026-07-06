@@ -36,6 +36,8 @@ export const assertDeployableWorktree = core.assertDeployableWorktree;
 export const publishDeploymentSource = core.publishDeploymentSource;
 export const deleteDeploymentTag = core.deleteDeploymentTag;
 export const moveMasterToDeploymentTag = core.moveMasterToDeploymentTag;
+export const exportWorkflowMasterBundle = core.exportMasterBundle;
+export const stageWorkflowBundleCheckout = core.stageBundleCheckout;
 
 export async function checkoutWorkflowForAgent(
   sessionId: string,

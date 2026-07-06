@@ -17,6 +17,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { appBuildDir, appRepoDir, appSrcDir } from '../src/agent/paths';
+import { writeScaffoldFiles } from '../src/agent/scaffold-files';
 import { db, schema } from '../src/db';
 import { deployApp } from '../src/server/apps/deploy';
 import { ensureAppRepo } from '../src/server/apps/git';
@@ -286,13 +287,20 @@ async function main(): Promise<void> {
   // -- 3 & 4) deploy a real cron-RPC app --------------------------------------
   console.log('[3+4] deploy Connect app with signed cron RPC method');
   const slug = `f8-cron-${Date.now().toString(36)}`;
-  const { id } = await createApp({ slug, name: 'F8 Cron RPC', pin: false });
+  const { id, files } = await createApp({
+    slug,
+    name: 'F8 Cron RPC',
+    pin: false,
+  });
   console.log(`  created app id=${id} slug=${slug}`);
 
   let deployed = false;
   try {
     const repoPath = await ensureAppRepo(id);
     const srcDir = appSrcDir(id);
+    // createApp now returns the scaffold instead of writing it; materialize
+    // it here like the Agent Runner would.
+    await writeScaffoldFiles(srcDir, files);
     // Reduce the scaffold to a backend-only Connect app with a cron RPC method.
     await fs.rm(path.join(srcDir, 'app'), { recursive: true, force: true });
     await fs.rm(path.join(srcDir, 'widgets'), { recursive: true, force: true });

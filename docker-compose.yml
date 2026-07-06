@@ -1,6 +1,7 @@
 # Hatch — one-command deploy: `docker compose up -d`
-# Brings up Postgres + the platform. The platform image bundles Node, Deno,
-# buf and esbuild, so it can build and run AI-generated apps on its own.
+# Brings up Postgres + the platform (control plane) + the Agent Runner
+# (execution plane). The platform image bundles Node, Deno, git, buf and
+# esbuild; the same image runs the Agent Runner with a different command.
 
 services:
   db:
@@ -40,6 +41,15 @@ services:
       HOST: 0.0.0.0
       NODE_ENV: production
       DENO_DIR: /app/.deno
+      # Runner-facing internal server (WS control channel + internal REST API).
+      # Listens on the compose network only — never publish port 3701.
+      AGENT_INTERNAL_HOST: 0.0.0.0
+      AGENT_INTERNAL_PORT: '3701'
+      # REQUIRED: shared secret the Agent Runner authenticates with (no
+      # default on purpose — a guessable token would let any process that can
+      # reach 3701, including generated app backends, impersonate the runner).
+      # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
       # CHANGE THIS in production: signs auth sessions.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-please-change-this-to-a-long-random-string}
       # Self-service sign-up. Open on first run so you can create the owner
@@ -55,7 +65,38 @@ services:
       # Persist Deno's npm cache so app backends start fast after the first run.
       - hatch_deno:/app/.deno
 
+  # The Agent Runner: executes LLM turns and the agent's shell/file sandbox in
+  # its own container. It only opens OUTBOUND connections to the platform's
+  # internal server (3701) — it has no database credentials, no auth secrets,
+  # and no access to the platform's workspace volume. Inside the container the
+  # runner demotes every agent-controlled subprocess (run_command shell,
+  # worktree git) to the unprivileged `hatch-sandbox` user via setpriv, so
+  # model-run commands cannot read AGENT_RUNNER_TOKEN from the runner
+  # process's /proc environment.
+  agent:
+    image: ${HATCH_IMAGE:-ghcr.io/imsingee/my-space:master}
+    pull_policy: always
+    restart: unless-stopped
+    command: ['node', 'dist-runner/main.mjs']
+    depends_on:
+      - app
+    environment:
+      NODE_ENV: production
+      HATCH_PLATFORM_URL: http://app:3701
+      HATCH_RUNNER_ID: runner-1
+      # Must match the platform's AGENT_RUNNER_TOKEN above.
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
+      # Runner-local worktrees + sandbox HOME (separate volume from the
+      # platform's workspace on purpose).
+      HATCH_DATA_DIR: /app/workspace
+      DENO_DIR: /app/.deno
+    volumes:
+      - hatch_agent_workspace:/app/workspace
+      - hatch_agent_deno:/app/.deno
+
 volumes:
   hatch_pgdata:
   hatch_workspace:
   hatch_deno:
+  hatch_agent_workspace:
+  hatch_agent_deno:

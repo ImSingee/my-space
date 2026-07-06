@@ -1,4 +1,8 @@
-/** Server-only: run one Agent turn for a session and stream events out. */
+/**
+ * Run one Agent turn for a session and stream events out. Executes inside
+ * the Agent Runner process: all platform state flows through the injected
+ * PlatformClient, never through direct server imports.
+ */
 import { mkdirSync } from 'node:fs';
 import {
   AgentHarness,
@@ -9,9 +13,10 @@ import {
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import type { Models } from '@earendil-works/pi-ai';
 import type { JsonValue } from '~/db/schema';
-import type { ResolvedModel } from './build-models';
 import type { AgentStreamEvent } from './events';
 import { agentWorkDir, SKILLS_DIR } from './paths';
+import type { PlatformClient } from './platform-client';
+import type { ResolvedModel } from './remote-models';
 import { agentShellEnv } from './shell-env';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge } from './tools';
@@ -53,6 +58,7 @@ export type RunAgentTurnOptions = {
   images?: { data: string; mimeType: string }[];
   models: Models;
   picked: ResolvedModel;
+  platform: PlatformClient;
   signal: AbortSignal;
   ask?: AskBridge;
   emit: (event: AgentStreamEvent) => void;
@@ -89,6 +95,7 @@ export async function runAgentTurn(
 
   const { skills } = await loadSkills(env, SKILLS_DIR);
   const tools = createTools(env, {
+    platform: opts.platform,
     ...(opts.ask ? { ask: opts.ask } : {}),
     sessionId,
   });

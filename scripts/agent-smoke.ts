@@ -4,7 +4,13 @@
  * the agent to scaffold and deploy an app -> assert the tools fired and the
  * app ended up deployed.
  *
- * Run with: set -a && . ./.env.local && set +a && pnpm exec tsx scripts/agent-smoke.ts
+ * Since the platform/agent-runner split, agent turns execute on a separate
+ * runner process. This script hosts the platform side itself (internal
+ * server + hub on port 3701), so STOP the dev server first (it would occupy
+ * the port) and start a runner:
+ *
+ *   pnpm dev:runner        # in another terminal
+ *   set -a && . ./.env.local && set +a && pnpm exec tsx scripts/agent-smoke.ts
  */
 import { eq } from 'drizzle-orm';
 import { appBuildDir, appSrcDir } from '../src/agent/paths';
@@ -16,6 +22,8 @@ import {
   listRunEventsAfter,
   startAgentRun,
 } from '../src/server/agent-runs';
+import { connectedRunnerCount } from '../src/server/agent-runner/hub';
+import { startAgentInternalServer } from '../src/server/agent-runner/internal-server';
 import { dropAppDatabase } from '../src/server/apps/provision';
 import { stopApp } from '../src/server/apps/runtime';
 import { promises as fs } from 'node:fs';
@@ -45,7 +53,28 @@ async function cleanupBySlug(slug: string) {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const RUNNER_WAIT_MS = Number(process.env.SMOKE_RUNNER_WAIT_MS ?? 30_000);
+
+/** Host the runner control plane and wait for a runner to register. */
+async function waitForRunner() {
+  startAgentInternalServer();
+  const deadline = Date.now() + RUNNER_WAIT_MS;
+  while (connectedRunnerCount() === 0) {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `no Agent Runner connected within ${RUNNER_WAIT_MS}ms — start one ` +
+          'with `pnpm dev:runner` (and stop the dev server so port 3701 is free).',
+      );
+    }
+    await delay(500);
+  }
+  console.log('[runner] connected');
+}
+
 async function main() {
+  console.log('[wait for runner]');
+  await waitForRunner();
+
   console.log('[seed providers]');
   const seeded = await seedDefaultProviders();
   console.log('  seeded:', seeded);

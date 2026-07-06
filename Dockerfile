@@ -20,12 +20,12 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# --- Build the platform (Nitro node server) ----------------------------------
+# --- Build the platform (Nitro node server) + the Agent Runner bundle --------
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Migrations run at server startup (nitro plugin), not during the build.
-RUN SKIP_DATABASE_MIGRATIONS=true pnpm build
+RUN SKIP_DATABASE_MIGRATIONS=true pnpm build && pnpm build:runner
 
 # --- Runtime image -----------------------------------------------------------
 FROM node:24-slim AS runner
@@ -36,9 +36,17 @@ ENV PORT=3700
 # Deno caches npm: dependencies here (mount a volume to persist across restarts).
 ENV DENO_DIR=/app/.deno
 
+# git: the platform keeps canonical app/workflow repos (bundle import/export)
+# and the Agent Runner clones/commits local worktrees.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates git \
   && rm -rf /var/lib/apt/lists/*
+
+# Unprivileged user the Agent Runner demotes agent subprocesses to (shell +
+# worktree git, via setpriv). Keeps AGENT_RUNNER_TOKEN — present only in the
+# runner process's environment — unreadable from /proc for model-controlled
+# commands. The runner itself stays root so it can setpriv/chown.
+RUN useradd --system --user-group --no-create-home hatch-sandbox
 
 # Deno runs the app backends the platform spawns.
 COPY --from=deno /deno /usr/local/bin/deno
@@ -48,6 +56,9 @@ COPY --from=deno /deno /usr/local/bin/deno
 # agent skills, and the SQL migrations applied on startup.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/.output ./.output
+# The Agent Runner service: same image, alternate entrypoint
+# (`node dist-runner/main.mjs`), no DB credentials.
+COPY --from=build /app/dist-runner ./dist-runner
 COPY package.json ./
 COPY migrations ./migrations
 COPY templates ./templates
@@ -57,4 +68,6 @@ COPY skills ./skills
 RUN mkdir -p /app/workspace /app/.deno
 
 EXPOSE 3700
+# Platform (default). The Agent Runner runs the same image with
+# `command: ["node", "dist-runner/main.mjs"]` (see docker-compose.yml).
 CMD ["node", ".output/server/index.mjs"]

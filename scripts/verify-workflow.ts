@@ -16,9 +16,11 @@ import {
   workflowCurrentDir,
   workflowRepoDir,
 } from '../src/agent/paths';
+import { writeScaffoldFiles } from '../src/agent/scaffold-files';
 import { db, schema } from '../src/db';
 import { deployWorkflow } from '../src/server/workflows/deploy';
 import { startWorkflowRun } from '../src/server/workflows/execute';
+import { checkoutWorkflowForAgent } from '../src/server/workflows/git';
 import { getWorkflowRun } from '../src/server/workflows/manage';
 import { createWorkflow } from '../src/server/workflows/scaffold';
 
@@ -119,10 +121,14 @@ async function main() {
   ]);
 
   console.log('1) scaffold');
-  await createWorkflow(
-    { id: ID, name: 'Workflow Demo', description: 'demo' },
-    { sessionId: SESSION_ID },
-  );
+  const created = await createWorkflow({
+    id: ID,
+    name: 'Workflow Demo',
+    description: 'demo',
+  });
+  // createWorkflow only registers + renders; materialize like the runner does.
+  await checkoutWorkflowForAgent(SESSION_ID, ID);
+  await writeScaffoldFiles(worktree, created.files);
 
   await fs.writeFile(
     path.join(worktree, 'manifest.json'),

@@ -1,6 +1,10 @@
 import { definePlugin } from 'nitro';
 import { runMigrations } from '~db/migrate.ts';
-import { interruptStaleAgentRuns } from '~server/agent-runs';
+import {
+  ensureAgentRunSweeper,
+  sweepExpiredAgentRuns,
+} from '~server/agent-runs';
+import { startAgentInternalServer } from '~server/agent-runner/internal-server';
 import { hardenPlatformDatabase } from '~server/apps/provision';
 import { warmLongRunningBackends } from '~server/apps/runtime';
 import { ensureScheduler } from '~server/apps/scheduler';
@@ -21,7 +25,13 @@ export default definePlugin(async () => {
   // Lock down PUBLIC connect on the platform DB so per-app roles (same server)
   // can't open a connection to it. Independent of the rest of boot.
   await hardenPlatformDatabase();
-  await interruptStaleAgentRuns();
+  // Agent runs execute on remote runners: bring up the runner-facing internal
+  // server (WS control channel + REST API), then reap only runs whose lease
+  // already expired — runs with live leases survive a platform restart, their
+  // runner reconnects and resumes streaming.
+  startAgentInternalServer();
+  await sweepExpiredAgentRuns();
+  ensureAgentRunSweeper();
 
   // Recover orphaned workflow runs first (the in-memory run registry doesn't
   // survive a restart), then (re)start cron timers so deployed schedules fire
