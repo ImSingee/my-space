@@ -76,7 +76,7 @@
     "@bufbuild/buf": "^1.71.0",
     "@bufbuild/protoc-gen-es": "^2.12.1",
     "@electric-sql/pglite": "^0.5.4",
-    "@tanstack/devtools-vite": "^0.7.0",
+    "@tanstack/devtools-vite": "^0.8.1",
     "@tanstack/react-devtools": "^0.10.5",
     "@tanstack/react-query-devtools": "^5.101.0",
     "@tanstack/react-router-devtools": "^1.167.0",
