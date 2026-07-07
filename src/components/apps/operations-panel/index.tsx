@@ -1,35 +1,107 @@
 import { Box, Center, Group, Loader, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { IconDatabase, IconServerBolt } from '@tabler/icons-react';
-import { appOpsQueryOptions } from '~queries/apps';
+import type { ReactNode } from 'react';
+import {
+  BackendControls,
+  BackendStatus,
+  BackendTime,
+  backendLastExitLabel,
+} from '~components/apps/backend-controls';
+import { appBackendsQueryOptions, appOpsQueryOptions } from '~queries/apps';
 import type { AppOps } from '~server/apps';
 import { CronSection } from './cron-section';
 import { KvSection } from './kv-section';
-import { SectionHeader, StatusDot } from './section-header';
+import { SectionHeader } from './section-header';
 import { StorageSection } from './storage-section';
 import { WebhookSection } from './webhook-section';
 
-function BackendSection({ backend }: { backend: AppOps['backend'] }) {
+/** One runtime metadata row, matching the Overview `Field` layout. */
+function RuntimeFact({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Group gap="md" wrap="nowrap" align="baseline">
+      <Text size="sm" c="dimmed" style={{ width: 96, flex: 'none' }}>
+        {label}
+      </Text>
+      {children}
+    </Group>
+  );
+}
+
+function BackendSection({
+  appId,
+  backend,
+}: {
+  appId: string;
+  backend: AppOps['backend'];
+}) {
+  // The runtime state lives in the polled Backends list (the same query the
+  // Backends page uses), so this section stays live and shares its cache.
+  const { data: backends } = useQuery(appBackendsQueryOptions);
+  const entry = backends?.find((b) => b.id === appId);
+  const runtime = entry?.runtime ?? null;
+  const mode = entry?.mode ?? backend.mode ?? 'serverless';
+
   return (
     <Stack gap={6}>
       <SectionHeader
         icon={<IconServerBolt size={16} stroke={1.8} />}
         title="Backend"
         meta={
-          <Group gap={6} wrap="nowrap">
-            <StatusDot active={backend.running} />
+          runtime ? (
+            <Group gap={10} wrap="nowrap">
+              <Group gap={6} wrap="nowrap">
+                <BackendStatus runtime={runtime} size="xs" dimmed />
+                <Text size="xs" c="dimmed">
+                  · {mode}
+                </Text>
+              </Group>
+              <BackendControls appId={appId} runtime={runtime} size="sm" />
+            </Group>
+          ) : backends ? (
             <Text size="xs" c="dimmed">
-              {backend.running ? 'Running' : 'Idle'} ·{' '}
-              {backend.mode ?? 'serverless'}
+              not deployed · {mode}
             </Text>
-          </Group>
+          ) : null
         }
       />
       <Text size="xs" c="dimmed">
-        {backend.mode === 'long-running'
+        {mode === 'long-running'
           ? 'Kept warm by the platform and restarted automatically if it exits.'
           : 'Started on demand, then reused by later requests in this platform process; not kept warm.'}
       </Text>
+      {runtime ? (
+        <Stack gap={6} mt={4}>
+          <RuntimeFact label="PID / Port">
+            {runtime.state === 'running' && runtime.pid != null ? (
+              <Text size="sm" ff="monospace">
+                {runtime.pid} · :{runtime.port}
+              </Text>
+            ) : (
+              <Text size="sm" c="dimmed">
+                —
+              </Text>
+            )}
+          </RuntimeFact>
+          <RuntimeFact label="Started">
+            <BackendTime value={runtime.startedAt} />
+          </RuntimeFact>
+          <RuntimeFact label="Last stopped">
+            <BackendTime value={runtime.stoppedAt} />
+          </RuntimeFact>
+          <RuntimeFact label="Last exit">
+            <Text size="sm" c="dimmed" ff="monospace">
+              {backendLastExitLabel(runtime)}
+            </Text>
+          </RuntimeFact>
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
@@ -112,7 +184,7 @@ export function OperationsPanel({
       ) : (
         <Stack gap="lg">
           {ops.backend.capable ? (
-            <BackendSection backend={ops.backend} />
+            <BackendSection appId={appId} backend={ops.backend} />
           ) : null}
           {dbEnabled ? <DatabaseSection dbName={dbName} /> : null}
           {ops.cron.enabled ? (

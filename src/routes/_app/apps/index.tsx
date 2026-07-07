@@ -38,7 +38,7 @@ function AppsPage() {
         <>
           <Button
             component={Link}
-            to="/backends"
+            to="/settings/backends"
             variant="default"
             leftSection={<IconServerBolt size={16} stroke={1.8} />}
           >

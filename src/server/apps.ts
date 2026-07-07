@@ -209,7 +209,6 @@ export type AppOps = {
   backend: {
     capable: boolean;
     mode: 'serverless' | 'long-running' | null;
-    running: boolean;
   };
   cron: { enabled: boolean; jobs: CronJobView[] };
   webhook: {
@@ -238,7 +237,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
     });
     if (!app) {
       return {
-        backend: { capable: false, mode: null, running: false },
+        backend: { capable: false, mode: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false, url: null, objects: [] },
@@ -248,7 +247,6 @@ export const getAppOps = createServerFn({ method: 'GET' })
     const caps = app.capabilities;
     const manifest: NormalizedManifest | null = await normalizedManifestFor(id);
 
-    const { isAppRunning } = await import('./apps/runtime');
     const cronJobs = caps?.cron
       ? await import('./apps/scheduler').then((m) => m.listCronJobs(id))
       : [];
@@ -261,7 +259,6 @@ export const getAppOps = createServerFn({ method: 'GET' })
       backend: {
         capable: Boolean(caps?.backend),
         mode: app.backendMode ?? null,
-        running: isAppRunning(id),
       },
       cron: { enabled: Boolean(caps?.cron), jobs: cronJobs },
       webhook: {
