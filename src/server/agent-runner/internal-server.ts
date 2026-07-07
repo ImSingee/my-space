@@ -21,7 +21,7 @@ type InternalServerGlobal = typeof globalThis & {
   __hatchInternalServer__?: { server: http.Server; port: number };
 };
 
-/** Dev fallback so `pnpm dev` + `pnpm dev:runner` work with zero setup. */
+/** Dev fallback so local platform + runner scripts work with zero setup. */
 const DEV_TOKEN = 'hatch-dev-runner-token';
 
 export function agentRunnerToken(): string | null {

@@ -7,7 +7,8 @@
   },
   "packageManager": "pnpm@10.12.2",
   "scripts": {
-    "dev": "HATCH_DATA_DIR=../my-space-data vite dev --port 3700",
+    "dev": "concurrently --kill-others --names platform,runner --prefix-colors blue,magenta \"pnpm dev:platform\" \"pnpm dev:runner\"",
+    "dev:platform": "HATCH_DATA_DIR=../my-space-data vite dev --port 3700",
     "dev:runner": "HATCH_DATA_DIR=../my-space-runner-data tsx watch src/runner/main.ts",
     "build": "pnpm build:platform && pnpm build:runner",
     "build:platform": "vite build",
@@ -92,6 +93,7 @@
     "@vitest/browser": "^4.1.8",
     "@vitest/browser-playwright": "^4.1.8",
     "@vitest/ui": "^4.1.8",
+    "concurrently": "^10.0.3",
     "drizzle-kit": "^0.31.10",
     "lefthook": "^2.1.9",
     "nitro": "3.0.260603-beta",

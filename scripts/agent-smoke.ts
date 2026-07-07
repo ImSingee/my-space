@@ -5,9 +5,10 @@
  * app ended up deployed.
  *
  * Since the platform/agent-runner split, agent turns execute on a separate
- * runner process. This script hosts the platform side itself (internal
- * server + hub on port 3701), so STOP the dev server first (it would occupy
- * the port) and start a runner:
+ * runner process. `pnpm dev` starts both platform and runner for normal local
+ * development, but this script hosts the platform side itself (internal
+ * server + hub on port 3701), so STOP any dev server first (it would occupy
+ * the port) and start only a runner:
  *
  *   pnpm dev:runner        # in another terminal
  *   set -a && . ./.env.local && set +a && pnpm exec tsx scripts/agent-smoke.ts
@@ -63,7 +64,7 @@ async function waitForRunner() {
     if (Date.now() >= deadline) {
       throw new Error(
         `no Agent Runner connected within ${RUNNER_WAIT_MS}ms — start one ` +
-          'with `pnpm dev:runner` (and stop the dev server so port 3701 is free).',
+          'with `pnpm dev:runner` (and stop `pnpm dev`/`pnpm dev:platform` so port 3701 is free).',
       );
     }
     await delay(500);
