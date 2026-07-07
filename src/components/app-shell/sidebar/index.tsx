@@ -1,11 +1,11 @@
 import { Box, Group, NavLink, ScrollArea, Stack } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { IconServerBolt, IconSparkles } from '@tabler/icons-react';
+import { IconSparkles } from '@tabler/icons-react';
 import { Brand } from '../brand';
 import { PinnedApps } from './pinned-apps';
 import { PinnedDashboards } from './pinned-dashboards';
 import { PinnedWorkflows } from './pinned-workflows';
-import { SectionHeading, useIsActive } from './section';
+import { useIsActive } from './section';
 import { ColorSchemeToggle, UserMenu } from './user-menu';
 import classes from './sidebar.module.css';
 
@@ -31,16 +31,6 @@ export function Sidebar() {
         <PinnedDashboards />
         <PinnedApps />
         <PinnedWorkflows />
-        <SectionHeading label="Status" />
-        <Stack gap={2} px="xs">
-          <NavLink
-            renderRoot={(props) => <Link to="/settings/backends" {...props} />}
-            label="Backends"
-            leftSection={<IconServerBolt size={18} stroke={1.6} />}
-            active={isActive('/settings/backends')}
-            variant="light"
-          />
-        </Stack>
       </ScrollArea>
 
       <Box className={classes.footer}>
