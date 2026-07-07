@@ -29,6 +29,7 @@ import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/use
 import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings/providers'
 import { Route as AppSettingsBackendsRouteImport } from './routes/_app/settings/backends'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsAgentRunnerRouteImport } from './routes/_app/settings/agent-runner'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
 import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
 import { Route as AppWorkflowsWorkflowIdIndexRouteImport } from './routes/_app/workflows/$workflowId/index'
@@ -148,6 +149,11 @@ const AppSettingsBackendsRoute = AppSettingsBackendsRouteImport.update({
 const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
   id: '/appearance',
   path: '/appearance',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsAgentRunnerRoute = AppSettingsAgentRunnerRouteImport.update({
+  id: '/agent-runner',
+  path: '/agent-runner',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
@@ -275,6 +281,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
@@ -315,6 +322,7 @@ export interface FileRoutesByTo {
   '/executions': typeof AppExecutionsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
@@ -359,6 +367,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/_app/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
   '/_app/settings/backends': typeof AppSettingsBackendsRoute
   '/_app/settings/providers': typeof AppSettingsProvidersRoute
@@ -403,6 +412,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
+    | '/settings/agent-runner'
     | '/settings/appearance'
     | '/settings/backends'
     | '/settings/providers'
@@ -443,6 +453,7 @@ export interface FileRouteTypes {
     | '/executions'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
+    | '/settings/agent-runner'
     | '/settings/appearance'
     | '/settings/backends'
     | '/settings/providers'
@@ -486,6 +497,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
+    | '/_app/settings/agent-runner'
     | '/_app/settings/appearance'
     | '/_app/settings/backends'
     | '/_app/settings/providers'
@@ -681,6 +693,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAppearanceRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/agent-runner': {
+      id: '/_app/settings/agent-runner'
+      path: '/agent-runner'
+      fullPath: '/settings/agent-runner'
+      preLoaderRoute: typeof AppSettingsAgentRunnerRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/dashboard/$dashboardId': {
       id: '/_app/dashboard/$dashboardId'
       path: '/dashboard/$dashboardId'
@@ -846,6 +865,7 @@ const AppAgentRouteWithChildren = AppAgentRoute._addFileChildren(
 )
 
 interface AppSettingsRouteChildren {
+  AppSettingsAgentRunnerRoute: typeof AppSettingsAgentRunnerRoute
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
   AppSettingsBackendsRoute: typeof AppSettingsBackendsRoute
   AppSettingsProvidersRoute: typeof AppSettingsProvidersRoute
@@ -854,6 +874,7 @@ interface AppSettingsRouteChildren {
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAgentRunnerRoute: AppSettingsAgentRunnerRoute,
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
   AppSettingsBackendsRoute: AppSettingsBackendsRoute,
   AppSettingsProvidersRoute: AppSettingsProvidersRoute,

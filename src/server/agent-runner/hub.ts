@@ -21,8 +21,13 @@ import {
 type RunnerConn = {
   runnerId: string;
   socket: WebSocket;
+  protocolVersion: number;
   /** Runs dispatched to (or reclaimed by) this runner on this connection. */
   activeRunIds: Set<string>;
+  /** Epoch ms when this connection registered (runner.hello accepted). */
+  connectedAt: number;
+  /** Epoch ms of the last valid message on this connection (ping, events…). */
+  lastSeenAt: number;
 };
 
 type DispatchWaiter = {
@@ -64,6 +69,29 @@ function send(conn: RunnerConn, message: HubMessage): boolean {
 
 export function connectedRunnerCount(): number {
   return hubState().runners.size;
+}
+
+/** One connected runner as exposed to the status page (no socket internals). */
+export type ConnectedRunnerInfo = {
+  runnerId: string;
+  protocolVersion: number;
+  /** Runs currently carried by this connection. */
+  activeRunCount: number;
+  connectedAt: string;
+  lastSeenAt: string;
+};
+
+/** Snapshot of every currently connected runner, stable-ordered by id. */
+export function listConnectedRunners(): ConnectedRunnerInfo[] {
+  return [...hubState().runners.values()]
+    .map((conn) => ({
+      runnerId: conn.runnerId,
+      protocolVersion: conn.protocolVersion,
+      activeRunCount: conn.activeRunIds.size,
+      connectedAt: new Date(conn.connectedAt).toISOString(),
+      lastSeenAt: new Date(conn.lastSeenAt).toISOString(),
+    }))
+    .sort((a, b) => a.runnerId.localeCompare(b.runnerId));
 }
 
 function ownerConn(runnerId: string | null | undefined): RunnerConn | null {
@@ -228,6 +256,7 @@ export function handleRunnerSocket(socket: WebSocket): void {
         return;
       }
 
+      conn.lastSeenAt = Date.now();
       try {
         await handleMessage(conn, message);
       } catch (error) {
@@ -291,10 +320,14 @@ async function registerRunner(
     state.runners.delete(hello.runnerId);
   }
 
+  const now = Date.now();
   const conn: RunnerConn = {
     runnerId: hello.runnerId,
     socket,
+    protocolVersion: hello.protocolVersion,
     activeRunIds: new Set(),
+    connectedAt: now,
+    lastSeenAt: now,
   };
 
   const { reconcileRunnerRuns } = await import('~server/agent-runs');

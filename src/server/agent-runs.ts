@@ -65,7 +65,7 @@ type AgentRunsGlobal = typeof globalThis & {
   __hatchAgentRunSweeper__?: ReturnType<typeof setInterval>;
 };
 
-const ACTIVE_STATUSES: AgentRunStatus[] = ['running', 'blocked'];
+export const ACTIVE_STATUSES: AgentRunStatus[] = ['running', 'blocked'];
 const TERMINAL_STATUSES: AgentRunStatus[] = [
   'completed',
   'failed',
