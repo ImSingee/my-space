@@ -1,1 +1,0 @@
-ALTER TABLE "dashboards" ADD COLUMN IF NOT EXISTS "pinned" boolean DEFAULT true NOT NULL;

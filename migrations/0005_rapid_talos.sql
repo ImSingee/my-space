@@ -1,1 +1,0 @@
-ALTER TABLE "dashboards" ADD COLUMN "description" text;

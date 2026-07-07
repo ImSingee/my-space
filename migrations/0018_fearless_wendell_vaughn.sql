@@ -1,1 +1,0 @@
-ALTER TABLE "sidebar_items" ADD COLUMN "entry_hash" text;
