@@ -1,14 +1,24 @@
 import { Box, MantineProvider } from '@mantine/core';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { MessageView } from './message-view';
 import type { ChatMessage } from './types';
 
-function renderMessage(message: ChatMessage, width?: number) {
+type RenderOptions = {
+  width?: number;
+  onRetry?: () => void;
+  retrying?: boolean;
+};
+
+function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
   return render(
     <MantineProvider>
-      <Box data-testid="message-shell" w={width}>
-        <MessageView message={message} />
+      <Box data-testid="message-shell" w={options.width}>
+        <MessageView
+          message={message}
+          onRetry={options.onRetry}
+          retrying={options.retrying}
+        />
       </Box>
     </MantineProvider>,
   );
@@ -35,6 +45,52 @@ test('shows a persisted model error even when the reply has no content', async (
     )
     .toBeVisible();
   expect(document.querySelector('[role="alert"]')).toBeNull();
+});
+
+test('shows Retry only when a callback is provided and invokes it', async () => {
+  const onRetry = vi.fn<() => void>();
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Provider request failed.',
+    },
+    { onRetry },
+  );
+
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  await expect.element(retry).toBeVisible();
+  await retry.click();
+  expect(onRetry).toHaveBeenCalledTimes(1);
+});
+
+test('disables Retry and exposes its busy state while retrying', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Provider request failed.',
+    },
+    { onRetry: () => {}, retrying: true },
+  );
+
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  await expect.element(retry).toBeDisabled();
+  expect(retry.element().getAttribute('aria-busy')).toBe('true');
+});
+
+test('does not show Retry when no callback is provided', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [],
+    stopReason: 'error',
+    errorMessage: 'Provider request failed.',
+  });
+
+  await expect.element(screen.getByRole('note')).toBeVisible();
+  expect(document.querySelector('button')).toBeNull();
 });
 
 test('renders the terminal error after partial assistant content', async () => {
@@ -101,7 +157,7 @@ test('wraps long and multiline provider errors inside a narrow message', async (
       stopReason: 'error',
       errorMessage: error,
     },
-    320,
+    { width: 320, onRetry: () => {} },
   );
 
   const detail = screen.getByText(error);

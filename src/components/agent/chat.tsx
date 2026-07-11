@@ -22,7 +22,11 @@ import {
   sessionsQueryOptions,
 } from '~queries/agent';
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
-import { groupTurns, hasPersistedAgentError } from './chat-turns';
+import {
+  getRetryableErrorInput,
+  groupTurns,
+  hasPersistedAgentError,
+} from './chat-turns';
 import { ModelPicker } from './model-picker';
 import { MessageView } from './message-view';
 import { StreamingBubble } from './streaming-bubble';
@@ -71,9 +75,14 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   const [model, setModel] = useState<string | null>(null);
   const [reconnectToken, setReconnectToken] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [consumedRetryIdentity, setConsumedRetryIdentity] = useState<
+    string | null
+  >(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const retryingRef = useRef(false);
   const RECONNECT_TOAST_ID = 'agent-reconnect';
 
   const clearReconnectTimer = useCallback(() => {
@@ -157,6 +166,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const {
     state: streamState,
     send: sendRun,
+    retry: retryRun,
     connect,
     stop: stopRun,
     answer,
@@ -183,65 +193,144 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // was pegging the browser's main thread and freezing the UI mid-run.)
   const toolResults = useMemo(() => pairToolResults(messages), [messages]);
   const turns = useMemo(() => groupTurns(messages), [messages]);
+  const retryInput = useMemo(
+    () => getRetryableErrorInput(messages),
+    [messages],
+  );
+  const retryableTurn = turns.at(-1);
+  const retryableTurnKey =
+    retryInput &&
+    retryableTurn?.kind === 'assistant' &&
+    retryableTurn.stopReason === 'error'
+      ? retryableTurn.key
+      : null;
+  const retryIdentity = retryableTurnKey
+    ? `${sessionId}:${retryableTurnKey}`
+    : null;
+  const runBusy = streamState.active || Boolean(session?.activeRun);
+  const busy = runBusy || retrying;
+
+  const send = useCallback(
+    async (
+      text: string,
+      images: ComposerImage[],
+      modelValue: string,
+    ): Promise<boolean> => {
+      if (runBusy) return false;
+      if (!text && images.length === 0) return false;
+      const parsed = splitModelValue(modelValue);
+      if (!parsed) return false;
+
+      const runId = await sendRun({
+        sessionId,
+        userText: text,
+        images,
+        providerId: parsed.providerId,
+        modelId: parsed.modelId,
+      });
+      if (!runId) return false;
+      // A successful start has consumed the currently retryable error even if
+      // the new user message cannot be refetched yet (or the run ends before
+      // the active state is observed). A normal send appends another turn, so
+      // its later error has a different key; atomic Retry uses the separate
+      // cache-replacement path below and deliberately does not consume this key.
+      if (retryIdentity) setConsumedRetryIdentity(retryIdentity);
+      // Surface the run immediately so the connection effect subscribes without
+      // waiting for the session refetch round-trip.
+      qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
+        old
+          ? {
+              ...old,
+              activeRun: {
+                id: runId,
+                status: 'running' as const,
+                pendingAsk: null,
+              },
+            }
+          : old,
+      );
+      revalidateSession();
+      return true;
+    },
+    [qc, revalidateSession, retryIdentity, runBusy, sendRun, sessionId],
+  );
+
+  // Keep the retry action mounted while its POST is pending so MessageView can
+  // show a disabled loading button. Other active runs hide it entirely.
+  const canOfferRetry = Boolean(
+    retryInput &&
+    retryIdentity &&
+    consumedRetryIdentity !== retryIdentity &&
+    (!runBusy || retrying),
+  );
+  const retry = useCallback(async () => {
+    // React state does not update synchronously, so the ref closes the window in
+    // which a rapid double click could create two active runs for one session.
+    if (retryingRef.current || runBusy || !retryInput) return;
+    retryingRef.current = true;
+    setRetrying(true);
+    try {
+      const runId = await retryRun(sessionId);
+      if (!runId) return;
+      const sessionOptions = sessionQueryOptions(sessionId);
+      // Stop an older background refetch from restoring the failed transcript
+      // over the optimistic retry snapshot. A repeated failure may land at the
+      // same message index, so unlike a normal send this does not consume the
+      // retry identity — that new error must be retryable again.
+      await qc.cancelQueries({ queryKey: sessionOptions.queryKey });
+      qc.setQueryData(sessionOptions.queryKey, (old) =>
+        old
+          ? {
+              ...old,
+              // The server atomically removed this user message and everything
+              // after it before starting the run. Keep one local copy so the
+              // retried prompt remains visible without the failed reply.
+              messages: old.messages.slice(0, retryInput.userMessageIndex + 1),
+              activeRun: {
+                id: runId,
+                status: 'running' as const,
+                pendingAsk: null,
+              },
+            }
+          : old,
+      );
+      revalidateSession();
+    } finally {
+      retryingRef.current = false;
+      setRetrying(false);
+    }
+  }, [qc, retryInput, retryRun, revalidateSession, runBusy, sessionId]);
+
   const renderedTurns = useMemo(
     () =>
-      turns.map((turn) => (
-        <MessageView
-          key={turn.key}
-          message={
-            turn.kind === 'user'
-              ? turn.message
-              : {
-                  role: 'assistant',
-                  content: turn.blocks,
-                  ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
-                  ...(turn.errorMessage
-                    ? { errorMessage: turn.errorMessage }
-                    : {}),
-                }
-          }
-          toolResults={toolResults}
-        />
-      )),
-    [turns, toolResults],
+      turns.map((turn) => {
+        const showRetry =
+          turn.kind === 'assistant' &&
+          turn.key === retryableTurnKey &&
+          canOfferRetry;
+        return (
+          <MessageView
+            key={turn.key}
+            message={
+              turn.kind === 'user'
+                ? turn.message
+                : {
+                    role: 'assistant',
+                    content: turn.blocks,
+                    ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
+                    ...(turn.errorMessage
+                      ? { errorMessage: turn.errorMessage }
+                      : {}),
+                  }
+            }
+            toolResults={toolResults}
+            onRetry={showRetry ? retry : undefined}
+            retrying={showRetry && retrying}
+          />
+        );
+      }),
+    [canOfferRetry, retry, retryableTurnKey, retrying, toolResults, turns],
   );
-  const busy = streamState.active || Boolean(session?.activeRun);
-
-  const send = async (
-    text: string,
-    images: ComposerImage[],
-    modelValue: string,
-  ): Promise<boolean> => {
-    if (busy) return false;
-    if (!text && images.length === 0) return false;
-    const parsed = splitModelValue(modelValue);
-    if (!parsed) return false;
-
-    const runId = await sendRun({
-      sessionId,
-      userText: text,
-      images,
-      providerId: parsed.providerId,
-      modelId: parsed.modelId,
-    });
-    if (!runId) return false;
-    // Surface the run immediately so the connection effect subscribes without
-    // waiting for the session refetch round-trip.
-    qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
-      old
-        ? {
-            ...old,
-            activeRun: {
-              id: runId,
-              status: 'running' as const,
-              pendingAsk: null,
-            },
-          }
-        : old,
-    );
-    revalidateSession();
-    return true;
-  };
 
   // Return acceptance so the composer keeps the draft if the run fails to start
   // (e.g. an oversized payload the server rejects) instead of losing it.

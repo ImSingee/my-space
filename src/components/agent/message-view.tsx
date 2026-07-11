@@ -111,9 +111,13 @@ function AssistantBlocks({
 export function MessageView({
   message,
   toolResults,
+  onRetry,
+  retrying = false,
 }: {
   message: ChatMessage;
   toolResults?: ToolResultMap;
+  onRetry?: () => void;
+  retrying?: boolean;
 }) {
   if (message.role === 'user') {
     const text = partsToText(message.content);
@@ -168,7 +172,11 @@ export function MessageView({
       <AssistantBlocks blocks={message.content} toolResults={toolResults} />
       <AppActions ids={deployedAppIds(message.content)} />
       {message.stopReason === 'error' ? (
-        <AgentErrorNotice message={message.errorMessage} />
+        <AgentErrorNotice
+          message={message.errorMessage}
+          onRetry={onRetry}
+          retrying={retrying}
+        />
       ) : null}
     </Box>
   );

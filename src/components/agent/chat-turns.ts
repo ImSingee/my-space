@@ -1,5 +1,6 @@
 import type { StopReason } from '@earendil-works/pi-ai';
-import type { AssistantBlock, ChatMessage } from './types';
+import type { ComposerSubmit } from './composer';
+import { type AssistantBlock, type ChatMessage, partsToText } from './types';
 
 export type RenderTurn =
   | { kind: 'user'; key: string; message: ChatMessage }
@@ -47,4 +48,42 @@ export function groupTurns(messages: ChatMessage[]): RenderTurn[] {
 export function hasPersistedAgentError(messages: ChatMessage[]): boolean {
   const last = messages.at(-1);
   return last?.role === 'assistant' && last.stopReason === 'error';
+}
+
+/**
+ * Recover the latest failed turn's original user payload for a retry.
+ *
+ * Only a provider error at the literal end of the raw transcript is retryable:
+ * once anything newer exists, replaying the older prompt could duplicate work.
+ */
+export function getRetryableErrorInput(
+  messages: ChatMessage[],
+): (ComposerSubmit & { userMessageIndex: number }) | null {
+  const last = messages.at(-1);
+  if (last?.role !== 'assistant' || last.stopReason !== 'error') return null;
+
+  for (let index = messages.length - 2; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== 'user') continue;
+
+    const text = partsToText(message.content);
+    const images =
+      typeof message.content === 'string'
+        ? []
+        : message.content.flatMap((part) =>
+            part.type === 'image' &&
+            typeof part.data === 'string' &&
+            part.data.length > 0 &&
+            typeof part.mimeType === 'string' &&
+            part.mimeType.length > 0
+              ? [{ data: part.data, mimeType: part.mimeType }]
+              : [],
+          );
+
+    return text.trim().length > 0 || images.length > 0
+      ? { text, images, userMessageIndex: index }
+      : null;
+  }
+
+  return null;
 }

@@ -55,9 +55,10 @@ async function readCappedJson(
   return JSON.parse(text);
 }
 
-const bodySchema = z
+const startBodySchema = z
   .object({
     sessionId: z.string().min(1),
+    retry: z.literal(false).optional(),
     userText: z.string().max(MAX_USER_TEXT).default(''),
     providerId: z.string().nullish(),
     modelId: z.string().nullish(),
@@ -76,6 +77,18 @@ const bodySchema = z
   .refine((b) => b.userText.trim().length > 0 || (b.images?.length ?? 0) > 0, {
     message: 'Message must include text or an image.',
   });
+
+// Retry is deliberately a separate, strict shape. The server reconstructs the
+// prompt, images, model, and transcript boundary from the persisted session;
+// clients cannot override any of them on a retry request.
+const retryBodySchema = z
+  .object({
+    sessionId: z.string().min(1),
+    retry: z.literal(true),
+  })
+  .strict();
+
+const bodySchema = z.union([retryBodySchema, startBodySchema]);
 
 export const Route = createFileRoute('/api/agent/runs')({
   server: {

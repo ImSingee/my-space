@@ -187,8 +187,11 @@ export type SendParams = {
   modelId?: string | null;
 };
 
+type RetryParams = { sessionId: string; retry: true };
+type StartParams = SendParams | RetryParams;
+
 export async function startAgentRunRequest(
-  params: SendParams,
+  params: StartParams,
 ): Promise<{ runId: string }> {
   const res = await fetch('/api/agent/runs', {
     method: 'POST',
@@ -380,7 +383,7 @@ export function useAgentStream(
     [handleEvent],
   );
 
-  const send = useCallback(async (params: SendParams) => {
+  const start = useCallback(async (params: StartParams) => {
     terminalRunIdRef.current = null;
     const requestId = startRequestIdRef.current + 1;
     startRequestIdRef.current = requestId;
@@ -429,6 +432,12 @@ export function useAgentStream(
     }
   }, []);
 
+  const send = useCallback((params: SendParams) => start(params), [start]);
+  const retry = useCallback(
+    (sessionId: string) => start({ sessionId, retry: true }),
+    [start],
+  );
+
   const answer = useCallback(async (askId: string, answers: AskAnswer[]) => {
     const runId = runIdRef.current;
     if (!runId) return;
@@ -472,5 +481,5 @@ export function useAgentStream(
     }
   }, []);
 
-  return { state, send, connect, stop, answer };
+  return { state, send, retry, connect, stop, answer };
 }

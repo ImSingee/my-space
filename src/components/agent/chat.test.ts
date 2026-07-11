@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { groupTurns, hasPersistedAgentError } from './chat-turns';
+import {
+  getRetryableErrorInput,
+  groupTurns,
+  hasPersistedAgentError,
+} from './chat-turns';
 import type { ChatMessage } from './types';
 
 describe('groupTurns', () => {
@@ -77,5 +81,140 @@ describe('hasPersistedAgentError', () => {
     expect(hasPersistedAgentError([{ role: 'user', content: 'Retry' }])).toBe(
       false,
     );
+  });
+});
+
+describe('getRetryableErrorInput', () => {
+  it('restores text and base64 images from the nearest user message', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Older request' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Build from these images' },
+          {
+            type: 'image',
+            data: 'aW1hZ2UtMQ==',
+            mimeType: 'image/png',
+          },
+          {
+            type: 'image',
+            data: 'aW1hZ2UtMg==',
+            mimeType: 'image/webp',
+          },
+        ],
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Partial reply' }],
+      },
+      {
+        role: 'toolResult',
+        toolName: 'read_file',
+        content: [{ type: 'text', text: 'result' }],
+      },
+      {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'Provider unavailable',
+      },
+    ];
+
+    expect(getRetryableErrorInput(messages)).toEqual({
+      text: 'Build from these images',
+      userMessageIndex: 2,
+      images: [
+        { data: 'aW1hZ2UtMQ==', mimeType: 'image/png' },
+        { data: 'aW1hZ2UtMg==', mimeType: 'image/webp' },
+      ],
+    });
+  });
+
+  it('restores a string-form user message', () => {
+    expect(
+      getRetryableErrorInput([
+        { role: 'user', content: 'Try this again' },
+        {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: 'Provider unavailable',
+        },
+      ]),
+    ).toEqual({ text: 'Try this again', images: [], userMessageIndex: 0 });
+  });
+
+  it('returns null when any message follows the failed assistant', () => {
+    const user: ChatMessage = { role: 'user', content: 'Original request' };
+    const failed: ChatMessage = {
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Provider unavailable',
+    };
+    const newerMessages: ChatMessage[] = [
+      { role: 'user', content: 'A newer request' },
+      {
+        role: 'toolResult',
+        toolName: 'read_file',
+        content: [{ type: 'text', text: 'late result' }],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'Recovered' }] },
+    ];
+
+    for (const newer of newerMessages) {
+      expect(getRetryableErrorInput([user, failed, newer])).toBeNull();
+    }
+  });
+
+  it('rejects aborted and successful terminal assistants', () => {
+    const user: ChatMessage = { role: 'user', content: 'Original request' };
+
+    expect(
+      getRetryableErrorInput([
+        user,
+        {
+          role: 'assistant',
+          content: [],
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted',
+        },
+      ]),
+    ).toBeNull();
+    expect(
+      getRetryableErrorInput([
+        user,
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done.' }],
+          stopReason: 'stop',
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it('returns null without a usable user payload', () => {
+    const failed: ChatMessage = {
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Provider unavailable',
+    };
+
+    expect(getRetryableErrorInput([failed])).toBeNull();
+    expect(
+      getRetryableErrorInput([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '   ' },
+            { type: 'image', data: 'missing-mime-type' },
+          ],
+        },
+        failed,
+      ]),
+    ).toBeNull();
   });
 });

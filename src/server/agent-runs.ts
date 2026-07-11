@@ -30,14 +30,21 @@ import {
   type SendImage,
 } from '~agent/protocol';
 import { AppError } from '~server/errors';
+import { parseRetryableAgentTurn } from './agent-retry';
 
-export type AgentRunInput = {
-  sessionId: string;
-  userText: string;
-  images?: SendImage[];
-  providerId?: string | null;
-  modelId?: string | null;
-};
+export type AgentRunInput =
+  | {
+      sessionId: string;
+      retry: true;
+    }
+  | {
+      sessionId: string;
+      retry?: false;
+      userText: string;
+      images?: SendImage[];
+      providerId?: string | null;
+      modelId?: string | null;
+    };
 
 export type PendingAskPayload = {
   askId: string;
@@ -361,9 +368,36 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     throw new AppError('This chat already has a running Agent turn.', 409);
   }
 
+  const sessionMessages = (sessionRow.messages ?? []) as JsonValue[];
+  let baseMessages: JsonValue[];
+  let userText: string;
+  let images: SendImage[];
+  let requestedProviderId: string | null;
+  let requestedModelId: string | null;
+
+  if (input.retry === true) {
+    const retry = parseRetryableAgentTurn(sessionMessages);
+    if (!retry) {
+      throw new AppError('There is no failed Agent turn to retry.', 409);
+    }
+    baseMessages = retry.baseMessages;
+    userText = retry.userText;
+    images = retry.images;
+    // A retry replays the persisted turn with its persisted session model; no
+    // client-supplied prompt, images, provider, or model participates.
+    requestedProviderId = sessionRow.providerId;
+    requestedModelId = sessionRow.modelId;
+  } else {
+    baseMessages = sessionMessages;
+    userText = input.userText;
+    images = input.images ?? [];
+    requestedProviderId = input.providerId ?? sessionRow.providerId;
+    requestedModelId = input.modelId ?? sessionRow.modelId;
+  }
+
   const model = await resolveRunModelConfig(
-    input.providerId ?? sessionRow.providerId,
-    input.modelId ?? sessionRow.modelId,
+    requestedProviderId,
+    requestedModelId,
   );
   if (!model) {
     throw new Error(
@@ -379,33 +413,48 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     );
   }
 
-  const baseMessages = (sessionRow.messages ?? []) as JsonValue[];
   const title =
     sessionRow.title && sessionRow.title !== 'New chat'
       ? sessionRow.title
-      : deriveTitle(input.userText);
-  const images = input.images ?? [];
+      : deriveTitle(userText);
 
   let run: typeof schema.agentRuns.$inferSelect;
   try {
-    [run] = await db
-      .insert(schema.agentRuns)
-      .values({
-        sessionId: input.sessionId,
-        providerId: model.providerId,
-        modelId: model.model.id,
-        status: 'running',
-        // Covers the dispatch window; the accepting runner renews from here.
-        leaseExpiresAt: leaseDeadline(),
-        // Diagnostics only (no reader reconstructs the run from this). Store
-        // image metadata, not the base64 payloads — those already live in the
-        // persisted session message, and duplicating them here bloated the row.
-        input: {
-          userText: input.userText,
-          images: images.map((image) => ({ mimeType: image.mimeType })),
-        },
-      })
-      .returning();
+    run = await db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(schema.agentRuns)
+        .values({
+          sessionId: input.sessionId,
+          providerId: model.providerId,
+          modelId: model.model.id,
+          status: 'running',
+          // Covers the dispatch window; the accepting runner renews from here.
+          leaseExpiresAt: leaseDeadline(),
+          // Diagnostics only (no reader reconstructs the run from this). Store
+          // image metadata, not the base64 payloads — those already live in the
+          // persisted session message, and duplicating them here bloated the row.
+          input: {
+            userText,
+            images: images.map((image) => ({ mimeType: image.mimeType })),
+          },
+        })
+        .returning();
+
+      // Keep run creation and transcript replacement in one commit. In
+      // particular, a retry must never delete the failed turn unless the new
+      // run row was created successfully.
+      await tx
+        .update(schema.agentSessions)
+        .set({
+          messages: [...baseMessages, userMessage(userText, images)],
+          title,
+          providerId: model.providerId,
+          modelId: model.model.id,
+        })
+        .where(eq(schema.agentSessions.id, input.sessionId));
+
+      return inserted;
+    });
   } catch (error) {
     if (isActiveRunConflict(error)) {
       throw new AppError('This chat already has a running Agent turn.', 409);
@@ -413,21 +462,11 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     throw error;
   }
 
-  await db
-    .update(schema.agentSessions)
-    .set({
-      messages: [...baseMessages, userMessage(input.userText, images)],
-      title,
-      providerId: model.providerId,
-      modelId: model.model.id,
-    })
-    .where(eq(schema.agentSessions.id, input.sessionId));
-
   try {
     await hub.dispatchRun({
       runId: run.id,
       sessionId: input.sessionId,
-      userText: input.userText,
+      userText,
       images,
       priorMessages: baseMessages,
       model,
