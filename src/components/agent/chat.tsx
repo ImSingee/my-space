@@ -172,9 +172,11 @@ export function Chat({ sessionId }: { sessionId: string }) {
     retryableTurn.stopReason === 'error'
       ? retryableTurn.key
       : null;
-  const retryIdentity = retryableTurnKey
-    ? `${sessionId}:${retryableTurnKey}`
-    : null;
+  const retryRevision = retryInput ? (session?.updatedAt ?? null) : null;
+  const retryIdentity =
+    retryableTurnKey && retryRevision
+      ? `${sessionId}:${retryableTurnKey}:${retryRevision}`
+      : null;
   const runBusy = streamState.active || Boolean(session?.activeRun);
   const busy = runBusy || retrying;
 
@@ -197,11 +199,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
         modelId: parsed.modelId,
       });
       if (!runId) return false;
-      // A successful start has consumed the currently retryable error even if
-      // the new user message cannot be refetched yet (or the run ends before
-      // the active state is observed). A normal send appends another turn, so
-      // its later error has a different key; atomic Retry uses the separate
-      // cache-replacement path below and deliberately does not consume this key.
+      // A successful start has consumed this exact failure revision even if the
+      // new user message cannot be refetched yet (or the run ends before the
+      // active state is observed). Any later failure has a new session revision;
+      // atomic Retry uses the separate cache-replacement path below.
       if (retryIdentity) setConsumedRetryIdentity(retryIdentity);
       // Surface the run immediately so the connection effect subscribes without
       // waiting for the session refetch round-trip.
@@ -238,22 +239,35 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const retry = useCallback(async () => {
     // React state does not update synchronously, so the ref closes the window in
     // which a rapid double click could create two active runs for one session.
-    if (retryingRef.current || runBusy || !retryInput || !effectiveModelParts)
+    if (
+      retryingRef.current ||
+      runBusy ||
+      !retryInput ||
+      !retryRevision ||
+      !effectiveModelParts
+    )
       return;
     retryingRef.current = true;
     setRetrying(true);
     try {
       const runId = await retryRun({
         sessionId,
+        expectedSessionUpdatedAt: retryRevision,
         providerId: effectiveModelParts.providerId,
         modelId: effectiveModelParts.modelId,
       });
-      if (!runId) return;
+      if (!runId) {
+        // A concurrent tab/run may already have consumed this failed turn.
+        // Refresh immediately so a server-side 409 cannot leave a stale Retry
+        // action mounted against transcript state that no longer exists.
+        revalidateSession();
+        return;
+      }
       const sessionOptions = sessionQueryOptions(sessionId);
       // Stop an older background refetch from restoring the failed transcript
       // over the optimistic retry snapshot. A repeated failure may land at the
-      // same message index, so unlike a normal send this does not consume the
-      // retry identity — that new error must be retryable again.
+      // same message index, but it receives a new session revision and must be
+      // independently retryable after the canonical transcript is refetched.
       await qc.cancelQueries({ queryKey: sessionOptions.queryKey });
       qc.setQueryData(sessionOptions.queryKey, (old) =>
         old
@@ -282,6 +296,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     effectiveModelParts,
     qc,
     retryInput,
+    retryRevision,
     retryRun,
     revalidateSession,
     runBusy,

@@ -189,6 +189,7 @@ export type SendParams = {
 
 export type RetryParams = {
   sessionId: string;
+  expectedSessionUpdatedAt: string;
   providerId: string;
   modelId: string;
 };

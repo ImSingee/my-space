@@ -12,6 +12,7 @@ const fixtures = vi.hoisted(() => ({
     appId: null,
     providerId: 'provider-original',
     modelId: 'model:with-colon',
+    updatedAt: '2026-07-11T12:00:00.000Z',
     messages: [
       {
         role: 'user',
@@ -94,7 +95,7 @@ vi.mock('~queries/agent', () => ({
       if (fixtures.failSessionFetch) {
         throw new Error('Session refetch failed');
       }
-      return fixtures.session;
+      return structuredClone(fixtures.session);
     },
   }),
 }));
@@ -108,6 +109,8 @@ function doneResponse(): Response {
 
 beforeEach(() => {
   fixtures.failSessionFetch = false;
+  fixtures.session.updatedAt = '2026-07-11T12:00:00.000Z';
+  fixtures.session.activeRun = null;
   for (const provider of fixtures.providers) {
     provider.enabled = true;
     for (const model of provider.models) model.enabled = true;
@@ -167,6 +170,7 @@ test('retries once with the selected model, hides stale error, and allows a same
   expect(JSON.parse(String(startCalls[0][1]?.body))).toEqual({
     sessionId: 'session-1',
     retry: true,
+    expectedSessionUpdatedAt: '2026-07-11T12:00:00.000Z',
     providerId: 'provider-latest',
     modelId: 'model-latest',
   });
@@ -192,6 +196,72 @@ test('retries once with the selected model, hides stale error, and allows a same
     fixtures.session,
   );
   await expect.element(retry).toBeVisible();
+});
+
+test('refreshes a stale error after another tab has consumed its Retry', async () => {
+  const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.includes('/events')) {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    }
+    if (url !== '/api/agent/runs') throw new Error(`Unexpected fetch: ${url}`);
+    fixtures.session.updatedAt = '2026-07-11T12:01:00.000Z';
+    fixtures.session.activeRun = {
+      id: 'run-from-another-tab',
+      status: 'running',
+      pendingAsk: null,
+    };
+    return new Response('This chat already has a running Agent turn.', {
+      status: 409,
+    });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Chat sessionId="session-1" />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  await expect.element(retry).toBeVisible();
+  await retry.click();
+
+  await vi.waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(
+        ([input]) => String(input) === '/api/agent/runs',
+      ),
+    ).toHaveLength(1),
+  );
+  const startCall = fetchMock.mock.calls.find(
+    ([input]) => String(input) === '/api/agent/runs',
+  );
+  expect(JSON.parse(String(startCall?.[1]?.body))).toEqual({
+    sessionId: 'session-1',
+    retry: true,
+    expectedSessionUpdatedAt: '2026-07-11T12:00:00.000Z',
+    providerId: 'provider-original',
+    modelId: 'model:with-colon',
+  });
+  await expect.element(retry).not.toBeInTheDocument();
+  expect(
+    queryClient.getQueryData(['test-agent-session', 'session-1']),
+  ).toMatchObject({
+    updatedAt: '2026-07-11T12:01:00.000Z',
+    activeRun: { id: 'run-from-another-tab' },
+  });
 });
 
 test('keeps the final error Retry visible but disabled without a model', async () => {

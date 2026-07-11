@@ -36,6 +36,7 @@ export type AgentRunInput =
   | {
       sessionId: string;
       retry: true;
+      expectedSessionUpdatedAt: string;
       providerId: string;
       modelId: string;
     }
@@ -362,23 +363,16 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     throw new AppError('This chat already has a running Agent turn.', 409);
   }
 
-  const sessionMessages = (sessionRow.messages ?? []) as JsonValue[];
-  let baseMessages: JsonValue[];
-  let userText: string;
-  let images: SendImage[];
-
   if (input.retry === true) {
-    const retry = parseRetryableAgentTurn(sessionMessages);
-    if (!retry) {
+    if (sessionRow.updatedAt.toISOString() !== input.expectedSessionUpdatedAt) {
       throw new AppError('There is no failed Agent turn to retry.', 409);
     }
-    baseMessages = retry.baseMessages;
-    userText = retry.userText;
-    images = retry.images;
-  } else {
-    baseMessages = sessionMessages;
-    userText = input.userText;
-    images = input.images ?? [];
+    const initialRetry = parseRetryableAgentTurn(
+      (sessionRow.messages ?? []) as JsonValue[],
+    );
+    if (!initialRetry) {
+      throw new AppError('There is no failed Agent turn to retry.', 409);
+    }
   }
 
   const model = await resolveRunModelConfig(input.providerId, input.modelId);
@@ -391,14 +385,69 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     );
   }
 
-  const title =
-    sessionRow.title && sessionRow.title !== 'New chat'
-      ? sessionRow.title
-      : deriveTitle(userText);
-
-  let run: typeof schema.agentRuns.$inferSelect;
+  type PreparedRun = {
+    run: typeof schema.agentRuns.$inferSelect;
+    baseMessages: JsonValue[];
+    userText: string;
+    images: SendImage[];
+  };
+  let prepared: PreparedRun;
   try {
-    run = await db.transaction(async (tx) => {
+    prepared = await db.transaction(async (tx) => {
+      // Serialize starts for this exact session, then re-read every piece of
+      // transcript state used below. A request may have waited on model or
+      // runner I/O after its initial validation; using that old snapshot here
+      // could replay a turn that a newer run had already completed.
+      const [lockedSession] = await tx
+        .select()
+        .from(schema.agentSessions)
+        .where(eq(schema.agentSessions.id, input.sessionId))
+        .for('update');
+      if (!lockedSession) throw new AppError('Session not found.', 404);
+
+      const [lockedActiveRun] = await tx
+        .select({ id: schema.agentRuns.id })
+        .from(schema.agentRuns)
+        .where(
+          and(
+            eq(schema.agentRuns.sessionId, input.sessionId),
+            inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+          ),
+        )
+        .limit(1);
+      if (lockedActiveRun) {
+        throw new AppError('This chat already has a running Agent turn.', 409);
+      }
+
+      if (
+        input.retry === true &&
+        lockedSession.updatedAt.toISOString() !== input.expectedSessionUpdatedAt
+      ) {
+        throw new AppError('There is no failed Agent turn to retry.', 409);
+      }
+
+      const sessionMessages = (lockedSession.messages ?? []) as JsonValue[];
+      let baseMessages: JsonValue[];
+      let userText: string;
+      let images: SendImage[];
+      if (input.retry === true) {
+        const retry = parseRetryableAgentTurn(sessionMessages);
+        if (!retry) {
+          throw new AppError('There is no failed Agent turn to retry.', 409);
+        }
+        baseMessages = retry.baseMessages;
+        userText = retry.userText;
+        images = retry.images;
+      } else {
+        baseMessages = sessionMessages;
+        userText = input.userText;
+        images = input.images ?? [];
+      }
+
+      const title =
+        lockedSession.title && lockedSession.title !== 'New chat'
+          ? lockedSession.title
+          : deriveTitle(userText);
       const [inserted] = await tx
         .insert(schema.agentRuns)
         .values({
@@ -431,7 +480,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         })
         .where(eq(schema.agentSessions.id, input.sessionId));
 
-      return inserted;
+      return { run: inserted, baseMessages, userText, images };
     });
   } catch (error) {
     if (isActiveRunConflict(error)) {
@@ -439,6 +488,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     }
     throw error;
   }
+  const { run, baseMessages, userText, images } = prepared;
 
   try {
     await hub.dispatchRun({

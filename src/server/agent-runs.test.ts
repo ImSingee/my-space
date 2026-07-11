@@ -61,13 +61,17 @@ async function seedAvailableModels() {
 }
 
 async function seedSession(id: string, messages: JsonValue[]) {
-  await db.insert(schema.agentSessions).values({
-    id,
-    title: 'Retry session',
-    providerId: PROVIDER_A_ID,
-    modelId: MODEL_A_ID,
-    messages,
-  });
+  const [session] = await db
+    .insert(schema.agentSessions)
+    .values({
+      id,
+      title: 'Retry session',
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+      messages,
+    })
+    .returning({ updatedAt: schema.agentSessions.updatedAt });
+  return session.updatedAt.toISOString();
 }
 
 describe('startAgentRun retry', () => {
@@ -81,7 +85,7 @@ describe('startAgentRun retry', () => {
         stopReason: 'stop',
       },
     ];
-    await seedSession('session-retry', [
+    const expectedSessionUpdatedAt = await seedSession('session-retry', [
       ...baseMessages,
       {
         role: 'user',
@@ -108,6 +112,7 @@ describe('startAgentRun retry', () => {
     const { runId } = await startAgentRun({
       sessionId: 'session-retry',
       retry: true,
+      expectedSessionUpdatedAt,
       userText: 'Malicious client override',
       images: [{ data: 'ZXZpbA==', mimeType: 'image/jpeg' }],
       providerId: PROVIDER_B_ID,
@@ -158,20 +163,146 @@ describe('startAgentRun retry', () => {
     });
   });
 
-  it('returns a conflict when the transcript has no retryable error', async () => {
-    await seedSession('session-not-retryable', [
-      { role: 'user', content: 'Already handled' },
+  it('rejects a stale retry after a newer retry has failed again', async () => {
+    await seedAvailableModels();
+    const failedMessages: JsonValue[] = [
+      { role: 'user', content: 'Failed request' },
       {
         role: 'assistant',
-        content: [{ type: 'text', text: 'Done.' }],
-        stopReason: 'stop',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'Provider unavailable',
       },
-    ]);
+    ];
+    const expectedSessionUpdatedAt = await seedSession(
+      'session-stale-retry',
+      failedMessages,
+    );
+
+    let signalProviderLookupStarted!: () => void;
+    const providerLookupStarted = new Promise<void>((resolve) => {
+      signalProviderLookupStarted = resolve;
+    });
+    let releaseProviderLookup!: () => void;
+    const providerLookupReleased = new Promise<void>((resolve) => {
+      releaseProviderLookup = resolve;
+    });
+    const originalFindProvider = db.query.agentProviders.findFirst.bind(
+      db.query.agentProviders,
+    );
+    const delayedFindProvider = ((
+      options: Parameters<typeof originalFindProvider>[0],
+    ) => {
+      signalProviderLookupStarted();
+      return providerLookupReleased.then(() => originalFindProvider(options));
+    }) as unknown as typeof db.query.agentProviders.findFirst;
+    const findProviderSpy = vi
+      .spyOn(db.query.agentProviders, 'findFirst')
+      .mockImplementationOnce(delayedFindProvider);
+
+    const staleRetry = startAgentRun({
+      sessionId: 'session-stale-retry',
+      retry: true,
+      expectedSessionUpdatedAt,
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
+    });
+    await providerLookupStarted;
+
+    const freshRetry = await startAgentRun({
+      sessionId: 'session-stale-retry',
+      retry: true,
+      expectedSessionUpdatedAt,
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
+    });
+    const failedAgainMessages: JsonValue[] = [
+      { role: 'user', content: 'Failed request' },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Another partial response' }],
+      },
+      {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'Provider unavailable again',
+      },
+    ];
+    await db
+      .update(schema.agentSessions)
+      .set({ messages: failedAgainMessages })
+      .where(eq(schema.agentSessions.id, 'session-stale-retry'));
+    await db
+      .update(schema.agentRuns)
+      .set({
+        status: 'failed',
+        error: 'Provider unavailable again',
+        completedAt: new Date(),
+      })
+      .where(eq(schema.agentRuns.id, freshRetry.runId));
+
+    // A duplicate that only reaches the server after the new failure is stale
+    // too: its client-supplied revision still identifies the original error.
+    await expect(
+      startAgentRun({
+        sessionId: 'session-stale-retry',
+        retry: true,
+        expectedSessionUpdatedAt,
+        providerId: PROVIDER_B_ID,
+        modelId: MODEL_B_ID,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'There is no failed Agent turn to retry.',
+    });
+
+    releaseProviderLookup();
+    await expect(staleRetry).rejects.toMatchObject({
+      status: 409,
+      message: 'There is no failed Agent turn to retry.',
+    });
+    findProviderSpy.mockRestore();
+
+    const session = await db.query.agentSessions.findFirst({
+      where: (row, { eq }) => eq(row.id, 'session-stale-retry'),
+    });
+    expect(session?.messages).toEqual(failedAgainMessages);
+    expect(session?.updatedAt.toISOString()).not.toBe(expectedSessionUpdatedAt);
+    expect(await db.query.agentRuns.findMany()).toHaveLength(1);
+    expect(hub.dispatchRun).toHaveBeenCalledTimes(1);
+
+    // A new click rendered from the new failure revision remains valid.
+    const intentionalRetry = await startAgentRun({
+      sessionId: 'session-stale-retry',
+      retry: true,
+      expectedSessionUpdatedAt: session!.updatedAt.toISOString(),
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
+    });
+    expect(intentionalRetry.runId).not.toBe(freshRetry.runId);
+    expect(await db.query.agentRuns.findMany()).toHaveLength(2);
+    expect(hub.dispatchRun).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a conflict when the transcript has no retryable error', async () => {
+    const expectedSessionUpdatedAt = await seedSession(
+      'session-not-retryable',
+      [
+        { role: 'user', content: 'Already handled' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done.' }],
+          stopReason: 'stop',
+        },
+      ],
+    );
 
     await expect(
       startAgentRun({
         sessionId: 'session-not-retryable',
         retry: true,
+        expectedSessionUpdatedAt,
         providerId: PROVIDER_B_ID,
         modelId: MODEL_B_ID,
       }),
@@ -245,12 +376,16 @@ describe('startAgentRun retry', () => {
         errorMessage: 'Provider unavailable',
       },
     ];
-    await seedSession('session-disabled-model', failedMessages);
+    const expectedSessionUpdatedAt = await seedSession(
+      'session-disabled-model',
+      failedMessages,
+    );
 
     await expect(
       startAgentRun({
         sessionId: 'session-disabled-model',
         retry: true,
+        expectedSessionUpdatedAt,
         providerId: PROVIDER_B_ID,
         modelId: MODEL_B_ID,
       }),

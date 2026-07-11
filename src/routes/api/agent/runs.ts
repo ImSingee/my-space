@@ -80,11 +80,13 @@ const startBodySchema = z
 
 // Retry is deliberately a separate, strict shape. The server reconstructs the
 // prompt, images, and transcript boundary from the persisted session, while
-// the client supplies the model currently selected in the composer.
+// the client supplies the model currently selected in the composer and the
+// exact session revision whose error the user chose to retry.
 const retryBodySchema = z
   .object({
     sessionId: z.string().min(1),
     retry: z.literal(true),
+    expectedSessionUpdatedAt: z.string().min(1),
     providerId: z.string().min(1),
     modelId: z.string().min(1),
   })

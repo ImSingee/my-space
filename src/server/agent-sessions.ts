@@ -57,6 +57,8 @@ export type SessionDetail = {
   appId: string | null;
   providerId: string | null;
   modelId: string | null;
+  /** Changes whenever the persisted session is mutated; used as a Retry CAS. */
+  updatedAt: string;
   messages: JsonValue[];
   activeRun: ActiveAgentRun | null;
 };
@@ -75,6 +77,7 @@ export const getSession = createServerFn({ method: 'GET' })
       appId: row.appId,
       providerId: row.providerId,
       modelId: row.modelId,
+      updatedAt: row.updatedAt.toISOString(),
       messages: row.messages,
       activeRun: await getActiveAgentRun(row.id),
     };

@@ -13,7 +13,7 @@
  *   pnpm dev:runner        # in another terminal
  *   set -a && . ./.env.local && set +a && pnpm exec tsx scripts/agent-smoke.ts
  */
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { appBuildDir, appSrcDir } from '../src/agent/paths';
 import { seedDefaultProviders } from '../src/agent/seed-providers';
 import { db, schema } from '../src/db';
@@ -80,17 +80,30 @@ async function main() {
   const seeded = await seedDefaultProviders();
   console.log('  seeded:', seeded);
 
-  const provider = await db.query.agentProviders.findFirst({
-    where: (row, { eq: equals }) => equals(row.enabled, true),
-    orderBy: (row, { asc }) => [asc(row.sortOrder), asc(row.createdAt)],
-  });
-  if (!provider) throw new Error('no enabled Agent provider');
-  const model = await db.query.agentModels.findFirst({
-    where: (row, { and, eq: equals }) =>
-      and(equals(row.providerId, provider.id), equals(row.enabled, true)),
-    orderBy: (row, { asc }) => [asc(row.sortOrder), asc(row.createdAt)],
-  });
-  if (!model) throw new Error('no enabled Agent model');
+  const [modelSelection] = await db
+    .select({
+      providerId: schema.agentProviders.id,
+      modelId: schema.agentModels.modelId,
+    })
+    .from(schema.agentProviders)
+    .innerJoin(
+      schema.agentModels,
+      and(
+        eq(schema.agentModels.providerId, schema.agentProviders.id),
+        eq(schema.agentModels.enabled, true),
+      ),
+    )
+    .where(eq(schema.agentProviders.enabled, true))
+    .orderBy(
+      asc(schema.agentProviders.sortOrder),
+      asc(schema.agentProviders.createdAt),
+      asc(schema.agentModels.sortOrder),
+      asc(schema.agentModels.createdAt),
+    )
+    .limit(1);
+  if (!modelSelection) {
+    throw new Error('no enabled Agent provider/model pair');
+  }
 
   console.log('[cleanup prior run]');
   await cleanupBySlug(SLUG);
@@ -112,8 +125,8 @@ async function main() {
   const { runId } = await startAgentRun({
     sessionId: session.id,
     userText: PROMPT,
-    providerId: provider.id,
-    modelId: model.modelId,
+    providerId: modelSelection.providerId,
+    modelId: modelSelection.modelId,
   });
 
   const deadline = Date.now() + TIMEOUT_MS;
