@@ -38,10 +38,13 @@ export function toModuleDataUrl(code: string): string {
  *   the host posts when the placement changes;
  * - pixel dimensions are measured in-frame with a ResizeObserver, so they stay
  *   accurate across responsive reflows without the host measuring anything;
- * - `onRefresh` callbacks run when the host posts a `refresh` message (a
- *   per-widget or dashboard-wide refresh), letting a widget refetch its data
- *   in place without a remount; a widget that registers none is reloaded
- *   instead, so the host's refresh control always does something.
+ * - `onRefresh` callbacks may return `void` or a Promise and run when the host
+ *   posts a `refresh` message (a per-widget or dashboard-wide refresh), letting
+ *   a widget refetch its data in place without a remount; registering the first
+ *   callback declares refresh support to the host, and removing the last one
+ *   withdraws it.
+ * - `generation` binds both directions of the postMessage protocol to this
+ *   exact document load, so delayed messages from an older load are ignored.
  *
  * `moduleUrl` is a base64 `data:` URL (no quotes / `</script`), so inlining it
  * is safe.
@@ -49,12 +52,14 @@ export function toModuleDataUrl(code: string): string {
 export function widgetFrameHtml(
   moduleUrl: string,
   initialUnits: { w: number; h: number },
+  generation: string,
 ): string {
   const units = JSON.stringify({
     w: Math.round(initialUnits.w),
     h: Math.round(initialUnits.h),
   });
   const channel = JSON.stringify(WIDGET_CHANNEL);
+  const frameGeneration = JSON.stringify(generation);
   // Run the widget in its own iframe document/realm instead of the dashboard
   // page: a crashing or DOM-mutating widget can no longer corrupt the dashboard,
   // and top-navigation/popups stay blocked (sandbox omits those tokens). The
@@ -73,6 +78,7 @@ body{font:14px/1.5 system-ui,-apple-system,sans-serif}
 <script type="module">
 (async () => {
   const channel = ${channel};
+  const generation = ${frameGeneration};
   try {
     const el = document.getElementById('hatch-widget-root');
     let units = ${units};
@@ -97,32 +103,26 @@ body{font:14px/1.5 system-ui,-apple-system,sans-serif}
       recompute();
     });
     ro.observe(el);
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', async (event) => {
       if (event.source !== parent) return;
       const data = event.data;
-      if (!data) return;
+      if (!data || data.generation !== generation) return;
       if (data[channel] === 'units') {
         units = { w: Number(data.w), h: Number(data.h) };
         recompute();
       } else if (data[channel] === 'refresh') {
-        const runRefresh = () => {
-          if (refreshListeners.size === 0) return false;
-          for (const cb of refreshListeners) {
-            try { cb(); } catch (e) {}
-          }
-          return true;
-        };
-        if (!runRefresh()) {
-          // No handler registered yet. React widgets register onRefresh from an
-          // effect that runs after mount() returned (and after we posted
-          // 'ready'), so give late registrations a tick before falling back to a
-          // full re-mount. The srcdoc + inlined data: module persist across the
-          // reload; the host re-sends current units on the new 'ready' so the
-          // remounted widget can't keep stale grid units.
-          setTimeout(() => {
-            if (!runRefresh()) location.reload();
-          }, 60);
-        }
+        const callbacks = Array.from(refreshListeners);
+        const results = await Promise.allSettled(
+          callbacks.map((cb) => Promise.resolve().then(() => cb())),
+        );
+        parent.postMessage({
+          [channel]: 'refresh-complete',
+          generation,
+          requestId: data.requestId,
+          success:
+            callbacks.length > 0 &&
+            results.every((result) => result.status === 'fulfilled'),
+        }, '*');
       }
     });
     const context = {
@@ -135,16 +135,37 @@ body{font:14px/1.5 system-ui,-apple-system,sans-serif}
       },
       onRefresh(cb) {
         if (typeof cb !== 'function') return () => {};
+        const wasEmpty = refreshListeners.size === 0;
         refreshListeners.add(cb);
-        return () => { refreshListeners.delete(cb); };
+        if (wasEmpty && refreshListeners.size === 1) {
+          parent.postMessage({
+            [channel]: 'refresh-capability',
+            generation,
+            supported: true,
+          }, '*');
+        }
+        return () => {
+          if (!refreshListeners.delete(cb)) return;
+          if (refreshListeners.size === 0) {
+            parent.postMessage({
+              [channel]: 'refresh-capability',
+              generation,
+              supported: false,
+            }, '*');
+          }
+        };
       },
     };
     const m = await import(${JSON.stringify(moduleUrl)});
     if (typeof m.mount !== 'function') throw new Error('widget does not export mount()');
     m.mount(el, context);
-    parent.postMessage({ [channel]: 'ready' }, '*');
+    parent.postMessage({ [channel]: 'ready', generation }, '*');
   } catch (e) {
-    parent.postMessage({ [channel]: 'error', message: String((e && e.message) || e) }, '*');
+    parent.postMessage({
+      [channel]: 'error',
+      generation,
+      message: String((e && e.message) || e),
+    }, '*');
   }
 })();
 </script></body></html>`;

@@ -56,10 +56,12 @@ Each app is an independent application with this source layout:
   widget's size — grid units (\`w\`/\`h\`) and live pixel size
   (\`width\`/\`height\`) — via \`context.size\` and a \`context.onResize\`
   subscription, so widgets can adapt their layout. \`context.onRefresh(cb)\`
-  registers a handler the platform calls when the user refreshes the widget or
-  dashboard (use it to refetch in place). Set \`defaultSize\` (and optionally
-  \`supportedSizes\` to snap resizing to specific footprints) per widget in the
-  manifest. Widgets bundle their own React, so just write normal React inside.
+  declares refresh capability. Refreshable widgets MUST register it and return
+  the actual refetch Promise; widgets without refresh MUST NOT register a no-op.
+  A refresh MUST keep the last successful content visible until new content
+  replaces it. Set \`defaultSize\` (and optionally \`supportedSizes\` to snap
+  resizing to specific footprints) per widget in the manifest. Widgets bundle
+  their own React, so just write normal React inside.
 - **Extended capabilities** (opt in via manifest \`capabilities\`):
   - \`cron\`: declare jobs (\`{ name, schedule, method }\`, 5-field cron) in a
     top-level \`cron\` array; on schedule the platform calls that proto RPC

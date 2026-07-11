@@ -46,7 +46,7 @@ export function DashboardGrid({
   items: DashboardItem[];
   onRemove: (id: string) => void;
   onLayoutChange: (layout: Layout[]) => void;
-  /** Bumped by the dashboard "Refresh all" control; forwarded to every widget. */
+  /** Bumped by dashboard-wide manual or automatic refreshes. */
   refreshSignal?: number;
 }) {
   // react-grid-layout measures container width on the client, so render it only

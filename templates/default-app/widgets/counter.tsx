@@ -21,7 +21,7 @@ type WidgetContext = {
   size: WidgetSize;
   onResize: (cb: (size: WidgetSize) => void) => () => void;
   /** Runs when the user refreshes this widget (or the whole dashboard). */
-  onRefresh: (cb: () => void) => () => void;
+  onRefresh: (cb: () => void | Promise<unknown>) => () => void;
 };
 
 /** Track the widget's current size. `onResize` fires immediately, then on every
@@ -74,6 +74,7 @@ function CounterWidget({ context }: { context?: WidgetContext }) {
     queryKey,
     queryFn: async () => countSchema.parse(await client.getCount({})).count,
   });
+  const isInitialLoading = isPending && data === undefined;
   const increment = useMutation({
     mutationFn: async () =>
       countSchema.parse(await client.increment({ amount: 1 })).count,
@@ -84,21 +85,18 @@ function CounterWidget({ context }: { context?: WidgetContext }) {
   // button or the dashboard's "Refresh all"). A no-op subscription when the
   // host doesn't provide a context (e.g. standalone rendering).
   useEffect(
-    () =>
-      context?.onRefresh(() => {
-        void queryClient.invalidateQueries({ queryKey });
-      }),
+    () => context?.onRefresh(() => queryClient.invalidateQueries({ queryKey })),
     [context, queryClient],
   );
 
   return (
     <div style={styles.card}>
       <span style={styles.label}>Counter</span>
-      <span style={styles.count}>{isPending ? '—' : data}</span>
+      <span style={styles.count}>{isInitialLoading ? '—' : data}</span>
       <button
         type="button"
         style={styles.button}
-        disabled={isPending || increment.isPending}
+        disabled={isInitialLoading || increment.isPending}
         onClick={() => increment.mutate()}
       >
         Increment

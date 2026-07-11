@@ -240,7 +240,7 @@ type WidgetSize = { w: number; h: number; width: number; height: number };
 type WidgetContext = {
   size: WidgetSize;
   onResize: (cb: (size: WidgetSize) => void) => () => void;
-  onRefresh: (cb: () => void) => () => void;
+  onRefresh: (cb: () => void | Promise<unknown>) => () => void;
 };
 
 export function mount(
@@ -259,10 +259,31 @@ Make widgets size-aware: use `context.size` / `context.onResize` to adapt the
 layout (e.g. hide labels when narrow, switch to a compact view at small pixel
 sizes). If you only support a few footprints, declare `supportedSizes` in the
 manifest (see above) so the dashboard snaps resizes to them. Register
-`context.onRefresh(() => …)` to refetch in place when the user refreshes the
-widget (per-widget button) or the whole dashboard — typically invalidate your
-TanStack Query keys. Widgets can also use the same Connect client pattern as the
-app.
+`context.onRefresh(...)` only when the widget supports refreshing. Registration
+declares that capability to the dashboard; without it, the widget has no refresh
+button and is skipped by dashboard-wide and automatic refreshes. Widgets can
+also use the same Connect client pattern as the app.
+
+Treat first load and background refresh as different states:
+
+- With no successful data yet, show an initial loading state. An initial load
+  error may replace it with an error state and a **Retry** action.
+- Once data exists, keep the last successful content visible for the entire
+  refresh. Do not clear it or replace the widget with a full loading, skeleton,
+  empty, or error state. Replace it with new data only after a successful
+  refresh; on failure, retain the old data and optionally show a non-destructive
+  error indicator.
+- Return the Promise for the real refresh work from the `onRefresh` callback so
+  the dashboard spinner lasts until that work settles. For one TanStack Query,
+  return `queryClient.invalidateQueries({ queryKey })` (or `refetchQueries`)
+  directly. For multiple independent queries, return
+  `Promise.all([queryClient.invalidateQueries(...), ...])`.
+- For manually managed state, make the loading function return its request
+  Promise and update data only after success. Never call `setData(null)`,
+  `setData(undefined)`, or otherwise clear successful data before the request.
+- Do not add a routine refresh button inside the widget; the dashboard supplies
+  it when `onRefresh` is registered. A Retry action for an initial-load error is
+  still appropriate.
 
 ## Database
 
