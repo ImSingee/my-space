@@ -47,6 +47,8 @@ export type StreamState = {
   /** True while the latest thinking block is still streaming. */
   thinkingActive: boolean;
   pendingAsk?: PendingAsk;
+  /** Terminal failure received from the run SSE stream. */
+  terminalError?: string;
 };
 
 const IDLE: StreamState = {
@@ -159,6 +161,17 @@ export function reduceStreamState(
           output: event.output || tool.output,
         })),
       };
+    case 'error':
+      // Keep the partial turn visible. The session refetch may replace it with
+      // the persisted transcript, but until then the inline failure belongs
+      // beside the text/thinking/tools that preceded it.
+      return {
+        ...state,
+        active: false,
+        thinkingActive: false,
+        pendingAsk: undefined,
+        terminalError: event.message,
+      };
     default:
       return state;
   }
@@ -214,7 +227,7 @@ async function answerAgentRunRequest(
 
 export function useAgentStream(
   onDone: () => void,
-  onTerminal?: () => void,
+  onTerminal: (errorMessage?: string) => boolean | Promise<boolean>,
   onDisconnect?: (runId: string) => void,
   onSessionChanged?: () => void,
   onConnected?: () => void,
@@ -224,6 +237,7 @@ export function useAgentStream(
   const runIdRef = useRef<string | null>(null);
   const lastSeqRef = useRef(0);
   const startRequestIdRef = useRef(0);
+  const terminalRunIdRef = useRef<string | null>(null);
   const pendingStartRef = useRef<{
     requestId: number;
     stopRequested: boolean;
@@ -252,21 +266,40 @@ export function useAgentStream(
         setState((p) => reduceStreamState(p, event));
         break;
       case 'done':
+        terminalRunIdRef.current = null;
         runIdRef.current = null;
         setState(IDLE);
         onDoneRef.current();
         break;
       case 'cancelled':
+        terminalRunIdRef.current = null;
         runIdRef.current = null;
         setState(IDLE);
-        onTerminalRef.current?.();
+        void Promise.resolve(onTerminalRef.current()).catch(() => {});
         break;
-      case 'error':
+      case 'error': {
+        const failedRunId = runIdRef.current;
+        terminalRunIdRef.current = failedRunId;
         runIdRef.current = null;
-        toast.error(event.message);
-        setState(IDLE);
-        onTerminalRef.current?.();
+        setState((p) => reduceStreamState(p, event));
+        void (async () => {
+          try {
+            const persisted = await onTerminalRef.current(event.message);
+            // A send/connect after this failure owns the live state now. Never
+            // let an older refetch result clear or toast over that newer run.
+            if (terminalRunIdRef.current !== failedRunId) return;
+            if (!persisted) toast.error(event.message);
+            terminalRunIdRef.current = null;
+            setState((current) =>
+              current.runId === failedRunId ? IDLE : current,
+            );
+          } catch {
+            // Refetch failed: keep the live partial turn + inline error so the
+            // failure does not disappear merely because recovery is offline.
+          }
+        })();
         break;
+      }
       default:
         break;
     }
@@ -284,6 +317,7 @@ export function useAgentStream(
   const connect = useCallback(
     (runId: string) => {
       abortRef.current?.abort();
+      terminalRunIdRef.current = null;
       const ac = new AbortController();
       abortRef.current = ac;
       runIdRef.current = runId;
@@ -347,6 +381,7 @@ export function useAgentStream(
   );
 
   const send = useCallback(async (params: SendParams) => {
+    terminalRunIdRef.current = null;
     const requestId = startRequestIdRef.current + 1;
     startRequestIdRef.current = requestId;
     pendingStartRef.current = { requestId, stopRequested: false };
@@ -425,6 +460,7 @@ export function useAgentStream(
       pendingStartRef.current.stopRequested = true;
     }
     const runId = runIdOverride ?? runIdRef.current;
+    terminalRunIdRef.current = null;
     abortRef.current?.abort();
     runIdRef.current = null;
     setState(IDLE);

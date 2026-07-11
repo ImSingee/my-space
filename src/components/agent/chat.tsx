@@ -22,14 +22,11 @@ import {
   sessionsQueryOptions,
 } from '~queries/agent';
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
+import { groupTurns, hasPersistedAgentError } from './chat-turns';
 import { ModelPicker } from './model-picker';
 import { MessageView } from './message-view';
 import { StreamingBubble } from './streaming-bubble';
-import {
-  type AssistantBlock,
-  type ChatMessage,
-  pairToolResults,
-} from './types';
+import { type ChatMessage, pairToolResults } from './types';
 import { useAgentStream } from './use-agent-stream';
 import classes from './chat.module.css';
 
@@ -65,38 +62,6 @@ export function splitModelValue(
   const modelId = value.slice(sep + 1);
   if (!providerId || !modelId) return null;
   return { providerId, modelId };
-}
-
-type RenderTurn =
-  | { kind: 'user'; key: string; message: ChatMessage }
-  | { kind: 'assistant'; key: string; blocks: AssistantBlock[] };
-
-/**
- * Collapse one agent reply — which the backend may split across several
- * assistant + tool-result messages — into a single turn. This lets all of a
- * reply's steps render as one evenly-spaced timeline instead of clusters with
- * uneven gaps at each message boundary. Tool-result messages are dropped here
- * because they are merged into their call rows via `pairToolResults`.
- */
-function groupTurns(messages: ChatMessage[]): RenderTurn[] {
-  const turns: RenderTurn[] = [];
-  messages.forEach((message, index) => {
-    if (message.role === 'user') {
-      turns.push({ kind: 'user', key: `m${index}`, message });
-    } else if (message.role === 'assistant') {
-      const last = turns.at(-1);
-      if (last?.kind === 'assistant') {
-        last.blocks = [...last.blocks, ...message.content];
-      } else {
-        turns.push({
-          kind: 'assistant',
-          key: `m${index}`,
-          blocks: [...message.content],
-        });
-      }
-    }
-  });
-  return turns;
 }
 
 export function Chat({ sessionId }: { sessionId: string }) {
@@ -150,7 +115,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
   }, [qc, sessionId]);
 
-  const clearActiveRun = () => {
+  const clearActiveRun = async (errorMessage?: string): Promise<boolean> => {
     clearReconnectTimer();
     reconnectAttemptsRef.current = 0;
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
@@ -161,7 +126,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
           }
         : old,
     );
-    revalidateSession();
+    void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
+
+    // A model/provider failure is already part of the assistant transcript.
+    // Wait for that canonical snapshot before removing the live error so the UI
+    // never flashes blank. Failures before an assistant message exists (for
+    // example dispatch rejection) return false and keep their existing toast.
+    const refreshed = await qc.fetchQuery(sessionQueryOptions(sessionId));
+    if (!errorMessage) return true;
+    const refreshedMessages = (refreshed?.messages ?? []) as ChatMessage[];
+    return hasPersistedAgentError(refreshedMessages);
   };
 
   const stream = useAgentStream(
@@ -217,7 +191,14 @@ export function Chat({ sessionId }: { sessionId: string }) {
           message={
             turn.kind === 'user'
               ? turn.message
-              : { role: 'assistant', content: turn.blocks }
+              : {
+                  role: 'assistant',
+                  content: turn.blocks,
+                  ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
+                  ...(turn.errorMessage
+                    ? { errorMessage: turn.errorMessage }
+                    : {}),
+                }
           }
           toolResults={toolResults}
         />
@@ -342,7 +323,9 @@ export function Chat({ sessionId }: { sessionId: string }) {
             <Center py="xl">
               <Loader />
             </Center>
-          ) : messages.length === 0 && !streamState.active ? (
+          ) : messages.length === 0 &&
+            !streamState.active &&
+            !streamState.terminalError ? (
             <Stack align="center" gap={6} py={80}>
               <ThemeIcon size={48} radius="xl" variant="light" color="ember">
                 <IconSparkles size={24} stroke={1.5} />
@@ -356,7 +339,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
           ) : (
             <>
               {renderedTurns}
-              {streamState.active ? (
+              {streamState.active || streamState.terminalError ? (
                 <StreamingBubble state={streamState} onAnswer={answer} />
               ) : null}
             </>

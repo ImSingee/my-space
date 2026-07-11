@@ -3,6 +3,7 @@ import { Box, Button, Group, Image, Paper, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { IconAppWindow, IconLayoutGrid } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { AgentErrorNotice } from './agent-error-notice';
 import { Markdownish } from './markdownish';
 import { ThinkingStep, ToolStep } from './steps';
 import {
@@ -166,6 +167,9 @@ export function MessageView({
     <Box className={classes.assistantRow}>
       <AssistantBlocks blocks={message.content} toolResults={toolResults} />
       <AppActions ids={deployedAppIds(message.content)} />
+      {message.stopReason === 'error' ? (
+        <AgentErrorNotice message={message.errorMessage} />
+      ) : null}
     </Box>
   );
 }

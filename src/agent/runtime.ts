@@ -213,11 +213,31 @@ export async function runAgentTurn(
   }));
 
   try {
-    await harness.prompt(userText, images.length > 0 ? { images } : undefined);
-    return {
-      messages: (await session.buildContext())
-        .messages as unknown as JsonValue[],
-    };
+    const assistant = await harness.prompt(
+      userText,
+      images.length > 0 ? { images } : undefined,
+    );
+    const messages = (await session.buildContext())
+      .messages as unknown as JsonValue[];
+
+    // AgentHarness reports provider/stream failures as a resolved assistant
+    // message rather than rejecting prompt(). Propagate those terminal reasons
+    // to the runner while keeping the full transcript (including partial text).
+    if (
+      assistant.stopReason === 'error' ||
+      assistant.stopReason === 'aborted'
+    ) {
+      return {
+        messages,
+        error:
+          assistant.errorMessage ||
+          (assistant.stopReason === 'aborted'
+            ? 'Agent run was aborted.'
+            : 'Agent run failed.'),
+      };
+    }
+
+    return { messages };
   } catch (error) {
     return {
       messages: (await session.buildContext())

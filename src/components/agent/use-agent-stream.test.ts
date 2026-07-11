@@ -119,4 +119,40 @@ describe('reduceStreamState', () => {
       { kind: 'thinking', text: 'turn two' },
     ]);
   });
+
+  it('keeps partial blocks and run identity when the stream fails', () => {
+    const state = reduceStreamState(baseState(), {
+      type: 'text',
+      delta: 'Partial reply',
+    });
+
+    const failed = reduceStreamState(state, {
+      type: 'error',
+      message: 'OpenAI API error (402)',
+    });
+
+    expect(failed).toMatchObject({
+      active: false,
+      runId: 'run_1',
+      terminalError: 'OpenAI API error (402)',
+    });
+    expect(failed.blocks).toBe(state.blocks);
+    expect(failed.blocks).toEqual([{ kind: 'text', text: 'Partial reply' }]);
+  });
+
+  it('closes in-flight thinking and pending asks on a terminal error', () => {
+    const failed = reduceStreamState(
+      {
+        ...baseState(),
+        thinkingActive: true,
+        pendingAsk: { askId: 'ask_1', questions: [question] },
+      },
+      { type: 'error', message: 'Provider unavailable' },
+    );
+
+    expect(failed.active).toBe(false);
+    expect(failed.thinkingActive).toBe(false);
+    expect(failed.pendingAsk).toBeUndefined();
+    expect(failed.terminalError).toBe('Provider unavailable');
+  });
 });

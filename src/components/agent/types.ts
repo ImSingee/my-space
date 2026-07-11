@@ -1,5 +1,7 @@
 /** Loose, render-friendly shapes for persisted pi `AgentMessage`s. */
 
+import type { StopReason } from '@earendil-works/pi-ai';
+
 export type TextBlock = { type: 'text'; text: string };
 export type ThinkingBlock = { type: 'thinking'; thinking: string };
 export type ToolCallBlock = {
@@ -19,7 +21,14 @@ export type ContentPart = {
 
 export type ChatMessage =
   | { role: 'user'; content: string | ContentPart[] }
-  | { role: 'assistant'; content: AssistantBlock[] }
+  | {
+      role: 'assistant';
+      content: AssistantBlock[];
+      /** Persisted pi terminal state; optional for legacy/synthetic messages. */
+      stopReason?: StopReason;
+      /** Provider/runtime detail when `stopReason` is `error`. */
+      errorMessage?: string;
+    }
   | {
       role: 'toolResult';
       toolName: string;

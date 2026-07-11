@@ -2,6 +2,7 @@
 import { Box, Group, Loader, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { AskAnswer } from '~agent/events';
+import { AgentErrorNotice } from './agent-error-notice';
 import { AskForm } from './ask-form';
 import { Markdownish } from './markdownish';
 import { StreamingThinkingStep, StreamingToolStep } from './steps';
@@ -80,7 +81,13 @@ export function StreamingBubble({
     state.thinkingActive &&
     lastThinkingBlock?.kind === 'thinking' &&
     Boolean(lastThinkingBlock.text.trim());
-  const working = !ask && !hasText && !thinkingVisible && !anyToolRunning;
+  const working =
+    state.active &&
+    !state.terminalError &&
+    !ask &&
+    !hasText &&
+    !thinkingVisible &&
+    !anyToolRunning;
 
   return (
     <Box className={classes.assistantRow}>
@@ -91,6 +98,9 @@ export function StreamingBubble({
           questions={ask.questions}
           onSubmit={(answers) => onAnswer(ask.askId, answers)}
         />
+      ) : null}
+      {state.terminalError ? (
+        <AgentErrorNotice message={state.terminalError} live />
       ) : null}
       {working ? (
         <Group gap={8} c="dimmed">

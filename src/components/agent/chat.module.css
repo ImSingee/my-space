@@ -45,6 +45,18 @@
   max-width: 100%;
 }
 
+.agentErrorNotice {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.agentErrorDetail {
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- agent process steps (thinking / tool calls + results) ---------- */
 
 /* A connected run of quiet steps so tool calls + results read as one timeline
