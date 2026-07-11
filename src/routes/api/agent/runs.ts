@@ -60,8 +60,8 @@ const startBodySchema = z
     sessionId: z.string().min(1),
     retry: z.literal(false).optional(),
     userText: z.string().max(MAX_USER_TEXT).default(''),
-    providerId: z.string().nullish(),
-    modelId: z.string().nullish(),
+    providerId: z.string().min(1),
+    modelId: z.string().min(1),
     images: z
       .array(
         z.object({
@@ -79,12 +79,14 @@ const startBodySchema = z
   });
 
 // Retry is deliberately a separate, strict shape. The server reconstructs the
-// prompt, images, model, and transcript boundary from the persisted session;
-// clients cannot override any of them on a retry request.
+// prompt, images, and transcript boundary from the persisted session, while
+// the client supplies the model currently selected in the composer.
 const retryBodySchema = z
   .object({
     sessionId: z.string().min(1),
     retry: z.literal(true),
+    providerId: z.string().min(1),
+    modelId: z.string().min(1),
   })
   .strict();
 

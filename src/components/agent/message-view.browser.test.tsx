@@ -8,6 +8,7 @@ type RenderOptions = {
   width?: number;
   onRetry?: () => void;
   retrying?: boolean;
+  retryDisabled?: boolean;
 };
 
 function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
@@ -18,6 +19,7 @@ function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
           message={message}
           onRetry={options.onRetry}
           retrying={options.retrying}
+          retryDisabled={options.retryDisabled}
         />
       </Box>
     </MantineProvider>,
@@ -79,6 +81,26 @@ test('disables Retry and exposes its busy state while retrying', async () => {
   const retry = screen.getByRole('button', { name: 'Retry' });
   await expect.element(retry).toBeDisabled();
   expect(retry.element().getAttribute('aria-busy')).toBe('true');
+});
+
+test('keeps Retry visible but disabled when no model is available', async () => {
+  const onRetry = vi.fn<() => void>();
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Provider request failed.',
+    },
+    { onRetry, retryDisabled: true },
+  );
+
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  await expect.element(retry).toBeVisible();
+  await expect.element(retry).toBeDisabled();
+  expect(retry.element()).not.toHaveAttribute('aria-busy');
+  await retry.click({ force: true });
+  expect(onRetry).not.toHaveBeenCalled();
 });
 
 test('does not show Retry when no callback is provided', async () => {

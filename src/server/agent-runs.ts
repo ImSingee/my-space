@@ -36,14 +36,16 @@ export type AgentRunInput =
   | {
       sessionId: string;
       retry: true;
+      providerId: string;
+      modelId: string;
     }
   | {
       sessionId: string;
       retry?: false;
       userText: string;
       images?: SendImage[];
-      providerId?: string | null;
-      modelId?: string | null;
+      providerId: string;
+      modelId: string;
     };
 
 export type PendingAskPayload = {
@@ -303,52 +305,44 @@ export function subscribeToAgentRun(
 /**
  * Resolve the model for a run into the self-contained config the runner
  * needs (including the provider API key, scoped to just this provider).
- * Falls back to the first enabled model when the requested one is gone.
  */
 async function resolveRunModelConfig(
-  providerId?: string | null,
-  modelId?: string | null,
-): Promise<RunModelConfig | null> {
-  const providers = await db.query.agentProviders.findMany({
-    where: (p, { eq: equals }) => equals(p.enabled, true),
-    orderBy: (p, { asc }) => [asc(p.sortOrder), asc(p.createdAt)],
+  providerId: string,
+  modelId: string,
+): Promise<RunModelConfig> {
+  const provider = await db.query.agentProviders.findFirst({
+    where: (p, { and: all, eq: equals }) =>
+      all(equals(p.id, providerId), equals(p.enabled, true)),
   });
-
-  type Candidate = {
-    provider: (typeof providers)[number];
-    model: typeof schema.agentModels.$inferSelect;
-  };
-  const candidates: Candidate[] = [];
-  for (const provider of providers) {
-    const models = await db.query.agentModels.findMany({
-      where: (m, { eq: equals, and: all }) =>
-        all(equals(m.providerId, provider.id), equals(m.enabled, true)),
-      orderBy: (m, { asc }) => [asc(m.sortOrder), asc(m.createdAt)],
-    });
-    for (const model of models) candidates.push({ provider, model });
+  if (!provider) {
+    throw new AppError('The selected Agent model is unavailable.', 409);
   }
-  if (candidates.length === 0) return null;
 
-  const picked =
-    (providerId && modelId
-      ? candidates.find(
-          (c) => c.provider.id === providerId && c.model.modelId === modelId,
-        )
-      : undefined) ?? candidates[0];
+  const model = await db.query.agentModels.findFirst({
+    where: (m, { and: all, eq: equals }) =>
+      all(
+        equals(m.providerId, providerId),
+        equals(m.modelId, modelId),
+        equals(m.enabled, true),
+      ),
+  });
+  if (!model) {
+    throw new AppError('The selected Agent model is unavailable.', 409);
+  }
 
   return {
-    providerId: picked.provider.id,
-    providerName: picked.provider.name,
-    apiType: picked.provider.apiType,
-    baseUrl: picked.provider.baseUrl,
-    apiKey: picked.provider.apiKey,
+    providerId: provider.id,
+    providerName: provider.name,
+    apiType: provider.apiType,
+    baseUrl: provider.baseUrl,
+    apiKey: provider.apiKey,
     model: {
-      id: picked.model.modelId,
-      name: picked.model.name,
-      reasoning: picked.model.reasoning,
-      input: picked.model.input as ('text' | 'image')[],
-      contextWindow: picked.model.contextWindow,
-      maxTokens: picked.model.maxTokens,
+      id: model.modelId,
+      name: model.name,
+      reasoning: model.reasoning,
+      input: model.input as ('text' | 'image')[],
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
     },
   };
 }
@@ -372,8 +366,6 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
   let baseMessages: JsonValue[];
   let userText: string;
   let images: SendImage[];
-  let requestedProviderId: string | null;
-  let requestedModelId: string | null;
 
   if (input.retry === true) {
     const retry = parseRetryableAgentTurn(sessionMessages);
@@ -383,27 +375,13 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     baseMessages = retry.baseMessages;
     userText = retry.userText;
     images = retry.images;
-    // A retry replays the persisted turn with its persisted session model; no
-    // client-supplied prompt, images, provider, or model participates.
-    requestedProviderId = sessionRow.providerId;
-    requestedModelId = sessionRow.modelId;
   } else {
     baseMessages = sessionMessages;
     userText = input.userText;
     images = input.images ?? [];
-    requestedProviderId = input.providerId ?? sessionRow.providerId;
-    requestedModelId = input.modelId ?? sessionRow.modelId;
   }
 
-  const model = await resolveRunModelConfig(
-    requestedProviderId,
-    requestedModelId,
-  );
-  if (!model) {
-    throw new Error(
-      'No models configured. Add a provider and model in Settings first.',
-    );
-  }
+  const model = await resolveRunModelConfig(input.providerId, input.modelId);
 
   const hub = await import('./agent-runner/hub');
   if (hub.connectedRunnerCount() === 0) {

@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonValue } from '~/db/schema';
 import type { AgentRunInput } from './agent-runs';
@@ -19,8 +20,10 @@ const { db, schema } = await import('~/db');
 const hub = await import('~server/agent-runner/hub');
 const { startAgentRun } = await import('./agent-runs');
 
-const PROVIDER_ID = 'provider-retry';
-const MODEL_ID = 'model-retry';
+const PROVIDER_A_ID = 'provider-a';
+const MODEL_A_ID = 'model-a';
+const PROVIDER_B_ID = 'provider-b';
+const MODEL_B_ID = 'model-b';
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -33,18 +36,18 @@ beforeEach(async () => {
   await db.delete(schema.agentProviders);
 });
 
-async function seedModel() {
+async function seedModel(providerId: string, modelId: string, name: string) {
   await db.insert(schema.agentProviders).values({
-    id: PROVIDER_ID,
-    name: 'Retry Provider',
+    id: providerId,
+    name: `${name} Provider`,
     apiType: 'openai-responses',
     baseUrl: 'https://api.example.test/v1',
     apiKey: 'test-key',
   });
   await db.insert(schema.agentModels).values({
-    providerId: PROVIDER_ID,
-    modelId: MODEL_ID,
-    name: 'Retry Model',
+    providerId,
+    modelId,
+    name: `${name} Model`,
     reasoning: true,
     input: ['text', 'image'],
     contextWindow: 128_000,
@@ -52,19 +55,24 @@ async function seedModel() {
   });
 }
 
+async function seedAvailableModels() {
+  await seedModel(PROVIDER_A_ID, MODEL_A_ID, 'A');
+  await seedModel(PROVIDER_B_ID, MODEL_B_ID, 'B');
+}
+
 async function seedSession(id: string, messages: JsonValue[]) {
   await db.insert(schema.agentSessions).values({
     id,
     title: 'Retry session',
-    providerId: PROVIDER_ID,
-    modelId: MODEL_ID,
+    providerId: PROVIDER_A_ID,
+    modelId: MODEL_A_ID,
     messages,
   });
 }
 
 describe('startAgentRun retry', () => {
-  it('replaces the failed tail and dispatches only the truncated history', async () => {
-    await seedModel();
+  it('replaces the failed tail and retries it with the requested latest model', async () => {
+    await seedAvailableModels();
     const baseMessages: JsonValue[] = [
       { role: 'user', content: [{ type: 'text', text: 'Earlier request' }] },
       {
@@ -95,14 +103,15 @@ describe('startAgentRun retry', () => {
     ]);
 
     // Even an internal caller that bypasses the strict HTTP schema cannot
-    // override a retry's persisted prompt, images, provider, or model.
+    // override a retry's persisted prompt or images. The requested model is
+    // intentional: the user switched from the session's A model to B.
     const { runId } = await startAgentRun({
       sessionId: 'session-retry',
       retry: true,
       userText: 'Malicious client override',
       images: [{ data: 'ZXZpbA==', mimeType: 'image/jpeg' }],
-      providerId: 'provider-override',
-      modelId: 'model-override',
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
     } as unknown as AgentRunInput);
 
     const session = await db.query.agentSessions.findFirst({
@@ -118,6 +127,10 @@ describe('startAgentRun retry', () => {
         ],
       },
     ]);
+    expect(session).toMatchObject({
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
+    });
 
     expect(hub.dispatchRun).toHaveBeenCalledWith({
       runId,
@@ -126,8 +139,8 @@ describe('startAgentRun retry', () => {
       images: [{ data: 'aW1hZ2U=', mimeType: 'image/png' }],
       priorMessages: baseMessages,
       model: expect.objectContaining({
-        providerId: PROVIDER_ID,
-        model: expect.objectContaining({ id: MODEL_ID }),
+        providerId: PROVIDER_B_ID,
+        model: expect.objectContaining({ id: MODEL_B_ID }),
       }),
     });
 
@@ -136,8 +149,8 @@ describe('startAgentRun retry', () => {
     });
     expect(run).toMatchObject({
       status: 'running',
-      providerId: PROVIDER_ID,
-      modelId: MODEL_ID,
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
       input: {
         userText: 'Failed request',
         images: [{ mimeType: 'image/png' }],
@@ -156,7 +169,12 @@ describe('startAgentRun retry', () => {
     ]);
 
     await expect(
-      startAgentRun({ sessionId: 'session-not-retryable', retry: true }),
+      startAgentRun({
+        sessionId: 'session-not-retryable',
+        retry: true,
+        providerId: PROVIDER_B_ID,
+        modelId: MODEL_B_ID,
+      }),
     ).rejects.toMatchObject({
       status: 409,
       message: 'There is no failed Agent turn to retry.',
@@ -164,8 +182,8 @@ describe('startAgentRun retry', () => {
     expect(hub.dispatchRun).not.toHaveBeenCalled();
   });
 
-  it('keeps normal sends append-only even after an error', async () => {
-    await seedModel();
+  it('keeps normal sends append-only and persists the requested latest model', async () => {
+    await seedAvailableModels();
     const existingMessages: JsonValue[] = [
       { role: 'user', content: 'Failed request' },
       {
@@ -181,8 +199,8 @@ describe('startAgentRun retry', () => {
       sessionId: 'session-normal-send',
       userText: 'A distinct new request',
       images: [],
-      providerId: PROVIDER_ID,
-      modelId: MODEL_ID,
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
     });
 
     const session = await db.query.agentSessions.findFirst({
@@ -195,12 +213,61 @@ describe('startAgentRun retry', () => {
         content: [{ type: 'text', text: 'A distinct new request' }],
       },
     ]);
+    expect(session).toMatchObject({
+      providerId: PROVIDER_B_ID,
+      modelId: MODEL_B_ID,
+    });
     expect(hub.dispatchRun).toHaveBeenCalledWith(
       expect.objectContaining({
         runId,
         userText: 'A distinct new request',
         priorMessages: existingMessages,
+        model: expect.objectContaining({
+          providerId: PROVIDER_B_ID,
+          model: expect.objectContaining({ id: MODEL_B_ID }),
+        }),
       }),
     );
+  });
+
+  it('rejects an unavailable selected model without changing the failed turn', async () => {
+    await seedAvailableModels();
+    await db
+      .update(schema.agentModels)
+      .set({ enabled: false })
+      .where(eq(schema.agentModels.providerId, PROVIDER_B_ID));
+    const failedMessages: JsonValue[] = [
+      { role: 'user', content: 'Failed request' },
+      {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'Provider unavailable',
+      },
+    ];
+    await seedSession('session-disabled-model', failedMessages);
+
+    await expect(
+      startAgentRun({
+        sessionId: 'session-disabled-model',
+        retry: true,
+        providerId: PROVIDER_B_ID,
+        modelId: MODEL_B_ID,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'The selected Agent model is unavailable.',
+    });
+
+    const session = await db.query.agentSessions.findFirst({
+      where: (row, { eq }) => eq(row.id, 'session-disabled-model'),
+    });
+    expect(session).toMatchObject({
+      messages: failedMessages,
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+    });
+    expect(await db.query.agentRuns.findMany()).toHaveLength(0);
+    expect(hub.dispatchRun).not.toHaveBeenCalled();
   });
 });

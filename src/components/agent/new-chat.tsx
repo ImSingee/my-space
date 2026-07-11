@@ -14,10 +14,11 @@ import { IconPlugConnected, IconSparkles } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
-import { createSession } from '~server/agent-sessions';
-import { splitModelValue, useModelOptions } from './chat';
 import { Composer, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
+import { useModelOptions } from './model-options';
+import { resolveEffectiveModel, splitModelValue } from './model-value';
+import { createEmptyAgentSession } from './new-chat-api';
 import { startAgentRunRequest } from './use-agent-stream';
 import classes from './chat.module.css';
 
@@ -41,7 +42,7 @@ export function NewChat({
   initialPrompt?: string;
 }) {
   const qc = useQueryClient();
-  const { groups, first } = useModelOptions();
+  const { groups, first, available } = useModelOptions();
   const [model, setModel] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   // Reuse a session created by a failed first attempt so a retry doesn't leave
@@ -52,7 +53,7 @@ export function NewChat({
     nonce: initialPrompt ? 1 : 0,
   });
 
-  const effectiveModel = model ?? first;
+  const effectiveModel = resolveEffectiveModel(model, null, available, first);
 
   const start = async ({ text, images }: ComposerSubmit): Promise<boolean> => {
     if (creating) return false;
@@ -65,8 +66,7 @@ export function NewChat({
     setCreating(true);
     try {
       const id =
-        createdSessionRef.current ??
-        (await createSession({ data: { providerId, modelId } })).id;
+        createdSessionRef.current ?? (await createEmptyAgentSession()).id;
       createdSessionRef.current = id;
       await startAgentRunRequest({
         sessionId: id,
@@ -78,11 +78,13 @@ export function NewChat({
       await qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
       onStart(id);
       return true;
-    } catch {
+    } catch (error) {
       // Keep the draft (return false) so the user can retry without retyping.
       // The created session id is retained (createdSessionRef) so the retry
       // reuses it instead of creating another empty session.
-      toast.error('Could not start the chat.');
+      toast.error(
+        error instanceof Error ? error.message : 'Could not start the chat.',
+      );
       setCreating(false);
       return false;
     }
@@ -139,6 +141,7 @@ export function NewChat({
                   groups={groups}
                   value={effectiveModel}
                   onChange={setModel}
+                  disabled={creating}
                 />
               }
             />

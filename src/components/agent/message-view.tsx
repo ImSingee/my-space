@@ -113,11 +113,13 @@ export function MessageView({
   toolResults,
   onRetry,
   retrying = false,
+  retryDisabled = false,
 }: {
   message: ChatMessage;
   toolResults?: ToolResultMap;
   onRetry?: () => void;
   retrying?: boolean;
+  retryDisabled?: boolean;
 }) {
   if (message.role === 'user') {
     const text = partsToText(message.content);
@@ -176,6 +178,7 @@ export function MessageView({
           message={message.errorMessage}
           onRetry={onRetry}
           retrying={retrying}
+          retryDisabled={retryDisabled}
         />
       ) : null}
     </Box>

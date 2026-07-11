@@ -9,12 +9,14 @@ export function AgentErrorNotice({
   live = false,
   onRetry,
   retrying = false,
+  retryDisabled = false,
 }: {
   message?: string;
   /** Announce a newly arrived live error; persisted history stays quiet. */
   live?: boolean;
   onRetry?: () => void;
   retrying?: boolean;
+  retryDisabled?: boolean;
 }) {
   return (
     <Alert
@@ -37,8 +39,8 @@ export function AgentErrorNotice({
             leftSection={<IconRefresh size={14} stroke={1.8} aria-hidden />}
             onClick={onRetry}
             loading={retrying}
-            disabled={retrying}
-            aria-busy={retrying}
+            disabled={retrying || retryDisabled}
+            aria-busy={retrying || undefined}
           >
             Retry
           </Button>

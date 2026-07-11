@@ -183,12 +183,17 @@ export type SendParams = {
   sessionId: string;
   userText: string;
   images?: SendImage[];
-  providerId?: string | null;
-  modelId?: string | null;
+  providerId: string;
+  modelId: string;
 };
 
-type RetryParams = { sessionId: string; retry: true };
-type StartParams = SendParams | RetryParams;
+export type RetryParams = {
+  sessionId: string;
+  providerId: string;
+  modelId: string;
+};
+
+type StartParams = SendParams | (RetryParams & { retry: true });
 
 export async function startAgentRunRequest(
   params: StartParams,
@@ -434,7 +439,7 @@ export function useAgentStream(
 
   const send = useCallback((params: SendParams) => start(params), [start]);
   const retry = useCallback(
-    (sessionId: string) => start({ sessionId, retry: true }),
+    (params: RetryParams) => start({ ...params, retry: true }),
     [start],
   );
 

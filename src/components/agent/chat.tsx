@@ -8,70 +8,30 @@ import {
   Text,
   ThemeIcon,
 } from '@mantine/core';
-import {
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-} from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import {
-  providersQueryOptions,
-  sessionQueryOptions,
-  sessionsQueryOptions,
-} from '~queries/agent';
+import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
 import {
   getRetryableErrorInput,
   groupTurns,
   hasPersistedAgentError,
 } from './chat-turns';
-import { ModelPicker } from './model-picker';
 import { MessageView } from './message-view';
+import { useModelOptions } from './model-options';
+import { ModelPicker } from './model-picker';
+import { resolveEffectiveModel, splitModelValue } from './model-value';
 import { StreamingBubble } from './streaming-bubble';
 import { type ChatMessage, pairToolResults } from './types';
 import { useAgentStream } from './use-agent-stream';
 import classes from './chat.module.css';
 
-export function useModelOptions() {
-  const { data: providers } = useSuspenseQuery(providersQueryOptions);
-  return useMemo(() => {
-    const groups = providers
-      .filter((p) => p.enabled)
-      .map((p) => ({
-        group: p.name,
-        items: p.models
-          .filter((m) => m.enabled)
-          .map((m) => ({ value: `${p.id}:${m.modelId}`, label: m.name })),
-      }))
-      .filter((g) => g.items.length > 0);
-    const first = groups[0]?.items[0]?.value ?? null;
-    return { groups, first };
-  }, [providers]);
-}
-
-/**
- * Decode a model picker value (`<providerId>:<modelId>`). Provider ids are
- * ULIDs (never contain a colon), but model ids legitimately do — e.g.
- * Bedrock-style ids ending in `:0` — so split only on the first separator and
- * keep the remainder intact instead of `split(':')` which would truncate them.
- */
-export function splitModelValue(
-  value: string,
-): { providerId: string; modelId: string } | null {
-  const sep = value.indexOf(':');
-  if (sep <= 0) return null;
-  const providerId = value.slice(0, sep);
-  const modelId = value.slice(sep + 1);
-  if (!providerId || !modelId) return null;
-  return { providerId, modelId };
-}
-
 export function Chat({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const sessionQuery = useQuery(sessionQueryOptions(sessionId));
-  const { groups, first } = useModelOptions();
+  const { groups, first, available } = useModelOptions();
 
   const [model, setModel] = useState<string | null>(null);
   const [reconnectToken, setReconnectToken] = useState(0);
@@ -173,12 +133,20 @@ export function Chat({ sessionId }: { sessionId: string }) {
   } = stream;
 
   const session = sessionQuery.data;
-  const effectiveModel =
-    model ??
-    (session?.providerId && session?.modelId
+  const sessionModel =
+    session?.providerId && session?.modelId
       ? `${session.providerId}:${session.modelId}`
-      : null) ??
-    first;
+      : null;
+  const effectiveModel = resolveEffectiveModel(
+    model,
+    sessionModel,
+    available,
+    first,
+  );
+  const effectiveModelParts = useMemo(
+    () => (effectiveModel ? splitModelValue(effectiveModel) : null),
+    [effectiveModel],
+  );
 
   const messages = useMemo(
     () => (session?.messages ?? []) as unknown as ChatMessage[],
@@ -237,10 +205,14 @@ export function Chat({ sessionId }: { sessionId: string }) {
       if (retryIdentity) setConsumedRetryIdentity(retryIdentity);
       // Surface the run immediately so the connection effect subscribes without
       // waiting for the session refetch round-trip.
-      qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
+      const sessionOptions = sessionQueryOptions(sessionId);
+      await qc.cancelQueries({ queryKey: sessionOptions.queryKey });
+      qc.setQueryData(sessionOptions.queryKey, (old) =>
         old
           ? {
               ...old,
+              providerId: parsed.providerId,
+              modelId: parsed.modelId,
               activeRun: {
                 id: runId,
                 status: 'running' as const,
@@ -266,11 +238,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const retry = useCallback(async () => {
     // React state does not update synchronously, so the ref closes the window in
     // which a rapid double click could create two active runs for one session.
-    if (retryingRef.current || runBusy || !retryInput) return;
+    if (retryingRef.current || runBusy || !retryInput || !effectiveModelParts)
+      return;
     retryingRef.current = true;
     setRetrying(true);
     try {
-      const runId = await retryRun(sessionId);
+      const runId = await retryRun({
+        sessionId,
+        providerId: effectiveModelParts.providerId,
+        modelId: effectiveModelParts.modelId,
+      });
       if (!runId) return;
       const sessionOptions = sessionQueryOptions(sessionId);
       // Stop an older background refetch from restoring the failed transcript
@@ -286,6 +263,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
               // after it before starting the run. Keep one local copy so the
               // retried prompt remains visible without the failed reply.
               messages: old.messages.slice(0, retryInput.userMessageIndex + 1),
+              providerId: effectiveModelParts.providerId,
+              modelId: effectiveModelParts.modelId,
               activeRun: {
                 id: runId,
                 status: 'running' as const,
@@ -299,7 +278,15 @@ export function Chat({ sessionId }: { sessionId: string }) {
       retryingRef.current = false;
       setRetrying(false);
     }
-  }, [qc, retryInput, retryRun, revalidateSession, runBusy, sessionId]);
+  }, [
+    effectiveModelParts,
+    qc,
+    retryInput,
+    retryRun,
+    revalidateSession,
+    runBusy,
+    sessionId,
+  ]);
 
   const renderedTurns = useMemo(
     () =>
@@ -326,10 +313,19 @@ export function Chat({ sessionId }: { sessionId: string }) {
             toolResults={toolResults}
             onRetry={showRetry ? retry : undefined}
             retrying={showRetry && retrying}
+            retryDisabled={showRetry && !effectiveModelParts}
           />
         );
       }),
-    [canOfferRetry, retry, retryableTurnKey, retrying, toolResults, turns],
+    [
+      canOfferRetry,
+      effectiveModelParts,
+      retry,
+      retryableTurnKey,
+      retrying,
+      toolResults,
+      turns,
+    ],
   );
 
   // Return acceptance so the composer keeps the draft if the run fails to start
@@ -448,6 +444,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 groups={groups}
                 value={effectiveModel}
                 onChange={setModel}
+                disabled={busy}
               />
             }
           />

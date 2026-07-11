@@ -80,6 +80,18 @@ async function main() {
   const seeded = await seedDefaultProviders();
   console.log('  seeded:', seeded);
 
+  const provider = await db.query.agentProviders.findFirst({
+    where: (row, { eq: equals }) => equals(row.enabled, true),
+    orderBy: (row, { asc }) => [asc(row.sortOrder), asc(row.createdAt)],
+  });
+  if (!provider) throw new Error('no enabled Agent provider');
+  const model = await db.query.agentModels.findFirst({
+    where: (row, { and, eq: equals }) =>
+      and(equals(row.providerId, provider.id), equals(row.enabled, true)),
+    orderBy: (row, { asc }) => [asc(row.sortOrder), asc(row.createdAt)],
+  });
+  if (!model) throw new Error('no enabled Agent model');
+
   console.log('[cleanup prior run]');
   await cleanupBySlug(SLUG);
 
@@ -100,6 +112,8 @@ async function main() {
   const { runId } = await startAgentRun({
     sessionId: session.id,
     userText: PROMPT,
+    providerId: provider.id,
+    modelId: model.modelId,
   });
 
   const deadline = Date.now() + TIMEOUT_MS;
