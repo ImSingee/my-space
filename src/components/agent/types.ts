@@ -152,14 +152,21 @@ export function toolDetail(
 }
 
 /**
- * App ids that an assistant message *deployed*, so we can offer "Open app"
- * links. Limited to deploy_app because that is when the app is actually live
- * (a freshly created-but-not-deployed app has nothing to open yet).
+ * App ids that an assistant turn successfully deployed, in call order.
+ *
+ * A tool call alone only means the Agent attempted a deploy. Requiring its
+ * paired, non-error result keeps failed or incomplete calls from producing a
+ * misleading app action in the finished transcript.
  */
-export function deployedAppIds(blocks: AssistantBlock[]): string[] {
+export function successfullyDeployedAppIds(
+  blocks: AssistantBlock[],
+  toolResults: ReadonlyMap<string, ToolResultMessage> | undefined,
+): string[] {
   const ids = new Set<string>();
   for (const block of blocks) {
     if (block.type === 'toolCall' && block.name === 'deploy_app') {
+      const result = toolResults?.get(block.id);
+      if (!result || result.isError) continue;
       const id = block.arguments?.id;
       if (typeof id === 'string') ids.add(id);
     }

@@ -45,6 +45,51 @@
   max-width: 100%;
 }
 
+.appActions {
+  width: min(100%, 480px);
+  margin-top: 4px;
+  overflow: hidden;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  box-shadow: none;
+}
+
+.appActionsTitle {
+  padding: 7px 10px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+  background: var(--surface-panel);
+}
+
+.appActionRows {
+  display: flex;
+  flex-direction: column;
+}
+
+.appActionRow {
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.appActionRow + .appActionRow {
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.appActionIdentity {
+  flex: 1;
+  min-width: 0;
+}
+
+.appActionCtas {
+  flex-shrink: 0;
+}
+
+.unavailableApp {
+  flex-shrink: 0;
+}
+
 .agentErrorNotice {
   min-width: 0;
   max-width: 100%;

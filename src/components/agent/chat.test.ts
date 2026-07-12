@@ -4,7 +4,56 @@ import {
   groupTurns,
   hasPersistedAgentError,
 } from './chat-turns';
-import type { ChatMessage } from './types';
+import {
+  type AssistantBlock,
+  type ChatMessage,
+  type ToolResultMessage,
+  successfullyDeployedAppIds,
+} from './types';
+
+describe('successfullyDeployedAppIds', () => {
+  it('keeps successful deploys in call order and drops failed or incomplete calls', () => {
+    const blocks: AssistantBlock[] = [
+      {
+        type: 'toolCall',
+        id: 'deploy-a',
+        name: 'deploy_app',
+        arguments: { id: 'alpha' },
+      },
+      {
+        type: 'toolCall',
+        id: 'deploy-b',
+        name: 'deploy_app',
+        arguments: { id: 'beta' },
+      },
+      {
+        type: 'toolCall',
+        id: 'deploy-c',
+        name: 'deploy_app',
+        arguments: { id: 'gamma' },
+      },
+      {
+        type: 'toolCall',
+        id: 'deploy-a-again',
+        name: 'deploy_app',
+        arguments: { id: 'alpha' },
+      },
+    ];
+    const result = (isError = false): ToolResultMessage => ({
+      role: 'toolResult',
+      toolName: 'deploy_app',
+      content: [{ type: 'text', text: 'result' }],
+      isError,
+    });
+    const toolResults = new Map([
+      ['deploy-a', result()],
+      ['deploy-b', result(true)],
+      ['deploy-a-again', result()],
+    ]);
+
+    expect(successfullyDeployedAppIds(blocks, toolResults)).toEqual(['alpha']);
+  });
+});
 
 describe('groupTurns', () => {
   it('keeps a terminal assistant error when it follows partial output', () => {

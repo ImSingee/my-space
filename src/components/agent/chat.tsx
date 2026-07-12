@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { appsQueryOptions } from '~queries/apps';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import { uploadAgentFiles } from './attachment-api';
 import {
@@ -37,6 +38,7 @@ import classes from './chat.module.css';
 export function Chat({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const sessionQuery = useQuery(sessionQueryOptions(sessionId));
+  const appsQuery = useQuery(appsQueryOptions);
   const { groups, first, available } = useModelOptions();
 
   const [model, setModel] = useState<string | null>(null);
@@ -90,9 +92,14 @@ export function Chat({ sessionId }: { sessionId: string }) {
     void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
   }, [qc, sessionId]);
 
+  const revalidateApps = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: appsQueryOptions.queryKey });
+  }, [qc]);
+
   const clearActiveRun = async (errorMessage?: string): Promise<boolean> => {
     clearReconnectTimer();
     reconnectAttemptsRef.current = 0;
+    revalidateApps();
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
       old
         ? {
@@ -122,6 +129,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
         old ? { ...old, activeRun: null } : old,
       );
+      revalidateApps();
       revalidateSession();
     },
     clearActiveRun,
@@ -346,6 +354,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
                   }
             }
             toolResults={toolResults}
+            apps={appsQuery.data}
             onRetry={showRetry ? retry : undefined}
             retrying={showRetry && retrying}
             retryDisabled={showRetry && !effectiveModelParts}
@@ -354,6 +363,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       }),
     [
       canOfferRetry,
+      appsQuery.data,
       effectiveModelParts,
       retry,
       retryableTurnKey,
