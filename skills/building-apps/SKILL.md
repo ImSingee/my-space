@@ -1,6 +1,6 @@
 ---
 name: building-apps
-description: How to design, build, and deploy a Hatch app end to end — manifest, Connect proto, Deno Connect backend, React SPA (TanStack Router hash history + Query), dashboard widgets, npm packages via package.json, and a per-app Postgres database. Use this whenever you create or modify an app.
+description: How to design, build, and deploy a Hatch app end to end — manifest, Connect proto, Deno Connect backend, React SPA (TanStack Router hash history + Query), dashboard widgets, npm packages installed by Deno, and a per-app Postgres database. Use this whenever you create or modify an app.
 ---
 
 # Building a Hatch app
@@ -20,7 +20,9 @@ bundling, process management, the Postgres database, and serving.
   app/index.html         HTML host that loads ./app.js
   app/main.tsx           React SPA entry (TanStack Router, hash history) + Query
   widgets/<name>.tsx     dashboard widget(s); each exports mount(element)
-  package.json           npm dependencies (shared by frontend + Deno backend)
+  package.json           npm dependencies (installed only with Deno)
+  deno.json              reviewed npm lifecycle-script allowlist
+  deno.lock              Deno dependency lock (commit this file)
   buf.yaml, buf.gen.yaml Connect codegen config (rarely needs changes)
 ```
 
@@ -34,8 +36,9 @@ on the app's manage page.
 `create_app` scaffolds a runnable **Counter** example you adapt in place — not a
 blank tree. The exact files are `manifest.json` (rpc service
 `app.v1.CounterService`), `proto/service.proto`, `backend/main.ts`,
-`app/index.html`, `app/main.tsx`, `package.json`, `buf.yaml`, `buf.gen.yaml`, and a
-single demo widget at `widgets/counter.tsx` (widget id `counter`). Read those
+`app/index.html`, `app/main.tsx`, `package.json`, `deno.json`, `deno.lock`,
+`buf.yaml`, `buf.gen.yaml`, and a single demo widget at `widgets/counter.tsx`
+(widget id `counter`). Read those
 exact paths before editing — don't guess filenames (the demo widget is
 `widgets/counter.tsx`, not `widgets/summary.tsx`). The `todo`/`summary` snippets
 below are illustrative only.
@@ -202,9 +205,46 @@ http.createServer(connectNodeAdapter({ routes })).listen(port);
 ```
 
 To use any npm package (frontend, widget, or backend), add it to `package.json`
-`dependencies` with a normal semver range — `deploy_app` runs `deno install`,
-caches the deps, and esbuild bundles them. Deno reads `package.json` natively, so
-bare imports (`import x from 'pkg'`) work in the backend too. No `deno.json`.
+`dependencies` with a normal semver range. **Deno is the only package manager:**
+never run `npm install`, `pnpm install`, or generate npm/pnpm lock files. After
+every dependency change, run this in the app source root:
+
+```bash
+deno install --package-json --node-modules-dir=auto --lock=deno.lock
+```
+
+Commit `package.json`, `deno.json`, and the resulting `deno.lock`. Do not commit
+`node_modules`. `deploy_app` repeats the Deno install with `--frozen` and rejects
+missing or stale dependency files. If deploy reports a legacy deno.json-only
+source, load this Skill, migrate its npm imports to `package.json`, run the
+command above, and commit all three files before deploying again. Deno reads
+`package.json` natively, so bare imports (`import x from 'pkg'`) work in the
+backend too.
+
+### npm lifecycle scripts
+
+Deno does not run npm `preinstall`, `install`, or `postinstall` scripts by
+default. If install reports a skipped lifecycle script, do **not** enable it
+blindly:
+
+1. Find the exact resolved version in `deno.lock` and inspect that package's
+   `package.json` lifecycle command plus every local script it invokes.
+2. Reject the dependency and choose an alternative if the command downloads or
+   executes unreviewed remote code, reads credentials or files outside the
+   project, writes outside the package/project, changes global configuration,
+   elevates privileges, is obfuscated/dynamic, or cannot be fully traced.
+3. Also reject packages that require native addons, FFI, runtime sidecars, or
+   generated files that the app artifact will not carry.
+4. Only after the exact command is confirmed safe, add the exact locked version
+   to `deno.json`, never a boolean, tag, wildcard, or range:
+
+   ```json
+   { "allowScripts": ["npm:trusted-package@1.2.3"] }
+   ```
+
+5. Run the Deno install command again, verify the script output and app, and
+   commit the updated `deno.json` and `deno.lock`. Transitive packages require
+   the same independent review and exact entry.
 
 ## Frontend (React SPA, TanStack Router + Query)
 

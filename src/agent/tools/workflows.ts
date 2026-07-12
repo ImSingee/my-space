@@ -229,7 +229,9 @@ export function createWorkflowTools(options: {
     label: 'Deploy workflow',
     description:
       'Bundle the workflow into a single Deno program, capture its input JSON ' +
-      'Schema, and deploy it so it can be triggered. Reports the version and ' +
+      'Schema, and deploy it so it can be triggered. Requires package.json, ' +
+      'deno.json, and a committed deno.lock; load the building-workflows Skill ' +
+      'to repair dependency configuration errors. Reports the version and ' +
       'webhook URL (if enabled).',
     executionMode: 'sequential',
     parameters: Type.Object({

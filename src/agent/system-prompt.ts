@@ -39,7 +39,9 @@ apps/<id>/
   app/index.html       # HTML host for the SPA (loads ./app.js)
   app/main.tsx         # React SPA entry (TanStack Router hash history + Query)
   widgets/<name>.tsx   # dashboard widget(s): export "mount(element)"
-  package.json         # npm dependencies (frontend + Deno backend)
+  package.json         # npm dependencies (installed only with Deno)
+  deno.json            # reviewed npm lifecycle-script allowlist
+  deno.lock            # Deno lockfile; generate locally and commit
   buf.yaml/buf.gen.yaml# Connect codegen config (don't usually need to touch)
 \`\`\`
 
@@ -49,6 +51,10 @@ apps/<id>/
   \`../gen/service_pb\` (frontend) or \`../gen/service_pb.ts\` (Deno backend).
   Never write \`gen/\` by hand — it is git-ignored and regenerated on every
   deploy, which also uploads the proto so the platform can show the app's API.
+- **Dependencies**: load the building-apps Skill, edit package.json, run
+  \`deno install\` locally, and commit deno.lock. Never use npm or pnpm. Deno
+  skips lifecycle scripts by default; only add an exact package version to
+  deno.json allowScripts after auditing the command and everything it invokes.
 - **Frontend**: React SPA using TanStack Router (hash history) + TanStack Query.
   It calls the backend through a generated Connect client whose base URL is the
   injected global \`__RPC_BASE_URL__\`. The template already wires this up. Add
@@ -144,9 +150,9 @@ apps/<id>/
    runnable Counter
    example you then adapt — the exact files are \`manifest.json\` (rpc service
    \`app.v1.CounterService\`), \`proto/service.proto\`, \`backend/main.ts\`,
-   \`app/index.html\`, \`app/main.tsx\`, \`package.json\`, \`buf.yaml\`,
-   \`buf.gen.yaml\`, and one demo widget at \`widgets/counter.tsx\` (widget id
-   \`counter\`).
+   \`app/index.html\`, \`app/main.tsx\`, \`package.json\`, \`deno.json\`,
+   \`deno.lock\`, \`buf.yaml\`, \`buf.gen.yaml\`, and one demo widget at
+   \`widgets/counter.tsx\` (widget id \`counter\`).
 2. For existing apps, use \`list_apps\` to find the id and \`get_app\` to
    inspect its manifest, live version, and capabilities, then call
    \`checkout_app\` to check the app repo out for this chat. Use the absolute
@@ -190,7 +196,10 @@ It is a single Deno program bundled at deploy time. Read the
 2. The source is \`workflow.ts\` (a \`defineWorkflow({ input, run })\` against
    \`@hatch/workflow\`, with a **zod v4** input schema and observable
    \`ctx.step(name, fn, { retry })\` units), \`manifest.json\` (id/name/triggers),
-   and \`deno.json\` (npm deps). Never edit \`hatch/\` (the SDK).
+   \`package.json\` (npm deps), \`deno.json\` (reviewed lifecycle-script
+   allowlist), and a committed \`deno.lock\`. Use Deno only: load the
+   building-workflows Skill, run \`deno install\` locally after dependency
+   changes, and never use npm or pnpm. Never edit \`hatch/\` (the SDK).
 3. Triggers: manual (form inferred from the input schema), \`cron\` jobs, and a
    public \`webhook\` (\`/api/workflow-hooks/<id>?secret=...\`). Runtime is
    net+env+read only, and a workflow CANNOT call AI during a run.

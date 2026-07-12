@@ -20,6 +20,26 @@ async function makeAppSource(
     JSON.stringify(manifest, null, 2),
     'utf8',
   );
+  await fs.writeFile(
+    path.join(sourceDir, 'package.json'),
+    JSON.stringify({ private: true, type: 'module' }),
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(sourceDir, 'deno.json'),
+    JSON.stringify({ allowScripts: [] }),
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(sourceDir, 'deno.lock'),
+    JSON.stringify({
+      version: '5',
+      specifiers: {},
+      npm: {},
+      workspace: { packageJson: { dependencies: [] } },
+    }),
+    'utf8',
+  );
   for (const [rel, content] of Object.entries(files)) {
     const full = path.join(sourceDir, rel);
     await fs.mkdir(path.dirname(full), { recursive: true });

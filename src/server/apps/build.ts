@@ -20,6 +20,7 @@ import {
   rpcUrl,
 } from './manifest';
 import { subprocessSandboxEnv } from '../sandbox-env';
+import { validateDenoDependencySource } from '../deno-dependencies';
 import { run as runSubprocess } from '../subprocess';
 
 export type BuildResult = {
@@ -237,6 +238,8 @@ export async function buildApp(
       );
     }
 
+    await validateDenoDependencySource(src, 'app');
+
     // Fresh output directory.
     await fs.rm(out, { recursive: true, force: true });
     await fs.mkdir(out, { recursive: true });
@@ -268,50 +271,35 @@ export async function buildApp(
       );
     }
 
-    // 2) Install app-declared npm dependencies. A `package.json` lets the app
-    // bring its own packages (frontend bundle + Deno backend). We force
-    // `--node-modules-dir=auto` so a local node_modules is always materialized
-    // for esbuild, even when the app keeps a `deno.json` with
-    // `nodeModulesDir: "none"` (which `deno install` would otherwise honor and
-    // skip node_modules). The install also primes Deno's module cache +
-    // deno.lock, used by the backend at runtime with --node-modules-dir=none,
-    // so the heavy node_modules is never staged. Legacy single-file apps have
-    // no package.json and keep resolving the bundle's imports from the
-    // platform's node_modules.
-    //
-    // The install runs with a sandboxed env (no platform secrets): Deno does not
-    // execute npm lifecycle scripts without an explicit `--allow-scripts`, so no
-    // app-controlled code runs here, but we still withhold the platform's
-    // secrets as defense-in-depth. `--lock=deno.lock` forces a lockfile even when
-    // the app's deno.json sets `"lock": false`, so the staged artifact always
-    // pins exact versions (the runtime enforces this lock).
-    const hasPackageJson = await pathExists(path.join(src, 'package.json'));
-    if (hasPackageJson) {
-      const install = await run(
-        'deno',
-        ['install', '--node-modules-dir=auto', '--lock=deno.lock'],
-        {
-          cwd: src,
-          env: subprocessSandboxEnv(),
-        },
+    // 2) Reproduce the Agent-reviewed dependency install from the committed
+    // package.json + deno.json + deno.lock. `--frozen` makes deploy validation
+    // read-only: dependency edits must be installed and committed by the Agent
+    // before deploy. Deno reads reviewed allowScripts entries from deno.json.
+    const installArgs = [
+      'install',
+      '--package-json',
+      '--node-modules-dir=auto',
+      '--lock=deno.lock',
+      '--frozen',
+    ];
+    const install = await run('deno', installArgs, {
+      cwd: src,
+      env: subprocessSandboxEnv(),
+    });
+    logs.push(`$ deno ${installArgs.join(' ')}\n${install.output.trim()}`);
+    if (install.code !== 0) {
+      throw new Error(
+        'Dependency install failed with the committed deno.lock. Load the ' +
+          '"building-apps" Skill, run deno install locally, commit the updated ' +
+          `dependency files, and deploy again:\n${install.output}`,
       );
-      logs.push(
-        `$ deno install --node-modules-dir=auto --lock=deno.lock\n${install.output.trim()}`,
-      );
-      if (install.code !== 0) {
-        throw new Error(`Dependency install failed:\n${install.output}`);
-      }
     }
     // esbuild resolves bare imports by walking node_modules up from each entry
-    // file, then falling back to `nodePaths`. package.json apps get their own
-    // node_modules (from `deno install`) preferred via the in-src entry walk; the
-    // platform node_modules stays a fallback so an app that adds a package.json
-    // for one dependency doesn't have to re-declare react/connect/etc. Legacy
-    // single-file apps have no app node_modules, so they resolve straight from
-    // the platform via nodePaths (the temp build dir lives outside the repo, so
-    // esbuild's directory walk can't reach platform deps otherwise).
+    // file, then falling back to `nodePaths`. The app's node_modules from Deno
+    // takes precedence; platform packages remain a fallback for dependencies
+    // supplied by the scaffold/runtime.
     const esbuildResolve = {
-      absWorkingDir: hasPackageJson ? src : REPO_ROOT,
+      absWorkingDir: src,
       nodePaths: [path.join(REPO_ROOT, 'node_modules')],
     };
 
@@ -425,8 +413,8 @@ export async function buildApp(
     // 5) Stage the Deno backend + generated stubs + dependency manifest for the
     // runtime. We stage package.json + deno.lock (not node_modules): the backend
     // runs with --node-modules-dir=none and resolves deps from Deno's module
-    // cache (primed by `deno install` above). A legacy deno.json import map is
-    // staged when present so single-file apps keep working.
+    // cache (primed by `deno install` above). deno.json carries the reviewed
+    // lifecycle-script policy used during dependency installation.
     if (manifest.capabilities.backend && manifest.backend) {
       // Pre-cache the backend's full module graph into Deno's global cache so a
       // healthy backend never resolves deps from the network at startup, and bad
@@ -438,11 +426,17 @@ export async function buildApp(
       const backendEntry = manifest.backend.entry;
       const cache = await run(
         'deno',
-        ['cache', '--node-modules-dir=none', '--lock=deno.lock', backendEntry],
+        [
+          'cache',
+          '--node-modules-dir=none',
+          '--lock=deno.lock',
+          '--frozen',
+          backendEntry,
+        ],
         { cwd: src, env: subprocessSandboxEnv() },
       );
       logs.push(
-        `$ deno cache --node-modules-dir=none --lock=deno.lock ${backendEntry}\n${cache.output.trim()}`,
+        `$ deno cache --node-modules-dir=none --lock=deno.lock --frozen ${backendEntry}\n${cache.output.trim()}`,
       );
       if (cache.code !== 0) {
         throw new Error(`Backend dependency cache failed:\n${cache.output}`);

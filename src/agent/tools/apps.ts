@@ -258,7 +258,9 @@ export function createAppTools(options: {
     label: 'Deploy app',
     description:
       'Build (Connect codegen + bundle app/widgets + stage Deno backend) and ' +
-      'deploy an app so it becomes live. Reports the app/widget/RPC URLs.',
+      'deploy an app so it becomes live. Requires package.json, deno.json, and ' +
+      'a committed deno.lock; load the building-apps Skill to repair dependency ' +
+      'configuration errors. Reports the app/widget/RPC URLs.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to deploy.' }),

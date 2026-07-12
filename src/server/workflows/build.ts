@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { WORKFLOW_BUILD_WORK_DIR } from '~agent/paths';
+import { validateDenoDependencySource } from '../deno-dependencies';
 import { run } from '../subprocess';
 import {
   type NormalizedWorkflowManifest,
@@ -91,6 +92,8 @@ export async function buildWorkflow(
   try {
     const manifest = await readManifest(tempSrc);
 
+    await validateDenoDependencySource(tempSrc, 'workflow');
+
     const entry = path.join(tempSrc, manifest.entry);
     if (!(await pathExists(entry))) {
       throw new Error(`workflow entry not found: ${manifest.entry}`);
@@ -99,8 +102,15 @@ export async function buildWorkflow(
     await fs.rm(out, { recursive: true, force: true });
     await fs.mkdir(out, { recursive: true });
 
-    // Generate the runner wrapper so the bundle dispatches describe/run. It
-    // imports the author's default export first, then hands it to the SDK.
+    // Generate the platform-owned SDK import map and runner wrapper so users
+    // keep the stable @hatch/workflow import without declaring the SDK as an npm
+    // dependency or maintaining a deno.json import map.
+    const importMap = path.join(tempSrc, '__hatch_import_map.json');
+    await fs.writeFile(
+      importMap,
+      JSON.stringify({ imports: { '@hatch/workflow': './hatch/workflow.ts' } }),
+      'utf8',
+    );
     const entryImport = `./${manifest.entry.replace(/\\/g, '/')}`;
     const wrapper = path.join(tempSrc, '__hatch_main.ts');
     await fs.writeFile(
@@ -114,28 +124,63 @@ export async function buildWorkflow(
       'utf8',
     );
 
-    // 1) Bundle the workflow + its npm deps into one Deno-runnable file.
-    const bundlePath = path.join(out, 'workflow.js');
-    const denoConfig = path.join(tempSrc, 'deno.json');
-    const bundle = await run(
-      'deno',
-      [
-        'bundle',
-        ...((await pathExists(denoConfig)) ? ['-c', denoConfig] : []),
-        '-o',
-        bundlePath,
-        wrapper,
-      ],
-      { cwd: tempSrc, env: workflowSandboxEnv() },
+    // 1) Reproduce the source-controlled dependency graph. Deno reads reviewed
+    // allowScripts entries from deno.json; --frozen rejects uncommitted changes.
+    const installArgs = [
+      'install',
+      '--package-json',
+      '--node-modules-dir=auto',
+      '--lock=deno.lock',
+      '--frozen',
+    ];
+    const install = await run('deno', installArgs, {
+      cwd: tempSrc,
+      env: workflowSandboxEnv(),
+    });
+    logs.push(
+      `$ deno ${installArgs.join(' ')}\n${(
+        install.stderr || install.stdout
+      ).trim()}`,
     );
-    logs.push(`$ deno bundle\n${(bundle.stderr || bundle.stdout).trim()}`);
+    if (install.code !== 0) {
+      throw new Error(
+        'Workflow dependency install failed with the committed deno.lock. ' +
+          'Load the "building-workflows" Skill, run deno install locally, ' +
+          `commit the updated dependency files, and deploy again:\n${
+            install.stderr || install.stdout
+          }`,
+      );
+    }
+
+    // 2) Bundle the workflow + its npm deps into one Deno-runnable file.
+    const bundlePath = path.join(out, 'workflow.js');
+    const bundleArgs = [
+      'bundle',
+      '--node-modules-dir=auto',
+      '--lock=deno.lock',
+      '--frozen',
+      '--import-map',
+      importMap,
+      '-o',
+      bundlePath,
+      wrapper,
+    ];
+    const bundle = await run('deno', bundleArgs, {
+      cwd: tempSrc,
+      env: workflowSandboxEnv(),
+    });
+    logs.push(
+      `$ deno ${bundleArgs.join(' ')}\n${(
+        bundle.stderr || bundle.stdout
+      ).trim()}`,
+    );
     if (bundle.code !== 0 || !(await pathExists(bundlePath))) {
       throw new Error(
         `Workflow bundle failed:\n${bundle.stderr || bundle.stdout}`,
       );
     }
 
-    // 2) Run the bundle in describe mode to capture the input JSON Schema.
+    // 3) Run the bundle in describe mode to capture the input JSON Schema.
     const describe = await run(
       'deno',
       // Scope FS reads to the bundle's own output dir; describe-mode runs the

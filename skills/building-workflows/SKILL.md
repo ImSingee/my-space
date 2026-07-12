@@ -1,6 +1,6 @@
 ---
 name: building-workflows
-description: How to design, build, and deploy a Hatch workflow end to end — a single-file Deno program defined with defineWorkflow, a zod v4 input schema, observable retried steps, and manual/cron/webhook triggers. Use this whenever you create or modify a workflow.
+description: How to design, build, and deploy a Hatch workflow end to end — a single-file Deno program defined with defineWorkflow, a zod v4 input schema, observable retried steps, Deno-installed npm dependencies, and manual/cron/webhook triggers. Use this whenever you create or modify a workflow.
 ---
 
 # Building a Hatch workflow
@@ -21,7 +21,9 @@ bundling, versioning (git + artifact), scheduling, and serving the webhook.
 <id>/
   manifest.json        declares id, name, description, entry, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
-  deno.json            import map (@hatch/workflow + zod), npm deps go here
+  package.json         npm dependencies (installed only with Deno)
+  deno.json            reviewed npm lifecycle-script allowlist
+  deno.lock            Deno dependency lock (commit this file)
   hatch/workflow.ts    the platform SDK — DO NOT EDIT
 ```
 
@@ -79,8 +81,48 @@ export default defineWorkflow({
 - Keep the result JSON-serializable. Do all real work inside `ctx.step` so the
   inspector is useful.
 - Do **not** edit `hatch/` — it's the platform SDK, bundled automatically.
-- Extra npm deps: add them to `deno.json` `imports` with `npm:` specifiers, e.g.
-  `"dayjs": "npm:dayjs@^1"`, then `import dayjs from 'dayjs'`.
+- Extra npm deps go in `package.json` `dependencies`, then use a bare import such
+  as `import dayjs from 'dayjs'`. Keep the scaffolded `@hatch/workflow` →
+  `./hatch/workflow.ts` mapping in `deno.json` so local Deno tooling resolves the
+  SDK; do not add the SDK to `package.json` or change/remove that mapping. The
+  platform injects the same authoritative mapping again during deploy.
+
+### Dependencies and lifecycle scripts
+
+**Deno is the only package manager.** Never run `npm install`, `pnpm install`,
+or generate npm/pnpm lock files. After every dependency change, run this in the
+workflow source root:
+
+```bash
+deno install --package-json --node-modules-dir=auto --lock=deno.lock
+```
+
+Commit `package.json`, `deno.json`, and the resulting `deno.lock`; never commit
+`node_modules`. `deploy_workflow` repeats the install with `--frozen`. Missing or
+stale files fail deploy. If deploy reports a legacy deno.json-only source, load
+this Skill, move every `npm:` import into `package.json`, run the command above,
+and commit all three files before deploying again.
+
+Deno skips npm `preinstall`, `install`, and `postinstall` scripts by default. If
+it reports a skipped lifecycle script, do not enable it blindly:
+
+1. Find the exact resolved version in `deno.lock`; inspect the package's
+   lifecycle command and every local script it invokes.
+2. Choose another dependency if it downloads or executes unreviewed remote
+   code, reads credentials/project-external files, writes outside the package or
+   project, changes global configuration, elevates privileges, is obfuscated or
+   dynamic, or cannot be fully traced.
+3. Reject native addons, FFI, runtime sidecars, and generated runtime files that
+   cannot be carried by the single-file Workflow bundle.
+4. Only after confirming the exact command is safe, add the exact locked version
+   to `deno.json`—never `true`, a tag, wildcard, or range:
+
+   ```json
+   { "allowScripts": ["npm:trusted-package@1.2.3"] }
+   ```
+
+5. Run Deno install again, verify the output and Workflow, then commit
+   `deno.json` and `deno.lock`. Review transitive packages independently.
 
 ## Manifest & triggers
 

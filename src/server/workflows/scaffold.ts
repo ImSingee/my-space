@@ -69,6 +69,7 @@ export async function createWorkflow(
         __WORKFLOW_NAME__: jsonStringInner(name),
         __WORKFLOW_DESCRIPTION__: jsonStringInner(description),
       },
+      'package.json': { __WORKFLOW_ID__: id },
     },
   );
 
