@@ -6,7 +6,12 @@ import {
 } from '@earendil-works/pi-agent-core';
 import { SKILLS_DIR } from './paths';
 
-const REQUIRED_SKILL_NAMES = ['building-apps', 'building-workflows'] as const;
+const REQUIRED_SKILL_NAMES = [
+  'building-apps',
+  'building-workflows',
+  'importing-apps',
+  'importing-workflows',
+] as const;
 
 function formatDiagnostic(diagnostic: SkillDiagnostic): string {
   return `${diagnostic.code} at ${diagnostic.path}: ${diagnostic.message}`;

@@ -29,6 +29,32 @@ describe('Agent system prompt skills', () => {
     expect(prompt).not.toContain('FULL_SKILL_BODY_SENTINEL');
   });
 
+  it('requires import and build Skills before opening source archives', () => {
+    const prompt = buildSystemPrompt([
+      visibleSkill,
+      {
+        ...visibleSkill,
+        name: 'building-workflows',
+        filePath: '/opt/hatch/skills/building-workflows/SKILL.md',
+      },
+      {
+        ...visibleSkill,
+        name: 'importing-apps',
+        filePath: '/opt/hatch/skills/importing-apps/SKILL.md',
+      },
+      {
+        ...visibleSkill,
+        name: 'importing-workflows',
+        filePath: '/opt/hatch/skills/importing-workflows/SKILL.md',
+      },
+    ]);
+
+    expect(prompt).toMatch(
+      /importing-apps.*building-apps.*importing-workflows.*building-workflows/s,
+    );
+    expect(prompt).toMatch(/before downloading or extracting the attachment/i);
+  });
+
   it('hides skills disabled for model invocation', () => {
     const prompt = buildSystemPrompt([
       { ...visibleSkill, disableModelInvocation: true },

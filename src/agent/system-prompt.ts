@@ -235,5 +235,5 @@ It is a single Deno program bundled at deploy time. Read the
 
   const skillsPrompt = formatSkillsForSystemPrompt(skills);
   if (!skillsPrompt) return basePrompt;
-  return `${basePrompt}\n\n# Skills\nBefore creating or modifying an app or workflow, read the full matching Skill file with \`read_file\` before calling app/workflow platform tools or editing workspace files.\n\n${skillsPrompt}`;
+  return `${basePrompt}\n\n# Skills\nBefore creating or modifying an app or workflow, read the full matching Skill file with \`read_file\` before calling app/workflow platform tools or editing workspace files. Before importing an uploaded source ZIP, read both full matching Skills before downloading or extracting the attachment: \`importing-apps\` plus \`building-apps\` for an app, or \`importing-workflows\` plus \`building-workflows\` for a workflow.\n\n${skillsPrompt}`;
 }

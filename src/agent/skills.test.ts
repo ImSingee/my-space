@@ -33,8 +33,37 @@ describe('Agent skills', () => {
     const skills = await loadAgentSkills(env, SKILLS_DIR);
 
     expect(skills.map((skill) => skill.name)).toEqual(
-      expect.arrayContaining(['building-apps', 'building-workflows']),
+      expect.arrayContaining([
+        'building-apps',
+        'building-workflows',
+        'importing-apps',
+        'importing-workflows',
+      ]),
     );
+  });
+
+  it('keeps import guidance focused on review and delegates build rules', async () => {
+    const env = new NodeExecutionEnv({ cwd: process.cwd() });
+    const skills = await loadAgentSkills(env, SKILLS_DIR);
+    const byName = new Map(skills.map((skill) => [skill.name, skill]));
+
+    for (const [importName, buildName] of [
+      ['importing-apps', 'building-apps'],
+      ['importing-workflows', 'building-workflows'],
+    ] as const) {
+      const skill = byName.get(importName);
+      expect(skill).toBeDefined();
+      if (!skill) throw new Error(`Missing ${importName} Skill`);
+      const { content } = skill;
+      expect(content).toContain('read_file');
+      expect(content).toContain(`\`${buildName}\``);
+      expect(content).toContain('unzip');
+      expect(content.indexOf(buildName)).toBeLessThan(
+        content.indexOf('download_attachment'),
+      );
+      expect(content).not.toContain('deno install');
+      expect(content).not.toContain('allowScripts');
+    }
   });
 
   it('advertises shipped skills that the registered read tool can load', async () => {
@@ -78,6 +107,31 @@ describe('Agent skills', () => {
 
     await expect(loadAgentSkills(env, root)).rejects.toThrow(
       /missing required skill: building-workflows/,
+    );
+  });
+
+  it('rejects shipped skills without the import safety procedures', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-skills-'));
+    tempRoots.push(root);
+    for (const name of ['building-apps', 'building-workflows']) {
+      const skillDir = path.join(root, name);
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        [
+          '---',
+          `name: ${name}`,
+          `description: ${name}`,
+          '---',
+          '',
+          `# ${name}`,
+        ].join('\n'),
+      );
+    }
+    const env = new NodeExecutionEnv({ cwd: process.cwd() });
+
+    await expect(loadAgentSkills(env, root)).rejects.toThrow(
+      /missing required skill: importing-apps/,
     );
   });
 
