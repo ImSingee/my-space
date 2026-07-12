@@ -38,10 +38,20 @@ ENV AGENT_INTERNAL_PORT=3701
 # Deno caches npm: dependencies here (mount /cache to persist across restarts).
 ENV DENO_DIR=/cache/deno
 
-# git: the platform keeps canonical app/workflow repos (bundle import/export)
-# and the Agent Runner clones/commits local worktrees.
+# Runtime tools used by the platform and Agent Runner. git backs canonical
+# app/workflow repos and local worktrees; the remaining tools are available to
+# model-controlled commands and deployment scripts.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    python-is-python3 \
+    python3 \
+    python3-pip \
+    rsync \
+    unzip \
+    wget \
   && rm -rf /var/lib/apt/lists/*
 
 # Unprivileged user the Agent Runner demotes agent subprocesses to (shell +
