@@ -65,7 +65,59 @@ async function canonicalWorkspaceRoot(
   return unwrap(await env.canonicalPath('.', signal));
 }
 
-async function resolveExistingTextFile(
+type ResolvedPath = {
+  canonicalPath: string;
+  displayPath: string;
+};
+
+async function canonicalReadOnlyRoots(
+  env: ExecutionEnv,
+  roots: readonly string[],
+  signal?: AbortSignal,
+): Promise<string[]> {
+  return Promise.all(
+    roots.map(async (root) => unwrap(await env.canonicalPath(root, signal))),
+  );
+}
+
+async function resolveReadablePath(
+  env: ExecutionEnv,
+  inputPath: string,
+  readOnlyRoots: readonly string[],
+  expectedKind: 'file' | 'directory',
+  signal?: AbortSignal,
+): Promise<ResolvedPath> {
+  const [workspaceRoot, canonicalPath, extraRoots] = await Promise.all([
+    canonicalWorkspaceRoot(env, signal),
+    unwrap(await env.canonicalPath(inputPath, signal)),
+    canonicalReadOnlyRoots(env, readOnlyRoots, signal),
+  ]);
+  const containingRoot = [workspaceRoot, ...extraRoots].find((root) =>
+    isInsidePath(root, canonicalPath),
+  );
+  if (!containingRoot) {
+    throw new Error(
+      `${inputPath} is outside the workspace and configured read-only roots.`,
+    );
+  }
+  const info = unwrap(await env.fileInfo(canonicalPath, signal));
+  if (info.kind !== expectedKind) {
+    throw new Error(
+      expectedKind === 'file'
+        ? `${inputPath} is not a regular file.`
+        : `${inputPath} is not a directory.`,
+    );
+  }
+  return {
+    canonicalPath,
+    displayPath:
+      containingRoot === workspaceRoot
+        ? toWorkspacePath(workspaceRoot, canonicalPath)
+        : canonicalPath,
+  };
+}
+
+async function resolveWorkspaceTextFile(
   env: ExecutionEnv,
   inputPath: string,
   signal?: AbortSignal,
@@ -87,25 +139,6 @@ async function resolveExistingTextFile(
   };
 }
 
-async function resolveListableDir(
-  env: ExecutionEnv,
-  inputPath: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const [root, canonicalPath] = await Promise.all([
-    canonicalWorkspaceRoot(env, signal),
-    unwrap(await env.canonicalPath(inputPath, signal)),
-  ]);
-  if (!isInsidePath(root, canonicalPath)) {
-    throw new Error(`${inputPath} is outside the workspace.`);
-  }
-  const info = unwrap(await env.fileInfo(canonicalPath, signal));
-  if (info.kind !== 'directory') {
-    throw new Error(`${inputPath} is not a directory.`);
-  }
-  return canonicalPath;
-}
-
 async function resolveWritableTextFile(
   env: ExecutionEnv,
   inputPath: string,
@@ -117,7 +150,7 @@ async function resolveWritableTextFile(
 
   const exists = unwrap(await env.exists(absolutePath, signal));
   if (exists) {
-    const existing = await resolveExistingTextFile(env, absolutePath, signal);
+    const existing = await resolveWorkspaceTextFile(env, absolutePath, signal);
     return { workspacePath: existing.workspacePath };
   }
 
@@ -146,43 +179,69 @@ async function resolveWritableTextFile(
   throw new Error(`${inputPath} is outside the workspace.`);
 }
 
-export function createFileTools(env: ExecutionEnv): AgentTool[] {
+export type CreateFileToolsOptions = {
+  readOnlyRoots?: string[];
+};
+
+export function createFileTools(
+  env: ExecutionEnv,
+  options: CreateFileToolsOptions = {},
+): AgentTool[] {
+  const readOnlyRoots = options.readOnlyRoots ?? [];
   const listFiles = tool({
     name: 'list_files',
     label: 'List files',
     description:
-      'List files and directories at a path (relative to the workspace root).',
+      'List a directory in the workspace, or an absolute directory under a ' +
+      'read-only resource root referenced by the system prompt.',
     parameters: Type.Object({
       path: Type.Optional(
         Type.String({ description: 'Directory path. Defaults to ".".' }),
       ),
     }),
     execute: async (_id, params, signal) => {
-      // Containment check parity with read/write/edit: `..` or an absolute path
-      // must not let the agent enumerate directories outside its workspace.
-      const dir = await resolveListableDir(env, params.path ?? '.', signal);
-      const entries = unwrap(await env.listDir(dir, signal));
+      const resolved = await resolveReadablePath(
+        env,
+        params.path ?? '.',
+        readOnlyRoots,
+        'directory',
+        signal,
+      );
+      const entries = unwrap(await env.listDir(resolved.canonicalPath, signal));
       const lines = entries
         .map((e) => `${e.kind === 'directory' ? 'd' : '-'} ${e.name}`)
         .sort();
-      return text(lines.join('\n') || '(empty)', { count: entries.length });
+      return text(lines.join('\n') || '(empty)', {
+        count: entries.length,
+        path: resolved.displayPath,
+      });
     },
   });
 
   const readFile = tool({
     name: 'read_file',
     label: 'Read file',
-    description: 'Read a UTF-8 text file relative to the workspace root.',
+    description:
+      'Read a UTF-8 text file in the workspace, or an absolute file under a ' +
+      'read-only resource root referenced by the system prompt.',
     executionMode: 'sequential',
     parameters: Type.Object({
       path: Type.String({ description: 'File path to read.' }),
     }),
     execute: async (_id, params, signal) => {
-      const resolved = await resolveExistingTextFile(env, params.path, signal);
-      const content = unwrap(await env.readTextFile(params.path, signal));
+      const resolved = await resolveReadablePath(
+        env,
+        params.path,
+        readOnlyRoots,
+        'file',
+        signal,
+      );
+      const content = unwrap(
+        await env.readTextFile(resolved.canonicalPath, signal),
+      );
       const truncated = content.length > MAX_FILE_CHARS;
       return text(truncated ? content.slice(0, MAX_FILE_CHARS) : content, {
-        path: resolved.workspacePath,
+        path: resolved.displayPath,
         truncated,
       });
     },
@@ -231,7 +290,7 @@ export function createFileTools(env: ExecutionEnv): AgentTool[] {
       ),
     }),
     execute: async (_id, params, signal) => {
-      const resolved = await resolveExistingTextFile(env, params.path, signal);
+      const resolved = await resolveWorkspaceTextFile(env, params.path, signal);
       const content = unwrap(
         await env.readTextFile(resolved.canonicalPath, signal),
       );

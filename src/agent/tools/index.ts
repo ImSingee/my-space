@@ -17,6 +17,7 @@ export type { AskBridge };
 export type CreateToolsOptions = {
   platform: PlatformClient;
   ask?: AskBridge;
+  readOnlyRoots?: string[];
   sessionId?: string;
 };
 
@@ -29,7 +30,10 @@ export function createTools(
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
   };
   const tools = [
-    ...createFileTools(env),
+    ...createFileTools(
+      env,
+      options.readOnlyRoots ? { readOnlyRoots: options.readOnlyRoots } : {},
+    ),
     createCommandTool(env),
     createAttachmentTool(shared),
     ...createAppTools(shared),

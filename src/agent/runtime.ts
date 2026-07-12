@@ -7,7 +7,6 @@ import { mkdirSync } from 'node:fs';
 import {
   AgentHarness,
   InMemorySessionRepo,
-  loadSkills,
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
@@ -19,6 +18,7 @@ import { agentWorkDir, SKILLS_DIR } from './paths';
 import type { PlatformClient } from './platform-client';
 import type { ResolvedModel } from './remote-models';
 import { agentShellEnv } from './shell-env';
+import { loadAgentSkills } from './skills';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge } from './tools';
 
@@ -95,10 +95,11 @@ export async function runAgentTurn(
     await session.appendMessage(message);
   }
 
-  const { skills } = await loadSkills(env, SKILLS_DIR);
+  const skills = await loadAgentSkills(env);
   const tools = createTools(env, {
     platform: opts.platform,
     ...(opts.ask ? { ask: opts.ask } : {}),
+    readOnlyRoots: [SKILLS_DIR],
     sessionId,
   });
   // Server-side source of truth for tool display labels. Emitting the label on
@@ -113,7 +114,7 @@ export async function runAgentTurn(
     model: picked.model,
     tools,
     resources: { skills },
-    systemPrompt: buildSystemPrompt(),
+    systemPrompt: ({ resources }) => buildSystemPrompt(resources.skills ?? []),
     thinkingLevel: picked.model.reasoning ? 'medium' : 'off',
   });
 

@@ -39,20 +39,35 @@ async function writeFixture(root: string, filePath: string, content: string) {
   await writeFile(fullPath, content);
 }
 
-async function setup(files: Record<string, string> = {}) {
+async function setup(
+  files: Record<string, string> = {},
+  readOnlyFiles?: Record<string, string>,
+) {
   const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-tools-'));
   tempRoots.push(root);
   for (const [filePath, content] of Object.entries(files)) {
     await writeFixture(root, filePath, content);
   }
+  const readOnlyRoot = readOnlyFiles
+    ? await mkdtemp(path.join(tmpdir(), 'hatch-agent-resources-'))
+    : undefined;
+  if (readOnlyRoot) {
+    tempRoots.push(readOnlyRoot);
+    for (const [filePath, content] of Object.entries(readOnlyFiles ?? {})) {
+      await writeFixture(readOnlyRoot, filePath, content);
+    }
+  }
   const env = new NodeExecutionEnv({ cwd: root });
-  const tools = createTools(env, { platform: stubPlatform });
+  const tools = createTools(env, {
+    platform: stubPlatform,
+    ...(readOnlyRoot ? { readOnlyRoots: [readOnlyRoot] } : {}),
+  });
   const getTool = (name: string) => {
     const found = tools.find((tool) => tool.name === name);
     if (!found) throw new Error(`Missing tool ${name}`);
     return found;
   };
-  return { root, getTool };
+  return { root, readOnlyRoot, getTool };
 }
 
 function textOf(result: { content: { type: string; text?: string }[] }) {
@@ -183,6 +198,87 @@ describe('agent file tools', () => {
     } finally {
       await rm(outsidePath, { force: true });
     }
+  });
+
+  it('reads and lists files inside a configured read-only root', async () => {
+    const { getTool, readOnlyRoot } = await setup(
+      {},
+      {
+        'building-apps/SKILL.md': '# Building apps\n',
+        'building-apps/references/manifest.md': '# Manifest\n',
+      },
+    );
+    if (!readOnlyRoot) throw new Error('Missing read-only fixture root');
+
+    const skillPath = path.join(readOnlyRoot, 'building-apps', 'SKILL.md');
+    const readResult = await getTool('read_file').execute('read', {
+      path: skillPath,
+    });
+    expect(textOf(readResult)).toBe('# Building apps\n');
+
+    const listResult = await getTool('list_files').execute('list', {
+      path: path.join(readOnlyRoot, 'building-apps', 'references'),
+    });
+    expect(textOf(listResult)).toBe('- manifest.md');
+  });
+
+  it('rejects symlinks escaping a configured read-only root', async () => {
+    const { getTool, readOnlyRoot } = await setup(
+      {},
+      { 'building-apps/SKILL.md': '# Building apps\n' },
+    );
+    if (!readOnlyRoot) throw new Error('Missing read-only fixture root');
+    const outsidePath = path.join(
+      path.dirname(readOnlyRoot),
+      `outside-${path.basename(readOnlyRoot)}.txt`,
+    );
+    await writeFile(outsidePath, 'secret');
+    await symlink(
+      outsidePath,
+      path.join(readOnlyRoot, 'building-apps', 'outside-link.txt'),
+    );
+    try {
+      await expect(
+        getTool('read_file').execute('read', {
+          path: path.join(readOnlyRoot, 'building-apps', 'outside-link.txt'),
+        }),
+      ).rejects.toThrow(/outside the workspace/);
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
+  });
+
+  it('never writes or edits files in a configured read-only root', async () => {
+    const { getTool, readOnlyRoot } = await setup(
+      {},
+      { 'building-apps/SKILL.md': '# Building apps\n' },
+    );
+    if (!readOnlyRoot) throw new Error('Missing read-only fixture root');
+    const skillPath = path.join(readOnlyRoot, 'building-apps', 'SKILL.md');
+
+    await expect(
+      getTool('edit_file').execute('edit', {
+        path: skillPath,
+        old_string: 'apps',
+        new_string: 'workflows',
+      }),
+    ).rejects.toThrow(/outside the workspace/);
+    await expect(
+      getTool('write_file').execute('write', {
+        path: skillPath,
+        content: 'overwritten',
+      }),
+    ).rejects.toThrow(/outside the workspace/);
+    await expect(
+      getTool('write_file').execute('write', {
+        path: path.join(readOnlyRoot, 'building-apps', 'new.md'),
+        content: 'new',
+      }),
+    ).rejects.toThrow(/outside the workspace/);
+
+    await expect(readFile(skillPath, 'utf8')).resolves.toBe(
+      '# Building apps\n',
+    );
   });
 });
 

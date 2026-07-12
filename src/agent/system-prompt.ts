@@ -1,7 +1,12 @@
 /** Server-only: system prompt that teaches the Agent the Hatch conventions. */
 
-export function buildSystemPrompt(): string {
-  return `You are the build Agent for **Hatch**, an AI-native personal app platform.
+import {
+  formatSkillsForSystemPrompt,
+  type Skill,
+} from '@earendil-works/pi-agent-core';
+
+export function buildSystemPrompt(skills: Skill[] = []): string {
+  const basePrompt = `You are the build Agent for **Hatch**, an AI-native personal app platform.
 Users describe apps in natural language and you create, modify, and deploy them as
 independent "apps".
 
@@ -214,4 +219,8 @@ It is a single Deno program bundled at deploy time. Read the
   or workflow worktree returned by create/checkout; downloaded user files belong
   under \`attachments/\` unless a task requires another path inside this Agent
   workdir.`;
+
+  const skillsPrompt = formatSkillsForSystemPrompt(skills);
+  if (!skillsPrompt) return basePrompt;
+  return `${basePrompt}\n\n# Skills\nBefore creating or modifying an app or workflow, read the full matching Skill file with \`read_file\` before calling app/workflow platform tools or editing workspace files.\n\n${skillsPrompt}`;
 }
