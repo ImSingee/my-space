@@ -14,7 +14,11 @@ import { IconAppWindow, IconSparkles } from '@tabler/icons-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { appsQueryOptions } from '~queries/apps';
+import { AppRouteAutocomplete } from '~components/apps/app-route-autocomplete';
+import {
+  appsQueryOptions,
+  normalizedManifestQueryOptions,
+} from '~queries/apps';
 import { sidebarItemsQueryOptions } from '~queries/sidebar';
 import {
   addSidebarItem,
@@ -38,9 +42,17 @@ export function PinnedApps() {
   const queryClient = useQueryClient();
   const { data: pins } = useQuery(sidebarItemsQueryOptions);
   const { data: apps } = useQuery(appsQueryOptions);
-  const [editTarget, setEditTarget] = useState<{ id: string } | null>(null);
+  const [editTarget, setEditTarget] = useState<{
+    id: string;
+    appId: string;
+  } | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editHash, setEditHash] = useState('');
+  const editedAppId = editTarget?.appId ?? '';
+  const { data: editedManifest } = useQuery({
+    ...normalizedManifestQueryOptions(editedAppId),
+    enabled: Boolean(editedAppId),
+  });
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -67,7 +79,7 @@ export function PinnedApps() {
     onSuccess: (row) => {
       void invalidate();
       if (row) {
-        setEditTarget({ id: row.id });
+        setEditTarget({ id: row.id, appId: row.appId });
         setEditLabel(row.label);
         setEditHash('');
       }
@@ -209,7 +221,7 @@ export function PinnedApps() {
             <PinnedRow
               renameLabel="Edit"
               onRename={() => {
-                setEditTarget({ id: pin.id });
+                setEditTarget({ id: pin.id, appId: pin.appId });
                 setEditLabel(pin.label);
                 setEditHash(pin.entryHash ?? '');
               }}
@@ -257,18 +269,13 @@ export function PinnedApps() {
               }
             }}
           />
-          <TextInput
+          <AppRouteAutocomplete
+            routes={editedManifest?.app?.routes ?? []}
             label="Entry point"
             description="Open the app at a specific page. Leave blank for the app home."
             placeholder="/settings"
             value={editHash}
-            onChange={(e) => setEditHash(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitEdit();
-              }
-            }}
+            onChange={setEditHash}
           />
           <Group justify="flex-end">
             <Button

@@ -111,7 +111,14 @@ Keep `manifest.json` consistent with the files. Example:
   "backendMode": "serverless",
   "rpc": { "proto": "proto/service.proto", "service": "app.v1.TodoService" },
   "backend": { "entry": "backend/main.ts" },
-  "app": { "entry": "app/main.tsx", "html": "app/index.html" },
+  "app": {
+    "entry": "app/main.tsx",
+    "html": "app/index.html",
+    "routes": [
+      { "path": "/", "description": "Todo list" },
+      { "path": "/todos/$todoId", "description": "Todo details" }
+    ]
+  },
   "widgets": [
     {
       "id": "summary",
@@ -130,6 +137,11 @@ Keep `manifest.json` consistent with the files. Example:
 
 The `service` value must be the fully-qualified proto service name
 (`<package>.<ServiceName>`), and the widget `id` is what the dashboard pins.
+Keep `app.routes` synchronized with every user-navigable frontend route so the
+platform can autocomplete app entry points. Each path starts with `/` and has a
+concise user-facing description; dynamic route templates use TanStack Router's
+`$param` syntax. The declaration is metadata only — TanStack Router remains the
+runtime source of truth.
 `defaultSize` is the footprint a widget opens at (grid units, 12-column system).
 `supportedSizes` is optional: list the discrete footprints your widget is
 designed for and the dashboard restricts resizing to them, snapping to the

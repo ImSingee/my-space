@@ -52,7 +52,11 @@ apps/<id>/
 - **Frontend**: React SPA using TanStack Router (hash history) + TanStack Query.
   It calls the backend through a generated Connect client whose base URL is the
   injected global \`__RPC_BASE_URL__\`. The template already wires this up. Add
-  any npm package to \`package.json\` and import it; the build bundles it.
+  any npm package to \`package.json\` and import it; the build bundles it. Keep
+  \`app.routes\` in \`manifest.json\` synchronized with every user-navigable
+  route. Each item declares \`{ path, description }\`; use TanStack Router
+  \`$param\` syntax for dynamic route templates. This is discoverability
+  metadata for path autocomplete, not runtime route registration.
 - **Backend**: a Deno process exposing a Connect service via
   \`connectNodeAdapter\`. Keep handlers small and serverless-style. It reads
   \`DATABASE_URL\` (injected by the platform) for persistence.

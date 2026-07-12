@@ -10,6 +10,15 @@ const visibleSkill: Skill = {
 };
 
 describe('Agent system prompt skills', () => {
+  it('requires frontend route metadata to stay synchronized', () => {
+    const prompt = buildSystemPrompt();
+
+    expect(prompt).toMatch(/Keep\s+`app\.routes`/);
+    expect(prompt).toContain('{ path, description }');
+    expect(prompt).toContain('$param');
+    expect(prompt).toContain('not runtime route registration');
+  });
+
   it('lists visible skill metadata without eagerly including its body', () => {
     const prompt = buildSystemPrompt([visibleSkill]);
 

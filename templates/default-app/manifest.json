@@ -22,7 +22,11 @@
   },
   "app": {
     "entry": "app/main.tsx",
-    "html": "app/index.html"
+    "html": "app/index.html",
+    "routes": [
+      { "path": "/", "description": "Persistent counter" },
+      { "path": "/about", "description": "About this app" }
+    ]
   },
   "widgets": [
     {

@@ -5,6 +5,61 @@ import {
   snapToSupportedSize,
 } from './manifest';
 
+describe('app route manifest', () => {
+  const parseRoutes = (routes?: unknown[]) =>
+    normalizeManifest(
+      parseSourceManifest({
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { frontend: true },
+        app: {
+          entry: 'app/main.tsx',
+          ...(routes === undefined ? {} : { routes }),
+        },
+      }),
+    ).app?.routes;
+
+  it('normalizes static and dynamic route metadata', () => {
+    expect(
+      parseRoutes([
+        { path: '/', description: 'Overview' },
+        { path: '/projects/$projectId', description: 'Project details' },
+      ]),
+    ).toEqual([
+      { path: '/', description: 'Overview' },
+      { path: '/projects/$projectId', description: 'Project details' },
+    ]);
+  });
+
+  it('defaults routes to an empty list for existing manifests', () => {
+    expect(parseRoutes()).toEqual([]);
+  });
+
+  it('rejects duplicate route paths', () => {
+    expect(() =>
+      parseRoutes([
+        { path: '/settings', description: 'Settings' },
+        { path: '/settings', description: 'Other settings' },
+      ]),
+    ).toThrow(/duplicate app route path/);
+  });
+
+  it('rejects relative paths and empty or multiline descriptions', () => {
+    expect(() =>
+      parseRoutes([{ path: 'settings', description: 'Settings' }]),
+    ).toThrow(/route path must start/);
+    expect(() => parseRoutes([{ path: '/', description: '' }])).toThrow(
+      /description/,
+    );
+    expect(() => parseRoutes([{ path: '/', description: '   ' }])).toThrow(
+      /must not be blank/,
+    );
+    expect(() =>
+      parseRoutes([{ path: '/', description: 'Home\nroute' }]),
+    ).toThrow(/must not contain line breaks/);
+  });
+});
+
 describe('snapToSupportedSize', () => {
   it('returns undefined for an empty list (free-form fallback)', () => {
     expect(snapToSupportedSize([], { w: 4, h: 3 })).toBeUndefined();

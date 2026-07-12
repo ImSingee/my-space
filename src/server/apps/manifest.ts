@@ -78,6 +78,36 @@ const singleLineNonEmpty = z
   .min(1)
   .refine(hasNoLineBreak, { message: 'must not contain line breaks' });
 
+/** A user-facing route the app exposes through its hash router. */
+export const appRouteSchema = z.object({
+  path: singleLineNonEmpty.refine((path) => path.startsWith('/'), {
+    message: 'route path must start with "/"',
+  }),
+  description: singleLineNonEmpty.refine(
+    (description) => description.trim().length > 0,
+    { message: 'route description must not be blank' },
+  ),
+});
+
+export type AppRoute = z.infer<typeof appRouteSchema>;
+
+const appRoutesSchema = z
+  .array(appRouteSchema)
+  .default([])
+  .superRefine((routes, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, route] of routes.entries()) {
+      if (seen.has(route.path)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `duplicate app route path "${route.path}"`,
+          path: [index, 'path'],
+        });
+      }
+      seen.add(route.path);
+    }
+  });
+
 export const widgetSizeSchema = z.object({
   w: z.number().int().min(1).max(12).default(4),
   h: z.number().int().min(1).max(12).default(3),
@@ -387,6 +417,8 @@ export const sourceManifestSchema = z
       .object({
         entry: sourceRelativePath,
         html: sourceRelativePath.optional(),
+        /** Discoverability metadata only; the platform does not register routes. */
+        routes: appRoutesSchema,
       })
       .optional(),
     widgets: z.array(widgetSchema).default([]),
@@ -539,8 +571,12 @@ export type NormalizedManifest = {
   backendMode: 'serverless' | 'long-running';
   /** Source-relative backend entry the platform runs, when a backend is present. */
   backend?: { entry: string };
-  /** Iframe URL for the full app, when a frontend is present. */
-  app?: { url: string };
+  /** Iframe URL and discoverable routes for the full app, when present. */
+  app?: {
+    url: string;
+    /** Optional only for normalized manifests persisted before route metadata. */
+    routes?: AppRoute[];
+  };
   widgets: NormalizedWidget[];
   /** Connect RPC base URL + fully-qualified service name, when a backend is present. */
   rpc?: { url: string; service: string };
@@ -703,7 +739,7 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     out.backend = { entry: src.backend.entry };
   }
   if (src.capabilities.frontend && src.app) {
-    out.app = { url: appUrl(src.id) };
+    out.app = { url: appUrl(src.id), routes: src.app.routes };
   }
   if (src.capabilities.backend && src.rpc) {
     out.rpc = { url: rpcUrl(src.id), service: src.rpc.service };
