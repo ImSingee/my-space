@@ -13,7 +13,7 @@
  *   Cancel/answer flow platform → runner over the same control channel.
  *   A sweeper interrupts active runs whose lease expired (runner died).
  */
-import { and, eq, inArray, gt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, gt, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { db, schema } from '~/db';
 import type { AgentRunStatus, JsonObject, JsonValue } from '~/db/schema';
@@ -23,6 +23,10 @@ import type {
   AskAnswer,
   AskQuestion,
 } from '~agent/events';
+import {
+  formatAttachmentPrompt,
+  type AgentAttachmentRef,
+} from '~agent/attachments';
 import {
   LEASE_SWEEP_INTERVAL_MS,
   RUN_LEASE_TTL_MS,
@@ -45,6 +49,7 @@ export type AgentRunInput =
       retry?: false;
       userText: string;
       images?: SendImage[];
+      attachmentIds?: string[];
       providerId: string;
       modelId: string;
     };
@@ -117,9 +122,14 @@ function deriveTitle(userText: string): string {
     : firstLine || 'New chat';
 }
 
-function userMessage(userText: string, images: SendImage[] = []): JsonObject {
+function userMessage(
+  userText: string,
+  images: SendImage[] = [],
+  attachments: AgentAttachmentRef[] = [],
+): JsonObject {
   const content: JsonValue[] = [];
-  if (userText.trim()) content.push({ type: 'text', text: userText });
+  const prompt = formatAttachmentPrompt(userText, attachments);
+  if (prompt.trim()) content.push({ type: 'text', text: prompt });
   for (const image of images) {
     content.push({
       type: 'image',
@@ -127,7 +137,13 @@ function userMessage(userText: string, images: SendImage[] = []): JsonObject {
       mimeType: image.mimeType,
     });
   }
-  return { role: 'user', content };
+  return {
+    role: 'user',
+    content,
+    ...(attachments.length > 0
+      ? { attachments: attachments as unknown as JsonValue }
+      : {}),
+  };
 }
 
 function asPendingAsk(value: JsonObject | null): PendingAskPayload | null {
@@ -390,6 +406,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     baseMessages: JsonValue[];
     userText: string;
     images: SendImage[];
+    attachments: AgentAttachmentRef[];
   };
   let prepared: PreparedRun;
   try {
@@ -430,6 +447,8 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       let baseMessages: JsonValue[];
       let userText: string;
       let images: SendImage[];
+      let requestedAttachmentIds: string[];
+      let isRetry = false;
       if (input.retry === true) {
         const retry = parseRetryableAgentTurn(sessionMessages);
         if (!retry) {
@@ -438,11 +457,52 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         baseMessages = retry.baseMessages;
         userText = retry.userText;
         images = retry.images;
+        requestedAttachmentIds = retry.attachments.map(
+          (attachment) => attachment.id,
+        );
+        isRetry = true;
       } else {
         baseMessages = sessionMessages;
         userText = input.userText;
         images = input.images ?? [];
+        requestedAttachmentIds = input.attachmentIds ?? [];
       }
+
+      const attachmentIds = [...new Set(requestedAttachmentIds)];
+      const attachmentRows =
+        attachmentIds.length > 0
+          ? await tx
+              .select()
+              .from(schema.agentAttachments)
+              .where(
+                and(
+                  eq(schema.agentAttachments.sessionId, input.sessionId),
+                  inArray(schema.agentAttachments.id, attachmentIds),
+                ),
+              )
+              .for('update')
+          : [];
+      if (attachmentRows.length !== attachmentIds.length) {
+        throw new AppError('One or more attachments were not found.', 404);
+      }
+      if (!isRetry && attachmentRows.some((row) => row.attachedAt != null)) {
+        throw new AppError(
+          'One or more attachments are already attached.',
+          409,
+        );
+      }
+      const attachmentById = new Map(
+        attachmentRows.map((row) => [row.id, row]),
+      );
+      const attachments = attachmentIds.map((id) => {
+        const row = attachmentById.get(id)!;
+        return {
+          id: row.id,
+          name: row.name,
+          mimeType: row.contentType,
+          size: row.size,
+        } satisfies AgentAttachmentRef;
+      });
 
       const title =
         lockedSession.title && lockedSession.title !== 'New chat'
@@ -463,6 +523,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
           input: {
             userText,
             images: images.map((image) => ({ mimeType: image.mimeType })),
+            attachments,
           },
         })
         .returning();
@@ -473,14 +534,36 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       await tx
         .update(schema.agentSessions)
         .set({
-          messages: [...baseMessages, userMessage(userText, images)],
+          messages: [
+            ...baseMessages,
+            userMessage(userText, images, attachments),
+          ],
           title,
           providerId: model.providerId,
           modelId: model.model.id,
         })
         .where(eq(schema.agentSessions.id, input.sessionId));
 
-      return { run: inserted, baseMessages, userText, images };
+      if (!isRetry && attachmentIds.length > 0) {
+        await tx
+          .update(schema.agentAttachments)
+          .set({ attachedAt: new Date() })
+          .where(
+            and(
+              eq(schema.agentAttachments.sessionId, input.sessionId),
+              inArray(schema.agentAttachments.id, attachmentIds),
+              isNull(schema.agentAttachments.attachedAt),
+            ),
+          );
+      }
+
+      return {
+        run: inserted,
+        baseMessages,
+        userText,
+        images,
+        attachments,
+      };
     });
   } catch (error) {
     if (isActiveRunConflict(error)) {
@@ -488,7 +571,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     }
     throw error;
   }
-  const { run, baseMessages, userText, images } = prepared;
+  const { run, baseMessages, userText, images, attachments } = prepared;
 
   try {
     await hub.dispatchRun({
@@ -496,6 +579,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       sessionId: input.sessionId,
       userText,
       images,
+      attachments,
       priorMessages: baseMessages,
       model,
     });

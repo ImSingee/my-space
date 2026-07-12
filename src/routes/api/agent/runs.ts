@@ -6,6 +6,7 @@ import { auth } from '~auth/server';
 const MAX_BODY_BYTES = 25_000_000;
 /** Matches the composer's MAX_ATTACHMENTS. */
 const MAX_IMAGES = 6;
+const MAX_ATTACHMENTS = 6;
 /** Per-image base64 length cap (~6 MB decoded). */
 const MAX_IMAGE_CHARS = 8_000_000;
 /** Generous prose cap that still blocks pathological text bodies. */
@@ -73,10 +74,21 @@ const startBodySchema = z
       )
       .max(MAX_IMAGES)
       .optional(),
+    attachmentIds: z.array(z.string().min(1)).max(MAX_ATTACHMENTS).optional(),
   })
-  .refine((b) => b.userText.trim().length > 0 || (b.images?.length ?? 0) > 0, {
-    message: 'Message must include text or an image.',
-  });
+  .refine(
+    (body) =>
+      body.userText.trim().length > 0 ||
+      (body.images?.length ?? 0) > 0 ||
+      (body.attachmentIds?.length ?? 0) > 0,
+    { message: 'Message must include text or an attachment.' },
+  )
+  .refine(
+    (body) =>
+      (body.images?.length ?? 0) + (body.attachmentIds?.length ?? 0) <=
+      MAX_ATTACHMENTS,
+    { message: `Message supports at most ${MAX_ATTACHMENTS} attachments.` },
+  );
 
 // Retry is deliberately a separate, strict shape. The server reconstructs the
 // prompt, images, and transcript boundary from the persisted session, while

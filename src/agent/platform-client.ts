@@ -18,6 +18,7 @@ import type { ScaffoldFile, SourceBundleResponse } from './protocol';
 
 export type CreateAppResult = {
   id: string;
+  generation: string;
   slug: string;
   name: string;
   /** Rendered scaffold template for the runner to write into its worktree. */
@@ -26,6 +27,7 @@ export type CreateAppResult = {
 
 export type CreateWorkflowResult = {
   id: string;
+  generation: string;
   name: string;
   files: ScaffoldFile[];
 };
@@ -49,7 +51,21 @@ export type QueryAppDbResponse = {
   rowCount: number;
 };
 
+export type DownloadedAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  body: Uint8Array;
+};
+
 export type PlatformClient = {
+  downloadAttachment(
+    sessionId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<DownloadedAttachment>;
+
   listApps(): Promise<AppSummary[]>;
   /** Resolves an id-or-slug handle; null when no app matches. */
   getApp(handle: string): Promise<AppDetail | null>;
@@ -63,7 +79,7 @@ export type PlatformClient = {
   getAppSource(handle: string): Promise<SourceBundleResponse>;
   deployApp(
     id: string,
-    opts: { message: string; bundleBase64: string },
+    opts: { message: string; generation: string; bundleBase64: string },
   ): Promise<AppDeployResponse>;
   rollbackApp(handle: string, version: number): Promise<{ version: number }>;
   /** `signal` aborts the platform request (and the running statement). */
@@ -84,7 +100,7 @@ export type PlatformClient = {
   getWorkflowSource(id: string): Promise<SourceBundleResponse>;
   deployWorkflow(
     id: string,
-    opts: { message: string; bundleBase64: string },
+    opts: { message: string; generation: string; bundleBase64: string },
   ): Promise<WorkflowDeployResponse>;
   rollbackWorkflow(id: string, version: number): Promise<{ version: number }>;
 };

@@ -169,6 +169,30 @@ test('uses a useful fallback when an error has no detail', async () => {
     .toBeVisible();
 });
 
+test('renders a persisted file attachment with a download link', async () => {
+  const screen = await renderMessage({
+    role: 'user',
+    content: [{ type: 'text', text: 'See the file' }],
+    attachments: [
+      {
+        id: 'attachment-a',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        size: 2048,
+      },
+    ],
+  });
+
+  const link = screen.getByTitle('report.pdf (2.0 KB)');
+  await expect.element(link).toBeVisible();
+  expect(link.element()).toHaveAttribute(
+    'href',
+    '/api/agent/attachments/attachment-a',
+  );
+  expect(link.element()).toHaveAttribute('download', 'report.pdf');
+  await expect.element(screen.getByText('See the file')).toBeVisible();
+});
+
 test('wraps long and multiline provider errors inside a narrow message', async () => {
   const longToken = `provider-${'x'.repeat(320)}`;
   const error = `First line\n${longToken}`;

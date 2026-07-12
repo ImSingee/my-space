@@ -13,7 +13,13 @@ import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
-import { Composer, type ComposerImage, type ComposerSubmit } from './composer';
+import { uploadAgentFiles } from './attachment-api';
+import {
+  Composer,
+  type ComposerFile,
+  type ComposerImage,
+  type ComposerSubmit,
+} from './composer';
 import {
   getRetryableErrorInput,
   groupTurns,
@@ -184,17 +190,31 @@ export function Chat({ sessionId }: { sessionId: string }) {
     async (
       text: string,
       images: ComposerImage[],
+      files: ComposerFile[],
       modelValue: string,
     ): Promise<boolean> => {
       if (runBusy) return false;
-      if (!text && images.length === 0) return false;
+      if (!text && images.length === 0 && files.length === 0) return false;
       const parsed = splitModelValue(modelValue);
       if (!parsed) return false;
+
+      let attachmentIds: string[];
+      try {
+        attachmentIds = (await uploadAgentFiles(sessionId, files)).map(
+          (attachment) => attachment.id,
+        );
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Could not upload files.',
+        );
+        return false;
+      }
 
       const runId = await sendRun({
         sessionId,
         userText: text,
         images,
+        attachmentIds,
         providerId: parsed.providerId,
         modelId: parsed.modelId,
       });
@@ -348,9 +368,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const onComposerSubmit = ({
     text,
     images,
+    files,
   }: ComposerSubmit): Promise<boolean> => {
     if (!effectiveModel) return Promise.resolve(false);
-    return send(text, images, effectiveModel);
+    return send(text, images, files, effectiveModel);
   };
 
   const stop = () => {

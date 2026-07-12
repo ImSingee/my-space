@@ -331,6 +331,7 @@ test('sends a new message with the model currently shown in the picker', async (
     sessionId: 'session-1',
     userText: 'Use the new model',
     images: [],
+    attachmentIds: [],
     providerId: 'provider-latest',
     modelId: 'model-latest',
   });

@@ -31,6 +31,7 @@ beforeEach(async () => {
   vi.mocked(hub.dispatchRun).mockResolvedValue('runner-test');
   await db.delete(schema.agentRunEvents);
   await db.delete(schema.agentRuns);
+  await db.delete(schema.agentAttachments);
   await db.delete(schema.agentSessions);
   await db.delete(schema.agentModels);
   await db.delete(schema.agentProviders);
@@ -142,6 +143,7 @@ describe('startAgentRun retry', () => {
       sessionId: 'session-retry',
       userText: 'Failed request',
       images: [{ data: 'aW1hZ2U=', mimeType: 'image/png' }],
+      attachments: [],
       priorMessages: baseMessages,
       model: expect.objectContaining({
         providerId: PROVIDER_B_ID,
@@ -359,6 +361,94 @@ describe('startAgentRun retry', () => {
         }),
       }),
     );
+  });
+
+  it('attaches only files uploaded for this session and marks them referenced', async () => {
+    await seedAvailableModels();
+    await seedSession('session-attachments', []);
+    await seedSession('session-other', []);
+    await db.insert(schema.agentAttachments).values([
+      {
+        id: 'document-a',
+        sessionId: 'session-attachments',
+        name: 'document.pdf',
+        contentType: 'application/pdf',
+        size: 123,
+      },
+      {
+        id: 'document-other',
+        sessionId: 'session-other',
+        name: 'other.pdf',
+        contentType: 'application/pdf',
+        size: 456,
+      },
+    ]);
+
+    const { runId } = await startAgentRun({
+      sessionId: 'session-attachments',
+      userText: 'Inspect this file',
+      attachmentIds: ['document-a'],
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+    });
+
+    const attachment = await db.query.agentAttachments.findFirst({
+      where: (row, { eq }) => eq(row.id, 'document-a'),
+    });
+    expect(attachment?.attachedAt).toBeInstanceOf(Date);
+    const session = await db.query.agentSessions.findFirst({
+      where: (row, { eq }) => eq(row.id, 'session-attachments'),
+    });
+    expect(session?.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: expect.stringContaining('id=document-a'),
+          },
+        ],
+        attachments: [
+          {
+            id: 'document-a',
+            name: 'document.pdf',
+            mimeType: 'application/pdf',
+            size: 123,
+          },
+        ],
+      },
+    ]);
+    expect(hub.dispatchRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        sessionId: 'session-attachments',
+        attachments: [
+          {
+            id: 'document-a',
+            name: 'document.pdf',
+            mimeType: 'application/pdf',
+            size: 123,
+          },
+        ],
+      }),
+    );
+
+    await db
+      .update(schema.agentRuns)
+      .set({ status: 'completed', completedAt: new Date() })
+      .where(eq(schema.agentRuns.id, runId));
+    await expect(
+      startAgentRun({
+        sessionId: 'session-attachments',
+        userText: 'Try another session file',
+        attachmentIds: ['document-other'],
+        providerId: PROVIDER_A_ID,
+        modelId: MODEL_A_ID,
+      }),
+    ).rejects.toMatchObject({
+      status: 404,
+      message: 'One or more attachments were not found.',
+    });
   });
 
   it('rejects an unavailable selected model without changing the failed turn', async () => {

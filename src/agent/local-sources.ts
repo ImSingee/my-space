@@ -9,8 +9,11 @@
  * agent's shell.
  *
  * Layout under the runner's data dir (HATCH_DATA_DIR):
- *   agents/<sessionId>/work/<id>/                  ← agent-visible worktree
+ *   agents/<sessionId>/work/apps/<id>/             ← app worktree
+ *   agents/<sessionId>/work/workflows/<id>/        ← workflow worktree
+ *   agents/<sessionId>/work/attachments/<id>/...   ← downloaded attachments
  *   agents/<sessionId>/bundles/<kind>-<id>.bundle  ← origin bundle (hidden)
+ *   agents/<sessionId>/workspace-index.json         ← runner-private path index
  */
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
@@ -20,14 +23,33 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AGENT_HOME_DIR, AGENTS_DIR, agentWorkDir } from './paths';
+import {
+  AGENT_HOME_DIR,
+  agentAppWorkDir,
+  agentSessionDir,
+  agentWorkDir,
+  agentWorkflowWorkDir,
+  isSafeEntityId,
+} from './paths';
 import type { SourceBundleResponse } from './protocol';
 import { sandboxSpawn } from './shell-sandbox';
+import {
+  isWorkspacePathInside,
+  listIndexedWorkspaces,
+  registerWorkspace,
+  removeIndexedWorkspaces,
+  workspacePathsOverlap,
+} from './workspace-index';
+import {
+  resolveAgentWorkspacePath,
+  type AgentWorkspacePath,
+} from './workspace-paths';
 
 export const SOURCE_BRANCH = 'master';
 
@@ -35,7 +57,7 @@ export type SourceKind = 'app' | 'workflow';
 
 export type LocalCheckout = {
   id: string;
-  /** Path relative to the chat work root (what the agent sees), e.g. "id/". */
+  /** Path relative to the chat work root, e.g. "apps/id". */
   path: string;
   absolutePath: string;
   dirty: boolean;
@@ -44,6 +66,140 @@ export type LocalCheckout = {
   remoteCommit: string | null;
   status: string;
 };
+
+const workspaceMutationChains = new Map<string, Promise<unknown>>();
+
+type SourceGateWaiter = {
+  mode: 'read' | 'write';
+  resolve: (release: () => void) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+};
+
+const sourceGateQueue: SourceGateWaiter[] = [];
+let sourceGateReaders = 0;
+let sourceGateWriter = false;
+const sourceBarrierToken = Symbol('source-workspace-barrier');
+let activeSourceBarrier: symbol | null = null;
+
+export type SourceWorkspaceBarrier = {
+  readonly [sourceBarrierToken]: symbol;
+  release(): void;
+};
+
+function drainSourceGate(): void {
+  if (sourceGateWriter || sourceGateReaders > 0) return;
+  const first = sourceGateQueue[0];
+  if (!first) return;
+
+  if (first.mode === 'write') {
+    sourceGateQueue.shift();
+    if (first.signal && first.onAbort) {
+      first.signal.removeEventListener('abort', first.onAbort);
+    }
+    sourceGateWriter = true;
+    let released = false;
+    first.resolve(() => {
+      if (released) return;
+      released = true;
+      sourceGateWriter = false;
+      drainSourceGate();
+    });
+    return;
+  }
+
+  while (sourceGateQueue[0]?.mode === 'read') {
+    const reader = sourceGateQueue.shift()!;
+    if (reader.signal && reader.onAbort) {
+      reader.signal.removeEventListener('abort', reader.onAbort);
+    }
+    sourceGateReaders += 1;
+    let released = false;
+    reader.resolve(() => {
+      if (released) return;
+      released = true;
+      sourceGateReaders -= 1;
+      drainSourceGate();
+    });
+  }
+}
+
+function acquireSourceGate(
+  mode: 'read' | 'write',
+  signal?: AbortSignal,
+): Promise<() => void> {
+  if (signal?.aborted) {
+    return Promise.reject(new Error('Source workspace operation was aborted.'));
+  }
+  return new Promise((resolve, reject) => {
+    const waiter: SourceGateWaiter = { mode, resolve, signal };
+    if (signal) {
+      waiter.onAbort = () => {
+        const index = sourceGateQueue.indexOf(waiter);
+        if (index < 0) return;
+        sourceGateQueue.splice(index, 1);
+        reject(new Error('Source workspace operation was aborted.'));
+        drainSourceGate();
+      };
+      signal.addEventListener('abort', waiter.onAbort, { once: true });
+    }
+    sourceGateQueue.push(waiter);
+    drainSourceGate();
+  });
+}
+
+export async function acquireSourceWorkspaceBarrier(): Promise<SourceWorkspaceBarrier> {
+  const releaseGate = await acquireSourceGate('write');
+  const token = Symbol('source-workspace-barrier-owner');
+  activeSourceBarrier = token;
+  let released = false;
+  return {
+    [sourceBarrierToken]: token,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (activeSourceBarrier === token) activeSourceBarrier = null;
+      releaseGate();
+    },
+  };
+}
+
+function assertActiveSourceBarrier(barrier: SourceWorkspaceBarrier): void {
+  if (activeSourceBarrier !== barrier[sourceBarrierToken]) {
+    throw new Error('Source workspace barrier is not active.');
+  }
+}
+
+export async function withSourceWorkspaceLock<T>(
+  sessionId: string,
+  task: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const releaseGate = await acquireSourceGate('read', signal);
+  try {
+    const tail = workspaceMutationChains.get(sessionId) ?? Promise.resolve();
+    const runTask = () => {
+      if (signal?.aborted) {
+        throw new Error('Source workspace operation was aborted.');
+      }
+      return task();
+    };
+    const result = tail.then(runTask, runTask);
+    const settled = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    workspaceMutationChains.set(sessionId, settled);
+    void settled.then(() => {
+      if (workspaceMutationChains.get(sessionId) === settled) {
+        workspaceMutationChains.delete(sessionId);
+      }
+    });
+    return await result;
+  } finally {
+    releaseGate();
+  }
+}
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string };
 
@@ -131,15 +287,211 @@ async function worktreeOrigin(worktree: string): Promise<string | null> {
 }
 
 function bundleFile(sessionId: string, kind: SourceKind, id: string): string {
-  return path.resolve(AGENTS_DIR, sessionId, 'bundles', `${kind}-${id}.bundle`);
+  if (!isSafeEntityId(id)) throw new Error(`Invalid ${kind} id.`);
+  const root = path.resolve(agentSessionDir(sessionId), 'bundles');
+  const target = path.resolve(root, `${kind}-${id}.bundle`);
+  if (!isWorkspacePathInside(root, target) || target === root) {
+    throw new Error(`${kind} bundle path escapes its data root.`);
+  }
+  return target;
 }
 
-function worktreeDir(sessionId: string, id: string): string {
-  return path.resolve(agentWorkDir(sessionId), id);
+/** Remove one stale app/workflow incarnation from this session. */
+export function removeSourceWorkspaces(
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+  generation: string | null,
+): Promise<number> {
+  return withSourceWorkspaceLock(sessionId, () =>
+    removeSourceWorkspacesUnlocked(sessionId, kind, id, generation),
+  );
+}
+
+/** Remove a stale hello-time source while the runner holds the exclusive gate. */
+export function removeSourceWorkspacesUnderBarrier(
+  barrier: SourceWorkspaceBarrier,
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+  generation: string | null,
+): Promise<number> {
+  assertActiveSourceBarrier(barrier);
+  return removeSourceWorkspacesUnlocked(sessionId, kind, id, generation);
+}
+
+async function removeSourceWorkspacesUnlocked(
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+  generation: string | null,
+): Promise<number> {
+  const bundle = bundleFile(sessionId, kind, id);
+  const allIndexed = await listIndexedWorkspaces(sessionId);
+  const indexed = allIndexed.filter(
+    (entry) =>
+      entry.kind === kind &&
+      entry.id === id &&
+      generation !== null &&
+      entry.generation === generation,
+  );
+  const remainingIndexed = allIndexed.filter(
+    (entry) =>
+      !(
+        entry.kind === kind &&
+        entry.id === id &&
+        generation !== null &&
+        entry.generation === generation
+      ),
+  );
+  const fallbackCandidates = [
+    defaultWorktreeDir(sessionId, kind, id),
+    path.resolve(agentWorkDir(sessionId), id),
+  ].filter(
+    (candidate) =>
+      !allIndexed.some(
+        (entry) => path.resolve(entry.absolutePath) === path.resolve(candidate),
+      ),
+  );
+  const candidates = new Set([
+    ...fallbackCandidates,
+    ...indexed.map((entry) => entry.absolutePath),
+  ]);
+  const removed = new Set<string>();
+  for (const candidate of candidates) {
+    let resolved: AgentWorkspacePath;
+    try {
+      resolved = await resolveAgentWorkspacePath(sessionId, candidate);
+    } catch {
+      continue;
+    }
+    if (!(await pathExists(path.join(resolved.absolutePath, '.git')))) continue;
+    const origin = await worktreeOrigin(resolved.absolutePath);
+    if (!origin || path.resolve(origin) !== path.resolve(bundle)) continue;
+    const protectedPaths = remainingIndexed.map((entry) =>
+      path.resolve(entry.absolutePath),
+    );
+    if (
+      await removeTreePreservingPaths(resolved.absolutePath, protectedPaths)
+    ) {
+      removed.add(path.resolve(resolved.absolutePath));
+    }
+  }
+  if (generation !== null) {
+    // Paths whose origin changed are deliberately left on disk, but this stale
+    // incarnation must no longer be authoritative in the private index.
+    await removeIndexedWorkspaces(
+      sessionId,
+      (entry) =>
+        entry.kind === kind &&
+        entry.id === id &&
+        entry.generation === generation,
+    );
+  }
+  const hasOtherGeneration = remainingIndexed.some(
+    (entry) => entry.kind === kind && entry.id === id,
+  );
+  if (!hasOtherGeneration) await rm(bundle, { force: true });
+  return removed.size;
+}
+
+async function removeTreePreservingPaths(
+  target: string,
+  protectedPaths: string[],
+): Promise<boolean> {
+  const absolute = path.resolve(target);
+  if (
+    protectedPaths.some((candidate) => path.resolve(candidate) === absolute)
+  ) {
+    return false;
+  }
+  const nested = protectedPaths.filter((candidate) =>
+    isWorkspacePathInside(absolute, candidate),
+  );
+  if (nested.length === 0) {
+    await rm(absolute, { recursive: true, force: true });
+    return true;
+  }
+  for (const name of await readdir(absolute)) {
+    await removeTreePreservingPaths(path.join(absolute, name), nested);
+  }
+  return true;
+}
+
+function defaultWorktreeDir(
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+): string {
+  return kind === 'app'
+    ? agentAppWorkDir(sessionId, id)
+    : agentWorkflowWorkDir(sessionId, id);
+}
+
+function resolveWorktree(
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+  requestedPath?: string,
+): Promise<AgentWorkspacePath> {
+  return resolveAgentWorkspacePath(
+    sessionId,
+    requestedPath ?? defaultWorktreeDir(sessionId, kind, id),
+  );
+}
+
+async function assertWorkspaceDoesNotOverlap(
+  sessionId: string,
+  worktree: string,
+  allowedExact?: { kind: SourceKind; id: string },
+): Promise<void> {
+  const target = path.resolve(worktree);
+  const root = agentWorkDir(sessionId);
+  const reservedRoots = [
+    path.resolve(root, 'apps'),
+    path.resolve(root, 'workflows'),
+  ];
+  if (reservedRoots.includes(target)) {
+    throw new Error(
+      `Workspace namespace cannot be used as a worktree: ${target}`,
+    );
+  }
+  const attachments = path.resolve(root, 'attachments');
+  if (isWorkspacePathInside(attachments, target)) {
+    throw new Error(
+      `Workspace path overlaps the attachment namespace: ${target}`,
+    );
+  }
+
+  const entries = await listIndexedWorkspaces(sessionId);
+  const conflict = entries.find((entry) => {
+    const exactAllowed =
+      allowedExact?.kind === entry.kind &&
+      allowedExact.id === entry.id &&
+      path.resolve(entry.absolutePath) === target;
+    return !exactAllowed && workspacePathsOverlap(entry.absolutePath, target);
+  });
+  if (conflict) {
+    throw new Error(
+      `Workspace path ${target} overlaps the registered ${conflict.kind} ` +
+        `"${conflict.id}" checkout at ${conflict.absolutePath}.`,
+    );
+  }
+
+  let parent = path.dirname(target);
+  while (isWorkspacePathInside(root, parent) && parent !== root) {
+    if (await pathExists(path.join(parent, '.git'))) {
+      throw new Error(
+        `Workspace path is nested inside another Git checkout: ${target}`,
+      );
+    }
+    parent = path.dirname(parent);
+  }
 }
 
 async function describeCheckout(
   sessionId: string,
+  kind: SourceKind,
   id: string,
   worktree: string,
   remoteCommit: string | null,
@@ -150,10 +502,7 @@ async function describeCheckout(
   ]);
   return {
     id,
-    path: path
-      .relative(agentWorkDir(sessionId), worktree)
-      .split(path.sep)
-      .join('/'),
+    path: (await resolveWorktree(sessionId, kind, id, worktree)).path,
     absolutePath: worktree,
     dirty: status.length > 0,
     headCommit,
@@ -163,11 +512,9 @@ async function describeCheckout(
 }
 
 /**
- * Guard the shared `<id>/` worktree namespace: apps and workflows may reuse a
- * slug, and a worktree from another entity must never be silently reused (a
- * deploy would push the wrong repo). The origin URL — our per-kind bundle
- * path — is the discriminator, exactly like the canonical-repo origin was in
- * the single-process design.
+ * Verify that an existing path is the checkout for this exact entity. The
+ * origin URL -- our per-kind bundle path -- distinguishes app/workflow repos,
+ * entities with different ids, and arbitrary Git repositories at custom paths.
  */
 async function assertOwnedWorktree(
   worktree: string,
@@ -181,20 +528,39 @@ async function assertOwnedWorktree(
     );
   }
   const origin = await worktreeOrigin(worktree);
-  if (origin && path.resolve(origin) !== path.resolve(bundle)) {
+  if (!origin || path.resolve(origin) !== path.resolve(bundle)) {
     throw new Error(
-      `"${id}/" in this chat is already checked out from a different ` +
-        `repo (${origin}). Pick a different slug for this ${kind}.`,
+      `Workspace path is not a checkout of ${kind} "${id}" ` +
+        `(expected origin ${bundle}, found ${origin ?? 'no origin'}).`,
     );
   }
 }
 
+async function assertWorkspaceGeneration(
+  sessionId: string,
+  worktree: string,
+  kind: SourceKind,
+  id: string,
+  generation: string,
+): Promise<void> {
+  const exact = (await listIndexedWorkspaces(sessionId)).find(
+    (entry) =>
+      entry.kind === kind &&
+      entry.id === id &&
+      path.resolve(entry.absolutePath) === path.resolve(worktree),
+  );
+  if (!exact || exact.generation === generation) return;
+  throw new Error(
+    `The worktree at ${worktree} belongs to a previous incarnation of ${kind} ` +
+      `"${id}". Remove that exact path and run checkout again.`,
+  );
+}
+
 /**
- * Ids are user-reusable (delete a workflow, recreate it under the same id)
- * and platform deletion cannot clean runner-local worktrees. A stale worktree
- * from the previous incarnation would then silently mix two unrelated repo
- * histories, so reject the checkout when the local HEAD shares no ancestor
- * with the freshly fetched platform master.
+ * Ids are user-reusable (delete a workflow, recreate it under the same id).
+ * Cleanup notifications and reconnect reconciliation are best-effort across a
+ * distributed runner, so reject any leftover checkout whose local HEAD shares
+ * no ancestor with the freshly fetched Platform master.
  */
 async function assertRelatedHistory(
   worktree: string,
@@ -215,9 +581,9 @@ async function assertRelatedHistory(
   });
   if (base.exitCode !== 0) {
     throw new Error(
-      `"${id}/" in this chat has history unrelated to the current ${kind} ` +
-        `repo — it is likely left over from a deleted ${kind} that was ` +
-        `recreated under the same id. Remove it (run_command: rm -rf ${id}) ` +
+      `The worktree at ${worktree} has history unrelated to the current ` +
+        `${kind} "${id}" repo -- it is likely left over from a deleted ` +
+        `${kind} that was recreated under the same id. Remove that exact path ` +
         'and run the checkout again.',
     );
   }
@@ -244,10 +610,9 @@ async function assertNotStaleForEmptyRemote(
   );
   if (remote.exitCode !== 0) return;
   throw new Error(
-    `"${id}/" in this chat tracks commits from a previous ${kind} that no ` +
-      `longer exists on the platform — the current ${kind} "${id}" has an ` +
-      `empty repo. Remove the stale directory (run_command: rm -rf ${id}) ` +
-      'and run the checkout again.',
+    `The worktree at ${worktree} tracks commits from a previous ${kind} that ` +
+      `no longer exists on the platform -- the current ${kind} "${id}" has an ` +
+      'empty repo. Remove that exact path and run the checkout again.',
   );
 }
 
@@ -260,11 +625,26 @@ export async function syncCheckoutFromBundle(
   sessionId: string,
   kind: SourceKind,
   source: SourceBundleResponse,
+  targetPath?: string,
 ): Promise<LocalCheckout> {
   const { id } = source;
-  const worktree = worktreeDir(sessionId, id);
+  const resolved = await resolveWorktree(sessionId, kind, id, targetPath);
+  const worktree = resolved.absolutePath;
+  await assertWorkspaceDoesNotOverlap(sessionId, worktree, { kind, id });
   const bundle = bundleFile(sessionId, kind, id);
   await mkdir(path.dirname(bundle), { recursive: true });
+  const worktreeExists = await pathExists(worktree);
+
+  if (worktreeExists) {
+    await assertOwnedWorktree(worktree, bundle, id, kind);
+    await assertWorkspaceGeneration(
+      sessionId,
+      worktree,
+      kind,
+      id,
+      source.generation,
+    );
+  }
 
   if (source.bundleBase64) {
     await writeFile(bundle, Buffer.from(source.bundleBase64, 'base64'));
@@ -275,8 +655,7 @@ export async function syncCheckoutFromBundle(
     await rm(bundle, { force: true });
   }
 
-  if (await pathExists(worktree)) {
-    await assertOwnedWorktree(worktree, bundle, id, kind);
+  if (worktreeExists) {
     if (source.bundleBase64) {
       // Refresh origin/master from the new bundle; merging/rebasing stays the
       // agent's own git decision, mirroring the old canonical-repo fetch.
@@ -289,7 +668,13 @@ export async function syncCheckoutFromBundle(
       await assertNotStaleForEmptyRemote(worktree, id, kind);
     }
     await setLocalGitIdentity(worktree);
-    return describeCheckout(sessionId, id, worktree, source.masterCommit);
+    await registerWorkspace(sessionId, {
+      kind,
+      id,
+      generation: source.generation,
+      absolutePath: worktree,
+    });
+    return describeCheckout(sessionId, kind, id, worktree, source.masterCommit);
   }
 
   await mkdir(path.dirname(worktree), { recursive: true });
@@ -305,7 +690,13 @@ export async function syncCheckoutFromBundle(
     await runGit(['remote', 'add', 'origin', bundle], { cwd: worktree });
   }
   await setLocalGitIdentity(worktree);
-  return describeCheckout(sessionId, id, worktree, source.masterCommit);
+  await registerWorkspace(sessionId, {
+    kind,
+    id,
+    generation: source.generation,
+    absolutePath: worktree,
+  });
+  return describeCheckout(sessionId, kind, id, worktree, source.masterCommit);
 }
 
 /**
@@ -314,21 +705,41 @@ export async function syncCheckoutFromBundle(
  * (otherwise the create would leave an orphan draft row behind and retrying
  * the same id would hit "already exists" on the platform side).
  *
- * The directory may also be a leftover from an entity that was deleted on
- * the platform (worktrees are runner-local, so platform deletion cannot
- * clean them) — tell the agent how to resolve that itself.
+ * The directory may also be an old or manually relocated checkout that was not
+ * registered when an entity was deleted; tell the Agent how to resolve it.
  */
 export async function assertWorktreeAvailable(
   sessionId: string,
+  kind: SourceKind,
   id: string,
-): Promise<void> {
-  if (await pathExists(worktreeDir(sessionId, id))) {
+  targetPath?: string,
+): Promise<AgentWorkspacePath> {
+  const resolved = await resolveWorktree(sessionId, kind, id, targetPath);
+  return assertResolvedWorktreeAvailable(sessionId, resolved);
+}
+
+/** Preflight a caller-provided create target before Platform state is mutated. */
+export async function assertWorkspacePathAvailable(
+  sessionId: string,
+  targetPath: string,
+): Promise<AgentWorkspacePath> {
+  const resolved = await resolveAgentWorkspacePath(sessionId, targetPath);
+  return assertResolvedWorktreeAvailable(sessionId, resolved);
+}
+
+async function assertResolvedWorktreeAvailable(
+  sessionId: string,
+  resolved: AgentWorkspacePath,
+): Promise<AgentWorkspacePath> {
+  await assertWorkspaceDoesNotOverlap(sessionId, resolved.absolutePath);
+  if (await pathExists(resolved.absolutePath)) {
+    const entries = await readdir(resolved.absolutePath);
+    if (entries.length === 0) return resolved;
     throw new Error(
-      `"${id}/" already exists in this chat's worktree. If it belongs to a ` +
-        `deleted app/workflow, remove it first (run_command: rm -rf ${id}); ` +
-        'otherwise check it out or pick a different id.',
+      `Workspace path already exists and is not empty: ${resolved.path}`,
     );
   }
+  return resolved;
 }
 
 /**
@@ -340,15 +751,22 @@ export async function initNewWorktree(
   sessionId: string,
   kind: SourceKind,
   id: string,
+  generation: string,
   writeFiles: (root: string) => Promise<void>,
+  targetPath?: string,
 ): Promise<LocalCheckout> {
-  const worktree = worktreeDir(sessionId, id);
+  const resolved = await assertWorktreeAvailable(
+    sessionId,
+    kind,
+    id,
+    targetPath,
+  );
+  const worktree = resolved.absolutePath;
   const bundle = bundleFile(sessionId, kind, id);
   await mkdir(path.dirname(bundle), { recursive: true });
-
-  // Backstop; creators preflight with assertWorktreeAvailable before the
-  // platform row exists.
-  await assertWorktreeAvailable(sessionId, id);
+  // A newly created entity has an empty canonical repo. Its reused id must not
+  // expose a bundle left by an older incarnation through the new origin URL.
+  await rm(bundle, { force: true });
 
   await mkdir(path.dirname(worktree), { recursive: true });
   // Let (possibly UID-demoted) git create the worktree dir itself so the
@@ -357,7 +775,13 @@ export async function initNewWorktree(
   await runGit(['remote', 'add', 'origin', bundle], { cwd: worktree });
   await setLocalGitIdentity(worktree);
   await writeFiles(worktree);
-  return describeCheckout(sessionId, id, worktree, null);
+  await registerWorkspace(sessionId, {
+    kind,
+    id,
+    generation,
+    absolutePath: worktree,
+  });
+  return describeCheckout(sessionId, kind, id, worktree, null);
 }
 
 /**
@@ -369,8 +793,12 @@ export async function bundleWorktreeForDeploy(
   sessionId: string,
   kind: SourceKind,
   id: string,
+  generation: string,
+  sourcePath: string,
 ): Promise<{ bundleBase64: string; headCommit: string }> {
-  const worktree = worktreeDir(sessionId, id);
+  const worktree = (await resolveWorktree(sessionId, kind, id, sourcePath))
+    .absolutePath;
+  await assertWorkspaceDoesNotOverlap(sessionId, worktree, { kind, id });
   const bundle = bundleFile(sessionId, kind, id);
   if (!(await pathExists(worktree))) {
     throw new Error(
@@ -378,6 +806,7 @@ export async function bundleWorktreeForDeploy(
     );
   }
   await assertOwnedWorktree(worktree, bundle, id, kind);
+  await assertWorkspaceGeneration(sessionId, worktree, kind, id, generation);
 
   const status = await worktreeStatus(worktree);
   if (status) {
@@ -407,6 +836,12 @@ export async function bundleWorktreeForDeploy(
       cwd: worktree,
     });
     const data = await readFile(out);
+    await registerWorkspace(sessionId, {
+      kind,
+      id,
+      generation,
+      absolutePath: worktree,
+    });
     return { bundleBase64: data.toString('base64'), headCommit };
   } finally {
     await rm(tmp, { recursive: true, force: true });

@@ -12,6 +12,7 @@ import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
 import { validateCron } from '~server/apps/cron-expr';
 import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
+import { AppError } from '~server/errors';
 import { buildWorkflow } from './build';
 import {
   assertDeployableWorktree,
@@ -35,7 +36,22 @@ export type DeployWorkflowOptions = {
   sourceDir?: string;
   /** Required release note recorded on the deployment. */
   message: string;
+  /** Reject if this workflow id now belongs to another incarnation. */
+  expectedGeneration?: string;
 };
+
+function assertWorkflowGeneration(
+  id: string,
+  expected: string | undefined,
+  actual: Date,
+): void {
+  if (!expected || actual.toISOString() === expected) return;
+  throw new AppError(
+    `Workflow "${id}" was deleted or recreated while preparing the deploy. ` +
+      'Checkout the current source and try again.',
+    409,
+  );
+}
 
 /**
  * Deploy serialization for workflows (advisory-lock namespace 2, distinct from
@@ -74,6 +90,7 @@ async function deployWorkflowInner(
   if (!workflow) {
     throw new Error(`Workflow "${id}" not found.`);
   }
+  assertWorkflowGeneration(id, options.expectedGeneration, workflow.createdAt);
 
   const sourceDir = options.sourceDir ?? (await prepareDeployCheckout(id));
   await assertDeployableWorktree(id, sourceDir);
@@ -88,10 +105,33 @@ async function deployWorkflowInner(
   let recorded = false;
 
   try {
-    await db
-      .update(schema.workflows)
-      .set({ status: 'building' })
-      .where(eq(schema.workflows.id, id));
+    const markedBuilding = await db.transaction(async (tx) => {
+      const [currentWorkflow] = await tx
+        .select({ createdAt: schema.workflows.createdAt })
+        .from(schema.workflows)
+        .where(eq(schema.workflows.id, id))
+        .for('update');
+      if (
+        !currentWorkflow ||
+        (options.expectedGeneration &&
+          currentWorkflow.createdAt.toISOString() !==
+            options.expectedGeneration)
+      ) {
+        return false;
+      }
+      await tx
+        .update(schema.workflows)
+        .set({ status: 'building' })
+        .where(eq(schema.workflows.id, id));
+      return true;
+    });
+    if (!markedBuilding) {
+      throw new AppError(
+        `Workflow "${id}" was deleted or recreated while preparing the deploy. ` +
+          'Checkout the current source and try again.',
+        409,
+      );
+    }
 
     const build = await buildWorkflow(id, {
       sourceDir,
@@ -147,6 +187,19 @@ async function deployWorkflowInner(
     let version = 0;
     await db.transaction(async (tx) => {
       await workflowDeployLock.acquire(tx, id);
+      const [currentWorkflow] = await tx
+        .select({ createdAt: schema.workflows.createdAt })
+        .from(schema.workflows)
+        .where(eq(schema.workflows.id, id))
+        .for('update');
+      if (!currentWorkflow) {
+        throw new Error(`Workflow "${id}" not found.`);
+      }
+      assertWorkflowGeneration(
+        id,
+        options.expectedGeneration,
+        currentWorkflow.createdAt,
+      );
       const last = await tx.query.workflowDeployments.findFirst({
         where: (d, { eq: e }) => e(d.workflowId, id),
         orderBy: (d, { desc }) => [desc(d.version)],
@@ -238,17 +291,32 @@ async function deployWorkflowInner(
     // failed redeploy must not silently re-enable its cron/webhook triggers),
     // one with a live deployment keeps serving it, and a never-deployed one is
     // marked failed.
-    await db
-      .update(schema.workflows)
-      .set({
-        status:
-          workflow.status === 'archived'
-            ? 'archived'
-            : workflow.currentDeploymentId
-              ? 'deployed'
-              : 'failed',
-      })
-      .where(eq(schema.workflows.id, id));
+    await db.transaction(async (tx) => {
+      const [currentWorkflow] = await tx
+        .select({ createdAt: schema.workflows.createdAt })
+        .from(schema.workflows)
+        .where(eq(schema.workflows.id, id))
+        .for('update');
+      if (
+        !currentWorkflow ||
+        (options.expectedGeneration &&
+          currentWorkflow.createdAt.toISOString() !==
+            options.expectedGeneration)
+      ) {
+        return;
+      }
+      await tx
+        .update(schema.workflows)
+        .set({
+          status:
+            workflow.status === 'archived'
+              ? 'archived'
+              : workflow.currentDeploymentId
+                ? 'deployed'
+                : 'failed',
+        })
+        .where(eq(schema.workflows.id, id));
+    });
     throw error;
   } finally {
     await fs.rm(path.dirname(tempBuild), { recursive: true, force: true });

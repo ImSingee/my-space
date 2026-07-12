@@ -61,6 +61,7 @@ export async function listWorkflowsForAgent(): Promise<
 
 export type WorkflowDetailForAgent = {
   id: string;
+  createdAt: string;
   name: string;
   description: string | null;
   status: WorkflowStatus;
@@ -108,6 +109,7 @@ export async function getWorkflowDetailForAgent(
 
   return {
     id: w.id,
+    createdAt: w.createdAt.toISOString(),
     name: w.name,
     description: w.description,
     status: w.status,

@@ -183,6 +183,7 @@ export type SendParams = {
   sessionId: string;
   userText: string;
   images?: SendImage[];
+  attachmentIds?: string[];
   providerId: string;
   modelId: string;
 };

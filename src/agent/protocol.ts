@@ -10,8 +10,9 @@
  */
 import { z } from 'zod';
 import type { AgentStreamEvent } from './events';
+import type { AgentAttachmentRef } from './attachments';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 3;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -60,6 +61,15 @@ export const sendImageSchema = z.object({
 });
 export type SendImage = z.infer<typeof sendImageSchema>;
 
+export const agentAttachmentRefSchema: z.ZodType<AgentAttachmentRef> = z.object(
+  {
+    id: z.string().min(1),
+    name: z.string().min(1),
+    mimeType: z.string().min(1),
+    size: z.number().int().nonnegative(),
+  },
+);
+
 /**
  * Stream events are produced and consumed by our own code on both ends; the
  * envelope only shape-checks the discriminator and passes the payload through.
@@ -99,12 +109,29 @@ export type RunModelConfig = z.infer<typeof runModelConfigSchema>;
 
 /** ================== runner -> platform messages ================== */
 
+export const workspaceSourceClaimSchema = z.object({
+  sessionId: z.string().min(1),
+  kind: z.enum(['app', 'workflow']),
+  id: z.string().min(1),
+  /** Entity creation token; null only for an unindexed compatibility path. */
+  generation: z.string().min(1).nullable(),
+});
+export type WorkspaceSourceClaim = z.infer<typeof workspaceSourceClaimSchema>;
+
 export const runnerHelloSchema = z.object({
   type: z.literal('runner.hello'),
   runnerId: z.string().min(1),
   protocolVersion: z.number().int(),
   /** Runs this runner is still executing (reclaim after reconnect). */
   activeRunIds: z.array(z.string()),
+  /** Session directories currently persisted in this runner's data root. */
+  workspaceSessionIds: z.array(z.string()),
+  /** Source workspaces present when this hello snapshot was captured. */
+  workspaceSources: z.array(workspaceSourceClaimSchema),
+});
+
+export const runnerReadySchema = z.object({
+  type: z.literal('runner.ready'),
 });
 
 export const runnerPingSchema = z.object({
@@ -145,6 +172,7 @@ export const runFinishedMessageSchema = z.object({
 
 export const runnerMessageSchema = z.discriminatedUnion('type', [
   runnerHelloSchema,
+  runnerReadySchema,
   runnerPingSchema,
   runAcceptedSchema,
   runRejectedSchema,
@@ -165,6 +193,14 @@ export const hubHelloAckSchema = z.object({
   resumedRunIds: z.array(z.string()),
   /** Runs this runner no longer owns (reassigned/unknown); abort + discard. */
   staleRunIds: z.array(z.string()),
+  /** Local session roots whose Platform sessions were deleted while offline. */
+  staleWorkspaceSessionIds: z.array(z.string()),
+  /** Hello-time source claims whose entity/generation is no longer current. */
+  staleWorkspaceSources: z.array(workspaceSourceClaimSchema),
+});
+
+export const hubReadyAckSchema = z.object({
+  type: z.literal('hub.ready_ack'),
 });
 
 export const hubPongSchema = z.object({
@@ -177,6 +213,7 @@ export const runStartSchema = z.object({
   sessionId: z.string().min(1),
   userText: z.string(),
   images: z.array(sendImageSchema),
+  attachments: z.array(agentAttachmentRefSchema),
   /** Persisted pi AgentMessage[] history for the session. */
   priorMessages: z.array(z.unknown()),
   model: runModelConfigSchema,
@@ -207,14 +244,36 @@ export const runFinishAckSchema = z.object({
   runId: z.string().min(1),
 });
 
-export const hubMessageSchema = z.discriminatedUnion('type', [
+export const workspaceCleanupSchema = z.discriminatedUnion('scope', [
+  z.object({
+    type: z.literal('workspace.cleanup'),
+    scope: z.literal('session'),
+    sessionId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal('workspace.cleanup'),
+    scope: z.literal('app'),
+    id: z.string().min(1),
+    generation: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal('workspace.cleanup'),
+    scope: z.literal('workflow'),
+    id: z.string().min(1),
+    generation: z.string().min(1),
+  }),
+]);
+
+export const hubMessageSchema = z.union([
   hubHelloAckSchema,
+  hubReadyAckSchema,
   hubPongSchema,
   runStartSchema,
   runCancelSchema,
   runAnswerSchema,
   runEventAckSchema,
   runFinishAckSchema,
+  workspaceCleanupSchema,
 ]);
 export type HubMessage = z.infer<typeof hubMessageSchema>;
 
@@ -261,6 +320,8 @@ export const createWorkflowRequestSchema = z.object({
 
 export const deploySourceRequestSchema = z.object({
   message: z.string().min(1),
+  /** Entity creation token observed before the runner bundled the worktree. */
+  generation: z.string().min(1),
   /** Git bundle of the worktree HEAD, base64-encoded. */
   bundleBase64: z.string().min(1),
 });
@@ -276,6 +337,8 @@ export const queryAppDbRequestSchema = z.object({
 /** Response of GET .../source: the canonical repo master as a git bundle. */
 export type SourceBundleResponse = {
   id: string;
+  /** Immutable creation token for this incarnation of the entity. */
+  generation: string;
   masterCommit: string | null;
   /** Null when the repo has no commits yet (nothing to bundle). */
   bundleBase64: string | null;

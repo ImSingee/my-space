@@ -46,6 +46,7 @@ describe('parseRetryableAgentTurn', () => {
         { data: 'aW1hZ2Ux', mimeType: 'image/png' },
         { data: 'aW1hZ2Uy', mimeType: 'image/webp' },
       ],
+      attachments: [],
     });
   });
 
@@ -59,6 +60,65 @@ describe('parseRetryableAgentTurn', () => {
       baseMessages: [],
       userText: 'Retry this string',
       images: [],
+      attachments: [],
+    });
+  });
+
+  it('recovers attachment refs while hiding their model-only prompt context', () => {
+    expect(
+      parseRetryableAgentTurn([
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                'Inspect it\n\n<hatch_attachments>\n' +
+                'These files are stored on the Platform and are not in the workspace yet.\n' +
+                'Call download_attachment with an id when you need a local copy.\n' +
+                '- id=file-a name="a.bin" type=application/octet-stream size=2\n' +
+                '</hatch_attachments>',
+            },
+          ],
+          attachments: [
+            {
+              id: 'file-a',
+              name: 'a.bin',
+              mimeType: 'application/octet-stream',
+              size: 2,
+            },
+          ],
+        },
+        { role: 'assistant', content: [], stopReason: 'error' },
+      ]),
+    ).toEqual({
+      baseMessages: [],
+      userText: 'Inspect it',
+      images: [],
+      attachments: [
+        {
+          id: 'file-a',
+          name: 'a.bin',
+          mimeType: 'application/octet-stream',
+          size: 2,
+        },
+      ],
+    });
+  });
+
+  it('preserves a literal attachment tag when no metadata is present', () => {
+    const literal =
+      'Explain this XML:\n<hatch_attachments>literal</hatch_attachments>';
+    expect(
+      parseRetryableAgentTurn([
+        { role: 'user', content: literal },
+        { role: 'assistant', content: [], stopReason: 'error' },
+      ]),
+    ).toEqual({
+      baseMessages: [],
+      userText: literal,
+      images: [],
+      attachments: [],
     });
   });
 

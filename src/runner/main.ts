@@ -22,10 +22,20 @@ import {
   type HubMessage,
   type RunnerMessage,
 } from '~agent/protocol';
+import {
+  acquireSourceWorkspaceBarrier,
+  type SourceWorkspaceBarrier,
+} from '~agent/local-sources';
 import { initializeAgentSandbox } from '~agent/shell-sandbox';
 import { loadRunnerConfig } from './config';
 import { RunnerExecutor } from './executor';
 import { createPlatformRestClient } from './platform-rest';
+import {
+  inspectLocalWorkspaces,
+  reconcileLocalWorkspaces,
+  removeEntityWorkspaces,
+  removeSessionWorkspace,
+} from './workspace-cleanup';
 
 const config = loadRunnerConfig();
 // Before any run executes: on Linux, demote agent subprocesses to the
@@ -43,6 +53,15 @@ let reconnectDelay = 1_000;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let offlineAbortTimer: ReturnType<typeof setTimeout> | undefined;
 let shuttingDown = false;
+let pendingResumedRunIds: string[] = [];
+const registrationBarriers = new WeakMap<WebSocket, SourceWorkspaceBarrier>();
+
+function releaseRegistrationBarrier(socket: WebSocket): void {
+  const barrier = registrationBarriers.get(socket);
+  if (!barrier) return;
+  registrationBarriers.delete(socket);
+  barrier.release();
+}
 
 function send(message: RunnerMessage): boolean {
   if (!ws || ws.readyState !== WebSocket.OPEN || !helloAcked) return false;
@@ -91,19 +110,56 @@ function stopOfflineAbortTimer(): void {
 function handleHubMessage(message: HubMessage): void {
   switch (message.type) {
     case 'hub.hello_ack': {
-      helloAcked = true;
-      reconnectDelay = 1_000;
-      stopOfflineAbortTimer();
+      const socket = ws;
+      const barrier = socket ? registrationBarriers.get(socket) : undefined;
+      if (!socket || !barrier) {
+        socket?.close(1011, 'Missing workspace reconciliation barrier.');
+        return;
+      }
+      pendingResumedRunIds = message.resumedRunIds;
       for (const runId of message.staleRunIds) {
         executor.abortStale(runId);
       }
-      for (const runId of message.resumedRunIds) {
+      void (async () => {
+        await Promise.all(
+          message.staleWorkspaceSessionIds.map((sessionId) =>
+            executor.abortSession(sessionId),
+          ),
+        );
+        await reconcileLocalWorkspaces(
+          {
+            staleSessionIds: message.staleWorkspaceSessionIds,
+            staleSources: message.staleWorkspaceSources,
+          },
+          barrier,
+        );
+        releaseRegistrationBarrier(socket);
+        if (!socket || ws !== socket || socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        socket.send(
+          JSON.stringify({ type: 'runner.ready' } satisfies RunnerMessage),
+        );
+      })().catch((error) => {
+        releaseRegistrationBarrier(socket);
+        console.error('[runner] workspace reconciliation failed:', error);
+        if (socket && ws === socket) {
+          socket.close(1011, 'Workspace reconciliation failed.');
+        }
+      });
+      return;
+    }
+    case 'hub.ready_ack': {
+      helloAcked = true;
+      reconnectDelay = 1_000;
+      stopOfflineAbortTimer();
+      for (const runId of pendingResumedRunIds) {
         executor.resendPending(runId);
       }
+      const resumed = pendingResumedRunIds.length;
+      pendingResumedRunIds = [];
       console.log(
-        `[runner] connected to ${config.platformUrl} ` +
-          `(resumed ${message.resumedRunIds.length}, ` +
-          `stale ${message.staleRunIds.length})`,
+        `[runner] connected to ${config.platformUrl} (resumed ${resumed})`,
       );
       return;
     }
@@ -145,6 +201,25 @@ function handleHubMessage(message: HubMessage): void {
       console.log(`[runner] run ${message.runId} finished (acked)`);
       return;
     }
+    case 'workspace.cleanup': {
+      if (message.scope === 'session') {
+        void executor
+          .abortSession(message.sessionId)
+          .then(() => removeSessionWorkspace(message.sessionId))
+          .catch((error) => {
+            console.error('[runner] session workspace cleanup failed:', error);
+          });
+      } else {
+        void removeEntityWorkspaces(
+          message.scope,
+          message.id,
+          message.generation,
+        ).catch((error) => {
+          console.error('[runner] entity workspace cleanup failed:', error);
+        });
+      }
+      return;
+    }
   }
 }
 
@@ -158,14 +233,31 @@ function connect(): void {
 
   socket.on('open', () => {
     // hello bypasses send() (helloAcked is still false by design).
-    socket.send(
-      JSON.stringify({
-        type: 'runner.hello',
-        runnerId: config.runnerId,
-        protocolVersion: PROTOCOL_VERSION,
-        activeRunIds: executor.activeRunIds(),
-      } satisfies RunnerMessage),
-    );
+    void (async () => {
+      const barrier = await acquireSourceWorkspaceBarrier();
+      if (socket.readyState !== WebSocket.OPEN) {
+        barrier.release();
+        return;
+      }
+      registrationBarriers.set(socket, barrier);
+      const workspace = await inspectLocalWorkspaces();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            type: 'runner.hello',
+            runnerId: config.runnerId,
+            protocolVersion: PROTOCOL_VERSION,
+            activeRunIds: executor.activeRunIds(),
+            workspaceSessionIds: workspace.sessionIds,
+            workspaceSources: workspace.sources,
+          } satisfies RunnerMessage),
+        );
+      }
+    })().catch((error) => {
+      releaseRegistrationBarrier(socket);
+      console.error('[runner] could not inspect local workspaces:', error);
+      socket.close(1011, 'Workspace inspection failed.');
+    });
   });
 
   socket.on('message', (data) => {
@@ -181,9 +273,11 @@ function connect(): void {
   });
 
   socket.on('close', (code, reason) => {
+    releaseRegistrationBarrier(socket);
     if (ws !== socket) return;
     ws = null;
     helloAcked = false;
+    pendingResumedRunIds = [];
     if (!shuttingDown) {
       console.warn(
         `[runner] connection closed (${code}${reason.length > 0 ? `: ${reason.toString()}` : ''})`,

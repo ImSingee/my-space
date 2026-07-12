@@ -4,6 +4,8 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
   AGENTS_DIR,
+  agentWorkflowWorkDir,
+  agentWorkDir,
   workflowArtifactsDir,
   workflowCurrentDir,
   workflowDeploymentArtifactDir,
@@ -230,8 +232,20 @@ export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   // strand an orphaned Deno child that keeps causing side effects.
   const { killActiveWorkflowRuns } = await import('./execute');
   await killActiveWorkflowRuns(id);
+  const { broadcastEntityWorkspaceCleanup } =
+    await import('../agent-runner/hub');
   // Cascades to deployments, runs, and run steps.
-  await db.delete(schema.workflows).where(eq(schema.workflows.id, id));
+  const [deleted] = await db
+    .delete(schema.workflows)
+    .where(eq(schema.workflows.id, id))
+    .returning({ createdAt: schema.workflows.createdAt });
+  if (deleted) {
+    broadcastEntityWorkspaceCleanup(
+      'workflow',
+      id,
+      deleted.createdAt.toISOString(),
+    );
+  }
   // Remove agent worktrees before the bare repo: deleteAgentWorktrees() scopes
   // each checkout to this workflow via its git origin, which must still resolve
   // against the not-yet-deleted repo or a stale worktree would be left behind.
@@ -256,15 +270,21 @@ async function deleteAgentWorktrees(id: string): Promise<void> {
     sessions
       .filter((entry) => entry.isDirectory())
       .map(async (entry) => {
-        const worktree = `${AGENTS_DIR}/${entry.name}/work/${id}`;
-        if (!(await pathExists(worktree))) return;
-        // Apps and workflows share the `work/<id>` namespace, so only remove a
-        // checkout that actually originates from this workflow's repo. This
-        // prevents clobbering an app worktree (and its uncommitted changes)
-        // that happens to use the same slug.
-        const origin = await worktreeOrigin(worktree);
-        if (!origin || path.resolve(origin) !== path.resolve(repoDir)) return;
-        await fs.rm(worktree, { recursive: true, force: true });
+        const candidates = [
+          agentWorkflowWorkDir(entry.name, id),
+          // Compatibility cleanup only. Old root-level worktrees are never
+          // scanned or migrated during normal source operations.
+          path.resolve(agentWorkDir(entry.name), id),
+        ];
+        await Promise.all(
+          candidates.map(async (worktree) => {
+            if (!(await pathExists(worktree))) return;
+            const origin = await worktreeOrigin(worktree);
+            if (!origin || path.resolve(origin) !== path.resolve(repoDir))
+              return;
+            await fs.rm(worktree, { recursive: true, force: true });
+          }),
+        );
       }),
   );
 }

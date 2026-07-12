@@ -140,7 +140,7 @@ export const setSessionModel = createServerFn({ method: 'POST' })
 
 export const deleteSession = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((data: { id: string }) => z.object({ id: z.string() }).parse(data))
+  .validator((data: { id: string }) => z.object({ id: z.ulid() }).parse(data))
   .handler(async ({ data }) => {
     // Abort (and wait for) any in-flight run first. Otherwise the deletion
     // cascades the run rows while its model/tool execution keeps going in the
@@ -148,8 +148,14 @@ export const deleteSession = createServerFn({ method: 'POST' })
     // gone — and late event inserts would hit already-deleted rows.
     const active = await getActiveAgentRun(data.id);
     if (active) await cancelAgentRun(active.id);
+    const [{ deleteAgentSessionAttachments }, hub] = await Promise.all([
+      import('./agent-attachments'),
+      import('./agent-runner/hub'),
+    ]);
     await db
       .delete(schema.agentSessions)
       .where(eq(schema.agentSessions.id, data.id));
+    hub.broadcastSessionWorkspaceCleanup(data.id);
+    await deleteAgentSessionAttachments(data.id);
     return { ok: true };
   });

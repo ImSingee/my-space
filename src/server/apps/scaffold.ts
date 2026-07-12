@@ -96,6 +96,7 @@ export type CreateAppInput = {
 
 export type CreateAppResult = {
   id: string;
+  generation: string;
   slug: string;
   name: string;
   /** Rendered template for the caller to write into its own worktree. */
@@ -154,17 +155,21 @@ export async function createApp(
     JSON.parse(fileContent(files, 'manifest.json')),
   );
 
-  await db.insert(schema.apps).values({
-    id,
-    slug,
-    name,
-    description: description || null,
-    status: 'draft',
-    capabilities: manifest.capabilities,
-    manifest: manifest as unknown as JsonObject,
-    repoPath,
-    backendMode: manifest.backendMode,
-  });
+  const [created] = await db
+    .insert(schema.apps)
+    .values({
+      id,
+      slug,
+      name,
+      description: description || null,
+      status: 'draft',
+      capabilities: manifest.capabilities,
+      manifest: manifest as unknown as JsonObject,
+      repoPath,
+      backendMode: manifest.backendMode,
+    })
+    .returning({ createdAt: schema.apps.createdAt });
+  if (!created) throw new Error('Failed to create app.');
 
   // Pin frontend apps to the sidebar so a freshly created app is reachable
   // immediately. The scaffold always declares a frontend, so the choice is
@@ -183,5 +188,11 @@ export async function createApp(
       .onConflictDoNothing();
   }
 
-  return { id, slug, name, files };
+  return {
+    id,
+    generation: created.createdAt.toISOString(),
+    slug,
+    name,
+    files,
+  };
 }

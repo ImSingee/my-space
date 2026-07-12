@@ -1,5 +1,4 @@
 import type { StopReason } from '@earendil-works/pi-ai';
-import type { ComposerSubmit } from './composer';
 import { type AssistantBlock, type ChatMessage, partsToText } from './types';
 
 export type RenderTurn =
@@ -56,9 +55,11 @@ export function hasPersistedAgentError(messages: ChatMessage[]): boolean {
  * Only a provider error at the literal end of the raw transcript is retryable:
  * once anything newer exists, replaying the older prompt could duplicate work.
  */
-export function getRetryableErrorInput(
-  messages: ChatMessage[],
-): (ComposerSubmit & { userMessageIndex: number }) | null {
+export function getRetryableErrorInput(messages: ChatMessage[]): {
+  text: string;
+  images: { data: string; mimeType: string }[];
+  userMessageIndex: number;
+} | null {
   const last = messages.at(-1);
   if (last?.role !== 'assistant' || last.stopReason !== 'error') return null;
 
@@ -66,7 +67,7 @@ export function getRetryableErrorInput(
     const message = messages[index];
     if (message.role !== 'user') continue;
 
-    const text = partsToText(message.content);
+    const text = partsToText(message.content, message.attachments);
     const images =
       typeof message.content === 'string'
         ? []
@@ -80,7 +81,9 @@ export function getRetryableErrorInput(
               : [],
           );
 
-    return text.trim().length > 0 || images.length > 0
+    return text.trim().length > 0 ||
+      images.length > 0 ||
+      (message.attachments?.length ?? 0) > 0
       ? { text, images, userMessageIndex: index }
       : null;
   }

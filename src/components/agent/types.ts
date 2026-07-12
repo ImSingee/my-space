@@ -1,6 +1,8 @@
 /** Loose, render-friendly shapes for persisted pi `AgentMessage`s. */
 
 import type { StopReason } from '@earendil-works/pi-ai';
+import type { AgentAttachmentRef } from '~agent/attachments';
+import { stripAttachmentPrompt } from '~agent/attachments';
 
 export type TextBlock = { type: 'text'; text: string };
 export type ThinkingBlock = { type: 'thinking'; thinking: string };
@@ -20,7 +22,11 @@ export type ContentPart = {
 };
 
 export type ChatMessage =
-  | { role: 'user'; content: string | ContentPart[] }
+  | {
+      role: 'user';
+      content: string | ContentPart[];
+      attachments?: AgentAttachmentRef[];
+    }
   | {
       role: 'assistant';
       content: AssistantBlock[];
@@ -67,12 +73,18 @@ export function pairToolResults(
   return map;
 }
 
-export function partsToText(content: string | ContentPart[]): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((p) => p.type === 'text' && typeof p.text === 'string')
-    .map((p) => p.text)
-    .join('');
+export function partsToText(
+  content: string | ContentPart[],
+  attachments: AgentAttachmentRef[] = [],
+): string {
+  const text =
+    typeof content === 'string'
+      ? content
+      : content
+          .filter((p) => p.type === 'text' && typeof p.text === 'string')
+          .map((p) => p.text)
+          .join('');
+  return stripAttachmentPrompt(text, attachments);
 }
 
 /** Image attachments in a message, as ready-to-use data URLs. */
@@ -95,6 +107,7 @@ export const TOOL_LABELS: Record<string, string> = {
   edit_file: 'Edit file',
   write_file: 'Write file',
   run_command: 'Run command',
+  download_attachment: 'Download attachment',
   list_apps: 'List apps',
   get_app: 'Get app',
   checkout_app: 'Checkout app',

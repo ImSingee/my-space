@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 import {
+  deploySourceRequestSchema,
   isSafeRelativePath,
   parseHubMessage,
   parseRunnerMessage,
@@ -14,9 +15,33 @@ describe('runner -> platform messages', () => {
       runnerId: 'runner-1',
       protocolVersion: 1,
       activeRunIds: ['a', 'b'],
+      workspaceSessionIds: ['s1'],
+      workspaceSources: [
+        {
+          sessionId: 's1',
+          kind: 'app',
+          id: 'app-a',
+          generation: '2026-07-12T00:00:00.000Z',
+        },
+      ],
     });
     if (message.type !== 'runner.hello') throw new Error('wrong type');
     expect(message.activeRunIds).toEqual(['a', 'b']);
+    expect(message.workspaceSessionIds).toEqual(['s1']);
+    expect(message.workspaceSources).toEqual([
+      {
+        sessionId: 's1',
+        kind: 'app',
+        id: 'app-a',
+        generation: '2026-07-12T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('parses runner.ready', () => {
+    expect(parseRunnerMessage({ type: 'runner.ready' })).toEqual({
+      type: 'runner.ready',
+    });
   });
 
   it('parses run.event and preserves the stream payload', () => {
@@ -69,6 +94,12 @@ describe('runner -> platform messages', () => {
 });
 
 describe('platform -> runner messages', () => {
+  it('parses hub.ready_ack', () => {
+    expect(parseHubMessage({ type: 'hub.ready_ack' })).toEqual({
+      type: 'hub.ready_ack',
+    });
+  });
+
   it('parses run.start with model config', () => {
     const message = parseHubMessage({
       type: 'run.start',
@@ -76,6 +107,7 @@ describe('platform -> runner messages', () => {
       sessionId: 's1',
       userText: 'hello',
       images: [],
+      attachments: [],
       priorMessages: [],
       model: {
         providerId: 'p1',
@@ -112,6 +144,24 @@ describe('platform -> runner messages', () => {
   it('rejects a runner message on the hub channel', () => {
     expect(() => parseHubMessage({ type: 'runner.ping' })).toThrow(ZodError);
   });
+
+  it('requires the deleted entity generation for source cleanup', () => {
+    expect(
+      parseHubMessage({
+        type: 'workspace.cleanup',
+        scope: 'workflow',
+        id: 'workflow-a',
+        generation: '2026-07-12T00:00:00.000Z',
+      }),
+    ).toMatchObject({ generation: '2026-07-12T00:00:00.000Z' });
+    expect(() =>
+      parseHubMessage({
+        type: 'workspace.cleanup',
+        scope: 'workflow',
+        id: 'workflow-a',
+      }),
+    ).toThrow(ZodError);
+  });
 });
 
 describe('scaffold file safety', () => {
@@ -140,5 +190,23 @@ describe('scaffold file safety', () => {
       scaffoldFileSchema.safeParse({ path: 'x.txt', contentBase64: 'aGk=' })
         .success,
     ).toBe(true);
+  });
+});
+
+describe('deploy source requests', () => {
+  it('requires the entity generation observed by the runner', () => {
+    expect(
+      deploySourceRequestSchema.safeParse({
+        message: 'Deploy current source',
+        generation: '2026-07-12T00:00:00.000Z',
+        bundleBase64: 'bundle',
+      }).success,
+    ).toBe(true);
+    expect(
+      deploySourceRequestSchema.safeParse({
+        message: 'Deploy current source',
+        bundleBase64: 'bundle',
+      }).success,
+    ).toBe(false);
   });
 });

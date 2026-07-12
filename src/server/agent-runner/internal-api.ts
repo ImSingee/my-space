@@ -85,14 +85,40 @@ async function resolveApp(handle: string): Promise<string> {
   return id;
 }
 
-async function requireWorkflow(id: string): Promise<string> {
+async function requireAppGeneration(id: string): Promise<string> {
+  const { db } = await import('~/db');
+  const row = await db.query.apps.findFirst({
+    where: (s, { eq }) => eq(s.id, id),
+    columns: { createdAt: true },
+  });
+  if (!row) throw new AppError(`App "${id}" not found.`, 404);
+  return row.createdAt.toISOString();
+}
+
+async function requireWorkflow(
+  id: string,
+): Promise<{ id: string; generation: string }> {
   const { db } = await import('~/db');
   const row = await db.query.workflows.findFirst({
     where: (s, { eq }) => eq(s.id, id),
-    columns: { id: true },
+    columns: { id: true, createdAt: true },
   });
   if (!row) throw new AppError(`Workflow "${id}" not found.`, 404);
-  return row.id;
+  return { id: row.id, generation: row.createdAt.toISOString() };
+}
+
+function requireGeneration(
+  kind: 'App' | 'Workflow',
+  id: string,
+  expected: string,
+  actual: string,
+): void {
+  if (expected === actual) return;
+  throw new AppError(
+    `${kind} "${id}" was deleted or recreated while preparing the deploy. ` +
+      'Checkout the current source and try again.',
+    409,
+  );
 }
 
 export async function handleInternalApiRequest(
@@ -117,6 +143,10 @@ export async function handleInternalApiRequest(
       await handleWorkflows(req, res, method, rest);
       return;
     }
+    if (resource === 'agent-sessions') {
+      await handleAgentSessions(res, method, rest);
+      return;
+    }
     throw new AppError('Not found.', 404);
   } catch (error) {
     const status = error instanceof AppError ? error.status : 500;
@@ -125,6 +155,28 @@ export async function handleInternalApiRequest(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+async function handleAgentSessions(
+  res: http.ServerResponse,
+  method: string,
+  rest: string[],
+): Promise<void> {
+  if (method !== 'GET' || rest.length !== 3 || rest[1] !== 'attachments') {
+    throw new AppError('Not found.', 404);
+  }
+  const sessionId = decodeURIComponent(rest[0]);
+  const attachmentId = decodeURIComponent(rest[2]);
+  const { getAgentAttachment } = await import('~server/agent-attachments');
+  const got = await getAgentAttachment(attachmentId, sessionId);
+  if (!got) throw new AppError('Attachment not found.', 404);
+  res.writeHead(200, {
+    'content-type': got.attachment.mimeType,
+    'content-length': String(got.attachment.size),
+    'x-attachment-name': encodeURIComponent(got.attachment.name),
+    'cache-control': 'private, no-store',
+  });
+  res.end(got.body);
 }
 
 async function handleApps(
@@ -165,12 +217,14 @@ async function handleApps(
 
   if (action === 'source' && method === 'GET') {
     const id = await resolveApp(handle);
+    const generation = await requireAppGeneration(id);
     const { appMasterCommit, exportAppMasterBundle } =
       await import('~server/apps/git');
     const commit = await appMasterCommit(id);
     const bundle = await exportAppMasterBundle(id);
     const payload: SourceBundleResponse = {
       id,
+      generation,
       masterCommit: commit,
       bundleBase64: bundle ? bundle.toString('base64') : null,
     };
@@ -181,6 +235,12 @@ async function handleApps(
   if (action === 'deploy' && method === 'POST') {
     const id = await resolveApp(handle);
     const body = deploySourceRequestSchema.parse(await readJsonBody(req));
+    requireGeneration(
+      'App',
+      id,
+      body.generation,
+      await requireAppGeneration(id),
+    );
     const { stageAppBundleCheckout } = await import('~server/apps/git');
     const staged = await stageAppBundleCheckout(
       id,
@@ -266,13 +326,14 @@ async function handleWorkflows(
   }
 
   if (action === 'source' && method === 'GET') {
-    await requireWorkflow(id);
+    const { generation } = await requireWorkflow(id);
     const { workflowMasterCommit, exportWorkflowMasterBundle } =
       await import('~server/workflows/git');
     const commit = await workflowMasterCommit(id);
     const bundle = await exportWorkflowMasterBundle(id);
     const payload: SourceBundleResponse = {
       id,
+      generation,
       masterCommit: commit,
       bundleBase64: bundle ? bundle.toString('base64') : null,
     };
@@ -281,8 +342,9 @@ async function handleWorkflows(
   }
 
   if (action === 'deploy' && method === 'POST') {
-    await requireWorkflow(id);
     const body = deploySourceRequestSchema.parse(await readJsonBody(req));
+    const workflow = await requireWorkflow(id);
+    requireGeneration('Workflow', id, body.generation, workflow.generation);
     const { stageWorkflowBundleCheckout } =
       await import('~server/workflows/git');
     const staged = await stageWorkflowBundleCheckout(
@@ -294,6 +356,7 @@ async function handleWorkflows(
       const result = await deployWorkflow(id, {
         sourceDir: staged.dir,
         message: body.message,
+        expectedGeneration: body.generation,
       });
       json(res, 200, {
         deploymentId: result.deploymentId,

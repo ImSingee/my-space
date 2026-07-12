@@ -10,6 +10,7 @@ import {
   bundleWorktreeForDeploy,
   initNewWorktree,
   syncCheckoutFromBundle,
+  withSourceWorkspaceLock,
 } from '../local-sources';
 import type { PlatformClient } from '../platform-client';
 import { writeScaffoldFiles } from '../scaffold-files';
@@ -103,31 +104,47 @@ export function createWorkflowTools(options: {
     description:
       "Checkout a workflow's Git repo into this chat's persistent worktree. " +
       'Use before reading or editing an existing workflow.',
+    executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'Workflow id to checkout.' }),
+      target_path: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'Absolute path inside this Agent workdir, or a path relative to ' +
+            'it. Defaults to workflows/<workflow-id>.',
+        }),
+      ),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const source = await platform.getWorkflowSource(params.id);
-      const checkout = await syncCheckoutFromBundle(
+      return withSourceWorkspaceLock(
         sessionId,
-        'workflow',
-        source,
+        async () => {
+          const source = await platform.getWorkflowSource(params.id);
+          const checkout = await syncCheckoutFromBundle(
+            sessionId,
+            'workflow',
+            source,
+            params.target_path,
+          );
+          const lines = [
+            `Checked out "${params.id}" at ${checkout.absolutePath}.`,
+            checkout.headCommit
+              ? `HEAD: ${checkout.headCommit}`
+              : 'No commits yet. Create files, then run git add and git commit.',
+            checkout.remoteCommit
+              ? `Remote master: ${checkout.remoteCommit}`
+              : 'Remote master has no commits yet.',
+            checkout.dirty
+              ? `Worktree has local changes:\n${checkout.status}`
+              : 'Worktree is clean.',
+          ];
+          return text(lines.join('\n'), checkout);
+        },
+        signal,
       );
-      const lines = [
-        `Checked out "${params.id}" at ${checkout.path}/.`,
-        checkout.headCommit
-          ? `HEAD: ${checkout.headCommit}`
-          : 'No commits yet. Create files, then run git add and git commit.',
-        checkout.remoteCommit
-          ? `Remote master: ${checkout.remoteCommit}`
-          : 'Remote master has no commits yet.',
-        checkout.dirty
-          ? `Worktree has local changes:\n${checkout.status}`
-          : 'Worktree is clean.',
-      ];
-      return text(lines.join('\n'), checkout);
     },
   });
 
@@ -139,6 +156,7 @@ export function createWorkflowTools(options: {
       'worktree (manifest, a `workflow.ts` defining a zod input + steps, and ' +
       'the @hatch/workflow SDK). Workflows run periodic/repetitive tasks; they ' +
       'have no custom UI/API, only manual/cron/webhook triggers.',
+    executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({
         description: 'kebab-case id, e.g. "digest" or "sync-stars".',
@@ -154,24 +172,54 @@ export function createWorkflowTools(options: {
             'right away.',
         }),
       ),
+      target_path: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'Absolute path inside this Agent workdir, or a path relative to ' +
+            'it. Defaults to workflows/<workflow-id>.',
+        }),
+      ),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      // The workflow id doubles as the local directory name; reserve it
-      // BEFORE the platform registers the id, or a collision here would
-      // strand an empty draft workflow on the platform.
-      await assertWorktreeAvailable(sessionId, params.id);
-      const res = await platform.createWorkflow(params);
-      await initNewWorktree(sessionId, 'workflow', res.id, (root) =>
-        writeScaffoldFiles(root, res.files),
-      );
-      return text(
-        `Created workflow "${res.id}". Source is at ${res.id}/.\n` +
-          'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
-          'and manifest.json (triggers), commit with git, then call ' +
-          'deploy_workflow. Do not edit hatch/ (the platform SDK).',
-        { id: res.id, name: res.name },
+      return withSourceWorkspaceLock(
+        sessionId,
+        async () => {
+          // The workflow id doubles as the local directory name; reserve it
+          // before the Platform registers the id.
+          await assertWorktreeAvailable(
+            sessionId,
+            'workflow',
+            params.id,
+            params.target_path,
+          );
+          const { target_path: targetPath, ...input } = params;
+          const res = await platform.createWorkflow(input);
+          const checkout = await initNewWorktree(
+            sessionId,
+            'workflow',
+            res.id,
+            res.generation,
+            (root) => writeScaffoldFiles(root, res.files),
+            targetPath,
+          );
+          return text(
+            `Created workflow "${res.id}". Source is at ` +
+              `${checkout.absolutePath}.\n` +
+              'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
+              'and manifest.json (triggers), commit with git, then call ' +
+              'deploy_workflow. Do not edit hatch/ (the platform SDK).',
+            {
+              id: res.id,
+              name: res.name,
+              path: checkout.path,
+              absolutePath: checkout.absolutePath,
+            },
+          );
+        },
+        signal,
       );
     },
   });
@@ -183,38 +231,57 @@ export function createWorkflowTools(options: {
       'Bundle the workflow into a single Deno program, capture its input JSON ' +
       'Schema, and deploy it so it can be triggered. Reports the version and ' +
       'webhook URL (if enabled).',
+    executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'Workflow id to deploy.' }),
+      source_path: Type.String({
+        minLength: 1,
+        description:
+          'Absolute path inside this Agent workdir, or a path relative to it, ' +
+          'for the workflow Git worktree. Use the path returned by ' +
+          'create_workflow or checkout_workflow.',
+      }),
       message: Type.String({
         description:
           'Required release note describing what this deployment changes ' +
           '(shown in the deployment history).',
       }),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const { bundleBase64 } = await bundleWorktreeForDeploy(
+      return withSourceWorkspaceLock(
         sessionId,
-        'workflow',
-        params.id,
+        async () => {
+          const detail = await platform.getWorkflow(params.id);
+          if (!detail) throw new Error(`Workflow "${params.id}" not found.`);
+          const { bundleBase64 } = await bundleWorktreeForDeploy(
+            sessionId,
+            'workflow',
+            detail.id,
+            detail.createdAt,
+            params.source_path,
+          );
+          const res = await platform.deployWorkflow(detail.id, {
+            message: params.message,
+            generation: detail.createdAt,
+            bundleBase64,
+          });
+          const lines = [
+            `Deployed "${detail.id}" (v${res.version}).`,
+            res.normalized.triggers.webhook.enabled
+              ? `Webhook: ${res.normalized.triggers.webhook.url}`
+              : null,
+            res.normalized.triggers.cron.length > 0
+              ? `Cron: ${res.normalized.triggers.cron
+                  .map((j) => `${j.name} [${j.schedule}]`)
+                  .join(', ')}`
+              : null,
+          ].filter(Boolean);
+          return text(lines.join('\n'), res);
+        },
+        signal,
       );
-      const res = await platform.deployWorkflow(params.id, {
-        message: params.message,
-        bundleBase64,
-      });
-      const lines = [
-        `Deployed "${params.id}" (v${res.version}).`,
-        res.normalized.triggers.webhook.enabled
-          ? `Webhook: ${res.normalized.triggers.webhook.url}`
-          : null,
-        res.normalized.triggers.cron.length > 0
-          ? `Cron: ${res.normalized.triggers.cron
-              .map((j) => `${j.name} [${j.schedule}]`)
-              .join(', ')}`
-          : null,
-      ].filter(Boolean);
-      return text(lines.join('\n'), res);
     },
   });
 

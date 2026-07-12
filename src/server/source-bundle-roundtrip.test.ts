@@ -16,6 +16,8 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 const root = await mkdtemp(path.join(tmpdir(), 'hatch-bundle-rt-'));
+const GENERATION = '2026-07-12T00:00:00.000Z';
+const NEXT_GENERATION = '2026-07-12T01:00:00.000Z';
 process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 
 // Import after HATCH_DATA_DIR is set (module-level path constants).
@@ -80,6 +82,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     expect(exported).not.toBeNull();
     const checkout = await syncCheckoutFromBundle(SESSION, 'app', {
       id: APP_ID,
+      generation: GENERATION,
       masterCommit: seedCommit,
       bundleBase64: exported!.toString('base64'),
     });
@@ -94,7 +97,13 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     const localCommit = await commitAll(checkout.absolutePath, 'agent edit');
 
     // -- Runner -> platform: bundle the worktree, stage it, publish. --------
-    const deploy = await bundleWorktreeForDeploy(SESSION, 'app', APP_ID);
+    const deploy = await bundleWorktreeForDeploy(
+      SESSION,
+      'app',
+      APP_ID,
+      GENERATION,
+      checkout.absolutePath,
+    );
     expect(deploy.headCommit).toBe(localCommit);
 
     const staged = await platform.stageBundleCheckout(
@@ -124,6 +133,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     const master = await platform.masterCommit(APP_ID);
     const checkout = await syncCheckoutFromBundle(SESSION, 'app', {
       id: APP_ID,
+      generation: GENERATION,
       masterCommit: master,
       bundleBase64: exported!.toString('base64'),
     });
@@ -141,6 +151,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     const master = await platform.masterCommit(APP_ID);
     const stale = await syncCheckoutFromBundle('rt-stale', 'app', {
       id: APP_ID,
+      generation: GENERATION,
       masterCommit: master,
       bundleBase64: exported!.toString('base64'),
     });
@@ -150,11 +161,14 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       'rt-stale',
       'app',
       APP_ID,
+      GENERATION,
+      stale.absolutePath,
     );
 
     // …but master advances first (another deploy wins the race). ------------
     const winner = await syncCheckoutFromBundle('rt-winner', 'app', {
       id: APP_ID,
+      generation: GENERATION,
       masterCommit: master,
       bundleBase64: exported!.toString('base64'),
     });
@@ -164,6 +178,8 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       'rt-winner',
       'app',
       APP_ID,
+      GENERATION,
+      winner.absolutePath,
     );
     const stagedWinner = await platform.stageBundleCheckout(
       APP_ID,
@@ -198,23 +214,29 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     await expect(
       syncCheckoutFromBundle(SESSION, 'app', {
         id: APP_ID,
+        generation: NEXT_GENERATION,
         masterCommit: null,
         bundleBase64: null,
       }),
-    ).rejects.toThrow(/no longer exists on the platform/);
+    ).rejects.toThrow(/previous incarnation/);
   });
 
   it('keeps a never-synced worktree when the remote is still empty', async () => {
     // Legit pre-first-deploy flow: initNewWorktree + local commits, then a
     // re-checkout while the platform repo is still empty. No origin/master
     // ref exists locally, so this must NOT be treated as stale.
-    const fresh = await initNewWorktree('rt-fresh', 'app', 'new-app', () =>
-      Promise.resolve(),
+    const fresh = await initNewWorktree(
+      'rt-fresh',
+      'app',
+      'new-app',
+      GENERATION,
+      () => Promise.resolve(),
     );
     await writeFile(path.join(fresh.absolutePath, 'a.txt'), 'work\n');
     const localCommit = await commitAll(fresh.absolutePath, 'local work');
     const again = await syncCheckoutFromBundle('rt-fresh', 'app', {
       id: 'new-app',
+      generation: GENERATION,
       masterCommit: null,
       bundleBase64: null,
     });
@@ -223,18 +245,48 @@ describe('git bundle round-trip (platform <-> runner)', () => {
 
   it('rejects a dirty worktree and an empty worktree at bundle time', async () => {
     await writeFile(
-      path.join(root, 'runner-data', 'agents', SESSION, 'work', APP_ID, 'x'),
+      path.join(
+        root,
+        'runner-data',
+        'agents',
+        SESSION,
+        'work',
+        'apps',
+        APP_ID,
+        'x',
+      ),
       'dirty\n',
     );
-    await expect(
-      bundleWorktreeForDeploy(SESSION, 'app', APP_ID),
-    ).rejects.toThrow(/dirty/);
-    await rm(
-      path.join(root, 'runner-data', 'agents', SESSION, 'work', APP_ID, 'x'),
+    const sourcePath = path.join(
+      root,
+      'runner-data',
+      'agents',
+      SESSION,
+      'work',
+      'apps',
+      APP_ID,
     );
+    await expect(
+      bundleWorktreeForDeploy(SESSION, 'app', APP_ID, GENERATION, sourcePath),
+    ).rejects.toThrow(/dirty/);
+    await rm(path.join(sourcePath, 'x'));
 
     await expect(
-      bundleWorktreeForDeploy(SESSION, 'app', 'never-checked-out'),
+      bundleWorktreeForDeploy(
+        SESSION,
+        'app',
+        'never-checked-out',
+        GENERATION,
+        path.join(
+          root,
+          'runner-data',
+          'agents',
+          SESSION,
+          'work',
+          'apps',
+          'never-checked-out',
+        ),
+      ),
     ).rejects.toThrow(/not checked out/);
   });
 });

@@ -7,10 +7,12 @@
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import {
+  assertWorkspacePathAvailable,
   bundleWorktreeForDeploy,
   initNewWorktree,
   syncCheckoutFromBundle,
   type LocalCheckout,
+  withSourceWorkspaceLock,
 } from '../local-sources';
 import type { PlatformClient } from '../platform-client';
 import { writeScaffoldFiles } from '../scaffold-files';
@@ -18,7 +20,7 @@ import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 function checkoutLines(id: string, checkout: LocalCheckout): string[] {
   return [
-    `Checked out "${id}" at ${checkout.path}/.`,
+    `Checked out "${id}" at ${checkout.absolutePath}.`,
     checkout.headCommit
       ? `HEAD: ${checkout.headCommit}`
       : 'No commits yet. Create files, then run git add and git commit.',
@@ -143,15 +145,35 @@ export function createAppTools(options: {
     description:
       "Checkout an app's Git repo into this chat's persistent worktree. " +
       'Use before reading or editing an existing app.',
+    executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to checkout.' }),
+      target_path: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'Absolute path inside this Agent workdir, or a path relative to ' +
+            'it. Defaults to apps/<app-id>.',
+        }),
+      ),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const source = await platform.getAppSource(params.id);
-      const checkout = await syncCheckoutFromBundle(sessionId, 'app', source);
-      return text(checkoutLines(source.id, checkout).join('\n'), checkout);
+      return withSourceWorkspaceLock(
+        sessionId,
+        async () => {
+          const source = await platform.getAppSource(params.id);
+          const checkout = await syncCheckoutFromBundle(
+            sessionId,
+            'app',
+            source,
+            params.target_path,
+          );
+          return text(checkoutLines(source.id, checkout).join('\n'), checkout);
+        },
+        signal,
+      );
     },
   });
 
@@ -162,6 +184,7 @@ export function createAppTools(options: {
       "Scaffold a new app from the platform template in this chat's " +
       'worktree with manifest, proto, Deno backend, React app, and a sample ' +
       'widget.',
+    executionMode: 'sequential',
     parameters: Type.Object({
       slug: Type.String({
         description:
@@ -181,20 +204,51 @@ export function createAppTools(options: {
             'and false for backend-only or widget-only apps.',
         }),
       ),
+      target_path: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'Absolute path inside this Agent workdir, or a path relative to ' +
+            'it. Defaults to apps/<generated-app-id>.',
+        }),
+      ),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
-      const res = await platform.createApp(params);
-      await initNewWorktree(sessionId, 'app', res.id, (root) =>
-        writeScaffoldFiles(root, res.files),
-      );
-      return text(
-        `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
-          `Source is at ${res.id}/.\n` +
-          'Use the id for checkout_app/deploy_app. Read the scaffolded files, ' +
-          'edit proto/backend/app/widgets, then commit your changes with git ' +
-          'before calling deploy_app.',
-        { id: res.id, slug: res.slug, name: res.name },
+      return withSourceWorkspaceLock(
+        sessionId,
+        async () => {
+          const { target_path: targetPath, ...input } = params;
+          if (targetPath !== undefined) {
+            // Keep validation and local initialization under one session lock so
+            // parallel create calls cannot both reserve the same target.
+            await assertWorkspacePathAvailable(sessionId, targetPath);
+          }
+          const res = await platform.createApp(input);
+          const checkout = await initNewWorktree(
+            sessionId,
+            'app',
+            res.id,
+            res.generation,
+            (root) => writeScaffoldFiles(root, res.files),
+            targetPath,
+          );
+          return text(
+            `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
+              `Source is at ${checkout.absolutePath}.\n` +
+              'Use the id for checkout_app/deploy_app. Read the scaffolded files, ' +
+              'edit proto/backend/app/widgets, then commit your changes with git ' +
+              'before calling deploy_app.',
+            {
+              id: res.id,
+              slug: res.slug,
+              name: res.name,
+              path: checkout.path,
+              absolutePath: checkout.absolutePath,
+            },
+          );
+        },
+        signal,
       );
     },
   });
@@ -205,37 +259,54 @@ export function createAppTools(options: {
     description:
       'Build (Connect codegen + bundle app/widgets + stage Deno backend) and ' +
       'deploy an app so it becomes live. Reports the app/widget/RPC URLs.',
+    executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to deploy.' }),
+      source_path: Type.String({
+        minLength: 1,
+        description:
+          'Absolute path inside this Agent workdir, or a path relative to it, ' +
+          'for the app Git worktree. Use the path returned by create_app or ' +
+          'checkout_app.',
+      }),
       message: Type.String({
         description:
           'Required release note describing what this deployment changes ' +
           '(e.g. "Add dark mode toggle"). Shown in the deployment history.',
       }),
     }),
-    execute: async (_id, params) => {
+    execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const detail = await platform.getApp(params.id);
-      if (!detail) throw new Error(`App "${params.id}" not found.`);
-      const { bundleBase64 } = await bundleWorktreeForDeploy(
+      return withSourceWorkspaceLock(
         sessionId,
-        'app',
-        detail.id,
+        async () => {
+          const detail = await platform.getApp(params.id);
+          if (!detail) throw new Error(`App "${params.id}" not found.`);
+          const { bundleBase64 } = await bundleWorktreeForDeploy(
+            sessionId,
+            'app',
+            detail.id,
+            detail.createdAt,
+            params.source_path,
+          );
+          const res = await platform.deployApp(detail.id, {
+            message: params.message,
+            generation: detail.createdAt,
+            bundleBase64,
+          });
+          const lines = [
+            `Deployed "${detail.id}" (v${res.version}).`,
+            res.normalized.app ? `App (iframe): /app/${res.slug}/` : null,
+            res.normalized.widgets.length > 0
+              ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
+              : null,
+            res.normalized.rpc ? `RPC: ${res.normalized.rpc.url}` : null,
+          ].filter(Boolean);
+          return text(lines.join('\n'), res);
+        },
+        signal,
       );
-      const res = await platform.deployApp(detail.id, {
-        message: params.message,
-        bundleBase64,
-      });
-      const lines = [
-        `Deployed "${detail.id}" (v${res.version}).`,
-        res.normalized.app ? `App (iframe): /app/${res.slug}/` : null,
-        res.normalized.widgets.length > 0
-          ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
-          : null,
-        res.normalized.rpc ? `RPC: ${res.normalized.rpc.url}` : null,
-      ].filter(Boolean);
-      return text(lines.join('\n'), res);
     },
   });
 

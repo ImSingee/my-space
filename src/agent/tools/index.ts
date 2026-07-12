@@ -6,6 +6,7 @@
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
 import type { PlatformClient } from '../platform-client';
 import { createAppTools } from './apps';
+import { createAttachmentTool } from './attachments';
 import { createAskTool, type AskBridge } from './ask';
 import { createCommandTool } from './command';
 import { createFileTools } from './files';
@@ -30,6 +31,7 @@ export function createTools(
   const tools = [
     ...createFileTools(env),
     createCommandTool(env),
+    createAttachmentTool(shared),
     ...createAppTools(shared),
     ...createWorkflowTools(shared),
   ];

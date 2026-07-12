@@ -23,6 +23,7 @@ type FinishedPayload = {
 
 type ActiveRun = {
   runId: string;
+  sessionId: string;
   queue: RunEventQueue;
   controller: AbortController;
   cancelled: boolean;
@@ -67,6 +68,7 @@ export class RunnerExecutor {
       const { models, picked } = buildRunModels(payload.model);
       run = {
         runId: payload.runId,
+        sessionId: payload.sessionId,
         queue: new RunEventQueue(),
         controller: new AbortController(),
         cancelled: false,
@@ -107,6 +109,7 @@ export class RunnerExecutor {
         sessionId: payload.sessionId,
         userText: payload.userText,
         images: payload.images,
+        attachments: payload.attachments,
         models,
         picked,
         platform: this.opts.platform,
@@ -213,6 +216,15 @@ export class RunnerExecutor {
         run.controller.abort();
       }
     }
+  }
+
+  /** Abort and settle every run using a session before its workspace is removed. */
+  async abortSession(sessionId: string): Promise<void> {
+    const affected = [...this.runs.values()].filter(
+      (run) => run.sessionId === sessionId,
+    );
+    for (const run of affected) this.abortStale(run.runId);
+    await Promise.all(affected.map((run) => run.done.catch(() => {})));
   }
 
   private finish(run: ActiveRun, payload: FinishedPayload): void {

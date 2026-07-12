@@ -474,6 +474,23 @@ export const agentSessions = pgTable('agent_sessions', {
   updatedAt,
 });
 
+export const agentAttachments = pgTable(
+  'agent_attachments',
+  {
+    id: text().primaryKey(),
+    sessionId: ulid('session_id')
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    contentType: text('content_type').notNull(),
+    size: integer().notNull(),
+    /** Null while uploaded but not yet committed into a chat turn. */
+    attachedAt: timestamp('attached_at'),
+    createdAt,
+  },
+  (table) => [index('agent_attachments_session_idx').on(table.sessionId)],
+);
+
 export const agentRuns = pgTable(
   'agent_runs',
   {

@@ -24,6 +24,8 @@ type RunnerConn = {
   protocolVersion: number;
   /** Runs dispatched to (or reclaimed by) this runner on this connection. */
   activeRunIds: Set<string>;
+  /** False until the runner applies its reconnect cleanup snapshot. */
+  ready: boolean;
   /** Epoch ms when this connection registered (runner.hello accepted). */
   connectedAt: number;
   /** Epoch ms of the last valid message on this connection (ping, events…). */
@@ -68,7 +70,23 @@ function send(conn: RunnerConn, message: HubMessage): boolean {
 }
 
 export function connectedRunnerCount(): number {
-  return hubState().runners.size;
+  return [...hubState().runners.values()].filter((conn) => conn.ready).length;
+}
+
+export function broadcastSessionWorkspaceCleanup(sessionId: string): void {
+  for (const conn of hubState().runners.values()) {
+    send(conn, { type: 'workspace.cleanup', scope: 'session', sessionId });
+  }
+}
+
+export function broadcastEntityWorkspaceCleanup(
+  scope: 'app' | 'workflow',
+  id: string,
+  generation: string,
+): void {
+  for (const conn of hubState().runners.values()) {
+    send(conn, { type: 'workspace.cleanup', scope, id, generation });
+  }
 }
 
 /** One connected runner as exposed to the status page (no socket internals). */
@@ -84,6 +102,7 @@ export type ConnectedRunnerInfo = {
 /** Snapshot of every currently connected runner, stable-ordered by id. */
 export function listConnectedRunners(): ConnectedRunnerInfo[] {
   return [...hubState().runners.values()]
+    .filter((conn) => conn.ready)
     .map((conn) => ({
       runnerId: conn.runnerId,
       protocolVersion: conn.protocolVersion,
@@ -103,6 +122,7 @@ function ownerConn(runnerId: string | null | undefined): RunnerConn | null {
 function pickRunner(): RunnerConn | null {
   let best: RunnerConn | null = null;
   for (const conn of hubState().runners.values()) {
+    if (!conn.ready) continue;
     if (!best || conn.activeRunIds.size < best.activeRunIds.size) {
       best = conn;
     }
@@ -252,7 +272,12 @@ export function handleRunnerSocket(socket: WebSocket): void {
           );
           return;
         }
-        conn = await registerRunner(socket, message);
+        try {
+          conn = await registerRunner(socket, message);
+        } catch (error) {
+          console.error('[runner-hub] runner registration failed:', error);
+          close(1011, 'Runner registration failed.');
+        }
         return;
       }
 
@@ -326,33 +351,76 @@ async function registerRunner(
     socket,
     protocolVersion: hello.protocolVersion,
     activeRunIds: new Set(),
+    ready: false,
     connectedAt: now,
     lastSeenAt: now,
   };
 
-  const { reconcileRunnerRuns } = await import('~server/agent-runs');
-  const { resumed, stale, pendingAnswers } = await reconcileRunnerRuns(
-    hello.runnerId,
-    hello.activeRunIds,
-  );
-  for (const runId of resumed) conn.activeRunIds.add(runId);
+  // Register as pending before any reconciliation query. Cleanup broadcasts
+  // that commit during this window must reach the socket, while pickRunner()
+  // keeps it out of new-run dispatch until runner.ready arrives.
+  state.runners.set(hello.runnerId, conn);
 
-  // The socket may have died while reconciliation was in flight; its close
-  // event already ran (with no registration to clean up), so storing it now
-  // would leave a permanent ghost runner that dispatches select and fail on.
+  let resumed: string[];
+  let stale: string[];
+  let pendingAnswers: {
+    runId: string;
+    askId: string;
+    answers: AskAnswerPayload[];
+  }[];
+  let workspace: Awaited<
+    ReturnType<
+      typeof import('~server/agent-workspaces').reconcileRunnerWorkspaces
+    >
+  >;
+  try {
+    const { reconcileRunnerRuns } = await import('~server/agent-runs');
+    ({ resumed, stale, pendingAnswers } = await reconcileRunnerRuns(
+      hello.runnerId,
+      hello.activeRunIds,
+    ));
+    for (const runId of resumed) conn.activeRunIds.add(runId);
+
+    const { reconcileRunnerWorkspaces } =
+      await import('~server/agent-workspaces');
+    workspace = await reconcileRunnerWorkspaces({
+      sessionIds: hello.workspaceSessionIds,
+      sources: hello.workspaceSources,
+    });
+  } catch (error) {
+    if (state.runners.get(hello.runnerId) === conn) {
+      state.runners.delete(hello.runnerId);
+    }
+    throw error;
+  }
+
+  // The socket may have died while reconciliation was in flight. Its close
+  // handler normally removes this pending entry; keep this check as a backstop
+  // when the close event has not run yet.
   if (socket.readyState !== socket.OPEN) {
+    if (state.runners.get(hello.runnerId) === conn) {
+      state.runners.delete(hello.runnerId);
+    }
     console.warn(
       `[runner-hub] runner ${hello.runnerId} disconnected during registration`,
     );
     return null;
   }
 
-  state.runners.set(hello.runnerId, conn);
-  send(conn, {
-    type: 'hub.hello_ack',
-    resumedRunIds: resumed,
-    staleRunIds: stale,
-  });
+  if (
+    !send(conn, {
+      type: 'hub.hello_ack',
+      resumedRunIds: resumed,
+      staleRunIds: stale,
+      staleWorkspaceSessionIds: workspace.staleSessionIds,
+      staleWorkspaceSources: workspace.staleSources,
+    })
+  ) {
+    if (state.runners.get(hello.runnerId) === conn) {
+      state.runners.delete(hello.runnerId);
+    }
+    return null;
+  }
   // Answers that arrived while the runner was offline: deliver now that the
   // runner reclaimed the runs.
   for (const pending of pendingAnswers) {
@@ -363,10 +431,7 @@ async function registerRunner(
       answers: pending.answers,
     });
   }
-  console.log(
-    `[runner-hub] runner ${hello.runnerId} connected ` +
-      `(resumed ${resumed.length}, stale ${stale.length})`,
-  );
+  console.log(`[runner-hub] runner ${hello.runnerId} awaiting workspace ready`);
   return conn;
 }
 
@@ -377,6 +442,16 @@ async function handleMessage(
   switch (message.type) {
     case 'runner.hello': {
       // A second hello on a live connection is a protocol violation; ignore.
+      return;
+    }
+    case 'runner.ready': {
+      if (conn.ready) return;
+      if (!send(conn, { type: 'hub.ready_ack' })) return;
+      conn.ready = true;
+      console.log(
+        `[runner-hub] runner ${conn.runnerId} connected ` +
+          `(${conn.activeRunIds.size} active run(s))`,
+      );
       return;
     }
     case 'runner.ping': {

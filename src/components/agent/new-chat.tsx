@@ -14,6 +14,7 @@ import { IconPlugConnected, IconSparkles } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
+import { uploadAgentFiles } from './attachment-api';
 import { Composer, type ComposerSubmit } from './composer';
 import { ModelPicker } from './model-picker';
 import { useModelOptions } from './model-options';
@@ -55,7 +56,11 @@ export function NewChat({
 
   const effectiveModel = resolveEffectiveModel(model, null, available, first);
 
-  const start = async ({ text, images }: ComposerSubmit): Promise<boolean> => {
+  const start = async ({
+    text,
+    images,
+    files,
+  }: ComposerSubmit): Promise<boolean> => {
     if (creating) return false;
     const value = effectiveModel;
     if (!value) return false;
@@ -68,10 +73,12 @@ export function NewChat({
       const id =
         createdSessionRef.current ?? (await createEmptyAgentSession()).id;
       createdSessionRef.current = id;
+      const attachments = await uploadAgentFiles(id, files);
       await startAgentRunRequest({
         sessionId: id,
         userText: text,
         images,
+        attachmentIds: attachments.map((attachment) => attachment.id),
         providerId,
         modelId,
       });

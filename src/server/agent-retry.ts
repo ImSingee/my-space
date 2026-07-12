@@ -1,4 +1,6 @@
 import type { JsonValue } from '~/db/schema';
+import type { AgentAttachmentRef } from '~agent/attachments';
+import { stripAttachmentPrompt } from '~agent/attachments';
 import type { SendImage } from '~agent/protocol';
 
 export type RetryableAgentTurn = {
@@ -6,6 +8,7 @@ export type RetryableAgentTurn = {
   baseMessages: JsonValue[];
   userText: string;
   images: SendImage[];
+  attachments: AgentAttachmentRef[];
 };
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -33,6 +36,7 @@ export function parseRetryableAgentTurn(
 
     const textParts: string[] = [];
     const images: SendImage[] = [];
+    const attachments: AgentAttachmentRef[] = [];
     if (typeof message.content === 'string') {
       textParts.push(message.content);
     } else if (Array.isArray(message.content)) {
@@ -53,12 +57,43 @@ export function parseRetryableAgentTurn(
       }
     }
 
-    const userText = textParts.join('');
-    if (userText.trim().length === 0 && images.length === 0) return null;
+    if (Array.isArray(message.attachments)) {
+      for (const rawAttachment of message.attachments) {
+        const attachment = asObject(rawAttachment);
+        if (
+          attachment &&
+          typeof attachment.id === 'string' &&
+          typeof attachment.name === 'string' &&
+          typeof attachment.mimeType === 'string' &&
+          typeof attachment.size === 'number'
+        ) {
+          attachments.push({
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+          });
+        }
+      }
+    }
+
+    const persistedText = textParts.join('');
+    const userText =
+      attachments.length > 0
+        ? stripAttachmentPrompt(persistedText, attachments)
+        : persistedText;
+    if (
+      userText.trim().length === 0 &&
+      images.length === 0 &&
+      attachments.length === 0
+    ) {
+      return null;
+    }
     return {
       baseMessages: messages.slice(0, index),
       userText,
       images,
+      attachments,
     };
   }
 

@@ -1,8 +1,9 @@
 /**
  * Server-only: shared Git-backed source storage engine.
  *
- * Apps and workflows store source identically — a bare repo per entity, agent
- * worktrees under each chat session, deploy tags owned by the platform. This
+ * Apps and workflows store source identically -- a bare repo per entity,
+ * namespaced Agent worktrees under each chat session, deploy tags owned by the
+ * platform. This
  * module implements that engine once; `apps/git.ts` and `workflows/git.ts` are
  * thin instantiations that plug in their own paths and wording.
  */
@@ -223,14 +224,12 @@ exit 0
           `Agent worktree exists but is not a Git checkout: ${worktree}`,
         );
       }
-      // Apps and workflows share the chat worktree namespace (both appear as
-      // `<id>/`), so guard against a slug already checked out for the other
-      // kind — otherwise this flow would reuse and deploy the wrong repo.
+      // Never reuse a custom/stale checkout from another repository.
       const origin = await worktreeOrigin(worktree);
-      if (origin && path.resolve(origin) !== path.resolve(repoDir)) {
+      if (!origin || path.resolve(origin) !== path.resolve(repoDir)) {
         throw new Error(
-          `"${id}/" in this chat is already checked out from a different ` +
-            `repo (${origin}). Pick a different slug for this ${cfg.noun}.`,
+          `Agent worktree is not a checkout of ${cfg.noun} "${id}" ` +
+            `(expected origin ${repoDir}, found ${origin ?? 'no origin'}).`,
         );
       }
       await setLocalGitIdentity(worktree);

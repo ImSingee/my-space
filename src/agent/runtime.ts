@@ -13,6 +13,7 @@ import {
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import type { Models } from '@earendil-works/pi-ai';
 import type { JsonValue } from '~/db/schema';
+import { formatAttachmentPrompt, type AgentAttachmentRef } from './attachments';
 import type { AgentStreamEvent } from './events';
 import { agentWorkDir, SKILLS_DIR } from './paths';
 import type { PlatformClient } from './platform-client';
@@ -56,6 +57,7 @@ export type RunAgentTurnOptions = {
   sessionId: string;
   userText: string;
   images?: { data: string; mimeType: string }[];
+  attachments?: AgentAttachmentRef[];
   models: Models;
   picked: ResolvedModel;
   platform: PlatformClient;
@@ -212,13 +214,35 @@ export async function runAgentTurn(
     mimeType: i.mimeType,
   }));
 
-  try {
-    const assistant = await harness.prompt(
-      userText,
-      images.length > 0 ? { images } : undefined,
-    );
+  const buildTranscript = async (): Promise<JsonValue[]> => {
     const messages = (await session.buildContext())
       .messages as unknown as JsonValue[];
+    const attachments = opts.attachments ?? [];
+    if (attachments.length === 0) return messages;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (
+        message &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'user'
+      ) {
+        messages[index] = {
+          ...message,
+          attachments: attachments as unknown as JsonValue,
+        };
+        break;
+      }
+    }
+    return messages;
+  };
+
+  try {
+    const assistant = await harness.prompt(
+      formatAttachmentPrompt(userText, opts.attachments ?? []),
+      images.length > 0 ? { images } : undefined,
+    );
+    const messages = await buildTranscript();
 
     // AgentHarness reports provider/stream failures as a resolved assistant
     // message rather than rejecting prompt(). Propagate those terminal reasons
@@ -240,8 +264,7 @@ export async function runAgentTurn(
     return { messages };
   } catch (error) {
     return {
-      messages: (await session.buildContext())
-        .messages as unknown as JsonValue[],
+      messages: await buildTranscript(),
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {

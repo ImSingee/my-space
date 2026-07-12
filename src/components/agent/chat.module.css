@@ -528,6 +528,62 @@ button.stepHeader:hover {
   background-color: rgba(0, 0, 0, 0.75);
 }
 
+.fileAttachment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  min-height: 36px;
+  padding: 6px 6px 6px 9px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-dimmed);
+  background: var(--mantine-color-body);
+}
+
+.fileAttachmentName {
+  flex: 1;
+  min-width: 0;
+  color: var(--mantine-color-text);
+}
+
+.fileAttachmentRemove {
+  flex-shrink: 0;
+}
+
+.messageFiles {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.messageFile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-text);
+  text-decoration: none;
+  background: var(--mantine-color-body);
+  transition: background-color var(--transition-fast) var(--ease-out-quart);
+}
+
+.messageFile:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.messageFileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .empty {
   flex: 1;
   display: flex;

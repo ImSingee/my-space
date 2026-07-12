@@ -24,6 +24,7 @@ const payload: RunStartPayload = {
   sessionId: 'session-1',
   userText: 'hello',
   images: [],
+  attachments: [],
   priorMessages: [],
   model: {
     providerId: 'provider-1',
@@ -129,5 +130,32 @@ describe('RunnerExecutor terminal outcomes', () => {
       messages,
     });
     executor.ackFinish(payload.runId);
+  });
+
+  it('aborts and settles every run before a session workspace is removed', async () => {
+    vi.mocked(runAgentTurn).mockImplementation(
+      (options) =>
+        new Promise((resolve) => {
+          options.signal.addEventListener(
+            'abort',
+            () => resolve({ messages: [], error: 'aborted for cleanup' }),
+            { once: true },
+          );
+        }),
+    );
+    const { executor } = setupExecutor();
+    const other = {
+      ...payload,
+      runId: 'run-other',
+      sessionId: 'session-other',
+    };
+
+    expect(executor.start(payload)).toEqual({ accepted: true });
+    expect(executor.start(other)).toEqual({ accepted: true });
+    await executor.abortSession(payload.sessionId);
+
+    expect(executor.activeRunIds()).toEqual(['run-other']);
+    executor.abortStale(other.runId);
+    await vi.waitFor(() => expect(executor.activeRunIds()).toEqual([]));
   });
 });

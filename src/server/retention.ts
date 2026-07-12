@@ -61,6 +61,10 @@ export async function pruneHistory(): Promise<void> {
           and coalesce(r.completed_at, r.created_at)
               < ${cutoff(RETENTION_DAYS.agentRunEvents)}::timestamptz`,
   );
+  const { pruneOrphanedAgentAttachmentSessions, prunePendingAgentAttachments } =
+    await import('./agent-attachments');
+  await prunePendingAgentAttachments();
+  await pruneOrphanedAgentAttachmentSessions();
 }
 
 type RetentionGlobal = typeof globalThis & {

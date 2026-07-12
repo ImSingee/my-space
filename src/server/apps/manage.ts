@@ -10,6 +10,8 @@ import {
   appVersionsDir,
   appArtifactsDir,
   appRepoDir,
+  agentAppWorkDir,
+  agentWorkDir,
   AGENTS_DIR,
   deploymentArtifactDir,
 } from '~agent/paths';
@@ -316,8 +318,16 @@ export async function deleteApp(id: string): Promise<{ ok: true }> {
   } catch {
     /* best-effort */
   }
+  const { broadcastEntityWorkspaceCleanup } =
+    await import('../agent-runner/hub');
   // Cascades to deployments, dashboard widgets, and sidebar items.
-  await db.delete(schema.apps).where(eq(schema.apps.id, id));
+  const [deleted] = await db
+    .delete(schema.apps)
+    .where(eq(schema.apps.id, id))
+    .returning({ createdAt: schema.apps.createdAt });
+  if (deleted) {
+    broadcastEntityWorkspaceCleanup('app', id, deleted.createdAt.toISOString());
+  }
 
   // Remove agent worktrees before the bare repo: deleteAgentWorktrees() scopes
   // each checkout to this app via its git origin, which must still resolve
@@ -344,17 +354,21 @@ async function deleteAgentWorktrees(id: string): Promise<void> {
     sessions
       .filter((entry) => entry.isDirectory())
       .map(async (entry) => {
-        const worktree = `${AGENTS_DIR}/${entry.name}/work/${id}`;
-        if (!(await pathExists(worktree))) return;
-        // Apps and workflows share the `work/<id>` namespace, so only remove a
-        // checkout that actually originates from this app's repo and never a
-        // same-slug workflow worktree (with its uncommitted changes).
-        const origin = await worktreeOrigin(worktree);
-        if (!origin || path.resolve(origin) !== path.resolve(repoDir)) return;
-        await fs.rm(worktree, {
-          recursive: true,
-          force: true,
-        });
+        const candidates = [
+          agentAppWorkDir(entry.name, id),
+          // Compatibility cleanup only. Old root-level worktrees are never
+          // scanned or migrated during normal source operations.
+          path.resolve(agentWorkDir(entry.name), id),
+        ];
+        await Promise.all(
+          candidates.map(async (worktree) => {
+            if (!(await pathExists(worktree))) return;
+            const origin = await worktreeOrigin(worktree);
+            if (!origin || path.resolve(origin) !== path.resolve(repoDir))
+              return;
+            await fs.rm(worktree, { recursive: true, force: true });
+          }),
+        );
       }),
   );
 }

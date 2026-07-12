@@ -1,8 +1,14 @@
 /** Persisted chat messages: user bubbles, assistant blocks, tool timelines. */
 import { Box, Button, Group, Image, Paper, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { IconAppWindow, IconLayoutGrid } from '@tabler/icons-react';
+import {
+  IconAppWindow,
+  IconDownload,
+  IconFile,
+  IconLayoutGrid,
+} from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { formatBytes } from '~lib/format';
 import { AgentErrorNotice } from './agent-error-notice';
 import { Markdownish } from './markdownish';
 import { ThinkingStep, ToolStep } from './steps';
@@ -122,8 +128,9 @@ export function MessageView({
   retryDisabled?: boolean;
 }) {
   if (message.role === 'user') {
-    const text = partsToText(message.content);
+    const text = partsToText(message.content, message.attachments);
     const images = partsToImages(message.content);
+    const files = message.attachments ?? [];
     return (
       <Box className={classes.userRow}>
         <Stack gap={6} align="flex-end" maw="80%">
@@ -141,6 +148,29 @@ export function MessageView({
                 />
               ))}
             </Group>
+          ) : null}
+          {files.length > 0 ? (
+            <Box className={classes.messageFiles}>
+              {files.map((file) => (
+                <Box
+                  component="a"
+                  key={file.id}
+                  href={`/api/agent/attachments/${encodeURIComponent(file.id)}`}
+                  download={file.name}
+                  className={classes.messageFile}
+                  title={`${file.name} (${formatBytes(file.size)})`}
+                >
+                  <IconFile size={16} stroke={1.7} />
+                  <Text size="xs" className={classes.messageFileName}>
+                    {file.name}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {formatBytes(file.size)}
+                  </Text>
+                  <IconDownload size={14} stroke={1.7} />
+                </Box>
+              ))}
+            </Box>
           ) : null}
           {text ? (
             <Paper className={classes.userBubble} radius="md" px="sm" py={6}>
