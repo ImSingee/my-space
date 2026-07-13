@@ -74,6 +74,7 @@ test('default counter keeps cached data throughout background refreshes', async 
     },
   };
   const container = document.createElement('div');
+  container.style.cssText = 'width:320px;height:220px;overflow:auto';
   document.body.appendChild(container);
   const unmount = mount(container, context);
 
@@ -87,6 +88,8 @@ test('default counter keeps cached data throughout background refreshes', async 
       expect(getCount).toHaveBeenCalledTimes(1);
       expect(renderedCount(container)).toBe('1');
       expect(refreshCallback).toBeTypeOf('function');
+      expect(container.clientHeight).toBe(220);
+      expect(container.scrollHeight).toBe(container.clientHeight);
     });
 
     const successfulRequest = deferred<CountReply>();
