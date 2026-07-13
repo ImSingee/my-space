@@ -2,6 +2,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
+import { LAST_SELECTED_MODEL_STORAGE_KEY } from './model-preference';
 import { NewChat } from './new-chat';
 
 const fixtures = vi.hoisted(() => ({
@@ -53,10 +54,75 @@ vi.mock('./new-chat-api', () => ({
 
 beforeEach(() => {
   fixtures.createSession.mockClear();
+  localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
 });
 
 afterEach(() => {
+  localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
   vi.unstubAllGlobals();
+});
+
+test('records an explicit model choice before the model is used', async () => {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <NewChat onStart={vi.fn<(sessionId: string) => void>()} />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  await screen.getByRole('button', { name: 'Model A' }).click();
+  await screen.getByRole('menuitem', { name: 'Model B' }).click();
+
+  expect(
+    JSON.parse(localStorage.getItem(LAST_SELECTED_MODEL_STORAGE_KEY)!),
+  ).toBe('provider-b:model-b');
+  expect(fixtures.createSession).not.toHaveBeenCalled();
+});
+
+test('defaults a new chat to the last selected available model', async () => {
+  localStorage.setItem(
+    LAST_SELECTED_MODEL_STORAGE_KEY,
+    JSON.stringify('provider-b:model-b'),
+  );
+  let runBody: Record<string, unknown> | undefined;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input) !== '/api/agent/runs') {
+        throw new Error(`Unexpected fetch: ${String(input)}`);
+      }
+      runBody = JSON.parse(String(init?.body));
+      return Response.json({ runId: 'new-run' });
+    }),
+  );
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <NewChat onStart={vi.fn<(sessionId: string) => void>()} />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  await expect
+    .element(screen.getByRole('button', { name: 'Model B' }))
+    .toBeVisible();
+  await screen
+    .getByPlaceholder('Describe the app you want to build…')
+    .fill('Use my default model');
+  await screen.getByRole('button', { name: 'Send' }).click();
+
+  await vi.waitFor(() => expect(runBody).toBeDefined());
+  expect(runBody).toMatchObject({
+    providerId: 'provider-b',
+    modelId: 'model-b',
+  });
 });
 
 test('reuses its unbound session when the first run start fails', async () => {

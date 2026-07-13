@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { Chat } from './chat';
+import { LAST_SELECTED_MODEL_STORAGE_KEY } from './model-preference';
 
 const fixtures = vi.hoisted(() => ({
   failSessionFetch: false,
@@ -115,6 +116,7 @@ function doneResponse(): Response {
 }
 
 beforeEach(() => {
+  localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
   fixtures.failSessionFetch = false;
   fixtures.session.updatedAt = '2026-07-11T12:00:00.000Z';
   fixtures.session.activeRun = null;
@@ -125,7 +127,29 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
   vi.unstubAllGlobals();
+});
+
+test('keeps the conversation model when another model was selected elsewhere', async () => {
+  localStorage.setItem(
+    LAST_SELECTED_MODEL_STORAGE_KEY,
+    JSON.stringify('provider-latest:model-latest'),
+  );
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Chat sessionId="session-1" />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  await expect
+    .element(screen.getByRole('button', { name: 'Original model' }))
+    .toBeVisible();
 });
 
 test('retries once with the selected model, hides stale error, and allows a same-index failure again', async () => {
@@ -161,6 +185,9 @@ test('retries once with the selected model, hides stale error, and allows a same
   await expect.element(retry).toBeVisible();
   await screen.getByRole('button', { name: 'Original model' }).click();
   await screen.getByRole('menuitem', { name: 'Latest model' }).click();
+  expect(
+    JSON.parse(localStorage.getItem(LAST_SELECTED_MODEL_STORAGE_KEY)!),
+  ).toBe('provider-latest:model-latest');
   const latestModelPicker = screen.getByRole('button', {
     name: 'Latest model',
   });

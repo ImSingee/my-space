@@ -27,6 +27,7 @@ import {
   hasPersistedAgentError,
 } from './chat-turns';
 import { MessageView } from './message-view';
+import { useLastSelectedModel } from './model-preference';
 import { useModelOptions } from './model-options';
 import { ModelPicker } from './model-picker';
 import { resolveEffectiveModel, splitModelValue } from './model-value';
@@ -42,6 +43,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const { groups, first, available } = useModelOptions();
 
   const [model, setModel] = useState<string | null>(null);
+  const [, setLastSelectedModel] = useLastSelectedModel();
   const [reconnectToken, setReconnectToken] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const [consumedRetryIdentity, setConsumedRetryIdentity] = useState<
@@ -384,6 +386,14 @@ export function Chat({ sessionId }: { sessionId: string }) {
     return send(text, images, files, effectiveModel);
   };
 
+  const selectModel = useCallback(
+    (value: string) => {
+      setModel(value);
+      setLastSelectedModel(value);
+    },
+    [setLastSelectedModel],
+  );
+
   const stop = () => {
     clearReconnectTimer();
     void stopRun(session?.activeRun?.id).finally(() => {
@@ -489,7 +499,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
               <ModelPicker
                 groups={groups}
                 value={effectiveModel}
-                onChange={setModel}
+                onChange={selectModel}
                 disabled={busy}
               />
             }

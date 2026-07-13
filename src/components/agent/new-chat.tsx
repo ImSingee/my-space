@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { sessionsQueryOptions } from '~queries/agent';
 import { uploadAgentFiles } from './attachment-api';
 import { Composer, type ComposerSubmit } from './composer';
+import { useLastSelectedModel } from './model-preference';
 import { ModelPicker } from './model-picker';
 import { useModelOptions } from './model-options';
 import { resolveEffectiveModel, splitModelValue } from './model-value';
@@ -44,7 +45,7 @@ export function NewChat({
 }) {
   const qc = useQueryClient();
   const { groups, first, available } = useModelOptions();
-  const [model, setModel] = useState<string | null>(null);
+  const [model, setModel] = useLastSelectedModel();
   const [creating, setCreating] = useState(false);
   // Reuse a session created by a failed first attempt so a retry doesn't leave
   // a trail of empty "New chat" shells in the sidebar.
