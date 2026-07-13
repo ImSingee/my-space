@@ -29,6 +29,16 @@ export function mount(el, context) {
   parent.postMessage({ t: 'mount', size: context.size }, '*');
 }`;
 
+// Mirrors the common full-height widget layout that previously overflowed by
+// the sum of its vertical padding under the browser's content-box default.
+const PADDED_FULL_HEIGHT_WIDGET = `
+export function mount(el) {
+  const content = document.createElement('div');
+  content.style.cssText = 'height:100%;padding:16px';
+  el.appendChild(content);
+  parent.postMessage({ t: 'padded-mounted' }, '*');
+}`;
+
 const BROKEN_WIDGET = `
 export function mount() {
   throw new Error('broken mount');
@@ -168,6 +178,35 @@ test('widget mount receives inlined grid units and measured pixel size', async (
         expect.objectContaining({ generation: FRAME_GENERATION }),
       ),
     );
+  } finally {
+    cleanup();
+  }
+});
+
+test('full-height widget padding does not create vertical overflow', async () => {
+  const { iframe, messages, cleanup } = mountReporter(
+    300,
+    200,
+    4,
+    3,
+    PADDED_FULL_HEIGHT_WIDGET,
+  );
+  try {
+    await vi.waitFor(() =>
+      expect(messages.some((message) => message.t === 'padded-mounted')).toBe(
+        true,
+      ),
+    );
+
+    const root = iframe.contentDocument?.getElementById('hatch-widget-root');
+    const content = root?.firstElementChild;
+    expect(root).toBeTruthy();
+    expect(content).toBeTruthy();
+    expect(iframe.contentWindow?.getComputedStyle(content!).boxSizing).toBe(
+      'border-box',
+    );
+    expect(root!.clientHeight).toBe(200);
+    expect(root!.scrollHeight).toBe(root!.clientHeight);
   } finally {
     cleanup();
   }

@@ -71,6 +71,7 @@ export function widgetFrameHtml(
   // origins or a scoped postMessage proxy (a platform-level change, same
   // limitation as cross-app runtime isolation).
   return `<!doctype html><html><head><meta charset="utf-8"><style>
+*,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%}
 body{font:14px/1.5 system-ui,-apple-system,sans-serif}
 #hatch-widget-root{height:100%;overflow:auto}

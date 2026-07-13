@@ -50,6 +50,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     gap: 8,
     height: '100%',
+    boxSizing: 'border-box',
     padding: 16,
     fontFamily: 'ui-sans-serif, system-ui, sans-serif',
   },
