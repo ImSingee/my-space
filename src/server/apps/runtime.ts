@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { appBuildDir, appStorageDir } from '~agent/paths';
 import { db, schema } from '~/db';
+import { internalPlatformUrl } from '../internal-platform-url';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import {
   HATCH_SIGNATURE_HEADER,
@@ -77,9 +78,6 @@ function readWorkflowRefs(
 async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
   const refs = readWorkflowRefs(buildDir);
   if (refs.length === 0) return null;
-  // Absolute platform origin so the sandboxed backend can reach the public
-  // workflow-hooks route (relative URLs have no host inside the subprocess).
-  const base = (process.env.BETTER_AUTH_URL ?? '').replace(/\/+$/, '');
   const { getCallableWorkflow } = await import('../workflows/external');
   const map: Record<
     string,
@@ -93,7 +91,7 @@ async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
     map[ref.alias] = {
       workflow: callable.id,
       name: callable.name,
-      url: `${base}${callable.path}`,
+      url: internalPlatformUrl(callable.path),
       secret: callable.secret,
     };
   }
@@ -385,9 +383,9 @@ async function startBackend(id: string): Promise<number> {
   // subprocess), so a KV-capable backend talks to it over HTTP at an absolute
   // URL, signing each request with HATCH_SIGNING_SECRET. Inject the endpoint so
   // the app doesn't hardcode the platform origin. Relative URLs have no host
-  // inside the subprocess, so resolve against the configured platform origin.
+  // inside the subprocess, so use the platform's loopback HTTP endpoint.
   const kvUrl = appRow?.capabilities?.kv
-    ? `${(process.env.BETTER_AUTH_URL ?? '').replace(/\/+$/, '')}/api/apps/${id}/kv`
+    ? internalPlatformUrl(`/api/apps/${id}/kv`)
     : null;
 
   // Scope filesystem access to the app's own build (read) and storage
