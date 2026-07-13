@@ -11,7 +11,7 @@
  *   sees plaintext (it's the app's own data); and
  * - the manage UI, via session-authed server fns, which masks `secret` values.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import { AppError } from '~server/errors';
 
@@ -103,6 +103,34 @@ export async function listKv(appId: string): Promise<KvRecord[]> {
     orderBy: (t, { asc }) => [asc(t.key)],
   });
   return rows.map(toRecord);
+}
+
+export type KvPage = {
+  items: KvRecord[];
+  hasMore: boolean;
+};
+
+/**
+ * Read one keyset-paginated batch. `after` and ordering use the same database
+ * collation, so a returned key is a stable cursor even for non-ASCII keys.
+ * Fetch one extra row to report whether another batch exists, but never return
+ * it to the caller.
+ */
+export async function listKvPage(
+  appId: string,
+  opts: { after?: string; limit: number },
+): Promise<KvPage> {
+  const rows = await db.query.appKv.findMany({
+    where: opts.after
+      ? and(eq(schema.appKv.appId, appId), gt(schema.appKv.key, opts.after))
+      : eq(schema.appKv.appId, appId),
+    orderBy: (t, { asc }) => [asc(t.key)],
+    limit: opts.limit + 1,
+  });
+  return {
+    items: rows.slice(0, opts.limit).map(toRecord),
+    hasMore: rows.length > opts.limit,
+  };
 }
 
 /** Number of entries for an app (for the soft cap). */

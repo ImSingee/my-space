@@ -12,7 +12,7 @@ import { z } from 'zod';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -333,6 +333,66 @@ export const rollbackRequestSchema = z.object({
 export const queryAppDbRequestSchema = z.object({
   sql: z.string().min(1),
 });
+
+const queryAppKvListRequestSchema = z
+  .object({
+    action: z.literal('list'),
+    cursor: z.string().min(1).max(512).optional(),
+    limit: z.number().int().min(1).max(100).default(100),
+  })
+  .strict();
+
+const queryAppKvGetRequestSchema = z
+  .object({
+    action: z.literal('get'),
+    key: z.string(),
+  })
+  .strict();
+
+const queryAppKvSetRequestSchema = z
+  .object({
+    action: z.literal('set'),
+    key: z.string(),
+    value: z.string(),
+    secret: z.boolean().optional(),
+  })
+  .strict();
+
+const queryAppKvDeleteRequestSchema = z
+  .object({
+    action: z.literal('delete'),
+    key: z.string(),
+  })
+  .strict();
+
+export const queryAppKvRequestSchema = z.discriminatedUnion('action', [
+  queryAppKvListRequestSchema,
+  queryAppKvGetRequestSchema,
+  queryAppKvSetRequestSchema,
+  queryAppKvDeleteRequestSchema,
+]);
+/** Request accepted from the runner; list limit is optional before parsing. */
+export type QueryAppKvRequest = z.input<typeof queryAppKvRequestSchema>;
+/** Strictly parsed request used by the platform implementation. */
+export type ParsedQueryAppKvRequest = z.output<typeof queryAppKvRequestSchema>;
+
+export type QueryAppKvRecord = {
+  key: string;
+  value: string;
+  secret: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type QueryAppKvResponse =
+  | {
+      action: 'list';
+      items: QueryAppKvRecord[];
+      nextCursor: string | null;
+    }
+  | { action: 'get'; record: QueryAppKvRecord | null }
+  | { action: 'set'; record: QueryAppKvRecord }
+  | { action: 'delete'; ok: boolean };
 
 /** Response of GET .../source: the canonical repo master as a git bundle. */
 export type SourceBundleResponse = {

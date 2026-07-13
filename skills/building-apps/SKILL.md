@@ -507,6 +507,13 @@ the heavier `database` capability when you only need a few values, and instead o
 `storage` when the data is small text (not blobs). Limits: key ≤ 512 chars, value
 ≤ 64 KB, ≤ 1000 keys per app.
 
+After the app has been deployed with `kv` enabled, use `query_app_kv` to list,
+read, initialize, update, or delete its entries during development. The tool is
+a privileged Agent surface: values marked `secret` are returned in plaintext
+and enter the model context. `delete` is permanent. Omit `secret` when updating
+an existing key to preserve its current flag; a new key defaults to non-secret.
+The tool is unavailable before the first KV-capable deployment.
+
 The backend reads/writes over an injected `HATCH_KV_URL`, signing each request
 with `HATCH_SIGNING_SECRET` (HMAC over `<timestamp>.<rawBody>`, empty body for
 GET/DELETE) — the same handshake the platform uses for cron/webhooks. Requires a

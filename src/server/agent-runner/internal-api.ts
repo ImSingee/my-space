@@ -10,6 +10,7 @@
  *   POST /internal/api/apps/:handle/deploy      → AppDeployResponse
  *   POST /internal/api/apps/:handle/rollback    → { version }
  *   POST /internal/api/apps/:handle/query-db    → { text, rowCount }
+ *   POST /internal/api/apps/:handle/query-kv    → QueryAppKvResponse
  *   GET  /internal/api/workflows                → WorkflowSummaryForAgent[]
  *   GET  /internal/api/workflows/:id            → WorkflowDetailForAgent (404)
  *   POST /internal/api/workflows                → CreateWorkflowResult
@@ -23,6 +24,7 @@ import {
   createWorkflowRequestSchema,
   deploySourceRequestSchema,
   queryAppDbRequestSchema,
+  queryAppKvRequestSchema,
   rollbackRequestSchema,
   type SourceBundleResponse,
 } from '~agent/protocol';
@@ -284,6 +286,14 @@ async function handleApps(
       if (!res.writableEnded) abort.abort();
     });
     json(res, 200, await queryAppDatabase(id, body.sql, abort.signal));
+    return;
+  }
+
+  if (action === 'query-kv' && method === 'POST') {
+    const id = await resolveApp(handle);
+    const body = queryAppKvRequestSchema.parse(await readJsonBody(req));
+    const { queryAppKv } = await import('~server/apps/query-kv');
+    json(res, 200, await queryAppKv(id, body));
     return;
   }
 
