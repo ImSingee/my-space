@@ -31,7 +31,14 @@ const config = defineConfig({
   plugins: [
     devtools(),
     tanstackStart(),
-    nitro({ noExternals: true }),
+    nitro({
+      noExternals: true,
+      // esbuild's Node API locates its native binary relative to its own
+      // CommonJS module. Bundling it into Nitro's ESM output removes the
+      // __filename/__dirname globals it relies on, so keep this one runtime
+      // dependency external. The production image already ships node_modules.
+      rollupConfig: { external: ['esbuild'] },
+    }),
     viteReact(),
   ],
   nitro: {
