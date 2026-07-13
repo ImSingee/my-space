@@ -1,11 +1,10 @@
 /**
- * Server-only: seed the built-in `ai.singee.me` test providers so the platform
- * is usable out of the box. Idempotent — does nothing if any provider exists.
+ * Server-only: seed the built-in provider templates. They intentionally have
+ * no API keys and start disabled, so a fresh install never ships a shared
+ * credential. Idempotent — does nothing if any provider exists.
  */
 import { sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
-
-const TEST_KEY = 'sk-e2f9188df87094bccc63a144cbd809d3';
 
 /** Stable advisory-lock key that serializes default seeding ("SEED"). */
 const SEED_LOCK_KEY = 0x53454544;
@@ -15,6 +14,7 @@ type SeedProvider = {
   apiType: schema.ProviderApiType;
   baseUrl: string;
   apiKey: string;
+  enabled: boolean;
   sortOrder: number;
   models: Array<{
     modelId: string;
@@ -28,38 +28,64 @@ type SeedProvider = {
 
 const DEFAULTS: SeedProvider[] = [
   {
-    name: 'Singee Anthropic',
-    apiType: 'anthropic-messages',
-    // SDK appends `/v1/messages`.
-    baseUrl: 'https://ai.singee.me/test',
-    apiKey: TEST_KEY,
+    name: 'OpenAI',
+    apiType: 'openai-responses',
+    // SDK appends `/responses`.
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    enabled: false,
     sortOrder: 0,
     models: [
       {
-        modelId: 'claude-sonnet-4-6',
-        name: 'Claude Sonnet 4.6',
+        modelId: 'gpt-5.6-sol',
+        name: 'GPT-5.6 Sol',
         reasoning: true,
         input: ['text', 'image'],
-        contextWindow: 200000,
-        maxTokens: 8192,
+        contextWindow: 1050000,
+        maxTokens: 128000,
       },
-    ],
-  },
-  {
-    name: 'Singee OpenAI',
-    apiType: 'openai-responses',
-    // SDK appends `/responses`.
-    baseUrl: 'https://ai.singee.me/test/v1',
-    apiKey: TEST_KEY,
-    sortOrder: 1,
-    models: [
       {
         modelId: 'gpt-5.5',
         name: 'GPT-5.5',
         reasoning: true,
         input: ['text', 'image'],
-        contextWindow: 400000,
-        maxTokens: 16384,
+        contextWindow: 1050000,
+        maxTokens: 128000,
+      },
+    ],
+  },
+  {
+    name: 'Claude',
+    apiType: 'anthropic-messages',
+    // SDK appends `/v1/messages`.
+    baseUrl: 'https://api.anthropic.com',
+    apiKey: '',
+    enabled: false,
+    sortOrder: 1,
+    models: [
+      {
+        modelId: 'claude-fable-5',
+        name: 'Claude Fable 5',
+        reasoning: true,
+        input: ['text', 'image'],
+        contextWindow: 1000000,
+        maxTokens: 128000,
+      },
+      {
+        modelId: 'claude-opus-4-8',
+        name: 'Claude Opus 4.8',
+        reasoning: true,
+        input: ['text', 'image'],
+        contextWindow: 1000000,
+        maxTokens: 128000,
+      },
+      {
+        modelId: 'claude-sonnet-5',
+        name: 'Claude Sonnet 5',
+        reasoning: true,
+        input: ['text', 'image'],
+        contextWindow: 1000000,
+        maxTokens: 128000,
       },
     ],
   },
@@ -85,6 +111,7 @@ export async function seedDefaultProviders(): Promise<boolean> {
           apiType: def.apiType,
           baseUrl: def.baseUrl,
           apiKey: def.apiKey,
+          enabled: def.enabled,
           sortOrder: def.sortOrder,
         })
         .returning();
