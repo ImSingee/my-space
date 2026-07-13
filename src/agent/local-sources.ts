@@ -20,10 +20,12 @@ import { constants as fsConstants } from 'node:fs';
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -44,6 +46,7 @@ import {
   listIndexedWorkspaces,
   registerWorkspace,
   removeIndexedWorkspaces,
+  type WorkspaceIndexEntry,
   workspacePathsOverlap,
 } from './workspace-index';
 import {
@@ -65,6 +68,13 @@ export type LocalCheckout = {
   /** Platform master commit at sync time (null when the repo is empty). */
   remoteCommit: string | null;
   status: string;
+  /** Whether this checkout replaced an existing filesystem entry. */
+  replacedExisting: boolean;
+};
+
+export type CheckoutFromBundleOptions = {
+  targetPath?: string;
+  force?: boolean;
 };
 
 const workspaceMutationChains = new Map<string, Promise<unknown>>();
@@ -256,6 +266,17 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+/** Like pathExists, but dangling symlinks also count as occupied paths. */
+async function pathEntryExists(p: string): Promise<boolean> {
+  try {
+    await lstat(p);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function setLocalGitIdentity(worktree: string): Promise<void> {
   await runGit(['config', 'user.name', 'Hatch Agent'], { cwd: worktree });
   await runGit(['config', 'user.email', 'agent@hatch.local'], {
@@ -443,8 +464,11 @@ function resolveWorktree(
 async function assertWorkspaceDoesNotOverlap(
   sessionId: string,
   worktree: string,
-  allowedExact?: { kind: SourceKind; id: string },
-): Promise<void> {
+  options: {
+    allowedExact?: { kind: SourceKind; id: string };
+    allowAnyExact?: boolean;
+  } = {},
+): Promise<WorkspaceIndexEntry | undefined> {
   const target = path.resolve(worktree);
   const root = agentWorkDir(sessionId);
   const reservedRoots = [
@@ -465,10 +489,12 @@ async function assertWorkspaceDoesNotOverlap(
 
   const entries = await listIndexedWorkspaces(sessionId);
   const conflict = entries.find((entry) => {
+    const samePath = path.resolve(entry.absolutePath) === target;
     const exactAllowed =
-      allowedExact?.kind === entry.kind &&
-      allowedExact.id === entry.id &&
-      path.resolve(entry.absolutePath) === target;
+      samePath &&
+      (options.allowAnyExact ||
+        (options.allowedExact?.kind === entry.kind &&
+          options.allowedExact.id === entry.id));
     return !exactAllowed && workspacePathsOverlap(entry.absolutePath, target);
   });
   if (conflict) {
@@ -487,6 +513,7 @@ async function assertWorkspaceDoesNotOverlap(
     }
     parent = path.dirname(parent);
   }
+  return entries.find((entry) => path.resolve(entry.absolutePath) === target);
 }
 
 async function describeCheckout(
@@ -495,6 +522,7 @@ async function describeCheckout(
   id: string,
   worktree: string,
   remoteCommit: string | null,
+  replacedExisting = false,
 ): Promise<LocalCheckout> {
   const [status, headCommit] = await Promise.all([
     worktreeStatus(worktree),
@@ -508,6 +536,7 @@ async function describeCheckout(
     headCommit,
     remoteCommit,
     status,
+    replacedExisting,
   };
 }
 
@@ -556,147 +585,397 @@ async function assertWorkspaceGeneration(
   );
 }
 
-/**
- * Ids are user-reusable (delete a workflow, recreate it under the same id).
- * Cleanup notifications and reconnect reconciliation are best-effort across a
- * distributed runner, so reject any leftover checkout whose local HEAD shares
- * no ancestor with the freshly fetched Platform master.
- */
-async function assertRelatedHistory(
-  worktree: string,
-  id: string,
-  kind: SourceKind,
-): Promise<void> {
-  const head = await worktreeHead(worktree);
-  if (!head) return;
-  const remoteRef = `origin/${SOURCE_BRANCH}`;
-  const remote = await runGit(['rev-parse', '--verify', remoteRef], {
-    cwd: worktree,
-    allowFailure: true,
-  });
-  if (remote.exitCode !== 0) return; // fetch failed / remote still empty
-  const base = await runGit(['merge-base', 'HEAD', remoteRef], {
-    cwd: worktree,
-    allowFailure: true,
-  });
-  if (base.exitCode !== 0) {
-    throw new Error(
-      `The worktree at ${worktree} has history unrelated to the current ` +
-        `${kind} "${id}" repo -- it is likely left over from a deleted ` +
-        `${kind} that was recreated under the same id. Remove that exact path ` +
-        'and run the checkout again.',
-    );
+type PreparedCheckout = {
+  root: string;
+  worktree: string;
+  bundle: string | null;
+};
+
+const CHECKOUT_CLEANUP_SCRIPT = String.raw`
+import { chmod, lstat, readdir, rm } from 'node:fs/promises';
+import path from 'node:path';
+
+async function makeTreeRemovable(target) {
+  let stats;
+  try {
+    stats = await lstat(target);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (stats.isSymbolicLink() || !stats.isDirectory()) return;
+  await chmod(target, 0o700).catch(() => undefined);
+  for (const name of await readdir(target)) {
+    await makeTreeRemovable(path.join(target, name));
   }
 }
 
-/**
- * The empty-remote counterpart of {@link assertRelatedHistory}: the canonical
- * repo only ever fast-forwards within one incarnation of an entity, so a
- * local `origin/master` ref combined with a now-empty platform repo proves
- * the entity was deleted and recreated under a reused id. Without this check
- * the leftover worktree would be reported as a valid checkout and a deploy
- * would publish the previous incarnation's code. (A worktree with only local
- * never-synced commits is indistinguishable from legitimate pre-first-deploy
- * work and is deliberately kept.)
- */
-async function assertNotStaleForEmptyRemote(
-  worktree: string,
-  id: string,
-  kind: SourceKind,
-): Promise<void> {
-  const remote = await runGit(
-    ['rev-parse', '--verify', `origin/${SOURCE_BRANCH}`],
-    { cwd: worktree, allowFailure: true },
-  );
-  if (remote.exitCode !== 0) return;
-  throw new Error(
-    `The worktree at ${worktree} tracks commits from a previous ${kind} that ` +
-      `no longer exists on the platform -- the current ${kind} "${id}" has an ` +
-      'empty repo. Remove that exact path and run the checkout again.',
-  );
+const root = process.argv[1];
+await makeTreeRemovable(root);
+await rm(root, { recursive: true, force: true });
+`;
+
+function removePreparedCheckoutRootAsAgent(root: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const wrapped = sandboxSpawn([
+      process.execPath,
+      '--input-type=module',
+      '--eval',
+      CHECKOUT_CLEANUP_SCRIPT,
+      root,
+    ]);
+    const child = spawn(wrapped.command, wrapped.args, {
+      env: {
+        PATH: process.env.PATH,
+        HOME: AGENT_HOME_DIR,
+        LANG: process.env.LANG,
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          stderr.trim() ||
+            `Agent checkout cleanup exited with status ${code ?? 'unknown'}.`,
+        ),
+      );
+    });
+  });
 }
 
-/**
- * Materialize (or refresh) the worktree for an existing app/workflow from
- * the platform-served source bundle. Existing local commits/changes are kept;
- * `origin/master` is updated so the agent can fetch/rebase as usual.
- */
-export async function syncCheckoutFromBundle(
-  sessionId: string,
-  kind: SourceKind,
-  source: SourceBundleResponse,
-  targetPath?: string,
-): Promise<LocalCheckout> {
-  const { id } = source;
-  const resolved = await resolveWorktree(sessionId, kind, id, targetPath);
-  const worktree = resolved.absolutePath;
-  await assertWorkspaceDoesNotOverlap(sessionId, worktree, { kind, id });
-  const bundle = bundleFile(sessionId, kind, id);
-  await mkdir(path.dirname(bundle), { recursive: true });
-  const worktreeExists = await pathExists(worktree);
+async function removePreparedCheckoutRoot(root: string): Promise<void> {
+  await removePreparedCheckoutRootAsAgent(root);
+}
 
-  if (worktreeExists) {
-    await assertOwnedWorktree(worktree, bundle, id, kind);
+async function cleanupPreparedCheckoutRoot(root: string): Promise<void> {
+  try {
+    await removePreparedCheckoutRoot(root);
+  } catch (error) {
+    console.warn(`Could not remove checkout staging directory ${root}:`, error);
+  }
+}
+
+async function prepareCheckout(
+  sessionId: string,
+  source: SourceBundleResponse,
+  finalBundle: string,
+): Promise<PreparedCheckout> {
+  if (Boolean(source.bundleBase64) !== Boolean(source.masterCommit)) {
+    throw new Error('Platform source bundle and master commit do not match.');
+  }
+
+  await mkdir(agentSessionDir(sessionId), { recursive: true });
+  const root = await mkdtemp(
+    path.join(agentSessionDir(sessionId), '.checkout-'),
+  );
+  await chmod(root, 0o777);
+  const worktree = path.join(root, 'worktree');
+  const bundle = source.bundleBase64 ? path.join(root, 'source.bundle') : null;
+  try {
+    if (bundle) {
+      await writeFile(bundle, Buffer.from(source.bundleBase64!, 'base64'));
+      await runGit(['clone', bundle, worktree]);
+      await runGit(['remote', 'set-url', 'origin', finalBundle], {
+        cwd: worktree,
+      });
+    } else {
+      await runGit(['init', '--initial-branch', SOURCE_BRANCH, worktree]);
+      await runGit(['remote', 'add', 'origin', finalBundle], { cwd: worktree });
+    }
+    await setLocalGitIdentity(worktree);
+
+    const [head, status] = await Promise.all([
+      worktreeHead(worktree),
+      worktreeStatus(worktree),
+    ]);
+    if (head !== source.masterCommit) {
+      throw new Error(
+        `Prepared checkout HEAD ${head ?? 'none'} does not match platform ` +
+          `master ${source.masterCommit ?? 'none'}.`,
+      );
+    }
+    if (status) {
+      throw new Error(`Prepared checkout is unexpectedly dirty:\n${status}`);
+    }
+    return { root, worktree, bundle };
+  } catch (error) {
+    await cleanupPreparedCheckoutRoot(root);
+    throw error;
+  }
+}
+
+async function installPreparedBundle(
+  prepared: PreparedCheckout,
+  finalBundle: string,
+): Promise<void> {
+  const backup = path.join(prepared.root, 'previous.bundle');
+  const hadBundle = await pathEntryExists(finalBundle);
+  let installed = false;
+  try {
+    if (hadBundle) await rename(finalBundle, backup);
+    if (prepared.bundle) {
+      await rename(prepared.bundle, finalBundle);
+      installed = true;
+    }
+  } catch (error) {
+    if (installed) await rm(finalBundle, { force: true });
+    if (hadBundle && (await pathEntryExists(backup))) {
+      await rename(backup, finalBundle);
+    }
+    throw error;
+  }
+}
+
+async function isCurrentOwnedWorktree(
+  sessionId: string,
+  worktree: string,
+  bundle: string,
+  source: SourceBundleResponse,
+  kind: SourceKind,
+): Promise<boolean> {
+  try {
+    await assertOwnedWorktree(worktree, bundle, source.id, kind);
     await assertWorkspaceGeneration(
       sessionId,
       worktree,
       kind,
-      id,
+      source.id,
       source.generation,
     );
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  if (source.bundleBase64) {
-    await writeFile(bundle, Buffer.from(source.bundleBase64, 'base64'));
-  } else {
-    // Empty platform repo: drop any leftover bundle from a previous
-    // incarnation of this id so a manual `git fetch origin` in a fresh
-    // worktree cannot resurrect the old refs.
-    await rm(bundle, { force: true });
+async function hasOtherOwnedDefaultCheckout(
+  sessionId: string,
+  owner: WorkspaceIndexEntry,
+  excludedPath: string,
+): Promise<boolean> {
+  let defaultPath: string;
+  try {
+    defaultPath = (await resolveWorktree(sessionId, owner.kind, owner.id))
+      .absolutePath;
+  } catch {
+    return false;
   }
+  if (path.resolve(defaultPath) === path.resolve(excludedPath)) return false;
+  if (!(await pathExists(path.join(defaultPath, '.git')))) return false;
+  const origin = await worktreeOrigin(defaultPath);
+  return (
+    origin !== null &&
+    path.resolve(origin) ===
+      path.resolve(bundleFile(sessionId, owner.kind, owner.id))
+  );
+}
 
-  if (worktreeExists) {
-    if (source.bundleBase64) {
-      // Refresh origin/master from the new bundle; merging/rebasing stays the
-      // agent's own git decision, mirroring the old canonical-repo fetch.
-      await runGit(['fetch', 'origin', SOURCE_BRANCH], {
-        cwd: worktree,
-        allowFailure: true,
-      });
-      await assertRelatedHistory(worktree, id, kind);
-    } else {
-      await assertNotStaleForEmptyRemote(worktree, id, kind);
-    }
-    await setLocalGitIdentity(worktree);
-    await registerWorkspace(sessionId, {
-      kind,
-      id,
-      generation: source.generation,
-      absolutePath: worktree,
-    });
-    return describeCheckout(sessionId, kind, id, worktree, source.masterCommit);
+function checkoutConflictMessage(
+  kind: SourceKind,
+  resolved: AgentWorkspacePath,
+  source: SourceBundleResponse,
+  originRefreshed: boolean,
+): string {
+  const tool = `checkout_${kind}`;
+  const overwrite =
+    `retry ${tool} with the same target_path and force: true to permanently ` +
+    'discard that path and create a fresh checkout.';
+  if (!originRefreshed) {
+    return (
+      `Checkout target "${resolved.path}" already exists. Nothing was ` +
+      `changed. Reuse it, choose a different target_path, or ${overwrite}`
+    );
   }
+  if (!source.bundleBase64) {
+    return (
+      `Checkout target "${resolved.path}" already exists. The worktree was ` +
+      'not overwritten; platform master is currently empty. ' +
+      `Choose another target_path, or ${overwrite}`
+    );
+  }
+  return (
+    `Checkout target "${resolved.path}" already exists. The worktree was not ` +
+    'overwritten, but its origin bundle was refreshed. Continue using ' +
+    `${resolved.absolutePath} and run git fetch origin master to preserve ` +
+    `local work, or ${overwrite}`
+  );
+}
 
-  await mkdir(path.dirname(worktree), { recursive: true });
-  if (source.bundleBase64) {
-    await runGit(['clone', bundle, worktree]);
-    // Clone records the (session-relative) bundle path as origin; normalize
-    // to the absolute path so the ownership check compares stable values.
-    await runGit(['remote', 'set-url', 'origin', bundle], { cwd: worktree });
-  } else {
-    // Let (possibly UID-demoted) git create the directory itself so the
-    // repo's owner matches the uid git later runs as (safe.directory).
-    await runGit(['init', '--initial-branch', SOURCE_BRANCH, worktree]);
-    await runGit(['remote', 'add', 'origin', bundle], { cwd: worktree });
-  }
-  await setLocalGitIdentity(worktree);
-  await registerWorkspace(sessionId, {
+/** Materialize a fresh app/workflow checkout from the platform source bundle. */
+export async function checkoutFromBundle(
+  sessionId: string,
+  kind: SourceKind,
+  source: SourceBundleResponse,
+  options: CheckoutFromBundleOptions = {},
+): Promise<LocalCheckout> {
+  const { id } = source;
+  const resolved = await resolveWorktree(
+    sessionId,
     kind,
     id,
-    generation: source.generation,
-    absolutePath: worktree,
-  });
-  return describeCheckout(sessionId, kind, id, worktree, source.masterCommit);
+    options.targetPath,
+  );
+  const worktree = resolved.absolutePath;
+  const previousOwner = await assertWorkspaceDoesNotOverlap(
+    sessionId,
+    worktree,
+    {
+      allowAnyExact: true,
+    },
+  );
+  const bundle = bundleFile(sessionId, kind, id);
+  const worktreeExists = await pathEntryExists(worktree);
+  const force = options.force ?? false;
+  if (worktreeExists && !force) {
+    const owned = await isCurrentOwnedWorktree(
+      sessionId,
+      worktree,
+      bundle,
+      source,
+      kind,
+    );
+    if (owned) {
+      await mkdir(path.dirname(bundle), { recursive: true });
+      const prepared = await prepareCheckout(sessionId, source, bundle);
+      try {
+        await installPreparedBundle(prepared, bundle);
+      } finally {
+        await cleanupPreparedCheckoutRoot(prepared.root);
+      }
+    }
+    throw new Error(checkoutConflictMessage(kind, resolved, source, owned));
+  }
+
+  await mkdir(path.dirname(bundle), { recursive: true });
+  const prepared = await prepareCheckout(sessionId, source, bundle);
+  await mkdir(path.dirname(worktree), { recursive: true });
+  const worktreeBackup = path.join(prepared.root, 'previous-worktree');
+  const bundleBackup = path.join(prepared.root, 'previous.bundle');
+  const previousOwnerBundleBackup = path.join(
+    prepared.root,
+    'previous-owner.bundle',
+  );
+  const hadBundle = await pathEntryExists(bundle);
+  const previousOwnerHasOtherCheckouts = previousOwner
+    ? (await listIndexedWorkspaces(sessionId)).some(
+        (entry) =>
+          entry.kind === previousOwner.kind &&
+          entry.id === previousOwner.id &&
+          path.resolve(entry.absolutePath) !== path.resolve(worktree),
+      )
+    : false;
+  const previousOwnerHasDefaultCheckout =
+    previousOwner && !previousOwnerHasOtherCheckouts
+      ? await hasOtherOwnedDefaultCheckout(sessionId, previousOwner, worktree)
+      : false;
+  const previousOwnerBundle =
+    previousOwner &&
+    !previousOwnerHasOtherCheckouts &&
+    !previousOwnerHasDefaultCheckout &&
+    (previousOwner.kind !== kind || previousOwner.id !== id)
+      ? bundleFile(sessionId, previousOwner.kind, previousOwner.id)
+      : null;
+  const hadPreviousOwnerBundle = previousOwnerBundle
+    ? await pathEntryExists(previousOwnerBundle)
+    : false;
+  let movedWorktree = false;
+  let movedBundle = false;
+  let movedPreviousOwnerBundle = false;
+  let installedWorktree = false;
+  let installedBundle = false;
+  let preservePreparedRoot = false;
+  try {
+    if (worktreeExists) {
+      await rename(worktree, worktreeBackup);
+      movedWorktree = true;
+    }
+    if (hadBundle) {
+      await rename(bundle, bundleBackup);
+      movedBundle = true;
+    }
+    if (previousOwnerBundle && hadPreviousOwnerBundle) {
+      await rename(previousOwnerBundle, previousOwnerBundleBackup);
+      movedPreviousOwnerBundle = true;
+    }
+    if (prepared.bundle) {
+      await rename(prepared.bundle, bundle);
+      installedBundle = true;
+    }
+    await rename(prepared.worktree, worktree);
+    installedWorktree = true;
+    const checkout = await describeCheckout(
+      sessionId,
+      kind,
+      id,
+      worktree,
+      source.masterCommit,
+      worktreeExists,
+    );
+    await registerWorkspace(
+      sessionId,
+      {
+        kind,
+        id,
+        generation: source.generation,
+        absolutePath: worktree,
+      },
+      { replaceExactPath: true },
+    );
+    return checkout;
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    try {
+      if (installedWorktree) {
+        await rm(worktree, { recursive: true, force: true });
+      }
+      if (movedWorktree && (await pathEntryExists(worktreeBackup))) {
+        await rename(worktreeBackup, worktree);
+      }
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    try {
+      if (installedBundle) await rm(bundle, { force: true });
+      if (movedBundle && (await pathEntryExists(bundleBackup))) {
+        await rename(bundleBackup, bundle);
+      }
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    try {
+      if (
+        previousOwnerBundle &&
+        movedPreviousOwnerBundle &&
+        (await pathEntryExists(previousOwnerBundleBackup))
+      ) {
+        await rename(previousOwnerBundleBackup, previousOwnerBundle);
+      }
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    if (rollbackErrors.length > 0) {
+      preservePreparedRoot = true;
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        `Checkout replacement failed and could not be fully restored. ` +
+          `Recovery files remain at ${prepared.root}.`,
+      );
+    }
+    throw error;
+  } finally {
+    if (!preservePreparedRoot) {
+      await cleanupPreparedCheckoutRoot(prepared.root);
+    }
+  }
 }
 
 /**
@@ -798,7 +1077,9 @@ export async function bundleWorktreeForDeploy(
 ): Promise<{ bundleBase64: string; headCommit: string }> {
   const worktree = (await resolveWorktree(sessionId, kind, id, sourcePath))
     .absolutePath;
-  await assertWorkspaceDoesNotOverlap(sessionId, worktree, { kind, id });
+  await assertWorkspaceDoesNotOverlap(sessionId, worktree, {
+    allowedExact: { kind, id },
+  });
   const bundle = bundleFile(sessionId, kind, id);
   if (!(await pathExists(worktree))) {
     throw new Error(

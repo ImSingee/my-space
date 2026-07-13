@@ -195,12 +195,15 @@ export function wrapShellCommand(command: string): string {
 export type SandboxedSpawn = { command: string; args: string[] };
 
 /**
- * Wrap a raw argv (no shell involved) so it runs as the sandbox user when
- * the Linux UID sandbox is active; passthrough otherwise. Used for the
- * runner's own worktree git commands — repo config is agent-writable, so git
- * must never execute at the runner's UID.
+ * Wrap a raw argv (no shell involved) with the platform's Agent containment:
+ * the macOS seatbelt deny-list or the Linux sandbox uid. Used for runner
+ * subprocesses that operate on Agent-controlled files and therefore must not
+ * execute with broader filesystem privileges than the Agent itself.
  */
 export function sandboxSpawn(argv: [string, ...string[]]): SandboxedSpawn {
+  if (process.platform === 'darwin' && canSeatbelt()) {
+    return { command: SANDBOX_EXEC, args: ['-p', buildProfile(), ...argv] };
+  }
   if (!canSetpriv()) {
     const [command, ...args] = argv;
     return { command, args };

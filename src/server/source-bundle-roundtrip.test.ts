@@ -1,7 +1,7 @@
 /**
  * Full platform <-> runner source transfer round-trip over git bundles:
  *
- *   platform exportMasterBundle -> runner syncCheckoutFromBundle -> agent
+ *   platform exportMasterBundle -> runner checkoutFromBundle -> agent
  *   commits -> runner bundleWorktreeForDeploy -> platform stageBundleCheckout
  *   -> publishDeploymentSource (fast-forward master).
  *
@@ -21,7 +21,7 @@ const NEXT_GENERATION = '2026-07-12T01:00:00.000Z';
 process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 
 // Import after HATCH_DATA_DIR is set (module-level path constants).
-const { bundleWorktreeForDeploy, initNewWorktree, syncCheckoutFromBundle } =
+const { bundleWorktreeForDeploy, checkoutFromBundle, initNewWorktree } =
   await import('~agent/local-sources');
 const { createGitSource } = await import('~server/source-git');
 
@@ -80,7 +80,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     // -- Platform -> runner: export master, sync a local checkout. ----------
     const exported = await platform.exportMasterBundle(APP_ID);
     expect(exported).not.toBeNull();
-    const checkout = await syncCheckoutFromBundle(SESSION, 'app', {
+    const checkout = await checkoutFromBundle(SESSION, 'app', {
       id: APP_ID,
       generation: GENERATION,
       masterCommit: seedCommit,
@@ -126,22 +126,34 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     await expect(platform.masterCommit(APP_ID)).resolves.toBe(localCommit);
   });
 
-  it('re-sync refreshes origin/master without touching local state', async () => {
-    // Master moved to v2 in the previous test; the runner still has its own
-    // checkout. A fresh export + sync must update origin/master in place.
+  it('rejects an existing checkout after refreshing its origin bundle', async () => {
     const exported = await platform.exportMasterBundle(APP_ID);
     const master = await platform.masterCommit(APP_ID);
-    const checkout = await syncCheckoutFromBundle(SESSION, 'app', {
-      id: APP_ID,
-      generation: GENERATION,
-      masterCommit: master,
-      bundleBase64: exported!.toString('base64'),
-    });
-    expect(checkout.remoteCommit).toBe(master);
-    const originMaster = await git(
-      ['rev-parse', 'origin/master'],
-      checkout.absolutePath,
+    const worktree = path.join(
+      process.env.HATCH_DATA_DIR!,
+      'agents',
+      SESSION,
+      'work',
+      'apps',
+      APP_ID,
     );
+    const head = await git(['rev-parse', 'HEAD'], worktree);
+    const contents = await readFile(path.join(worktree, 'README.md'), 'utf8');
+
+    await expect(
+      checkoutFromBundle(SESSION, 'app', {
+        id: APP_ID,
+        generation: GENERATION,
+        masterCommit: master,
+        bundleBase64: exported!.toString('base64'),
+      }),
+    ).rejects.toThrow(/already exists.*origin bundle was refreshed/);
+    await expect(git(['rev-parse', 'HEAD'], worktree)).resolves.toBe(head);
+    await expect(
+      readFile(path.join(worktree, 'README.md'), 'utf8'),
+    ).resolves.toBe(contents);
+    await git(['fetch', 'origin', 'master'], worktree);
+    const originMaster = await git(['rev-parse', 'origin/master'], worktree);
     expect(originMaster).toBe(master);
   });
 
@@ -149,7 +161,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     // A second session syncs, commits on top of v2… ------------------------
     const exported = await platform.exportMasterBundle(APP_ID);
     const master = await platform.masterCommit(APP_ID);
-    const stale = await syncCheckoutFromBundle('rt-stale', 'app', {
+    const stale = await checkoutFromBundle('rt-stale', 'app', {
       id: APP_ID,
       generation: GENERATION,
       masterCommit: master,
@@ -166,7 +178,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     );
 
     // …but master advances first (another deploy wins the race). ------------
-    const winner = await syncCheckoutFromBundle('rt-winner', 'app', {
+    const winner = await checkoutFromBundle('rt-winner', 'app', {
       id: APP_ID,
       generation: GENERATION,
       masterCommit: master,
@@ -206,25 +218,45 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     }
   });
 
-  it('rejects a synced checkout when the entity was recreated with an empty repo', async () => {
-    // The worktree from the tests above tracks origin/master of the old
-    // incarnation. If the app is deleted and recreated under the same id,
-    // the platform serves an EMPTY source (no bundle) — the sync must refuse
-    // to present the leftover worktree as a valid checkout of the new app.
+  it('requires force to replace a previous generation with an empty repo', async () => {
+    const sessionId = 'rt-recreated';
+    const exported = await platform.exportMasterBundle(APP_ID);
+    const master = await platform.masterCommit(APP_ID);
+    const old = await checkoutFromBundle(sessionId, 'app', {
+      id: APP_ID,
+      generation: GENERATION,
+      masterCommit: master,
+      bundleBase64: exported!.toString('base64'),
+    });
+
     await expect(
-      syncCheckoutFromBundle(SESSION, 'app', {
+      checkoutFromBundle(sessionId, 'app', {
         id: APP_ID,
         generation: NEXT_GENERATION,
         masterCommit: null,
         bundleBase64: null,
       }),
-    ).rejects.toThrow(/previous incarnation/);
+    ).rejects.toThrow(/already exists.*Nothing was changed/);
+
+    const replacement = await checkoutFromBundle(
+      sessionId,
+      'app',
+      {
+        id: APP_ID,
+        generation: NEXT_GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      },
+      { force: true },
+    );
+    expect(replacement.replacedExisting).toBe(true);
+    expect(replacement.headCommit).toBeNull();
+    await expect(
+      readFile(path.join(old.absolutePath, 'README.md'), 'utf8'),
+    ).rejects.toThrow(/ENOENT/);
   });
 
-  it('keeps a never-synced worktree when the remote is still empty', async () => {
-    // Legit pre-first-deploy flow: initNewWorktree + local commits, then a
-    // re-checkout while the platform repo is still empty. No origin/master
-    // ref exists locally, so this must NOT be treated as stale.
+  it('requires force to discard local-only work against an empty remote', async () => {
     const fresh = await initNewWorktree(
       'rt-fresh',
       'app',
@@ -234,13 +266,70 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     );
     await writeFile(path.join(fresh.absolutePath, 'a.txt'), 'work\n');
     const localCommit = await commitAll(fresh.absolutePath, 'local work');
-    const again = await syncCheckoutFromBundle('rt-fresh', 'app', {
-      id: 'new-app',
+    await expect(
+      checkoutFromBundle('rt-fresh', 'app', {
+        id: 'new-app',
+        generation: GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      }),
+    ).rejects.toThrow(/already exists.*platform master is currently empty/);
+    await expect(git(['rev-parse', 'HEAD'], fresh.absolutePath)).resolves.toBe(
+      localCommit,
+    );
+
+    const again = await checkoutFromBundle(
+      'rt-fresh',
+      'app',
+      {
+        id: 'new-app',
+        generation: GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      },
+      { force: true },
+    );
+    expect(again.replacedExisting).toBe(true);
+    expect(again.headCommit).toBeNull();
+    await expect(
+      readFile(path.join(again.absolutePath, 'a.txt'), 'utf8'),
+    ).rejects.toThrow(/ENOENT/);
+  });
+
+  it('materializes the first remote commit only when force is requested', async () => {
+    const sessionId = 'rt-empty-then-source';
+    const empty = await checkoutFromBundle(sessionId, 'app', {
+      id: APP_ID,
       generation: GENERATION,
       masterCommit: null,
       bundleBase64: null,
     });
-    expect(again.headCommit).toBe(localCommit);
+    const exported = await platform.exportMasterBundle(APP_ID);
+    const master = await platform.masterCommit(APP_ID);
+    const source = {
+      id: APP_ID,
+      generation: GENERATION,
+      masterCommit: master,
+      bundleBase64: exported!.toString('base64'),
+    };
+
+    await expect(checkoutFromBundle(sessionId, 'app', source)).rejects.toThrow(
+      /already exists.*origin bundle was refreshed/,
+    );
+    expect(
+      await git(['rev-parse', '--verify', 'HEAD'], empty.absolutePath).catch(
+        () => '',
+      ),
+    ).toBe('');
+
+    const replacement = await checkoutFromBundle(sessionId, 'app', source, {
+      force: true,
+    });
+    expect(replacement.replacedExisting).toBe(true);
+    expect(replacement.headCommit).toBe(master);
+    await expect(
+      readFile(path.join(replacement.absolutePath, 'README.md'), 'utf8'),
+    ).resolves.not.toBe('');
   });
 
   it('rejects a dirty worktree and an empty worktree at bundle time', async () => {

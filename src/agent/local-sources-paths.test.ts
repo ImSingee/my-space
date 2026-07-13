@@ -1,9 +1,12 @@
 import { execFile } from 'node:child_process';
 import {
   access,
+  chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
@@ -28,9 +31,9 @@ const {
   acquireSourceWorkspaceBarrier,
   assertWorktreeAvailable,
   bundleWorktreeForDeploy,
+  checkoutFromBundle,
   initNewWorktree,
   removeSourceWorkspaces,
-  syncCheckoutFromBundle,
   withSourceWorkspaceLock,
 } = await import('./local-sources');
 const {
@@ -43,6 +46,7 @@ const {
 } = await import('./paths');
 const { listIndexedWorkspaces } = await import('./workspace-index');
 const { createAppTools } = await import('./tools/apps');
+const { createWorkflowTools } = await import('./tools/workflows');
 const {
   inspectLocalWorkspaces,
   reconcileLocalWorkspaces,
@@ -72,6 +76,12 @@ async function commitFile(
   await git(worktree, 'add', '-A');
   await git(worktree, 'commit', '-m', `add ${name}`);
   return git(worktree, 'rev-parse', 'HEAD');
+}
+
+function toolText(result: {
+  content: Array<{ type: string; text?: string }>;
+}): string {
+  return result.content.map((part) => part.text ?? '').join('');
 }
 
 afterAll(async () => {
@@ -124,7 +134,7 @@ describe('runner source paths', () => {
       agentWorkDir(sessionId),
       'copies/absolute',
     );
-    const copy = await syncCheckoutFromBundle(
+    const copy = await checkoutFromBundle(
       sessionId,
       'app',
       {
@@ -133,7 +143,7 @@ describe('runner source paths', () => {
         masterCommit: head,
         bundleBase64: deploy.bundleBase64,
       },
-      absoluteTarget,
+      { targetPath: absoluteTarget },
     );
     expect(copy.path).toBe('copies/absolute');
     expect(copy.absolutePath).toBe(absoluteTarget);
@@ -272,6 +282,382 @@ describe('runner source paths', () => {
       'fulfilled',
       'rejected',
     ]);
+  });
+
+  it('exposes force on app and workflow checkout tools', async () => {
+    const sessionId = 'checkout-tools-force';
+    const source = (id: string) => ({
+      id,
+      generation: GENERATION,
+      masterCommit: null,
+      bundleBase64: null,
+    });
+    const appTools = createAppTools({
+      sessionId,
+      platform: {
+        getAppSource: vi.fn<PlatformClient['getAppSource']>(async () =>
+          source('app-id'),
+        ),
+      } as unknown as PlatformClient,
+    });
+    const workflowTools = createWorkflowTools({
+      sessionId,
+      platform: {
+        getWorkflowSource: vi.fn<PlatformClient['getWorkflowSource']>(
+          async () => source('workflow-id'),
+        ),
+      } as unknown as PlatformClient,
+    });
+    const app = appTools.find((tool) => tool.name === 'checkout_app');
+    const workflow = workflowTools.find(
+      (tool) => tool.name === 'checkout_workflow',
+    );
+    if (!app || !workflow) throw new Error('Missing checkout tools.');
+
+    const firstApp = await app.execute('app-first', {
+      id: 'app-id',
+      target_path: 'custom/app',
+    });
+    expect(toolText(firstApp)).toContain('Checked out "app-id"');
+    await expect(
+      app.execute('app-again', {
+        id: 'app-id',
+        target_path: 'custom/app',
+        force: false,
+      }),
+    ).rejects.toThrow(/force: true/);
+    const forcedApp = await app.execute('app-force', {
+      id: 'app-id',
+      target_path: 'custom/app',
+      force: true,
+    });
+    expect(toolText(forcedApp)).toContain('Replaced existing checkout');
+
+    await workflow.execute('workflow-first', {
+      id: 'workflow-id',
+      target_path: 'custom/workflow',
+    });
+    const forcedWorkflow = await workflow.execute('workflow-force', {
+      id: 'workflow-id',
+      target_path: 'custom/workflow',
+      force: true,
+    });
+    expect(toolText(forcedWorkflow)).toContain('Replaced existing checkout');
+  });
+
+  it('force replaces one exact indexed target without touching other checkouts', async () => {
+    const sessionId = 'force-index-owner';
+    const replaced = await initNewWorktree(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      () => Promise.resolve(),
+      'custom/shared',
+    );
+    const untouched = await initNewWorktree(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      () => Promise.resolve(),
+      'custom/other',
+    );
+    await commitFile(replaced.absolutePath, 'discard.txt', 'discard');
+    await commitFile(untouched.absolutePath, 'keep.txt', 'keep');
+    const sharedBundle = await bundleWorktreeForDeploy(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      untouched.absolutePath,
+    );
+    const sharedBundlePath = path.join(
+      agentSessionDir(sessionId),
+      'bundles',
+      'app-old-app.bundle',
+    );
+    await writeFile(
+      sharedBundlePath,
+      Buffer.from(sharedBundle.bundleBase64, 'base64'),
+    );
+
+    const workflow = await checkoutFromBundle(
+      sessionId,
+      'workflow',
+      {
+        id: 'new-workflow',
+        generation: NEW_GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      },
+      { targetPath: 'custom/shared', force: true },
+    );
+
+    expect(workflow.replacedExisting).toBe(true);
+    await expect(
+      readFile(path.join(workflow.absolutePath, 'discard.txt'), 'utf8'),
+    ).rejects.toThrow(/ENOENT/);
+    await expect(
+      readFile(path.join(untouched.absolutePath, 'keep.txt'), 'utf8'),
+    ).resolves.toBe('keep');
+    await expect(exists(sharedBundlePath)).resolves.toBe(true);
+    expect(await listIndexedWorkspaces(sessionId)).toEqual(
+      expect.arrayContaining([
+        {
+          kind: 'app',
+          id: 'old-app',
+          generation: GENERATION,
+          absolutePath: untouched.absolutePath,
+        },
+        {
+          kind: 'workflow',
+          id: 'new-workflow',
+          generation: NEW_GENERATION,
+          absolutePath: workflow.absolutePath,
+        },
+      ]),
+    );
+    expect(await listIndexedWorkspaces(sessionId)).not.toContainEqual(
+      expect.objectContaining({
+        kind: 'app',
+        absolutePath: replaced.absolutePath,
+      }),
+    );
+  });
+
+  it('removes the displaced owner bundle only after its last checkout is replaced', async () => {
+    const sessionId = 'force-displaced-owner-bundle';
+    const onlyCheckout = await initNewWorktree(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      () => Promise.resolve(),
+      'custom/shared',
+    );
+    await commitFile(onlyCheckout.absolutePath);
+    const oldBundle = await bundleWorktreeForDeploy(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      onlyCheckout.absolutePath,
+    );
+    const oldBundlePath = path.join(
+      agentSessionDir(sessionId),
+      'bundles',
+      'app-old-app.bundle',
+    );
+    await writeFile(
+      oldBundlePath,
+      Buffer.from(oldBundle.bundleBase64, 'base64'),
+    );
+
+    await checkoutFromBundle(
+      sessionId,
+      'workflow',
+      {
+        id: 'new-workflow',
+        generation: NEW_GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      },
+      { targetPath: onlyCheckout.absolutePath, force: true },
+    );
+
+    await expect(exists(oldBundlePath)).resolves.toBe(false);
+  });
+
+  it('keeps the displaced owner bundle for an unindexed default checkout', async () => {
+    const sessionId = 'force-unindexed-default-bundle';
+    const defaultCheckout = await initNewWorktree(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      () => Promise.resolve(),
+    );
+    const replacedCheckout = await initNewWorktree(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      () => Promise.resolve(),
+      'custom/shared',
+    );
+    await commitFile(defaultCheckout.absolutePath, 'keep.txt', 'keep');
+    const oldBundle = await bundleWorktreeForDeploy(
+      sessionId,
+      'app',
+      'old-app',
+      GENERATION,
+      defaultCheckout.absolutePath,
+    );
+    const oldBundlePath = path.join(
+      agentSessionDir(sessionId),
+      'bundles',
+      'app-old-app.bundle',
+    );
+    await writeFile(
+      oldBundlePath,
+      Buffer.from(oldBundle.bundleBase64, 'base64'),
+    );
+    await writeFile(
+      agentWorkspaceIndexPath(sessionId),
+      JSON.stringify({
+        entries: (await listIndexedWorkspaces(sessionId)).filter(
+          (entry) =>
+            path.resolve(entry.absolutePath) ===
+            path.resolve(replacedCheckout.absolutePath),
+        ),
+      }),
+    );
+
+    await checkoutFromBundle(
+      sessionId,
+      'workflow',
+      {
+        id: 'new-workflow',
+        generation: NEW_GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      },
+      { targetPath: replacedCheckout.absolutePath, force: true },
+    );
+
+    await expect(exists(oldBundlePath)).resolves.toBe(true);
+    await expect(
+      readFile(path.join(defaultCheckout.absolutePath, 'keep.txt'), 'utf8'),
+    ).resolves.toBe('keep');
+    await expect(
+      git(defaultCheckout.absolutePath, 'fetch', 'origin', 'master'),
+    ).resolves.toBe('');
+  });
+
+  it('completes force checkout when the old target needs permission repair for cleanup', async () => {
+    const sessionId = 'force-cleanup-permissions';
+    const target = path.join(agentWorkDir(sessionId), 'custom/locked');
+    const lockedChild = path.join(target, 'child');
+    await mkdir(lockedChild, { recursive: true });
+    await writeFile(path.join(lockedChild, 'discard.txt'), 'discard');
+    await chmod(lockedChild, 0o000);
+
+    const checkout = await checkoutFromBundle(
+      sessionId,
+      'app',
+      {
+        id: 'replacement',
+        generation: GENERATION,
+        masterCommit: null,
+        bundleBase64: null,
+      },
+      { targetPath: target, force: true },
+    );
+
+    expect(checkout.absolutePath).toBe(target);
+    expect(checkout.replacedExisting).toBe(true);
+    await expect(readdir(agentSessionDir(sessionId))).resolves.not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^\.checkout-/)]),
+    );
+  });
+
+  it('treats files and dangling symlinks as occupied checkout targets', async () => {
+    const sessionId = 'force-path-entry';
+    const work = agentWorkDir(sessionId);
+    await mkdir(path.join(work, 'custom'), { recursive: true });
+    const fileTarget = path.join(work, 'custom/file-target');
+    await writeFile(fileTarget, 'keep');
+    const emptySource = {
+      id: 'entry-app',
+      generation: GENERATION,
+      masterCommit: null,
+      bundleBase64: null,
+    };
+
+    await expect(
+      checkoutFromBundle(sessionId, 'app', emptySource, {
+        targetPath: fileTarget,
+      }),
+    ).rejects.toThrow(/already exists.*Nothing was changed/);
+    await expect(readFile(fileTarget, 'utf8')).resolves.toBe('keep');
+    await checkoutFromBundle(sessionId, 'app', emptySource, {
+      targetPath: fileTarget,
+      force: true,
+    });
+    expect((await lstat(fileTarget)).isDirectory()).toBe(true);
+
+    const danglingTarget = path.join(work, 'custom/dangling-target');
+    await symlink('missing-target', danglingTarget);
+    await expect(
+      checkoutFromBundle(
+        sessionId,
+        'workflow',
+        { ...emptySource, id: 'entry-workflow' },
+        { targetPath: danglingTarget },
+      ),
+    ).rejects.toThrow(/already exists.*Nothing was changed/);
+    expect((await lstat(danglingTarget)).isSymbolicLink()).toBe(true);
+    await checkoutFromBundle(
+      sessionId,
+      'workflow',
+      { ...emptySource, id: 'entry-workflow' },
+      { targetPath: danglingTarget, force: true },
+    );
+    expect((await lstat(danglingTarget)).isDirectory()).toBe(true);
+  });
+
+  it('preserves the old target when a forced checkout cannot be prepared', async () => {
+    const sessionId = 'force-prepare-failure';
+    const existing = await initNewWorktree(
+      sessionId,
+      'app',
+      'existing-app',
+      GENERATION,
+      () => Promise.resolve(),
+      'custom/replace-me',
+    );
+    await writeFile(path.join(existing.absolutePath, 'keep.txt'), 'keep');
+
+    const source = await initNewWorktree(
+      sessionId,
+      'app',
+      'source-app',
+      GENERATION,
+      () => Promise.resolve(),
+      'custom/source',
+    );
+    await commitFile(source.absolutePath);
+    const bundle = await bundleWorktreeForDeploy(
+      sessionId,
+      'app',
+      'source-app',
+      GENERATION,
+      source.absolutePath,
+    );
+
+    await expect(
+      checkoutFromBundle(
+        sessionId,
+        'workflow',
+        {
+          id: 'replacement',
+          generation: NEW_GENERATION,
+          masterCommit: '0000000000000000000000000000000000000000',
+          bundleBase64: bundle.bundleBase64,
+        },
+        { targetPath: existing.absolutePath, force: true },
+      ),
+    ).rejects.toThrow(/does not match platform master/);
+    await expect(
+      readFile(path.join(existing.absolutePath, 'keep.txt'), 'utf8'),
+    ).resolves.toBe('keep');
+    await expect(listIndexedWorkspaces(sessionId)).resolves.toContainEqual({
+      kind: 'app',
+      id: 'existing-app',
+      generation: GENERATION,
+      absolutePath: existing.absolutePath,
+    });
   });
 
   it('requires a matching origin, a clean worktree, and at least one commit', async () => {
@@ -491,7 +877,7 @@ describe('runner workspace cleanup', () => {
       GENERATION,
       app.absolutePath,
     );
-    const custom = await syncCheckoutFromBundle(
+    const custom = await checkoutFromBundle(
       sessionId,
       'app',
       {
@@ -500,7 +886,7 @@ describe('runner workspace cleanup', () => {
         masterCommit: head,
         bundleBase64: bundle.bundleBase64,
       },
-      'custom/same-id',
+      { targetPath: 'custom/same-id' },
     );
     const workflow = await initNewWorktree(
       sessionId,
@@ -606,7 +992,7 @@ describe('runner workspace cleanup', () => {
       OLD_GENERATION,
     );
 
-    const replacement = await syncCheckoutFromBundle(sessionId, 'workflow', {
+    const replacement = await checkoutFromBundle(sessionId, 'workflow', {
       id: 'reused-id',
       generation: NEW_GENERATION,
       masterCommit: head,
@@ -805,7 +1191,7 @@ describe('runner workspace cleanup', () => {
       let replacementStarted = false;
       const replacement = withSourceWorkspaceLock(sessionId, async () => {
         replacementStarted = true;
-        return syncCheckoutFromBundle(sessionId, 'workflow', {
+        return checkoutFromBundle(sessionId, 'workflow', {
           id: 'reused-id',
           generation: NEW_GENERATION,
           masterCommit: null,

@@ -90,8 +90,9 @@ async function writeIndex(
   await writeFile(temp, JSON.stringify({ entries }, null, 2), 'utf8');
   try {
     await rename(temp, target);
-  } finally {
-    await rm(temp, { force: true });
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -118,6 +119,7 @@ export function listIndexedWorkspaces(
 export function registerWorkspace(
   sessionId: string,
   entry: WorkspaceIndexEntry,
+  options: { replaceExactPath?: boolean } = {},
 ): Promise<void> {
   return serialize(sessionId, async () => {
     if (!isValidIndexEntry(await sessionWorkspaceRoots(sessionId), entry)) {
@@ -125,13 +127,14 @@ export function registerWorkspace(
     }
     const entries = await readIndex(sessionId);
     const conflicting = entries.find((candidate) => {
-      const sameEntry =
-        candidate.kind === entry.kind &&
-        candidate.id === entry.id &&
+      const samePath =
         path.resolve(candidate.absolutePath) ===
-          path.resolve(entry.absolutePath);
+        path.resolve(entry.absolutePath);
+      const sameEntry =
+        candidate.kind === entry.kind && candidate.id === entry.id && samePath;
       return (
         !sameEntry &&
+        !(options.replaceExactPath && samePath) &&
         workspacePathsOverlap(candidate.absolutePath, entry.absolutePath)
       );
     });
@@ -142,14 +145,16 @@ export function registerWorkspace(
           `${conflicting.absolutePath}.`,
       );
     }
-    const withoutDuplicate = entries.filter(
-      (candidate) =>
-        !(
-          candidate.kind === entry.kind &&
-          candidate.id === entry.id &&
-          path.resolve(candidate.absolutePath) ===
-            path.resolve(entry.absolutePath)
-        ),
+    const withoutDuplicate = entries.filter((candidate) =>
+      options.replaceExactPath
+        ? path.resolve(candidate.absolutePath) !==
+          path.resolve(entry.absolutePath)
+        : !(
+            candidate.kind === entry.kind &&
+            candidate.id === entry.id &&
+            path.resolve(candidate.absolutePath) ===
+              path.resolve(entry.absolutePath)
+          ),
     );
     withoutDuplicate.push(entry);
     await writeIndex(sessionId, withoutDuplicate);

@@ -9,8 +9,8 @@ import type { AgentTool } from '@earendil-works/pi-agent-core';
 import {
   assertWorkspacePathAvailable,
   bundleWorktreeForDeploy,
+  checkoutFromBundle,
   initNewWorktree,
-  syncCheckoutFromBundle,
   type LocalCheckout,
   withSourceWorkspaceLock,
 } from '../local-sources';
@@ -20,7 +20,10 @@ import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 function checkoutLines(id: string, checkout: LocalCheckout): string[] {
   return [
-    `Checked out "${id}" at ${checkout.absolutePath}.`,
+    checkout.replacedExisting
+      ? `Replaced existing checkout for "${id}" at ${checkout.absolutePath}. ` +
+        'All previous local work at that path was discarded.'
+      : `Checked out "${id}" at ${checkout.absolutePath}.`,
     checkout.headCommit
       ? `HEAD: ${checkout.headCommit}`
       : 'No commits yet. Create files, then run git add and git commit.',
@@ -144,7 +147,8 @@ export function createAppTools(options: {
     label: 'Checkout app',
     description:
       "Checkout an app's Git repo into this chat's persistent worktree. " +
-      'Use before reading or editing an existing app.',
+      'Use before reading or editing an existing app. Existing targets fail ' +
+      'unless force is true.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to checkout.' }),
@@ -156,6 +160,13 @@ export function createAppTools(options: {
             'it. Defaults to apps/<app-id>.',
         }),
       ),
+      force: Type.Optional(
+        Type.Boolean({
+          description:
+            'Replace an existing target_path with a fresh checkout. Defaults ' +
+            'to false. This permanently discards all local work at that path.',
+        }),
+      ),
     }),
     execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
@@ -164,12 +175,10 @@ export function createAppTools(options: {
         sessionId,
         async () => {
           const source = await platform.getAppSource(params.id);
-          const checkout = await syncCheckoutFromBundle(
-            sessionId,
-            'app',
-            source,
-            params.target_path,
-          );
+          const checkout = await checkoutFromBundle(sessionId, 'app', source, {
+            targetPath: params.target_path,
+            force: params.force ?? false,
+          });
           return text(checkoutLines(source.id, checkout).join('\n'), checkout);
         },
         signal,
@@ -332,8 +341,9 @@ export function createAppTools(options: {
       const res = await platform.rollbackApp(params.id, params.version);
       return text(
         `Rolled back "${params.id}" to v${res.version}. ` +
-          'Run checkout_app or git fetch/rebase in existing worktrees before ' +
-          'making more changes.',
+          'Existing Agent worktrees were not changed. Re-run checkout_app with ' +
+          'the same target_path to refresh its origin before fetching/rebasing, ' +
+          'or use force: true to discard and replace that checkout.',
         res,
       );
     },

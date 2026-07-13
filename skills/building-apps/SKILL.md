@@ -6,14 +6,15 @@ description: How to design, build, and deploy a Hatch app end to end — manifes
 # Building a Hatch app
 
 An app is an independent app the platform builds and runs for you. Call
-`checkout_app` before modifying an existing app; the app source appears under
-`<id>/` in your chat's persistent worktree. The platform handles codegen,
-bundling, process management, the Postgres database, and serving.
+`checkout_app` before modifying an existing app; its default source path is
+`apps/<id>/`, but the returned absolute path is authoritative. The platform
+handles codegen, bundling, process management, the Postgres database, and
+serving.
 
 ## Source layout
 
 ```
-<id>/
+apps/<id>/
   manifest.json          declares id, name, capabilities, widgets, rpc service
   proto/service.proto    Connect RPC service (one service per app)
   backend/main.ts        Deno Connect server implementing the service
@@ -64,17 +65,21 @@ use native git locally:
      Pass `pin: true` when the app will have a user-facing frontend (the default)
      so it's pinned to the sidebar, or `pin: false` for backend-only /
      widget-only apps.
-2. For an existing app, call `checkout_app`.
-3. Edit files under `<id>/`.
-4. Run `git status`, `git add ...`, and `git commit -m "message"` inside
-   `<id>/`.
-5. Call `deploy_app` with a required `message` (a concise release note
-   describing what changed, e.g. "Add dark mode toggle"); deploy publishes the
-   clean commit, updates `master`, creates the `deploy/v<version>` tag, and
-   records the artifact and message in the deployment history.
+2. For an existing app, call `checkout_app` and keep the returned source path.
+   Checkout only creates a missing target by default. If the target exists, use
+   it or choose another `target_path`; pass the same path with `force: true` only
+   to permanently discard it and create a fresh checkout.
+3. Edit files under the exact returned source path.
+4. Run `git status`, `git add ...`, and `git commit -m "message"` there.
+5. Call `deploy_app` with that `source_path` and a required `message` (a concise
+   release note, e.g. "Add dark mode toggle"); deploy publishes the clean
+   commit, updates `master`, creates the `deploy/v<version>` tag, and records the
+   artifact and message in the deployment history.
 
 Do not push branches. Do not create or push tags. The platform Git server
 rejects Agent branch/tag pushes. If deploy says `master` advanced, run
+`checkout_app` again with the same `target_path` to refresh the origin bundle
+(the existing-target error does not overwrite files), then run
 `git fetch origin master`, rebase your local work onto `origin/master`, resolve
 conflicts, commit, and call `deploy_app` again.
 
@@ -86,9 +91,10 @@ conflicts, commit, and call `deploy_app` again.
 - To roll back, call `rollback_app` with the app `id` and the `version`
   number to restore (e.g. `version: 4` for v4) — the same version shown by
   `get_app` and in the management UI. Only successfully deployed versions can
-  be restored. Rolling back moves `master` to that version's commit, so run
-  `checkout_app` (or `git fetch`/rebase in an existing checkout) before making
-  further changes.
+  be restored. Rolling back moves `master` to that version's commit but does not
+  change existing Agent worktrees. To preserve local work, call `checkout_app`
+  with the same `target_path` to refresh the origin bundle, then fetch/rebase.
+  To discard it and exactly restore rollback source, pass `force: true`.
 
 ## Manifest
 

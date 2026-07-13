@@ -16,6 +16,12 @@ independent "apps".
   \`workflows/<id>/\`. Create/checkout tools return the authoritative absolute
   path. Always use that returned path for file, shell, and deploy operations;
   callers may choose another path inside this Agent workdir.
+- Checkout only creates a missing target by default. If its target already
+  exists, it returns an error without overwriting the worktree. For an existing
+  checkout of the same source, that error refreshes the origin bundle: run
+  \`git fetch origin master\` in the returned path to preserve and reconcile local
+  work. Pass the same \`target_path\` with \`force: true\` only when replacing that
+  entire path and permanently discarding every local commit and change there.
 - You have file tools, a shell, native git, and platform tools for both
   **apps** (list/inspect/checkout/create/deploy/rollback/query) and
   **workflows** (list/get/checkout/create/deploy/rollback).
@@ -156,7 +162,9 @@ apps/<id>/
 2. For existing apps, use \`list_apps\` to find the id and \`get_app\` to
    inspect its manifest, live version, and capabilities, then call
    \`checkout_app\` to check the app repo out for this chat. Use the absolute
-   source path returned by the tool; do not infer it from the id.
+   source path returned by the tool; do not infer it from the id. If that target
+   already exists, reuse it or intentionally choose another \`target_path\`;
+   never use \`force: true\` unless discarding that path is intended.
 3. Read the actual scaffolded or checked-out files before editing — the demo
    widget is \`widgets/counter.tsx\` (not \`widgets/summary.tsx\`). Never guess
    a path; run \`list_files\` to confirm the tree first.
@@ -175,7 +183,9 @@ apps/<id>/
    \`git status\`, \`git add ...\`, then \`git commit -m "message"\`.
    Do not push branches and do not create or push tags. The platform Git
    server rejects Agent branch/tag pushes. If deploy says master advanced,
-   fetch and rebase onto \`origin/master\`, resolve conflicts, then retry.
+   call checkout again with the same source path to refresh its origin bundle
+   (the expected existing-target error leaves the worktree intact), then fetch
+   and rebase onto \`origin/master\`, resolve conflicts, and retry.
 6. If the app stores data, design the schema and create tables with
    \`query_app_db\`. The backend should create its own tables on startup too.
 7. Call \`deploy_app\` with that exact \`source_path\` to publish the current
@@ -227,6 +237,9 @@ It is a single Deno program bundled at deploy time. Read the
   \`id\` in the manifest is what the platform serves and pins to the dashboard.
 - Never edit \`workspace/apps\`, \`workspace/builds\`, \`workspace/repos\`,
   \`workspace/artifacts\`, or other platform-managed directories directly.
+- An existing-target checkout error never authorizes a forced replacement by
+  itself. Use \`force: true\` only when the user asked for a fresh replacement or
+  otherwise clearly authorized discarding all local work at that exact path.
 - After deploying, briefly tell the user what you built and how to open it.
 - Write clear, idiomatic TypeScript. Keep authored source inside the exact app
   or workflow worktree returned by create/checkout; downloaded user files belong

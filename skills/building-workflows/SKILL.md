@@ -12,13 +12,14 @@ workflow is pure code: a single Deno program (npm imports allowed) that the
 platform **bundles into one file** at deploy time and runs on each trigger.
 
 Call `checkout_workflow` before modifying an existing workflow; the source
-appears under `<id>/` in your chat's persistent worktree. The platform handles
-bundling, versioning (git + artifact), scheduling, and serving the webhook.
+defaults to `workflows/<id>/`, but the returned absolute path is authoritative.
+The platform handles bundling, versioning (git + artifact), scheduling, and
+serving the webhook.
 
 ## Source layout
 
 ```
-<id>/
+workflows/<id>/
   manifest.json        declares id, name, description, entry, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
   package.json         npm dependencies (installed only with Deno)
@@ -165,16 +166,21 @@ in the manifest — it is derived from your zod schema at deploy time.
    is editable later; the slug is permanent — it keys the URL, repo, and webhook).
    Only then call `create_workflow`. Pass `pin: true` (default) to pin it to the
    sidebar.
-2. For an existing workflow, call `checkout_workflow`.
-3. Edit files under `<id>/`.
-4. `git status`, `git add ...`, `git commit -m "message"` inside `<id>/`.
-5. Call `deploy_workflow` with a required `message`. Deploy bundles the program,
-   captures the input JSON Schema, publishes the clean commit, tags
-   `deploy/v<version>`, records the artifact, and reloads the cron schedule.
+2. For an existing workflow, call `checkout_workflow` and keep the returned
+   source path. Checkout only creates a missing target by default; use the
+   existing path or another `target_path` on conflict. Pass the same path with
+   `force: true` only to permanently discard and replace it.
+3. Edit files under the exact returned source path.
+4. `git status`, `git add ...`, `git commit -m "message"` there.
+5. Call `deploy_workflow` with that `source_path` and a required `message`.
+   Deploy bundles the program, captures the input JSON Schema, publishes the
+   clean commit, tags `deploy/v<version>`, records the artifact, and reloads the
+   cron schedule.
 
 Do not push branches or tags — the platform Git server rejects Agent pushes. If
-deploy says `master` advanced, `git fetch origin master`, rebase, resolve, and
-deploy again.
+deploy says `master` advanced, call `checkout_workflow` with the same
+`target_path` to refresh its origin bundle (the existing-target error preserves
+files), then `git fetch origin master`, rebase, resolve, and deploy again.
 
 ## Inspect, run & roll back
 
@@ -182,16 +188,19 @@ deploy again.
 - `get_workflow <id>` shows the input schema, triggers, recent runs, and
   deployment history.
 - `rollback_workflow` with the `id` and `version` restores that version's bundle
-  and source (moves `master` to that commit — re-checkout before further edits).
+  and source but does not modify existing Agent worktrees. To preserve local
+  work, refresh with the same checkout target and fetch/rebase; to exactly
+  replace it with rollback source, use the same `target_path` and `force: true`.
 - Users trigger manual runs and inspect run history (steps, logs, output, errors)
   from the workflow page; you don't run workflows yourself.
 
 ## Deploy & iterate
 
-1. New workflow → confirm name/slug → `create_workflow`. Existing → `checkout_workflow`.
+1. New workflow → confirm name/slug → `create_workflow`. Existing →
+   `checkout_workflow` and retain its returned source path.
 2. Read the files, edit `workflow.ts` (input + steps) and `manifest.json`
    (triggers), keeping the zod schema authoritative.
 3. Commit with git.
-4. `deploy_workflow` with a `message`. On failure, read the build/describe output,
-   fix the source, commit, and deploy again.
+4. `deploy_workflow` with that `source_path` and a `message`. On failure, read
+   the build/describe output, fix the source, commit, and deploy again.
 5. Tell the user what it does, how it's triggered, and where to watch runs.

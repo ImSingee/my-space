@@ -8,8 +8,8 @@ import type { AgentTool } from '@earendil-works/pi-agent-core';
 import {
   assertWorktreeAvailable,
   bundleWorktreeForDeploy,
+  checkoutFromBundle,
   initNewWorktree,
-  syncCheckoutFromBundle,
   withSourceWorkspaceLock,
 } from '../local-sources';
 import type { PlatformClient } from '../platform-client';
@@ -103,7 +103,8 @@ export function createWorkflowTools(options: {
     label: 'Checkout workflow',
     description:
       "Checkout a workflow's Git repo into this chat's persistent worktree. " +
-      'Use before reading or editing an existing workflow.',
+      'Use before reading or editing an existing workflow. Existing targets ' +
+      'fail unless force is true.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'Workflow id to checkout.' }),
@@ -115,6 +116,13 @@ export function createWorkflowTools(options: {
             'it. Defaults to workflows/<workflow-id>.',
         }),
       ),
+      force: Type.Optional(
+        Type.Boolean({
+          description:
+            'Replace an existing target_path with a fresh checkout. Defaults ' +
+            'to false. This permanently discards all local work at that path.',
+        }),
+      ),
     }),
     execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
@@ -123,14 +131,21 @@ export function createWorkflowTools(options: {
         sessionId,
         async () => {
           const source = await platform.getWorkflowSource(params.id);
-          const checkout = await syncCheckoutFromBundle(
+          const checkout = await checkoutFromBundle(
             sessionId,
             'workflow',
             source,
-            params.target_path,
+            {
+              targetPath: params.target_path,
+              force: params.force ?? false,
+            },
           );
           const lines = [
-            `Checked out "${params.id}" at ${checkout.absolutePath}.`,
+            checkout.replacedExisting
+              ? `Replaced existing checkout for "${params.id}" at ` +
+                `${checkout.absolutePath}. All previous local work at that ` +
+                'path was discarded.'
+              : `Checked out "${params.id}" at ${checkout.absolutePath}.`,
             checkout.headCommit
               ? `HEAD: ${checkout.headCommit}`
               : 'No commits yet. Create files, then run git add and git commit.',
@@ -300,7 +315,13 @@ export function createWorkflowTools(options: {
     execute: async (_id, params) => {
       requireIdSlug(params.id);
       const res = await platform.rollbackWorkflow(params.id, params.version);
-      return text(`Rolled "${params.id}" back to v${res.version}.`, res);
+      return text(
+        `Rolled "${params.id}" back to v${res.version}. Existing Agent ` +
+          'worktrees were not changed. Re-run checkout_workflow with the same ' +
+          'target_path to refresh its origin before fetching/rebasing, or use ' +
+          'force: true to discard and replace that checkout.',
+        res,
+      );
     },
   });
 
