@@ -12,7 +12,7 @@ import { z } from 'zod';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 4;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -357,7 +357,6 @@ const queryAppKvSetRequestSchema = z
     key: z.string(),
     value: z.string(),
     secret: z.boolean().optional(),
-    revealSecrets: z.boolean().default(false),
   })
   .strict();
 

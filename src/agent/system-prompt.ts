@@ -110,8 +110,8 @@ apps/<id>/
     The manage UI shows entries; values marked \`secret\` are masked there
     (overwrite-only). After deploying with this capability, use
     \`query_app_kv\` to inspect or initialize entries; secret values are masked
-    unless you explicitly pass \`reveal_secrets: true\`. Requires a backend. See
-    the building-apps skill.
+    unless you explicitly pass \`reveal_secrets: true\` to a list or get action.
+    Requires a backend. See the building-apps skill.
   - \`userscripts\`: publish Tampermonkey userscripts. Declare a top-level
     \`userscripts\` array (each \`{ id, name, entry, matches, ... }\`); the build
     bundles each \`entry\` to a browser script and the platform serves a

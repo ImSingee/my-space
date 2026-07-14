@@ -107,7 +107,7 @@ export async function queryAppKv(
       });
       return {
         action: 'set',
-        record: presentKvRecord(record, input.revealSecrets),
+        record: presentKvRecord(record, false),
       };
     }
     case 'delete':

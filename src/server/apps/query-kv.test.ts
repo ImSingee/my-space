@@ -76,17 +76,6 @@ describe('queryAppKv operations', () => {
       record: { key: 'api-token', value: null, secret: true },
     });
 
-    const revealedSet = await queryAppKv('secrets', {
-      action: 'set',
-      key: 'api-token',
-      value: 'plain-secret',
-      revealSecrets: true,
-    });
-    expect(revealedSet).toMatchObject({
-      action: 'set',
-      record: { value: 'plain-secret', secret: true },
-    });
-
     const get = await queryAppKv('secrets', {
       action: 'get',
       key: 'api-token',
@@ -141,11 +130,17 @@ describe('queryAppKv operations', () => {
       action: 'set',
       key: 'secret',
       value: 'second',
-      revealSecrets: true,
     });
     expect(updated).toMatchObject({
-      record: { value: 'second', secret: true },
+      record: { value: null, secret: true },
     });
+    await expect(
+      queryAppKv('flags', {
+        action: 'get',
+        key: 'secret',
+        revealSecrets: true,
+      }),
+    ).resolves.toMatchObject({ record: { value: 'second', secret: true } });
 
     const created = await queryAppKv('flags', {
       action: 'set',

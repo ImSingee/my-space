@@ -11,8 +11,8 @@ import {
 } from './protocol';
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v5 for explicit KV secret reveal', () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+  it('uses protocol v4 for the query_app_kv REST contract', () => {
+    expect(PROTOCOL_VERSION).toBe(4);
   });
 
   it('parses runner.hello', () => {
@@ -251,7 +251,6 @@ describe('query app KV requests', () => {
       key: 'token',
       value: 'value',
       secret: true,
-      revealSecrets: false,
     });
     expect(
       queryAppKvRequestSchema.safeParse({ action: 'delete', key: 'token' })
@@ -259,21 +258,23 @@ describe('query app KV requests', () => {
     ).toBe(true);
   });
 
-  it('allows explicit secret reveal only for actions that return records', () => {
+  it('allows explicit secret reveal only for read actions', () => {
     for (const input of [
       { action: 'list', revealSecrets: true },
       { action: 'get', key: 'token', revealSecrets: true },
-      {
-        action: 'set',
-        key: 'token',
-        value: 'value',
-        revealSecrets: true,
-      },
     ]) {
       expect(queryAppKvRequestSchema.parse(input)).toMatchObject({
         revealSecrets: true,
       });
     }
+    expect(
+      queryAppKvRequestSchema.safeParse({
+        action: 'set',
+        key: 'token',
+        value: 'value',
+        revealSecrets: true,
+      }).success,
+    ).toBe(false);
     expect(
       queryAppKvRequestSchema.safeParse({
         action: 'delete',

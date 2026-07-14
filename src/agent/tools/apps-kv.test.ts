@@ -58,6 +58,15 @@ describe('query_app_kv', () => {
       }),
     ).rejects.toThrow(/expected int/);
     await expect(
+      query.execute('set-reveal', {
+        id: 'demo-app',
+        action: 'set',
+        key: 'token',
+        value: 'value',
+        reveal_secrets: true,
+      }),
+    ).rejects.toThrow(/unrecognized/i);
+    await expect(
       query.execute('delete-reveal', {
         id: 'demo-app',
         action: 'delete',
@@ -159,7 +168,6 @@ describe('query_app_kv', () => {
           action: 'set',
           key: 'mode',
           value: 'production',
-          revealSecrets: false,
         },
       ],
       ['demo-app', { action: 'delete', key: 'mode' }],

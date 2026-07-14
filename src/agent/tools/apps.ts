@@ -375,9 +375,9 @@ export function createAppTools(options: {
     label: 'Query app KV',
     description:
       "List, read, write, or permanently delete entries in a deployed app's " +
-      'KV store. Secret values are masked by default; set reveal_secrets to ' +
-      'true only when their plaintext is needed in the model context. The app ' +
-      'must already have the kv capability enabled.',
+      'KV store. Secret values are masked by default. For list and get, set ' +
+      'reveal_secrets to true only when their plaintext is needed in the model ' +
+      'context. The app must already have the kv capability enabled.',
     // Keep the root object-shaped: the Anthropic adapter forwards root
     // properties/required fields and would discard a root anyOf schema.
     parameters: Type.Object({
@@ -420,8 +420,8 @@ export function createAppTools(options: {
       reveal_secrets: Type.Optional(
         Type.Boolean({
           description:
-            'List, get, and set only: return secret values in plaintext. ' +
-            'Defaults to false.',
+            'List and get only: return secret values in plaintext. Defaults ' +
+            'to false.',
         }),
       ),
     }),
