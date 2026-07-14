@@ -12,7 +12,7 @@ import { z } from 'zod';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -339,6 +339,7 @@ const queryAppKvListRequestSchema = z
     action: z.literal('list'),
     cursor: z.string().min(1).max(512).optional(),
     limit: z.number().int().min(1).max(100).default(100),
+    revealSecrets: z.boolean().default(false),
   })
   .strict();
 
@@ -346,6 +347,7 @@ const queryAppKvGetRequestSchema = z
   .object({
     action: z.literal('get'),
     key: z.string(),
+    revealSecrets: z.boolean().default(false),
   })
   .strict();
 
@@ -355,6 +357,7 @@ const queryAppKvSetRequestSchema = z
     key: z.string(),
     value: z.string(),
     secret: z.boolean().optional(),
+    revealSecrets: z.boolean().default(false),
   })
   .strict();
 
@@ -378,7 +381,7 @@ export type ParsedQueryAppKvRequest = z.output<typeof queryAppKvRequestSchema>;
 
 export type QueryAppKvRecord = {
   key: string;
-  value: string;
+  value: string | null;
   secret: boolean;
   createdAt: string;
   updatedAt: string;

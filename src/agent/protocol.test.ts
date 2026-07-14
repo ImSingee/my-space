@@ -11,8 +11,8 @@ import {
 } from './protocol';
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v4 for the query_app_kv REST contract', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it('uses protocol v5 for explicit KV secret reveal', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 
   it('parses runner.hello', () => {
@@ -222,6 +222,7 @@ describe('query app KV requests', () => {
     expect(queryAppKvRequestSchema.parse({ action: 'list' })).toEqual({
       action: 'list',
       limit: 100,
+      revealSecrets: false,
     });
     expect(
       queryAppKvRequestSchema.parse({
@@ -229,23 +230,57 @@ describe('query app KV requests', () => {
         cursor: 'last-key',
         limit: 25,
       }),
-    ).toEqual({ action: 'list', cursor: 'last-key', limit: 25 });
+    ).toEqual({
+      action: 'list',
+      cursor: 'last-key',
+      limit: 25,
+      revealSecrets: false,
+    });
     expect(
-      queryAppKvRequestSchema.safeParse({ action: 'get', key: 'token' })
-        .success,
-    ).toBe(true);
+      queryAppKvRequestSchema.parse({ action: 'get', key: 'token' }),
+    ).toEqual({ action: 'get', key: 'token', revealSecrets: false });
     expect(
-      queryAppKvRequestSchema.safeParse({
+      queryAppKvRequestSchema.parse({
         action: 'set',
         key: 'token',
         value: 'value',
         secret: true,
-      }).success,
-    ).toBe(true);
+      }),
+    ).toEqual({
+      action: 'set',
+      key: 'token',
+      value: 'value',
+      secret: true,
+      revealSecrets: false,
+    });
     expect(
       queryAppKvRequestSchema.safeParse({ action: 'delete', key: 'token' })
         .success,
     ).toBe(true);
+  });
+
+  it('allows explicit secret reveal only for actions that return records', () => {
+    for (const input of [
+      { action: 'list', revealSecrets: true },
+      { action: 'get', key: 'token', revealSecrets: true },
+      {
+        action: 'set',
+        key: 'token',
+        value: 'value',
+        revealSecrets: true,
+      },
+    ]) {
+      expect(queryAppKvRequestSchema.parse(input)).toMatchObject({
+        revealSecrets: true,
+      });
+    }
+    expect(
+      queryAppKvRequestSchema.safeParse({
+        action: 'delete',
+        key: 'token',
+        revealSecrets: true,
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects missing, invalid, and action-inappropriate fields', () => {

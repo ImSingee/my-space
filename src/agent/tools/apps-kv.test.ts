@@ -37,6 +37,7 @@ describe('query_app_kv', () => {
       'secret',
       'cursor',
       'limit',
+      'reveal_secrets',
     ]);
     expect(schema.required).toEqual(['id', 'action']);
     expect(schema.properties?.limit?.type).toBe('integer');
@@ -56,6 +57,14 @@ describe('query_app_kv', () => {
         limit: 1.5,
       }),
     ).rejects.toThrow(/expected int/);
+    await expect(
+      query.execute('delete-reveal', {
+        id: 'demo-app',
+        action: 'delete',
+        key: 'token',
+        reveal_secrets: true,
+      }),
+    ).rejects.toThrow(/unrecognized/i);
     expect(queryAppKv).not.toHaveBeenCalled();
   });
 
@@ -67,13 +76,23 @@ describe('query_app_kv', () => {
         items: [
           {
             key: 'api-token',
-            value: 'plain-secret',
+            value: null,
             secret: true,
             createdAt: '2026-07-13T00:00:00.000Z',
             updatedAt: '2026-07-13T00:00:00.000Z',
           },
         ],
         nextCursor: 'api-token',
+      })
+      .mockResolvedValueOnce({
+        action: 'get',
+        record: {
+          key: 'api-token',
+          value: 'plain-secret',
+          secret: true,
+          createdAt: '2026-07-13T00:00:00.000Z',
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        },
       })
       .mockResolvedValueOnce({ action: 'get', record: null })
       .mockResolvedValueOnce({
@@ -96,8 +115,17 @@ describe('query_app_kv', () => {
       action: 'list',
       limit: 10,
     });
-    expect(toolText(list)).toContain('plain-secret');
+    expect(toolText(list)).toContain('"value": null');
+    expect(toolText(list)).not.toContain('plain-secret');
     expect(toolText(list)).toContain('Continue with cursor: "api-token"');
+
+    const revealed = await query.execute('revealed-get', {
+      id: 'demo-app',
+      action: 'get',
+      key: 'api-token',
+      reveal_secrets: true,
+    });
+    expect(toolText(revealed)).toContain('plain-secret');
 
     const get = await query.execute('get', {
       id: 'demo-app',
@@ -122,9 +150,18 @@ describe('query_app_kv', () => {
     expect(toolText(deleted)).toBe('Deleted KV key "mode" permanently.');
 
     expect(queryAppKv.mock.calls.map(([id, input]) => [id, input])).toEqual([
-      ['demo-app', { action: 'list', limit: 10 }],
-      ['demo-app', { action: 'get', key: 'missing' }],
-      ['demo-app', { action: 'set', key: 'mode', value: 'production' }],
+      ['demo-app', { action: 'list', limit: 10, revealSecrets: false }],
+      ['demo-app', { action: 'get', key: 'api-token', revealSecrets: true }],
+      ['demo-app', { action: 'get', key: 'missing', revealSecrets: false }],
+      [
+        'demo-app',
+        {
+          action: 'set',
+          key: 'mode',
+          value: 'production',
+          revealSecrets: false,
+        },
+      ],
       ['demo-app', { action: 'delete', key: 'mode' }],
     ]);
   });

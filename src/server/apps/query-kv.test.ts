@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { QueryAppKvRequest } from '~agent/protocol';
 
 vi.mock('~/db', async () => {
   const { createTestDb } = await import('~/db/test-db');
@@ -6,8 +7,13 @@ vi.mock('~/db', async () => {
 });
 
 const { db, schema } = await import('~/db');
+const { queryAppKvRequestSchema } = await import('~agent/protocol');
 const { listKvPage } = await import('./kv');
-const { queryAppKv } = await import('./query-kv');
+const { queryAppKv: executeQueryAppKv } = await import('./query-kv');
+
+async function queryAppKv(id: string, input: QueryAppKvRequest) {
+  return executeQueryAppKv(id, queryAppKvRequestSchema.parse(input));
+}
 
 const KV_CAPABILITIES = {
   database: false,
@@ -56,7 +62,7 @@ describe('queryAppKv guards', () => {
 });
 
 describe('queryAppKv operations', () => {
-  it('returns secret values in plaintext for set, get, and list', async () => {
+  it('masks secrets by default and reveals them only when requested', async () => {
     await seedApp('secrets');
 
     const set = await queryAppKv('secrets', {
@@ -67,7 +73,18 @@ describe('queryAppKv operations', () => {
     });
     expect(set).toMatchObject({
       action: 'set',
-      record: { key: 'api-token', value: 'plain-secret', secret: true },
+      record: { key: 'api-token', value: null, secret: true },
+    });
+
+    const revealedSet = await queryAppKv('secrets', {
+      action: 'set',
+      key: 'api-token',
+      value: 'plain-secret',
+      revealSecrets: true,
+    });
+    expect(revealedSet).toMatchObject({
+      action: 'set',
+      record: { value: 'plain-secret', secret: true },
     });
 
     const get = await queryAppKv('secrets', {
@@ -75,6 +92,16 @@ describe('queryAppKv operations', () => {
       key: 'api-token',
     });
     expect(get).toMatchObject({
+      action: 'get',
+      record: { value: null, secret: true },
+    });
+    await expect(
+      queryAppKv('secrets', {
+        action: 'get',
+        key: 'api-token',
+        revealSecrets: true,
+      }),
+    ).resolves.toMatchObject({
       action: 'get',
       record: { value: 'plain-secret', secret: true },
     });
@@ -84,6 +111,17 @@ describe('queryAppKv operations', () => {
       limit: 100,
     });
     expect(list).toMatchObject({
+      action: 'list',
+      items: [{ value: null, secret: true }],
+      nextCursor: null,
+    });
+    await expect(
+      queryAppKv('secrets', {
+        action: 'list',
+        limit: 100,
+        revealSecrets: true,
+      }),
+    ).resolves.toMatchObject({
       action: 'list',
       items: [{ value: 'plain-secret', secret: true }],
       nextCursor: null,
@@ -103,6 +141,7 @@ describe('queryAppKv operations', () => {
       action: 'set',
       key: 'secret',
       value: 'second',
+      revealSecrets: true,
     });
     expect(updated).toMatchObject({
       record: { value: 'second', secret: true },

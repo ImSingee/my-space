@@ -33,7 +33,7 @@ describe('Platform REST KV client', () => {
       token: 'runner-token',
     });
     const inputs = [
-      { action: 'list' as const, limit: 10 },
+      { action: 'list' as const, limit: 10, revealSecrets: true },
       { action: 'get' as const, key: 'missing' },
       {
         action: 'set' as const,

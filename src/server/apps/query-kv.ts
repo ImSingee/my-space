@@ -1,8 +1,7 @@
 /**
  * Server-only: execute Agent KV operations against the platform database.
  * The Agent Runner reaches this through the bearer-authenticated internal API;
- * unlike the manage UI, this trusted surface intentionally returns secret
- * values in plaintext so the Agent can inspect and maintain app configuration.
+ * Secret values are masked unless the Agent explicitly requests plaintext.
  */
 import { db } from '~/db';
 import type {
@@ -11,12 +10,19 @@ import type {
   QueryAppKvResponse,
 } from '~agent/protocol';
 import { AppError } from '~server/errors';
-import { deleteKv, getKv, listKvPage, setKv } from './kv';
+import { deleteKv, getKv, listKvPage, setKv, type KvRecord } from './kv';
 
 /** Approximate model-context budget for one list response. */
 export const MAX_KV_QUERY_CHARS = 60000;
 /** Bound plaintext fetched ahead of the response budget to roughly 704 KiB. */
 const KV_QUERY_BATCH_SIZE = 10;
+
+function presentKvRecord(
+  record: KvRecord,
+  revealSecrets: boolean,
+): QueryAppKvRecord {
+  return record.secret && !revealSecrets ? { ...record, value: null } : record;
+}
 
 async function requireKvEnabledApp(id: string): Promise<void> {
   const app = await db.query.apps.findFirst({
@@ -35,6 +41,7 @@ async function listKvForAgent(
   id: string,
   cursor: string | undefined,
   limit: number,
+  revealSecrets: boolean,
 ): Promise<{ items: QueryAppKvRecord[]; nextCursor: string | null }> {
   const items: QueryAppKvRecord[] = [];
   let after = cursor;
@@ -48,7 +55,8 @@ async function listKvForAgent(
     hasMore = batch.hasMore;
 
     for (const record of batch.items) {
-      const candidate = [...items, record];
+      const presented = presentKvRecord(record, revealSecrets);
+      const candidate = [...items, presented];
       // Always return at least one complete record so a value larger than the
       // approximate context budget cannot make pagination stall forever.
       if (
@@ -57,7 +65,7 @@ async function listKvForAgent(
       ) {
         return { items, nextCursor: items.at(-1)?.key ?? null };
       }
-      items.push(record);
+      items.push(presented);
       after = record.key;
     }
   }
@@ -78,18 +86,30 @@ export async function queryAppKv(
     case 'list': {
       return {
         action: 'list',
-        ...(await listKvForAgent(id, input.cursor, input.limit)),
+        ...(await listKvForAgent(
+          id,
+          input.cursor,
+          input.limit,
+          input.revealSecrets,
+        )),
       };
     }
-    case 'get':
-      return { action: 'get', record: await getKv(id, input.key) };
-    case 'set':
+    case 'get': {
+      const record = await getKv(id, input.key);
+      return {
+        action: 'get',
+        record: record ? presentKvRecord(record, input.revealSecrets) : null,
+      };
+    }
+    case 'set': {
+      const record = await setKv(id, input.key, input.value, {
+        secret: input.secret,
+      });
       return {
         action: 'set',
-        record: await setKv(id, input.key, input.value, {
-          secret: input.secret,
-        }),
+        record: presentKvRecord(record, input.revealSecrets),
       };
+    }
     case 'delete':
       return { action: 'delete', ok: await deleteKv(id, input.key) };
   }

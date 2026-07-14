@@ -375,8 +375,9 @@ export function createAppTools(options: {
     label: 'Query app KV',
     description:
       "List, read, write, or permanently delete entries in a deployed app's " +
-      'KV store. Secret values are returned in plaintext and enter the model ' +
-      'context. The app must already have the kv capability enabled.',
+      'KV store. Secret values are masked by default; set reveal_secrets to ' +
+      'true only when their plaintext is needed in the model context. The app ' +
+      'must already have the kv capability enabled.',
     // Keep the root object-shaped: the Anthropic adapter forwards root
     // properties/required fields and would discard a root anyOf schema.
     parameters: Type.Object({
@@ -416,14 +417,24 @@ export function createAppTools(options: {
           description: 'List only: maximum entries. Defaults to 100.',
         }),
       ),
+      reveal_secrets: Type.Optional(
+        Type.Boolean({
+          description:
+            'List, get, and set only: return secret values in plaintext. ' +
+            'Defaults to false.',
+        }),
+      ),
     }),
     execute: async (_id, params, signal) => {
       requireIdSlug(params.id);
-      const { id, ...rawInput } = params;
+      const { id, reveal_secrets: revealSecrets, ...rawInput } = params;
       // The object-rooted provider schema exposes every field. Enforce the
       // action-specific required/allowed combinations before making the REST
       // request, using the same contract as the platform endpoint.
-      const input = queryAppKvRequestSchema.parse(rawInput);
+      const input = queryAppKvRequestSchema.parse({
+        ...rawInput,
+        ...(revealSecrets === undefined ? {} : { revealSecrets }),
+      });
       const cursor = input.action === 'list' ? input.cursor : undefined;
       const key = input.action === 'list' ? undefined : input.key;
       const res = await platform.queryAppKv(id, input, signal);
