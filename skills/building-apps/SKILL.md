@@ -133,12 +133,7 @@ Keep `manifest.json` consistent with the files. Example:
       "id": "summary",
       "name": "Todo summary",
       "entry": "widgets/summary.tsx",
-      "defaultSize": { "w": 4, "h": 3 },
-      "supportedSizes": [
-        { "w": 3, "h": 2 },
-        { "w": 4, "h": 3 },
-        { "w": 6, "h": 3 }
-      ]
+      "defaultSize": { "w": 4, "h": 3 }
     }
   ]
 }
@@ -151,10 +146,14 @@ platform can autocomplete app entry points. Each path starts with `/` and has a
 concise user-facing description; dynamic route templates use TanStack Router's
 `$param` syntax. The declaration is metadata only — TanStack Router remains the
 runtime source of truth.
-`defaultSize` is the footprint a widget opens at (grid units, 12-column system).
-`supportedSizes` is optional: list the discrete footprints your widget is
-designed for and the dashboard restricts resizing to them, snapping to the
-nearest on release (omit it to allow any size). Keep `defaultSize` in the list.
+
+Set `defaultSize` to the footprint a widget opens at in the 12-column grid;
+every declared `w` and `h` must be an integer from 1 through 12. Build widgets
+responsive by default: omit `supportedSizes` and adapt to `context.size` /
+`context.onResize`; the dashboard then allows free-form resizing with a `2×2`
+UI floor. Declare `supportedSizes` only when the widget deliberately implements
+and has been verified at every listed footprint. One entry locks resizing;
+multiple entries snap to the nearest size. Include `defaultSize` in the list.
 
 ## Proto
 
@@ -315,8 +314,8 @@ export function mount(
 
 Make widgets size-aware: use `context.size` / `context.onResize` to adapt the
 layout (e.g. hide labels when narrow, switch to a compact view at small pixel
-sizes). If you only support a few footprints, declare `supportedSizes` in the
-manifest (see above) so the dashboard snaps resizes to them. Register
+sizes). Default to free-form responsive sizing. Opt into `supportedSizes` only
+after implementing and verifying every declared layout. Register
 `context.onRefresh(...)` only when the widget supports refreshing. Registration
 declares that capability to the dashboard; without it, the widget has no refresh
 button and is skipped by dashboard-wide and automatic refreshes. Widgets can

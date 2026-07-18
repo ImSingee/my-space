@@ -19,6 +19,15 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('not runtime route registration');
   });
 
+  it('makes widgets responsive by default', () => {
+    const prompt = buildSystemPrompt();
+
+    expect(prompt).toMatch(
+      /Make widgets responsive by default\s+and omit `supportedSizes`/,
+    );
+    expect(prompt).toContain('verified discrete footprints');
+  });
+
   it('lists visible skill metadata without eagerly including its body', () => {
     const prompt = buildSystemPrompt([visibleSkill]);
 

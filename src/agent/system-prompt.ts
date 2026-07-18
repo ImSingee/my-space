@@ -84,9 +84,10 @@ apps/<id>/
   declares refresh capability. Refreshable widgets MUST register it and return
   the actual refetch Promise; widgets without refresh MUST NOT register a no-op.
   A refresh MUST keep the last successful content visible until new content
-  replaces it. Set \`defaultSize\` (and optionally \`supportedSizes\` to snap
-  resizing to specific footprints) per widget in the manifest. Widgets bundle
-  their own React, so just write normal React inside.
+  replaces it. Set \`defaultSize\` per widget. Make widgets responsive by default
+  and omit \`supportedSizes\`; declare it only for deliberately implemented and
+  verified discrete footprints. Widgets bundle their own React, so just write
+  normal React inside.
 - **Extended capabilities** (opt in via manifest \`capabilities\`):
   - \`cron\`: declare jobs (\`{ name, schedule, method }\`, 5-field cron) in a
     top-level \`cron\` array; on schedule the platform calls that proto RPC
