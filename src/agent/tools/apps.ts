@@ -1,5 +1,6 @@
 /**
- * App lifecycle tools: list, inspect, checkout, create, deploy, rollback, DB.
+ * App lifecycle tools: list, inspect, checkout, create, deploy, rollback,
+ * database, and KV.
  * All platform state flows through the injected PlatformClient (REST to the
  * platform's internal API); source trees live in runner-local worktrees fed
  * by git bundles.
@@ -15,6 +16,7 @@ import {
   withSourceWorkspaceLock,
 } from '../local-sources';
 import type { PlatformClient } from '../platform-client';
+import { queryAppKvRequestSchema } from '../protocol';
 import { writeScaffoldFiles } from '../scaffold-files';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
@@ -368,6 +370,109 @@ export function createAppTools(options: {
     },
   });
 
+  const queryAppKv = tool({
+    name: 'query_app_kv',
+    label: 'Query app KV',
+    description:
+      "List, read, write, or permanently delete entries in a deployed app's " +
+      'KV store. Secret values are masked by default. For list and get, set ' +
+      'reveal_secrets to true only when their plaintext is needed in the model ' +
+      'context. The app must already have the kv capability enabled.',
+    // Keep the root object-shaped: the Anthropic adapter forwards root
+    // properties/required fields and would discard a root anyOf schema.
+    parameters: Type.Object({
+      id: Type.String({ description: 'App id or slug.' }),
+      action: Type.Union([
+        Type.Literal('list'),
+        Type.Literal('get'),
+        Type.Literal('set'),
+        Type.Literal('delete'),
+      ]),
+      key: Type.Optional(
+        Type.String({
+          description: 'Required for get, set, and delete.',
+        }),
+      ),
+      value: Type.Optional(
+        Type.String({
+          description: 'Plaintext string value. Required for set.',
+        }),
+      ),
+      secret: Type.Optional(
+        Type.Boolean({
+          description:
+            'Set only: secret flag. Omit to preserve it on update; new keys ' +
+            'default to false.',
+        }),
+      ),
+      cursor: Type.Optional(
+        Type.String({
+          description: 'List only: cursor returned by the previous call.',
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 100,
+          description: 'List only: maximum entries. Defaults to 100.',
+        }),
+      ),
+      reveal_secrets: Type.Optional(
+        Type.Boolean({
+          description:
+            'List and get only: return secret values in plaintext. Defaults ' +
+            'to false.',
+        }),
+      ),
+    }),
+    execute: async (_id, params, signal) => {
+      requireIdSlug(params.id);
+      const { id, reveal_secrets: revealSecrets, ...rawInput } = params;
+      // The object-rooted provider schema exposes every field. Enforce the
+      // action-specific required/allowed combinations before making the REST
+      // request, using the same contract as the platform endpoint.
+      const input = queryAppKvRequestSchema.parse({
+        ...rawInput,
+        ...(revealSecrets === undefined ? {} : { revealSecrets }),
+      });
+      const cursor = input.action === 'list' ? input.cursor : undefined;
+      const key = input.action === 'list' ? undefined : input.key;
+      const res = await platform.queryAppKv(id, input, signal);
+      switch (res.action) {
+        case 'list': {
+          if (res.items.length === 0) {
+            return text(
+              cursor
+                ? `No KV entries found after cursor ${JSON.stringify(cursor)}.`
+                : `App "${id}" has no KV entries.`,
+              res,
+            );
+          }
+          const continuation = res.nextCursor
+            ? `\nContinue with cursor: ${JSON.stringify(res.nextCursor)}`
+            : '';
+          return text(
+            `${JSON.stringify(res.items, null, 2)}${continuation}`,
+            res,
+          );
+        }
+        case 'get':
+          return res.record
+            ? text(JSON.stringify(res.record, null, 2), res)
+            : text(`KV key ${JSON.stringify(key)} is not set.`, res);
+        case 'set':
+          return text(JSON.stringify(res.record, null, 2), res);
+        case 'delete':
+          return text(
+            res.ok
+              ? `Deleted KV key ${JSON.stringify(key)} permanently.`
+              : `KV key ${JSON.stringify(key)} was not set.`,
+            res,
+          );
+      }
+    },
+  });
+
   return [
     listAppsTool,
     getAppTool,
@@ -376,5 +481,6 @@ export function createAppTools(options: {
     deployAppTool,
     rollbackAppTool,
     queryAppDb,
+    queryAppKv,
   ];
 }

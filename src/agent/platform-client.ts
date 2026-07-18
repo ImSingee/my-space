@@ -14,7 +14,12 @@ import type {
   WorkflowDetailForAgent,
   WorkflowSummaryForAgent,
 } from '~server/workflows/inspect';
-import type { ScaffoldFile, SourceBundleResponse } from './protocol';
+import type {
+  QueryAppKvRequest,
+  QueryAppKvResponse,
+  ScaffoldFile,
+  SourceBundleResponse,
+} from './protocol';
 
 export type CreateAppResult = {
   id: string;
@@ -88,6 +93,11 @@ export type PlatformClient = {
     sql: string,
     signal?: AbortSignal,
   ): Promise<QueryAppDbResponse>;
+  queryAppKv(
+    handle: string,
+    input: QueryAppKvRequest,
+    signal?: AbortSignal,
+  ): Promise<QueryAppKvResponse>;
 
   listWorkflows(): Promise<WorkflowSummaryForAgent[]>;
   getWorkflow(id: string): Promise<WorkflowDetailForAgent | null>;

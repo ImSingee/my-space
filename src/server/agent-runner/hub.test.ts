@@ -52,12 +52,15 @@ class FakeSocket extends EventEmitter {
   OPEN = 1;
   readyState = 1;
   sent: Record<string, unknown>[] = [];
+  closed: { code: number | undefined; reason: string | undefined } | null =
+    null;
 
   send(data: string) {
     this.sent.push(JSON.parse(data));
   }
 
-  close() {
+  close(code?: number, reason?: string) {
+    this.closed = { code, reason };
     this.readyState = 3;
   }
 
@@ -115,6 +118,31 @@ afterEach(() => {
 });
 
 describe('runner connection snapshot', () => {
+  it('rejects an older runner before it can use incompatible REST tools', async () => {
+    const socket = new FakeSocket();
+    handleRunnerSocket(socket.asWebSocket());
+    socket.emit(
+      'message',
+      JSON.stringify({
+        type: 'runner.hello',
+        runnerId: 'old-runner',
+        protocolVersion: PROTOCOL_VERSION - 1,
+        activeRunIds: [],
+        workspaceSessionIds: [],
+        workspaceSources: [],
+      }),
+    );
+
+    await vi.waitFor(() =>
+      expect(socket.closed).toEqual({
+        code: 1008,
+        reason: `Unsupported protocol version ${PROTOCOL_VERSION - 1}.`,
+      }),
+    );
+    expect(connectedRunnerCount()).toBe(0);
+    expect(agentWorkspaces.reconcileRunnerWorkspaces).not.toHaveBeenCalled();
+  });
+
   it('lists a registered runner with its hello metadata', async () => {
     await connectRunner('runner-a');
 

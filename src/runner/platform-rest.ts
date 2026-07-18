@@ -11,7 +11,7 @@ import type {
   QueryAppDbResponse,
   WorkflowDeployResponse,
 } from '~agent/platform-client';
-import type { SourceBundleResponse } from '~agent/protocol';
+import type { QueryAppKvResponse, SourceBundleResponse } from '~agent/protocol';
 
 export function createPlatformRestClient(opts: {
   baseUrl: string;
@@ -111,6 +111,14 @@ export function createPlatformRestClient(opts: {
         'POST',
         `/internal/api/apps/${enc(handle)}/query-db`,
         { sql },
+        false,
+        signal,
+      ),
+    queryAppKv: (handle, input, signal) =>
+      call<QueryAppKvResponse>(
+        'POST',
+        `/internal/api/apps/${enc(handle)}/query-kv`,
+        input,
         false,
         signal,
       ),
