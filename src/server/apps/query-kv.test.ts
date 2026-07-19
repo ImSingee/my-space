@@ -22,7 +22,6 @@ const KV_CAPABILITIES = {
   backend: true,
   cron: false,
   webhook: false,
-  storage: false,
   kv: true,
   userscripts: false,
 };

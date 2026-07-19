@@ -288,7 +288,7 @@ function AppView() {
             </Text>
             <Text size="sm" c="dimmed" ta="center">
               {app.status === 'deployed'
-                ? 'This app has no frontend — it runs a backend (cron, webhook, or storage). Open Manage to inspect its capabilities.'
+                ? 'This app has no frontend — it runs a backend (cron or webhook). Open Manage to inspect its capabilities.'
                 : 'Deploy this app to use it here. You can build and deploy it from the Manage page.'}
             </Text>
             <Button

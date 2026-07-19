@@ -61,6 +61,44 @@ describe('backend manifest', () => {
   });
 });
 
+describe('app capabilities manifest', () => {
+  const manifest = (capabilities: Record<string, unknown>) => ({
+    id: 'demo',
+    name: 'Demo',
+    capabilities,
+  });
+
+  it('accepts known capabilities and applies their defaults', () => {
+    const parsed = parseSourceManifest(manifest({ backend: true }));
+
+    expect(parsed.capabilities).toMatchObject({
+      backend: true,
+      frontend: false,
+      kv: false,
+    });
+  });
+
+  it('accepts and strips the retired storage: false field', () => {
+    const parsed = parseSourceManifest(
+      manifest({ backend: true, storage: false }),
+    );
+    const normalized = normalizeManifest(parsed);
+
+    expect(parsed.capabilities).not.toHaveProperty('storage');
+    expect(normalized.capabilities).not.toHaveProperty('storage');
+    expect(normalized).not.toHaveProperty('storage');
+  });
+
+  it('rejects storage: true and other unknown fields', () => {
+    expect(() =>
+      parseSourceManifest(manifest({ backend: true, storage: true })),
+    ).toThrow(/storage/);
+    expect(() =>
+      parseSourceManifest(manifest({ backend: true, madeUp: true })),
+    ).toThrow(/madeUp/);
+  });
+});
+
 describe('app route manifest', () => {
   const parseRoutes = (routes?: unknown[]) =>
     normalizeManifest(

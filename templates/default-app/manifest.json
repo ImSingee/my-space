@@ -10,7 +10,6 @@
     "backend": true,
     "cron": false,
     "webhook": false,
-    "storage": false,
     "kv": false,
     "dataTable": true,
     "userscripts": false
