@@ -6,6 +6,7 @@ import type {
   AskAnswer,
   AskQuestion,
 } from '~agent/events';
+import type { JsonValue } from '~/db/schema';
 
 export type StreamTool = {
   id: string;
@@ -17,6 +18,8 @@ export type StreamTool = {
   isError?: boolean;
   /** Live (while running) or final (on completion) tool output text. */
   output?: string;
+  /** Structured final result details sent by the runtime. */
+  details?: JsonValue;
 };
 
 export type PendingAsk = {
@@ -159,6 +162,7 @@ export function reduceStreamState(
           done: true,
           isError: event.isError,
           output: event.output || tool.output,
+          details: event.details,
         })),
       };
     case 'error':

@@ -39,6 +39,8 @@ export type ChatMessage =
       role: 'toolResult';
       toolName: string;
       content: ContentPart[];
+      /** Structured result data persisted by pi tools. */
+      details?: unknown;
       isError?: boolean;
     };
 

@@ -48,6 +48,8 @@ export type AgentStreamEvent =
       isError: boolean;
       /** Final tool output text, streamed as soon as the tool finishes. */
       output?: string;
+      /** Tool-declared, size-bounded structured data needed by the live UI. */
+      details?: JsonValue;
       summary?: string;
     }
   | { type: 'turn_end' }

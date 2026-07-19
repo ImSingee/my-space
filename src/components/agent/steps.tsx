@@ -8,11 +8,23 @@ import {
   IconSparkles,
 } from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef } from 'react';
+import { isEditFileDetails } from '~agent/edit-file-details';
+import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
 import { toolDetail, toolLabel } from './types';
 import classes from './chat.module.css';
 
 export type ToolStatus = 'running' | 'done' | 'error';
+
+type ToolResult = { text: string; details?: unknown; isError?: boolean };
+
+function successfulEditDiff(name: string, result?: ToolResult) {
+  return name === 'edit_file' &&
+    result?.isError !== true &&
+    isEditFileDetails(result?.details)
+    ? result.details.diff
+    : undefined;
+}
 
 /**
  * One quiet line in the agent's activity timeline. Used for thinking and tool
@@ -87,9 +99,10 @@ export function ToolStep({
   name: string;
   detail?: string;
   status: ToolStatus;
-  result?: { text: string; isError?: boolean };
+  result?: ToolResult;
 }) {
   const isError = status === 'error' || result?.isError === true;
+  const editDiff = successfulEditDiff(name, result);
   const icon =
     status === 'running' ? (
       <Loader size={11} color="gray" />
@@ -107,9 +120,13 @@ export function ToolStep({
     >
       {result ? (
         <Box className={classes.stepBody}>
-          <Box className={classes.stepBodyCode}>
-            {result.text || '(no output)'}
-          </Box>
+          {editDiff ? (
+            <EditDiff diff={editDiff} />
+          ) : (
+            <Box className={classes.stepBodyCode}>
+              {result.text || '(no output)'}
+            </Box>
+          )}
         </Box>
       ) : null}
     </StepRow>
@@ -194,9 +211,14 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const running = !tool.done;
   const isError = tool.isError === true;
-  const hasOutput = Boolean(tool.output);
-  const showBody = running ? hasOutput : open && hasOutput;
-  const expandable = !running && hasOutput;
+  const editDiff = successfulEditDiff(tool.name, {
+    text: tool.output ?? '',
+    details: tool.details,
+    isError: tool.isError,
+  });
+  const hasBody = Boolean(tool.output || editDiff);
+  const showBody = running ? hasBody : open && hasBody;
+  const expandable = !running && hasBody;
 
   useEffect(() => {
     if (running && bodyRef.current) {
@@ -243,9 +265,13 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       )}
       {showBody ? (
         <Box className={classes.stepBody}>
-          <Box ref={bodyRef} className={classes.stepBodyCode}>
-            {tool.output}
-          </Box>
+          {editDiff ? (
+            <EditDiff diff={editDiff} />
+          ) : (
+            <Box ref={bodyRef} className={classes.stepBodyCode}>
+              {tool.output}
+            </Box>
+          )}
         </Box>
       ) : null}
     </Box>

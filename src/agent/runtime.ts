@@ -3,6 +3,7 @@
  * the Agent Runner process: all platform state flows through the injected
  * PlatformClient, never through direct server imports.
  */
+import { Buffer } from 'node:buffer';
 import { mkdirSync } from 'node:fs';
 import {
   AgentHarness,
@@ -21,9 +22,12 @@ import { agentShellEnv } from './shell-env';
 import { loadAgentSkills } from './skills';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge } from './tools';
+import type { StreamDetailsSelector } from './tools/shared';
 
 /** Keep streamed tool output small; the full result is persisted on `done`. */
 const MAX_STREAM_OUTPUT = 4000;
+/** Hard cap for tool-declared details crossing WS, DB event JSON, and SSE. */
+const MAX_STREAM_DETAILS_BYTES = 32 * 1024;
 
 function clip(text: string): string {
   return text.length > MAX_STREAM_OUTPUT
@@ -50,6 +54,46 @@ function extractToolText(value: unknown): string {
       .join('');
   }
   return '';
+}
+
+/** Keep only details that can safely cross WebSocket, DB JSON, and SSE. */
+function isJsonValue(
+  value: unknown,
+  ancestors = new Set<object>(),
+): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return true;
+  }
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object') return false;
+  if (ancestors.has(value)) return false;
+  ancestors.add(value);
+  const valid = Array.isArray(value)
+    ? value.every((item) => isJsonValue(item, ancestors))
+    : Object.values(value).every((item) => isJsonValue(item, ancestors));
+  ancestors.delete(value);
+  return valid;
+}
+
+function extractToolDetails(
+  value: unknown,
+  selectDetails: StreamDetailsSelector | undefined,
+): JsonValue | undefined {
+  if (!selectDetails || !value || typeof value !== 'object') return undefined;
+  try {
+    const details = selectDetails((value as { details?: unknown }).details);
+    if (!isJsonValue(details)) return undefined;
+    const serialized = JSON.stringify(details);
+    return Buffer.byteLength(serialized, 'utf8') <= MAX_STREAM_DETAILS_BYTES
+      ? details
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export type RunAgentTurnOptions = {
@@ -106,6 +150,12 @@ export async function runAgentTurn(
   // tool_start lets the client show it without maintaining a second copy of
   // every tool name (which drifted out of date and showed raw snake_case).
   const labelByName = new Map(tools.map((tool) => [tool.name, tool.label]));
+  const streamDetailsByName = new Map<string, StreamDetailsSelector>();
+  for (const tool of tools) {
+    if (tool.selectStreamDetails) {
+      streamDetailsByName.set(tool.name, tool.selectStreamDetails);
+    }
+  }
 
   const harness = new AgentHarness({
     env,
@@ -191,12 +241,17 @@ export async function runAgentTurn(
         break;
       }
       case 'tool_execution_end': {
+        const details = extractToolDetails(
+          event.result,
+          event.isError ? undefined : streamDetailsByName.get(event.toolName),
+        );
         emit({
           type: 'tool_end',
           id: event.toolCallId,
           name: event.toolName,
           isError: event.isError,
           output: clip(extractToolText(event.result)),
+          ...(details === undefined ? {} : { details }),
         });
         break;
       }

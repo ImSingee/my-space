@@ -2,6 +2,14 @@
 import { type Static, type TSchema } from '@earendil-works/pi-ai';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 
+export type StreamDetailsSelector = (details: unknown) => unknown;
+
+/** Local tool metadata consumed by the live Agent event bridge. */
+export type AgentToolWithStreamDetails = AgentTool & {
+  /** Select and validate structured details that the frontend needs live. */
+  selectStreamDetails?: StreamDetailsSelector;
+};
+
 /** Define a tool while keeping `execute` params typed from its schema. */
 export function tool<S extends TSchema>(def: {
   name: string;
@@ -9,6 +17,7 @@ export function tool<S extends TSchema>(def: {
   description: string;
   parameters: S;
   executionMode?: AgentTool['executionMode'];
+  selectStreamDetails?: StreamDetailsSelector;
   execute: (
     id: string,
     params: Static<S>,
@@ -16,8 +25,8 @@ export function tool<S extends TSchema>(def: {
     /** Stream partial output while the tool is still running. */
     onUpdate?: (partial: unknown) => void,
   ) => Promise<AgentToolResult<unknown>>;
-}): AgentTool {
-  return def as unknown as AgentTool;
+}): AgentToolWithStreamDetails {
+  return def as unknown as AgentToolWithStreamDetails;
 }
 
 export function text(content: string, details: unknown = {}) {
