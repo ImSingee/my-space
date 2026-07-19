@@ -3,13 +3,14 @@
  * platform's internal API (via the injected PlatformClient). Runs inside the
  * Agent Runner process — never import `~server/*` values here.
  */
-import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
+import type { ExecutionEnv } from '@earendil-works/pi-agent-core';
 import type { PlatformClient } from '../platform-client';
 import { createAppTools } from './apps';
 import { createAttachmentTool } from './attachments';
 import { createAskTool, type AskBridge } from './ask';
 import { createCommandTool } from './command';
 import { createFileTools } from './files';
+import type { AgentToolWithStreamDetails } from './shared';
 import { createWorkflowTools } from './workflows';
 
 export type { AskBridge };
@@ -24,7 +25,7 @@ export type CreateToolsOptions = {
 export function createTools(
   env: ExecutionEnv,
   options: CreateToolsOptions,
-): AgentTool[] {
+): AgentToolWithStreamDetails[] {
   const shared = {
     platform: options.platform,
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),

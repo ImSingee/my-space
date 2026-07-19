@@ -196,6 +196,43 @@ button.stepHeader:hover {
   font-family: var(--mantine-font-family-monospace);
 }
 
+.editDiff {
+  max-width: 100%;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.6;
+}
+
+.editDiffLine {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.editDiffContext {
+  composes: editDiffLine;
+  color: var(--mantine-color-dimmed);
+}
+
+.editDiffAdded {
+  composes: editDiffLine;
+  color: var(--mantine-color-green-light-color);
+  background: color-mix(in srgb, var(--mantine-color-green-6) 12%, transparent);
+}
+
+.editDiffRemoved {
+  composes: editDiffLine;
+  color: var(--mantine-color-red-light-color);
+  background: color-mix(in srgb, var(--mantine-color-red-6) 12%, transparent);
+}
+
 /* Markdown rendering for assistant messages: tighten the default
    TypographyStylesProvider spacing so chat bubbles stay compact. */
 .markdown {

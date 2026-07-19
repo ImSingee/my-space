@@ -120,6 +120,50 @@ describe('reduceStreamState', () => {
     ]);
   });
 
+  it('retains structured details when an edit tool finishes', () => {
+    let state = reduceStreamState(baseState(), {
+      type: 'tool_start',
+      id: 'edit_1',
+      name: 'edit_file',
+      args: { path: 'src/app.ts' },
+    });
+    state = reduceStreamState(state, {
+      type: 'tool_end',
+      id: 'edit_1',
+      name: 'edit_file',
+      isError: false,
+      output: 'Edited src/app.ts: replaced 1 occurrence(s).',
+      details: {
+        path: 'src/app.ts',
+        replacements: 1,
+        diff: '-1 old\n+1 new',
+        patch: '--- src/app.ts\n+++ src/app.ts',
+        firstChangedLine: 1,
+      },
+    });
+
+    expect(state.blocks).toEqual([
+      {
+        kind: 'tool',
+        tool: {
+          id: 'edit_1',
+          name: 'edit_file',
+          args: { path: 'src/app.ts' },
+          done: true,
+          isError: false,
+          output: 'Edited src/app.ts: replaced 1 occurrence(s).',
+          details: {
+            path: 'src/app.ts',
+            replacements: 1,
+            diff: '-1 old\n+1 new',
+            patch: '--- src/app.ts\n+++ src/app.ts',
+            firstChangedLine: 1,
+          },
+        },
+      },
+    ]);
+  });
+
   it('keeps partial blocks and run identity when the stream fails', () => {
     const state = reduceStreamState(baseState(), {
       type: 'text',

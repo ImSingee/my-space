@@ -222,7 +222,11 @@ function AssistantBlocks({
           status="done"
           result={
             result
-              ? { text: partsToText(result.content), isError: result.isError }
+              ? {
+                  text: partsToText(result.content),
+                  details: result.details,
+                  isError: result.isError,
+                }
               : undefined
           }
         />,
@@ -314,6 +318,7 @@ export function MessageView({
           status={message.isError ? 'error' : 'done'}
           result={{
             text: partsToText(message.content),
+            details: message.details,
             isError: message.isError,
           }}
         />

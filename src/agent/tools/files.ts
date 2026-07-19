@@ -2,6 +2,8 @@
 import path from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
+import { isEditFileDetails } from '../edit-file-details';
+import { generateEditFileDetails } from './edit-diff';
 import { MAX_FILE_CHARS, text, tool, unwrap } from './shared';
 
 function isInsidePath(root: string, target: string): boolean {
@@ -276,6 +278,8 @@ export function createFileTools(
       'Edit an existing UTF-8 text file by replacing an exact string. ' +
       'Read the file first so old_string can be copied exactly.',
     executionMode: 'sequential',
+    selectStreamDetails: (details) =>
+      isEditFileDetails(details) ? details : undefined,
     parameters: Type.Object({
       path: Type.String({ description: 'File path to edit.' }),
       old_string: Type.String({
@@ -301,12 +305,15 @@ export function createFileTools(
         params.replace_all ?? false,
       );
       unwrap(await env.writeFile(resolved.canonicalPath, updated, signal));
+      const details = generateEditFileDetails({
+        path: resolved.workspacePath,
+        replacements: count,
+        oldContent: content,
+        newContent: updated,
+      });
       return text(
         `Edited ${resolved.workspacePath}: replaced ${count} occurrence(s).`,
-        {
-          path: resolved.workspacePath,
-          replacements: count,
-        },
+        details,
       );
     },
   });

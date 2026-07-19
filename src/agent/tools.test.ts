@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { Buffer } from 'node:buffer';
 import {
   mkdtemp,
   mkdir,
@@ -11,7 +12,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { EditFileDetails } from './edit-file-details';
 import type { PlatformClient } from './platform-client';
+import {
+  DIFF_TRUNCATION_LINE,
+  MAX_EDIT_DETAILS_BYTES,
+  MAX_EDIT_DIFF_INPUT_LINES,
+} from './tools/edit-diff';
 import { createTools } from './tools';
 
 /** These tests only exercise file tools; platform calls must never happen. */
@@ -77,6 +84,10 @@ function textOf(result: { content: { type: string; text?: string }[] }) {
     .join('');
 }
 
+function editDetailsOf(result: { details?: unknown }): EditFileDetails {
+  return result.details as EditFileDetails;
+}
+
 describe('agent file tools', () => {
   it('edits a file with an exact replacement', async () => {
     const { root, getTool } = await setup({
@@ -93,6 +104,15 @@ describe('agent file tools', () => {
       'const greeting = "hi";\n',
     );
     expect(textOf(result)).toContain('replaced 1 occurrence');
+    expect(editDetailsOf(result)).toMatchObject({
+      path: 'src/app.ts',
+      replacements: 1,
+      diff: '-1 const greeting = "hello";\n+1 const greeting = "hi";',
+      firstChangedLine: 1,
+    });
+    expect(editDetailsOf(result).patch).toContain(
+      '--- src/app.ts\n+++ src/app.ts\n@@ -1,1 +1,1 @@\n-const greeting = "hello";\n+const greeting = "hi";',
+    );
   });
 
   it('allows edit_file after write_file creates a file', async () => {
@@ -139,7 +159,7 @@ describe('agent file tools', () => {
       }),
     ).rejects.toThrow(/matched 2 times/);
 
-    await getTool('edit_file').execute('edit', {
+    const result = await getTool('edit_file').execute('edit', {
       path: 'app.ts',
       old_string: 'foo',
       new_string: 'bar',
@@ -149,6 +169,81 @@ describe('agent file tools', () => {
     await expect(readFile(path.join(root, 'app.ts'), 'utf8')).resolves.toBe(
       'bar bar\n',
     );
+    expect(editDetailsOf(result)).toMatchObject({
+      path: 'app.ts',
+      replacements: 2,
+      diff: '-1 foo foo\n+1 bar bar',
+      firstChangedLine: 1,
+    });
+  });
+
+  it('preserves CRLF file contents while returning LF-normalized diffs', async () => {
+    const { root, getTool } = await setup({
+      'app.ts': 'const one = 1;\r\nconst two = 2;\r\n',
+    });
+
+    const result = await getTool('edit_file').execute('edit', {
+      path: 'app.ts',
+      old_string: 'two = 2',
+      new_string: 'two = 3',
+    });
+
+    await expect(readFile(path.join(root, 'app.ts'), 'utf8')).resolves.toBe(
+      'const one = 1;\r\nconst two = 3;\r\n',
+    );
+    expect(editDetailsOf(result).diff).toBe(
+      ' 1 const one = 1;\n-2 const two = 2;\n+2 const two = 3;',
+    );
+    expect(editDetailsOf(result).patch).not.toContain('\r');
+  });
+
+  it('bounds details for a large single-line edit', async () => {
+    const original = `TOKEN${'🙂\\'.repeat(20_000)}`;
+    const { root, getTool } = await setup({ 'large.js': original });
+
+    const result = await getTool('edit_file').execute('edit', {
+      path: 'large.js',
+      old_string: 'TOKEN',
+      new_string: 'DONE',
+    });
+    const details = editDetailsOf(result);
+
+    await expect(readFile(path.join(root, 'large.js'), 'utf8')).resolves.toBe(
+      original.replace('TOKEN', 'DONE'),
+    );
+    expect(
+      Buffer.byteLength(JSON.stringify(details), 'utf8'),
+    ).toBeLessThanOrEqual(MAX_EDIT_DETAILS_BYTES);
+    expect(details).toMatchObject({
+      diffTruncated: true,
+      patchOmitted: true,
+    });
+    expect(details.patch).toBeUndefined();
+  });
+
+  it('bounds diff computation for a large multi-line replace_all', async () => {
+    const lineCount = MAX_EDIT_DIFF_INPUT_LINES / 2;
+    const original = 'TOKEN\n'.repeat(lineCount);
+    const { root, getTool } = await setup({ 'large.txt': original });
+
+    const result = await getTool('edit_file').execute('edit', {
+      path: 'large.txt',
+      old_string: 'TOKEN',
+      new_string: 'DONE',
+      replace_all: true,
+    });
+    const details = editDetailsOf(result);
+
+    await expect(readFile(path.join(root, 'large.txt'), 'utf8')).resolves.toBe(
+      'DONE\n'.repeat(lineCount),
+    );
+    expect(details).toEqual({
+      path: 'large.txt',
+      replacements: lineCount,
+      diff: DIFF_TRUNCATION_LINE,
+      diffTruncated: true,
+      patchOmitted: true,
+    });
   });
 
   it('allows symlinked files that resolve inside the workspace', async () => {

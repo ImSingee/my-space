@@ -9,7 +9,9 @@ import {
 import { expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { MessageView } from './message-view';
+import { StreamingToolStep } from './steps';
 import type { AppListItem } from '~server/apps';
+import type { EditFileDetails } from '~agent/edit-file-details';
 import type { ChatMessage, ToolResultMessage, ToolCallBlock } from './types';
 
 type RenderOptions = {
@@ -106,6 +108,15 @@ function deployResult(isError = false): ToolResultMessage {
     isError,
   };
 }
+
+const editDetails: EditFileDetails = {
+  path: 'src/app.ts',
+  replacements: 1,
+  diff: ' 1 const value = true;\n-2 const oldName = 1;\n+2 const newName = 1;\n   \\ No newline at end of file',
+  patch:
+    '--- src/app.ts\n+++ src/app.ts\n@@ -1,2 +1,2 @@\n const value = true;\n-const oldName = 1;\n+const newName = 1;',
+  firstChangedLine: 2,
+};
 
 test('shows a persisted model error even when the reply has no content', async () => {
   const screen = await renderMessage({
@@ -295,6 +306,115 @@ test('wraps long and multiline provider errors inside a narrow message', async (
   expect(getComputedStyle(detailElement).whiteSpace).toBe('pre-wrap');
   expect(getComputedStyle(detailElement).overflowWrap).toBe('anywhere');
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('renders a persisted edit result as a colored diff', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'edit-app',
+          name: 'edit_file',
+          arguments: { path: 'src/app.ts' },
+        },
+      ],
+    },
+    {
+      width: 320,
+      toolResults: new Map([
+        [
+          'edit-app',
+          {
+            role: 'toolResult',
+            toolName: 'edit_file',
+            content: [
+              {
+                type: 'text',
+                text: 'Edited src/app.ts: replaced 1 occurrence(s).',
+              },
+            ],
+            details: editDetails,
+          },
+        ],
+      ]),
+    },
+  );
+
+  await screen.getByRole('button', { name: /Edit file/ }).click();
+  await expect
+    .element(screen.getByRole('region', { name: 'File changes' }))
+    .toBeVisible();
+  const removed = screen.getByText('-2 const oldName = 1;');
+  const added = screen.getByText('+2 const newName = 1;');
+  await expect.element(removed).toBeVisible();
+  await expect.element(added).toBeVisible();
+  await expect
+    .element(screen.getByText('\\ No newline at end of file'))
+    .toBeVisible();
+  expect(getComputedStyle(removed.element()).backgroundColor).not.toBe(
+    getComputedStyle(added.element()).backgroundColor,
+  );
+  expect(document.body.textContent).not.toContain(
+    'Edited src/app.ts: replaced 1 occurrence(s).',
+  );
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('renders a completed live edit result with the same diff view', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'edit-live',
+          name: 'edit_file',
+          args: { path: 'src/app.ts' },
+          done: true,
+          output: 'Edited src/app.ts: replaced 1 occurrence(s).',
+          details: editDetails,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  await screen.getByRole('button', { name: /Edit file/ }).click();
+  await expect
+    .element(screen.getByRole('region', { name: 'File changes' }))
+    .toBeVisible();
+  await expect.element(screen.getByText('+2 const newName = 1;')).toBeVisible();
+});
+
+test('falls back to result text for legacy and failed edit results', async () => {
+  const legacy = await renderMessage({
+    role: 'toolResult',
+    toolName: 'edit_file',
+    content: [{ type: 'text', text: 'Legacy edit completed.' }],
+  });
+  await legacy.getByRole('button', { name: /Edit file/ }).click();
+  await expect
+    .element(legacy.getByText('Legacy edit completed.'))
+    .toBeVisible();
+  expect(
+    legacy.getByRole('region', { name: 'File changes' }).query(),
+  ).toBeNull();
+  await legacy.unmount();
+
+  const failed = await renderMessage({
+    role: 'toolResult',
+    toolName: 'edit_file',
+    content: [{ type: 'text', text: 'old_string was not found.' }],
+    details: editDetails,
+    isError: true,
+  });
+  await failed.getByRole('button', { name: /Edit file/ }).click();
+  await expect
+    .element(failed.getByText('old_string was not found.'))
+    .toBeVisible();
+  expect(
+    failed.getByRole('region', { name: 'File changes' }).query(),
+  ).toBeNull();
 });
 
 test('renders one successful frontend deploy with Open and a Manage menu', async () => {
