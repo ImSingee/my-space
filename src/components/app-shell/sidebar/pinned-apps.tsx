@@ -115,18 +115,20 @@ export function PinnedApps() {
     onSettled: () => void invalidate(),
   });
 
+  if (!pins?.length) return null;
+
   // Only deployed apps with a frontend can be opened from the sidebar.
   const openable = (apps ?? []).filter(
     (s) => s.status === 'deployed' && Boolean(s.capabilities?.frontend),
   );
-  const pinnedIds = new Set((pins ?? []).map((p) => p.appId));
+  const pinnedIds = new Set(pins.map((p) => p.appId));
   const unpinnedApps = openable.filter((s) => !pinnedIds.has(s.id));
   const pinnedApps = openable.filter((s) => pinnedIds.has(s.id));
 
   // How many pins each app has, so a pin only needs hash-aware highlighting
   // when its app is pinned more than once (single pins stay active app-wide).
   const pinCountByApp = new Map<string, number>();
-  for (const p of pins ?? []) {
+  for (const p of pins) {
     pinCountByApp.set(p.appId, (pinCountByApp.get(p.appId) ?? 0) + 1);
   }
   const isPinActive = (pin: { appId: string; entryHash: string | null }) => {
@@ -150,11 +152,9 @@ export function PinnedApps() {
     void navigate({ to: '/agent' });
   };
 
-  const alwaysVisible = (pins?.length ?? 0) === 0;
-
   const addControl =
     openable.length > 0 ? (
-      <AddMenuButton label="Add app" alwaysVisible={alwaysVisible}>
+      <AddMenuButton label="Add app" alwaysVisible={false}>
         {unpinnedApps.length > 0 ? (
           <>
             <Menu.Label>Pin a deployed app</Menu.Label>
@@ -200,7 +200,7 @@ export function PinnedApps() {
     ) : (
       <AddActionButton
         label="Create an app with the Agent"
-        alwaysVisible={alwaysVisible}
+        alwaysVisible={false}
         onClick={goCreateApp}
       />
     );
@@ -215,7 +215,7 @@ export function PinnedApps() {
       />
       <Stack gap={2} px="xs">
         <SortableList
-          items={pins ?? []}
+          items={pins}
           onReorder={(ids) => reorder.mutate(ids)}
           renderItem={(pin) => (
             <PinnedRow

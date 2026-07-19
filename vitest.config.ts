@@ -66,6 +66,12 @@ export default defineConfig({
         resolve: {
           tsconfigPaths: true,
         },
+        // Browser tests mock server functions; prebundling React Start would
+        // still traverse server-only virtual imports that only the app plugin
+        // provides, so leave those modules to Vite's normal transform pipeline.
+        optimizeDeps: {
+          exclude: ['@tanstack/react-start', '@tanstack/react-start/server'],
+        },
         plugins: [defaultCounterTemplateFixture(), viteReact()],
         test: {
           name: 'browser',
@@ -74,7 +80,7 @@ export default defineConfig({
           include: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
           deps: {
             optimizer: {
-              web: {
+              client: {
                 enabled: false,
               },
             },
