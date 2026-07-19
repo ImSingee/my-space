@@ -36,6 +36,9 @@ export function PinnedWorkflows() {
 
   const all = workflows ?? [];
   const pinned = all.filter((w) => w.pinned);
+
+  if (pinned.length === 0) return null;
+
   const candidates = all.filter((w) => !w.pinned);
 
   const goCreate = () => {
@@ -45,7 +48,7 @@ export function PinnedWorkflows() {
 
   const addControl =
     candidates.length > 0 ? (
-      <AddMenuButton label="Add workflow" alwaysVisible={pinned.length === 0}>
+      <AddMenuButton label="Add workflow" alwaysVisible={false}>
         <Menu.Label>Pin a workflow</Menu.Label>
         {candidates.map((w) => (
           <Menu.Item
@@ -70,7 +73,7 @@ export function PinnedWorkflows() {
     ) : (
       <AddActionButton
         label="Create a workflow with the Agent"
-        alwaysVisible={pinned.length === 0}
+        alwaysVisible={false}
         onClick={goCreate}
       />
     );
