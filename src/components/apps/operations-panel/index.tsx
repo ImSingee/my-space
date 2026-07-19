@@ -13,7 +13,6 @@ import type { AppOps } from '~server/apps';
 import { CronSection } from './cron-section';
 import { KvSection } from './kv-section';
 import { SectionHeader } from './section-header';
-import { StorageSection } from './storage-section';
 import { WebhookSection } from './webhook-section';
 
 /** One runtime metadata row, matching the Overview `Field` layout. */
@@ -167,7 +166,6 @@ export function OperationsPanel({
     Boolean(dbEnabled) ||
     ops.cron.enabled ||
     ops.webhook.enabled ||
-    ops.storage.enabled ||
     ops.kv.enabled;
 
   return (
@@ -178,8 +176,8 @@ export function OperationsPanel({
 
       {!anyEnabled ? (
         <Text size="sm" c="dimmed">
-          No database, backend, scheduled jobs, webhook, storage, or KV to
-          manage for this app.
+          No database, backend, scheduled jobs, webhook, or KV to manage for
+          this app.
         </Text>
       ) : (
         <Stack gap="lg">
@@ -192,9 +190,6 @@ export function OperationsPanel({
           ) : null}
           {ops.webhook.enabled ? (
             <WebhookSection webhook={ops.webhook} />
-          ) : null}
-          {ops.storage.enabled ? (
-            <StorageSection appId={appId} storage={ops.storage} />
           ) : null}
           {ops.kv.enabled ? <KvSection appId={appId} /> : null}
         </Stack>

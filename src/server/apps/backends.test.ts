@@ -44,7 +44,6 @@ const BACKEND_CAPS = {
   backend: true,
   cron: false,
   webhook: false,
-  storage: false,
   kv: false,
   userscripts: false,
 };

@@ -44,7 +44,7 @@ export function DeploymentHistory({ appId }: { appId: string }) {
     onSuccess: (result) => {
       toast.success(`Restored v${result.version}`);
       void qc.invalidateQueries(deploymentsQueryOptions(appId));
-      // Rolling back can change backend/cron/webhook/storage capabilities, so
+      // Rolling back can change backend/cron/webhook capabilities, so
       // refresh the Operations panel on this page too; the deployments + loader
       // invalidation alone leaves its cached ops data stale.
       void qc.invalidateQueries(appOpsQueryOptions(appId));

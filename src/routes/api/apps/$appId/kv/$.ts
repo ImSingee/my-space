@@ -87,8 +87,8 @@ export async function handle({
       signingSecret: true,
     },
   });
-  // Gate on a live, kv-capable, non-archived app (mirrors the storage/webhook
-  // routes) so a stale URL can't reach a retired or non-kv app.
+  // Gate on a live, kv-capable, non-archived app (mirrors the webhook route) so
+  // a stale URL can't reach a retired or non-kv app.
   if (
     !app ||
     app.status === 'archived' ||
