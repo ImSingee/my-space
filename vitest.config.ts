@@ -66,6 +66,9 @@ export default defineConfig({
         resolve: {
           tsconfigPaths: true,
         },
+        optimizeDeps: {
+          exclude: ['@tanstack/react-start', '@tanstack/react-start/server'],
+        },
         plugins: [defaultCounterTemplateFixture(), viteReact()],
         test: {
           name: 'browser',
@@ -74,7 +77,7 @@ export default defineConfig({
           include: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
           deps: {
             optimizer: {
-              web: {
+              client: {
                 enabled: false,
               },
             },
