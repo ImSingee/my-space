@@ -66,6 +66,10 @@ export default defineConfig({
         resolve: {
           tsconfigPaths: true,
         },
+        server: {
+          // Skip warming server-backed modules that browser tests mock.
+          preTransformRequests: false,
+        },
         optimizeDeps: {
           exclude: ['@tanstack/react-start', '@tanstack/react-start/server'],
         },
