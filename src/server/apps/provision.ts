@@ -1,7 +1,7 @@
 /** Server-only: provision a dedicated Postgres database + role per app. */
 import { createHmac } from 'node:crypto';
 import postgres from 'postgres';
-import { resolvePlatformSecrets } from '../platform-secret';
+import { getPlatformEnv } from '../../env';
 
 /** Map an app id (kebab-case) to a safe Postgres database/role name. */
 export function appDbName(id: string): string {
@@ -25,7 +25,7 @@ function adminUrl(): string {
  * embed in a SQL string literal and a connection URL.
  */
 function appDbPassword(id: string): string {
-  const { secret } = resolvePlatformSecrets();
+  const { secret } = getPlatformEnv();
   return createHmac('sha256', secret)
     .update(`app-db-password:${appDbName(id)}`)
     .digest('hex');

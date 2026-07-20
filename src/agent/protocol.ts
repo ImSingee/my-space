@@ -12,6 +12,8 @@ import { z } from 'zod';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
 
+export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
+
 export const PROTOCOL_VERSION = 4;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
@@ -28,11 +30,6 @@ export const DISPATCH_ACCEPT_TIMEOUT_MS = 10_000;
  * first, so the runner is only cleaning up work nobody can observe anymore.
  */
 export const RUNNER_OFFLINE_ABORT_MS = 120_000;
-
-/** Default internal port the platform's runner-facing server listens on. */
-export const DEFAULT_INTERNAL_PORT = 3701;
-/** WebSocket path on the internal server. */
-export const RUNNER_WS_PATH = '/internal/agent/runner/ws';
 
 /** ================== shared payload schemas ================== */
 

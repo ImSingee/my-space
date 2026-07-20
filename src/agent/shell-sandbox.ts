@@ -30,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { getAgentRunnerEnv } from '../env';
 import { AGENT_HOME_DIR, AGENTS_DIR, REPO_ROOT } from './paths';
 
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
@@ -228,10 +229,8 @@ export function sandboxSpawn(argv: [string, ...string[]]): SandboxedSpawn {
 export function initializeAgentSandbox(): void {
   if (process.platform === 'darwin') return; // seatbelt needs no setup
   if (!canSetpriv()) {
-    if (
-      process.env.NODE_ENV === 'production' &&
-      process.env.HATCH_ALLOW_UNSANDBOXED !== 'true'
-    ) {
+    const { production, allowUnsandboxed } = getAgentRunnerEnv();
+    if (production && !allowUnsandboxed) {
       throw new Error(
         `[shell-sandbox] ${LINUX_FALLBACK_WARNING} Refusing to start in ` +
           'production; set HATCH_ALLOW_UNSANDBOXED=true to accept this risk.',

@@ -5,10 +5,10 @@ import { tanstackStartCookies } from 'better-auth/tanstack-start';
 // FIXME: We have to use ../db (rather than ~db) here to make @better-auth/cli happy
 // See https://github.com/better-auth/better-auth/issues/6373
 import { db } from '../db';
-import { resolvePlatformSecrets } from '../server/platform-secret';
+import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 
-const { betterAuthSecret } = resolvePlatformSecrets();
+const { betterAuthSecret } = getPlatformEnv();
 
 // Single-tenant platform: self-service sign-up is a runtime platform setting
 // (`auth.allowSignup` in platform_config), toggled from Settings → Users, not
