@@ -8,9 +8,15 @@ import { startAgentInternalServer } from '~server/agent-runner/internal-server';
 import { hardenPlatformDatabase } from '~server/apps/provision';
 import { warmLongRunningBackends } from '~server/apps/runtime';
 import { ensureScheduler } from '~server/apps/scheduler';
+import { resolvePlatformSecrets } from '~server/platform-secret';
 import { ensureRetentionSweep } from '~server/retention';
 import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
+
+// Validate synchronously while Nitro loads its plugins. Throwing from the async
+// plugin callback is reported as an unhandled rejection after the HTTP server
+// starts listening, which would leave a misconfigured process alive.
+resolvePlatformSecrets();
 
 export default definePlugin(async () => {
   await runMigrations();

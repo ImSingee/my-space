@@ -47,8 +47,11 @@ services:
       # reach 3701, including generated app backends, impersonate the runner).
       # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
-      # CHANGE THIS in production: signs auth sessions.
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-please-change-this-to-a-long-random-string}
+      # REQUIRED: platform root secret used to derive every app database
+      # password. Also signs auth sessions unless BETTER_AUTH_SECRET overrides it.
+      # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
+      SECRET: ${SECRET:?set SECRET in .env (e.g. openssl rand -hex 32)}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-${SECRET}}
       # Self-service sign-up is a runtime platform setting (Settings → Users),
       # not an env var. It starts open so you can create the owner account;
       # turn it off there once your account exists.

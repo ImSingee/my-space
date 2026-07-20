@@ -5,7 +5,10 @@ import { tanstackStartCookies } from 'better-auth/tanstack-start';
 // FIXME: We have to use ../db (rather than ~db) here to make @better-auth/cli happy
 // See https://github.com/better-auth/better-auth/issues/6373
 import { db } from '../db';
+import { resolvePlatformSecrets } from '../server/platform-secret';
 import { assertSignupAllowed } from './signup-gate';
+
+const { betterAuthSecret } = resolvePlatformSecrets();
 
 // Single-tenant platform: self-service sign-up is a runtime platform setting
 // (`auth.allowSignup` in platform_config), toggled from Settings → Users, not
@@ -17,6 +20,7 @@ import { assertSignupAllowed } from './signup-gate';
 // It also has no empty-table bootstrap race: the check reads a config row, not
 // the user count, so a fresh deploy defaults to open and can create its owner.
 export const auth = betterAuth({
+  secret: betterAuthSecret,
   database: drizzleAdapter(db, {
     provider: 'pg',
   }),

@@ -60,7 +60,9 @@ wished existed, built for an audience of one: you.
 All you need is Docker. From the folder containing `docker-compose.yml`:
 
 ```bash
-echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" > .env
+printf 'SECRET=%s\nAGENT_RUNNER_TOKEN=%s\n' \
+  "$(openssl rand -hex 32)" \
+  "$(openssl rand -hex 32)" > .env
 docker compose up -d
 ```
 
