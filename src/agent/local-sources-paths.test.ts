@@ -345,6 +345,85 @@ describe('runner source paths', () => {
     expect(toolText(forcedWorkflow)).toContain('Replaced existing checkout');
   });
 
+  it('reports synchronized existing app and workflow checkouts', async () => {
+    const sourceSessionId = 'checkout-tools-sync-source';
+    const sourceWorktree = await initNewWorktree(
+      sourceSessionId,
+      'app',
+      'source-repo',
+      GENERATION,
+      () => Promise.resolve(),
+    );
+    const masterCommit = await commitFile(sourceWorktree.absolutePath);
+    const bundle = await bundleWorktreeForDeploy(
+      sourceSessionId,
+      'app',
+      'source-repo',
+      GENERATION,
+      sourceWorktree.absolutePath,
+    );
+    const source = (id: string) => ({
+      id,
+      generation: GENERATION,
+      masterCommit,
+      bundleBase64: bundle.bundleBase64,
+    });
+    const sessionId = 'checkout-tools-sync';
+    const appTools = createAppTools({
+      sessionId,
+      platform: {
+        getAppSource: vi.fn<PlatformClient['getAppSource']>(async () =>
+          source('app-id'),
+        ),
+      } as unknown as PlatformClient,
+    });
+    const workflowTools = createWorkflowTools({
+      sessionId,
+      platform: {
+        getWorkflowSource: vi.fn<PlatformClient['getWorkflowSource']>(
+          async () => source('workflow-id'),
+        ),
+      } as unknown as PlatformClient,
+    });
+    const app = appTools.find((tool) => tool.name === 'checkout_app');
+    const workflow = workflowTools.find(
+      (tool) => tool.name === 'checkout_workflow',
+    );
+    if (!app || !workflow) throw new Error('Missing checkout tools.');
+
+    await app.execute('app-first', {
+      id: 'app-id',
+      target_path: 'custom/sync-app',
+    });
+    const synchronizedApp = await app.execute('app-sync', {
+      id: 'app-id',
+      target_path: 'custom/sync-app',
+    });
+    expect(toolText(synchronizedApp)).toContain(
+      'Synchronized existing checkout',
+    );
+    expect(synchronizedApp.details).toMatchObject({
+      replacedExisting: false,
+      synchronizedExisting: true,
+    });
+
+    await workflow.execute('workflow-first', {
+      id: 'workflow-id',
+      target_path: 'custom/sync-workflow',
+    });
+    const synchronizedWorkflow = await workflow.execute('workflow-sync', {
+      id: 'workflow-id',
+      target_path: 'custom/sync-workflow',
+    });
+    expect(toolText(synchronizedWorkflow)).toContain(
+      'Synchronized existing checkout',
+    );
+    expect(synchronizedWorkflow.details).toMatchObject({
+      replacedExisting: false,
+      synchronizedExisting: true,
+    });
+  });
+
   it('force replaces one exact indexed target without touching other checkouts', async () => {
     const sessionId = 'force-index-owner';
     const replaced = await initNewWorktree(

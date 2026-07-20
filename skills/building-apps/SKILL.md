@@ -66,9 +66,12 @@ use native git locally:
      so it's pinned to the sidebar, or `pin: false` for backend-only /
      widget-only apps.
 2. For an existing app, call `checkout_app` and keep the returned source path.
-   Checkout only creates a missing target by default. If the target exists, use
-   it or choose another `target_path`; pass the same path with `force: true` only
-   to permanently discard it and create a fresh checkout.
+   Checkout creates a missing target. An existing target is synchronized only
+   when it is the same owned checkout, its worktree is clean and on `master`, and
+   remote master is a fast-forward. Every other existing-target state is
+   preserved and returns an error; reconcile it or choose another `target_path`.
+   Pass the same path with `force: true` only to permanently discard it and
+   create a fresh checkout.
 3. Edit files under the exact returned source path.
 4. Run `git status`, `git add ...`, and `git commit -m "message"` there.
 5. Call `deploy_app` with that `source_path` and a required `message` (a concise
@@ -78,10 +81,11 @@ use native git locally:
 
 Do not push branches. Do not create or push tags. The platform Git server
 rejects Agent branch/tag pushes. If deploy says `master` advanced, run
-`checkout_app` again with the same `target_path` to refresh the origin bundle
-(the existing-target error does not overwrite files), then run
-`git fetch origin master`, rebase your local work onto `origin/master`, resolve
-conflicts, commit, and call `deploy_app` again.
+`checkout_app` again with the same `target_path`. A clean `master` whose remote
+is a fast-forward synchronizes automatically; call `deploy_app` again. If
+checkout preserves an ahead or diverged local `master`, run
+`git fetch origin master`, rebase your local commits onto `origin/master`,
+resolve conflicts, commit, and deploy again.
 
 ## Inspecting and rolling back
 
@@ -93,8 +97,13 @@ conflicts, commit, and call `deploy_app` again.
   `get_app` and in the management UI. Only successfully deployed versions can
   be restored. Rolling back moves `master` to that version's commit but does not
   change existing Agent worktrees. To preserve local work, call `checkout_app`
-  with the same `target_path` to refresh the origin bundle, then fetch/rebase.
-  To discard it and exactly restore rollback source, pass `force: true`.
+  with the same `target_path`. It auto-synchronizes only when the rolled-back
+  remote master is a fast-forward of the local clean `master`. A checkout still
+  at a newer commit is ahead of the rolled-back master, so it is preserved
+  instead of rewound; fetching keeps that newer work available, and deploying it
+  again would publish it again. Rebase divergent work onto `origin/master` when
+  retaining it. To discard local work and exactly restore rollback source, pass
+  `force: true` only with authorization to replace that path.
 
 ## Manifest
 

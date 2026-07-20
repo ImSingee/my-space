@@ -167,9 +167,12 @@ in the manifest — it is derived from your zod schema at deploy time.
    Only then call `create_workflow`. Pass `pin: true` (default) to pin it to the
    sidebar.
 2. For an existing workflow, call `checkout_workflow` and keep the returned
-   source path. Checkout only creates a missing target by default; use the
-   existing path or another `target_path` on conflict. Pass the same path with
-   `force: true` only to permanently discard and replace it.
+   source path. Checkout creates a missing target. An existing target is
+   synchronized only when it is the same owned checkout, its worktree is clean
+   and on `master`, and remote master is a fast-forward. Every other
+   existing-target state is preserved and returns an error; reconcile it or use
+   another `target_path`. Pass the same path with `force: true` only to
+   permanently discard and replace it.
 3. Edit files under the exact returned source path.
 4. `git status`, `git add ...`, `git commit -m "message"` there.
 5. Call `deploy_workflow` with that `source_path` and a required `message`.
@@ -179,8 +182,10 @@ in the manifest — it is derived from your zod schema at deploy time.
 
 Do not push branches or tags — the platform Git server rejects Agent pushes. If
 deploy says `master` advanced, call `checkout_workflow` with the same
-`target_path` to refresh its origin bundle (the existing-target error preserves
-files), then `git fetch origin master`, rebase, resolve, and deploy again.
+`target_path`. A clean `master` whose remote is a fast-forward synchronizes
+automatically; deploy again. If checkout preserves an ahead or diverged local
+`master`, run `git fetch origin master`, rebase the local commits onto
+`origin/master`, resolve conflicts, and deploy again.
 
 ## Inspect, run & roll back
 
@@ -189,8 +194,13 @@ files), then `git fetch origin master`, rebase, resolve, and deploy again.
   deployment history.
 - `rollback_workflow` with the `id` and `version` restores that version's bundle
   and source but does not modify existing Agent worktrees. To preserve local
-  work, refresh with the same checkout target and fetch/rebase; to exactly
-  replace it with rollback source, use the same `target_path` and `force: true`.
+  work, call checkout with the same target. It auto-synchronizes only when the
+  rolled-back remote master is a fast-forward of the local clean `master`. A
+  checkout still at a newer commit is ahead and remains untouched; deploying it
+  would publish that newer work again. Rebase divergent work onto
+  `origin/master` when retaining it. To exactly replace the checkout with
+  rollback source, use the same `target_path` and `force: true` only with
+  authorization to discard local work.
 - Users trigger manual runs and inspect run history (steps, logs, output, errors)
   from the workflow page; you don't run workflows yourself.
 

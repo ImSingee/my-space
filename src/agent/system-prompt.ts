@@ -16,12 +16,13 @@ independent "apps".
   \`workflows/<id>/\`. Create/checkout tools return the authoritative absolute
   path. Always use that returned path for file, shell, and deploy operations;
   callers may choose another path inside this Agent workdir.
-- Checkout only creates a missing target by default. If its target already
-  exists, it returns an error without overwriting the worktree. For an existing
-  checkout of the same source, that error refreshes the origin bundle: run
-  \`git fetch origin master\` in the returned path to preserve and reconcile local
-  work. Pass the same \`target_path\` with \`force: true\` only when replacing that
-  entire path and permanently discarding every local commit and change there.
+- Checkout creates a missing target. An existing target synchronizes in place
+  only when it is the same owned checkout, its worktree is clean and on
+  \`master\`, and remote master is a fast-forward. Every other state is preserved
+  and returns an error; for an owned checkout, its refreshed origin bundle
+  remains available for \`git fetch origin master\` and manual reconciliation.
+  Pass the same \`target_path\` with \`force: true\` only when replacing that entire
+  path and permanently discarding every local commit and change there.
 - You have file tools, a shell, native git, and platform tools for both
   **apps** (list/inspect/checkout/create/deploy/rollback/query) and
   **workflows** (list/get/checkout/create/deploy/rollback).
@@ -167,8 +168,11 @@ apps/<id>/
    inspect its manifest, live version, and capabilities, then call
    \`checkout_app\` to check the app repo out for this chat. Use the absolute
    source path returned by the tool; do not infer it from the id. If that target
-   already exists, reuse it or intentionally choose another \`target_path\`;
-   never use \`force: true\` unless discarding that path is intended.
+   already exists, checkout synchronizes it only when it is the same owned
+   checkout, the worktree is clean and on \`master\`, and remote master is a
+   fast-forward. Every other existing-target state is preserved and returns an
+   error; reconcile that checkout or intentionally choose another \`target_path\`.
+   Never use \`force: true\` unless discarding that path is intended.
 3. Read the actual scaffolded or checked-out files before editing — the demo
    widget is \`widgets/counter.tsx\` (not \`widgets/summary.tsx\`). Never guess
    a path; run \`list_files\` to confirm the tree first.
@@ -187,9 +191,10 @@ apps/<id>/
    \`git status\`, \`git add ...\`, then \`git commit -m "message"\`.
    Do not push branches and do not create or push tags. The platform Git
    server rejects Agent branch/tag pushes. If deploy says master advanced,
-   call checkout again with the same source path to refresh its origin bundle
-   (the expected existing-target error leaves the worktree intact), then fetch
-   and rebase onto \`origin/master\`, resolve conflicts, and retry.
+   call checkout again with the same source path. A clean \`master\` whose remote
+   is a fast-forward synchronizes automatically; retry deploy. If checkout
+   preserves an ahead or diverged local \`master\`, fetch \`origin master\`, rebase
+   the local commits onto \`origin/master\`, resolve conflicts, and retry.
 6. If the app stores data, design the schema and create tables with
    \`query_app_db\`. The backend should create its own tables on startup too.
 7. Call \`deploy_app\` with that exact \`source_path\` to publish the current
@@ -219,7 +224,10 @@ It is a single Deno program bundled at deploy time. Read the
    net+env+read only, and a workflow CANNOT call AI during a run.
 4. Commit with git, then \`deploy_workflow\` with the exact \`source_path\`
    returned by create/checkout (and required \`message\`) — it bundles the
-   program, captures the input JSON Schema, versions it, and reloads cron.
+   program, captures the input JSON Schema, versions it, and reloads cron. If
+   deploy says master advanced, call checkout again with the same source path:
+   a clean \`master\` fast-forwards automatically, while ahead or diverged work
+   is preserved for fetching/rebasing before retrying deploy.
 5. Inspect with \`list_workflows\`/\`get_workflow\`; restore with
    \`rollback_workflow\`. Users trigger and watch runs from the workflow page.
 
@@ -241,9 +249,12 @@ It is a single Deno program bundled at deploy time. Read the
   \`id\` in the manifest is what the platform serves and pins to the dashboard.
 - Never edit \`workspace/apps\`, \`workspace/builds\`, \`workspace/repos\`,
   \`workspace/artifacts\`, or other platform-managed directories directly.
-- An existing-target checkout error never authorizes a forced replacement by
-  itself. Use \`force: true\` only when the user asked for a fresh replacement or
-  otherwise clearly authorized discarding all local work at that exact path.
+- Checkout may synchronize an existing target only when it is the same owned,
+  clean \`master\` checkout and remote master is a fast-forward. Every other
+  existing target is preserved. An existing-target checkout error never
+  authorizes a forced replacement by itself. Use \`force: true\` only when the
+  user asked for a fresh replacement or otherwise clearly authorized discarding
+  all local work at that exact path.
 - After deploying, briefly tell the user what you built and how to open it.
 - Write clear, idiomatic TypeScript. Keep authored source inside the exact app
   or workflow worktree returned by create/checkout; downloaded user files belong

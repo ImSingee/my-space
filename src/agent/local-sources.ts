@@ -70,6 +70,8 @@ export type LocalCheckout = {
   status: string;
   /** Whether this checkout replaced an existing filesystem entry. */
   replacedExisting: boolean;
+  /** Whether an existing clean master checkout was synchronized in place. */
+  synchronizedExisting: boolean;
 };
 
 export type CheckoutFromBundleOptions = {
@@ -291,6 +293,15 @@ async function worktreeHead(worktree: string): Promise<string | null> {
   });
   if (result.exitCode !== 0) return null;
   return result.stdout.trim();
+}
+
+async function worktreeBranch(worktree: string): Promise<string | null> {
+  const result = await runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+    cwd: worktree,
+    allowFailure: true,
+  });
+  if (result.exitCode !== 0) return null;
+  return result.stdout.trim() || null;
 }
 
 async function worktreeStatus(worktree: string): Promise<string> {
@@ -523,6 +534,7 @@ async function describeCheckout(
   worktree: string,
   remoteCommit: string | null,
   replacedExisting = false,
+  synchronizedExisting = false,
 ): Promise<LocalCheckout> {
   const [status, headCommit] = await Promise.all([
     worktreeStatus(worktree),
@@ -537,6 +549,7 @@ async function describeCheckout(
     remoteCommit,
     status,
     replacedExisting,
+    synchronizedExisting,
   };
 }
 
@@ -810,6 +823,112 @@ function checkoutConflictMessage(
   );
 }
 
+function checkoutSynchronizationConflictMessage(
+  kind: SourceKind,
+  resolved: AgentWorkspacePath,
+): string {
+  const tool = `checkout_${kind}`;
+  return (
+    `Checkout target "${resolved.path}" could not be synchronized because ` +
+    'local master has commits ahead of or diverged from platform master. Its ' +
+    'origin/master was refreshed, but local master and the worktree were not ' +
+    'changed. Rebase or merge the local commits onto origin/master, or retry ' +
+    `${tool} with the same target_path and force: true to permanently discard ` +
+    'that path and create a fresh checkout.'
+  );
+}
+
+async function synchronizeExistingCheckout(
+  sessionId: string,
+  kind: SourceKind,
+  source: SourceBundleResponse,
+  resolved: AgentWorkspacePath,
+): Promise<LocalCheckout | null> {
+  if (!source.bundleBase64 || !source.masterCommit) return null;
+
+  const worktree = resolved.absolutePath;
+  const [branchBeforeFetch, statusBeforeFetch] = await Promise.all([
+    worktreeBranch(worktree),
+    worktreeStatus(worktree),
+  ]);
+  if (branchBeforeFetch !== SOURCE_BRANCH || statusBeforeFetch) return null;
+
+  await runGit(['fetch', 'origin', SOURCE_BRANCH], { cwd: worktree });
+  const remoteRef = `origin/${SOURCE_BRANCH}`;
+  const remoteHead = (
+    await runGit(['rev-parse', '--verify', remoteRef], { cwd: worktree })
+  ).stdout.trim();
+  if (remoteHead !== source.masterCommit) {
+    throw new Error(
+      `Fetched ${remoteRef} ${remoteHead || 'none'} does not match platform ` +
+        `${SOURCE_BRANCH} ${source.masterCommit}.`,
+    );
+  }
+
+  // Re-check after fetch so edits or branch switches made while it was running
+  // are rejected before attempting the in-place fast-forward.
+  const [branch, status, head] = await Promise.all([
+    worktreeBranch(worktree),
+    worktreeStatus(worktree),
+    worktreeHead(worktree),
+  ]);
+  if (branch !== SOURCE_BRANCH || status) return null;
+
+  if (head) {
+    const ancestor = await runGit(
+      ['merge-base', '--is-ancestor', head, remoteRef],
+      { cwd: worktree, allowFailure: true },
+    );
+    if (ancestor.exitCode === 1) {
+      throw new Error(checkoutSynchronizationConflictMessage(kind, resolved));
+    }
+    if (ancestor.exitCode !== 0) {
+      const details = (ancestor.stderr || ancestor.stdout).trim();
+      throw new Error(
+        `git merge-base --is-ancestor ${head} ${remoteRef} failed: ${details}`,
+      );
+    }
+  }
+
+  // A fast-forward merge reaches the validated remote commit while refusing
+  // to discard a concurrent commit or edit.
+  await runGit(['merge', '--ff-only', remoteRef], { cwd: worktree });
+  const [branchAfterMerge, checkout] = await Promise.all([
+    worktreeBranch(worktree),
+    describeCheckout(
+      sessionId,
+      kind,
+      source.id,
+      worktree,
+      source.masterCommit,
+      false,
+      true,
+    ),
+  ]);
+  if (
+    branchAfterMerge !== SOURCE_BRANCH ||
+    checkout.dirty ||
+    checkout.headCommit !== source.masterCommit
+  ) {
+    throw new Error(
+      `Checkout target "${resolved.path}" changed while it was being ` +
+        'synchronized. No local changes were discarded; inspect the worktree ' +
+        'and retry checkout.',
+    );
+  }
+  await registerWorkspace(
+    sessionId,
+    {
+      kind,
+      id: source.id,
+      generation: source.generation,
+      absolutePath: worktree,
+    },
+    { replaceExactPath: true },
+  );
+  return checkout;
+}
+
 /** Materialize a fresh app/workflow checkout from the platform source bundle. */
 export async function checkoutFromBundle(
   sessionId: string,
@@ -851,6 +970,13 @@ export async function checkoutFromBundle(
       } finally {
         await cleanupPreparedCheckoutRoot(prepared.root);
       }
+      const synchronized = await synchronizeExistingCheckout(
+        sessionId,
+        kind,
+        source,
+        resolved,
+      );
+      if (synchronized) return synchronized;
     }
     throw new Error(checkoutConflictMessage(kind, resolved, source, owned));
   }

@@ -103,8 +103,10 @@ export function createWorkflowTools(options: {
     label: 'Checkout workflow',
     description:
       "Checkout a workflow's Git repo into this chat's persistent worktree. " +
-      'Use before reading or editing an existing workflow. Existing targets ' +
-      'fail unless force is true.',
+      'Use before reading or editing an existing workflow. An existing target ' +
+      'is synchronized only when it is the same owned checkout, clean, on ' +
+      'master, and remote master is a fast-forward; otherwise it fails unless ' +
+      'force is true.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'Workflow id to checkout.' }),
@@ -145,7 +147,10 @@ export function createWorkflowTools(options: {
               ? `Replaced existing checkout for "${params.id}" at ` +
                 `${checkout.absolutePath}. All previous local work at that ` +
                 'path was discarded.'
-              : `Checked out "${params.id}" at ${checkout.absolutePath}.`,
+              : checkout.synchronizedExisting
+                ? `Synchronized existing checkout for "${params.id}" at ` +
+                  `${checkout.absolutePath} to remote master.`
+                : `Checked out "${params.id}" at ${checkout.absolutePath}.`,
             checkout.headCommit
               ? `HEAD: ${checkout.headCommit}`
               : 'No commits yet. Create files, then run git add and git commit.',
@@ -318,8 +323,10 @@ export function createWorkflowTools(options: {
       return text(
         `Rolled "${params.id}" back to v${res.version}. Existing Agent ` +
           'worktrees were not changed. Re-run checkout_workflow with the same ' +
-          'target_path to refresh its origin before fetching/rebasing, or use ' +
-          'force: true to discard and replace that checkout.',
+          'target_path. It synchronizes only when remote master fast-forwards ' +
+          'a clean local master; ahead or diverged work is preserved. ' +
+          'Fetch/rebase to retain that work, or use force: true only when ' +
+          'discarding and replacing the checkout is intended.',
         res,
       );
     },
