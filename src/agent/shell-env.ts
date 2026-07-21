@@ -9,9 +9,9 @@
  * `undefined`; Node's `spawn` omits env entries whose value is `undefined`, so
  * the spawned shell only ever sees allowlisted variables.
  *
- * This keeps deployment secrets (DATABASE_URL, BETTER_AUTH_SECRET, provider API
- * keys, …) out of every command the model runs — including ones injected via a
- * malicious project file telling the agent to run `env`.
+ * This keeps deployment secrets (DATABASE_URL, SECRET, BETTER_AUTH_SECRET,
+ * provider API keys, …) out of every command the model runs — including ones
+ * injected via a malicious project file telling the agent to run `env`.
  *
  * The env allowlist does NOT stop a command from reading secret files by path
  * (e.g. `cat <repo>/.env.local`); shell-sandbox.ts closes that gap on macOS

@@ -27,7 +27,7 @@ import {
   type SourceWorkspaceBarrier,
 } from '~agent/local-sources';
 import { initializeAgentSandbox } from '~agent/shell-sandbox';
-import { loadRunnerConfig } from './config';
+import { getAgentRunnerEnv } from '~env';
 import { RunnerExecutor } from './executor';
 import { createPlatformRestClient } from './platform-rest';
 import {
@@ -37,7 +37,7 @@ import {
   removeSessionWorkspace,
 } from './workspace-cleanup';
 
-const config = loadRunnerConfig();
+const config = getAgentRunnerEnv();
 // Before any run executes: on Linux, demote agent subprocesses to the
 // unprivileged sandbox user so they cannot read this process's environment
 // (AGENT_RUNNER_TOKEN) via /proc. Throws in production when unavailable.

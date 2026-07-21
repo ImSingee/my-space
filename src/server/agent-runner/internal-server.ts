@@ -12,7 +12,8 @@
  */
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from '~agent/protocol';
+import { RUNNER_WS_PATH } from '~agent/protocol';
+import { getPlatformEnv } from '~env';
 import { secretsMatch } from '~server/secrets';
 import { handleInternalApiRequest } from './internal-api';
 import { handleRunnerSocket } from './hub';
@@ -20,19 +21,6 @@ import { handleRunnerSocket } from './hub';
 type InternalServerGlobal = typeof globalThis & {
   __hatchInternalServer__?: { server: http.Server; port: number };
 };
-
-/** Dev fallback so local platform + runner scripts work with zero setup. */
-const DEV_TOKEN = 'hatch-dev-runner-token';
-
-export function agentRunnerToken(): string | null {
-  const token = process.env.AGENT_RUNNER_TOKEN?.trim();
-  if (process.env.NODE_ENV !== 'production') return token || DEV_TOKEN;
-  // Production: require an explicit secret. The well-known dev fallback is
-  // as good as no token (any local process could impersonate the runner), so
-  // treat it as unset and keep the endpoint disabled.
-  if (!token || token === DEV_TOKEN) return null;
-  return token;
-}
 
 function bearerToken(header: string | undefined): string | null {
   if (!header) return null;
@@ -44,7 +32,11 @@ export function startAgentInternalServer(): void {
   const g = globalThis as InternalServerGlobal;
   if (g.__hatchInternalServer__) return;
 
-  const token = agentRunnerToken();
+  const {
+    agentRunnerToken: token,
+    agentInternalHost,
+    agentInternalPort,
+  } = getPlatformEnv();
   if (!token) {
     console.warn(
       '[agent-internal] AGENT_RUNNER_TOKEN is not set; the Agent Runner ' +
@@ -52,11 +44,6 @@ export function startAgentInternalServer(): void {
     );
     return;
   }
-
-  const port = Number(process.env.AGENT_INTERNAL_PORT) || DEFAULT_INTERNAL_PORT;
-  // Loopback by default for local dev; deployments (docker-compose) set
-  // 0.0.0.0 so the runner container can reach it over the compose network.
-  const host = process.env.AGENT_INTERNAL_HOST || '127.0.0.1';
 
   const authorized = (req: http.IncomingMessage): boolean =>
     secretsMatch(bearerToken(req.headers.authorization), token);
@@ -87,8 +74,10 @@ export function startAgentInternalServer(): void {
     console.error('[agent-internal] server error:', error);
   });
 
-  server.listen(port, host, () => {
-    console.log(`[agent-internal] listening on ${host}:${port}`);
+  server.listen(agentInternalPort, agentInternalHost, () => {
+    console.log(
+      `[agent-internal] listening on ${agentInternalHost}:${agentInternalPort}`,
+    );
   });
-  g.__hatchInternalServer__ = { server, port };
+  g.__hatchInternalServer__ = { server, port: agentInternalPort };
 }

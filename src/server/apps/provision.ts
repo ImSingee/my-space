@@ -1,6 +1,7 @@
 /** Server-only: provision a dedicated Postgres database + role per app. */
 import { createHmac } from 'node:crypto';
 import postgres from 'postgres';
+import { getPlatformEnv } from '../../env';
 
 /** Map an app id (kebab-case) to a safe Postgres database/role name. */
 export function appDbName(id: string): string {
@@ -18,16 +19,13 @@ function adminUrl(): string {
 
 /**
  * Deterministic per-app role password, derived from the platform secret so it
- * never needs to be stored. Rotating BETTER_AUTH_SECRET changes every derived
- * password; `ensureAppDatabase` re-aligns the role password on each cold start,
- * so backends recover on their next boot. Hex output, so it is always safe to
+ * never needs to be stored. Rotating SECRET changes every derived password;
+ * `ensureAppDatabase` re-aligns the role password on each cold start, so
+ * backends recover on their next boot. Hex output, so it is always safe to
  * embed in a SQL string literal and a connection URL.
  */
 function appDbPassword(id: string): string {
-  const secret = process.env.BETTER_AUTH_SECRET;
-  if (!secret) {
-    throw new Error('BETTER_AUTH_SECRET is not set');
-  }
+  const { secret } = getPlatformEnv();
   return createHmac('sha256', secret)
     .update(`app-db-password:${appDbName(id)}`)
     .digest('hex');
@@ -74,7 +72,7 @@ export async function ensureAppDatabase(id: string): Promise<string> {
           'nosuperuser nocreatedb nocreaterole',
       );
     } else {
-      // Re-align after a BETTER_AUTH_SECRET rotation (or a manual edit).
+      // Re-align after a SECRET rotation (or a manual edit).
       await admin.unsafe(`alter role "${name}" login password '${password}'`);
     }
     // Membership lets a non-superuser admin create the database with this
