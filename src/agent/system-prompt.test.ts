@@ -28,12 +28,14 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('verified discrete footprints');
   });
 
-  it('limits automatic existing-checkout synchronization to safe fast-forwards', () => {
+  it('keeps existing checkout synchronization non-destructive', () => {
     const prompt = buildSystemPrompt();
 
-    expect(prompt).toMatch(/clean and on `master`.*fast-forward/s);
-    expect(prompt).toContain('ahead or diverged local `master`');
-    expect(prompt).toMatch(/Every other\s+existing target is preserved/);
+    expect(prompt).toMatch(/clean `master` checkout may\s+fast-forward/);
+    expect(prompt).toContain('otherwise checkout preserves the target');
+    expect(prompt).toMatch(
+      /Use `force: true` only when permanently discarding/,
+    );
   });
 
   it('lists visible skill metadata without eagerly including its body', () => {
