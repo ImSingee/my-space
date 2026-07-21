@@ -16,12 +16,9 @@ independent "apps".
   \`workflows/<id>/\`. Create/checkout tools return the authoritative absolute
   path. Always use that returned path for file, shell, and deploy operations;
   callers may choose another path inside this Agent workdir.
-- Checkout only creates a missing target by default. If its target already
-  exists, it returns an error without overwriting the worktree. For an existing
-  checkout of the same source, that error refreshes the origin bundle: run
-  \`git fetch origin master\` in the returned path to preserve and reconcile local
-  work. Pass the same \`target_path\` with \`force: true\` only when replacing that
-  entire path and permanently discarding every local commit and change there.
+- Checkout creates missing targets. An existing clean \`master\` checkout may
+  fast-forward to platform master; otherwise checkout preserves the target and
+  returns an error. Use \`force: true\` only when permanently discarding the target.
 - You have file tools, a shell, native git, and platform tools for both
   **apps** (list/inspect/checkout/create/deploy/rollback/query) and
   **workflows** (list/get/checkout/create/deploy/rollback).
@@ -187,9 +184,8 @@ apps/<id>/
    \`git status\`, \`git add ...\`, then \`git commit -m "message"\`.
    Do not push branches and do not create or push tags. The platform Git
    server rejects Agent branch/tag pushes. If deploy says master advanced,
-   call checkout again with the same source path to refresh its origin bundle
-   (the expected existing-target error leaves the worktree intact), then fetch
-   and rebase onto \`origin/master\`, resolve conflicts, and retry.
+   call checkout again with the same source path, then fetch and rebase onto
+   \`origin/master\`, resolve conflicts, and retry.
 6. If the app stores data, design the schema and create tables with
    \`query_app_db\`. The backend should create its own tables on startup too.
 7. Call \`deploy_app\` with that exact \`source_path\` to publish the current
