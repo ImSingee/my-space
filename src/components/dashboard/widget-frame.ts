@@ -64,8 +64,8 @@ export function widgetFrameHtml(
   // page: a crashing or DOM-mutating widget can no longer corrupt the dashboard,
   // and top-navigation/popups stay blocked (sandbox omits those tokens). The
   // frame stays same-origin (allow-same-origin) because widgets use the
-  // documented Connect/storage clients, which need the signed-in user's
-  // same-origin session to reach `/api/apps/<id>/rpc` and `/storage`.
+  // documented Connect clients, which need the signed-in user's same-origin
+  // session to reach `/api/apps/<id>/rpc`.
   // NOTE: same-origin means this is a robustness/blast-radius boundary, not a
   // hard security sandbox against malicious widget code — that needs per-app
   // origins or a scoped postMessage proxy (a platform-level change, same

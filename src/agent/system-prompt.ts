@@ -100,8 +100,6 @@ apps/<id>/
     (\`HATCH_SIGNING_SECRET\`, signature over \`<ts>.<rawBody>\`); \`none\` is an
     unauthenticated passthrough (no secret/signature) where the app secures
     itself. Requires a backend.
-  - \`storage\`: the backend gets a writable \`STORAGE_DIR\`; the frontend can
-    use \`GET/PUT/DELETE /api/apps/<id>/storage/<key>\`.
   - \`kv\`: a simple per-app key/value store (small tokens/config, not blobs) in
     the platform DB. The backend reads/writes via injected \`HATCH_KV_URL\`,
     signing each call with \`HATCH_SIGNING_SECRET\` (HMAC over \`<ts>.<rawBody>\`).

@@ -59,7 +59,6 @@ export type AppCapabilities = {
   backend: boolean;
   cron: boolean;
   webhook: boolean;
-  storage: boolean;
   /** Simple per-app key/value store (platform DB) for small tokens/config. */
   kv: boolean;
   /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */

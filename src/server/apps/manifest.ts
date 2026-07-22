@@ -356,19 +356,20 @@ export const webhookConfigSchema = z.object({
   auth: z.enum(['platform', 'none']).default('platform'),
 });
 
-export const capabilitiesSchema = z.object({
-  database: z.boolean().default(false),
-  frontend: z.boolean().default(false),
-  widgets: z.boolean().default(false),
-  backend: z.boolean().default(false),
-  cron: z.boolean().default(false),
-  webhook: z.boolean().default(false),
-  storage: z.boolean().default(false),
-  /** Simple per-app key/value store (platform DB) for small tokens/config. */
-  kv: z.boolean().default(false),
-  /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
-  userscripts: z.boolean().default(false),
-});
+export const capabilitiesSchema = z
+  .object({
+    database: z.boolean().default(false),
+    frontend: z.boolean().default(false),
+    widgets: z.boolean().default(false),
+    backend: z.boolean().default(false),
+    cron: z.boolean().default(false),
+    webhook: z.boolean().default(false),
+    /** Simple per-app key/value store (platform DB) for small tokens/config. */
+    kv: z.boolean().default(false),
+    /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
+    userscripts: z.boolean().default(false),
+  })
+  .strict();
 
 /**
  * Canonical app-id shape: lowercase alphanumerics and hyphens, safe as a path
@@ -599,8 +600,6 @@ export type NormalizedManifest = {
    * unauthenticated passthrough (app self-secures). See webhookConfigSchema.
    */
   webhook?: { url: string; auth: WebhookAuth };
-  /** Blob storage base URL, when the storage capability is enabled. */
-  storage?: { url: string };
   /** KV REST base URL, when the kv capability is enabled. */
   kv?: { url: string };
   /**
@@ -645,10 +644,6 @@ export function userscriptNamespace(id: string, scriptId: string): string {
 
 export function rpcUrl(id: string): string {
   return `${appBasePath(id)}/rpc`;
-}
-
-export function storageUrl(id: string): string {
-  return `${appBasePath(id)}/storage`;
 }
 
 /** Per-app KV REST base. The backend calls it with an HMAC signature. */
@@ -749,9 +744,6 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
       url: webhookUrl(src.id),
       auth: src.webhook?.auth ?? 'platform',
     };
-  }
-  if (src.capabilities.storage) {
-    out.storage = { url: storageUrl(src.id) };
   }
   // KV is reachable only from the app's own backend over the HMAC-signed route
   // (a signing secret is minted only for backend apps), so like rpc / workflow

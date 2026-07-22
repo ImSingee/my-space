@@ -13,7 +13,6 @@ const CAPABILITY_KEYS = [
   'database',
   'cron',
   'webhook',
-  'storage',
   'kv',
   'userscripts',
 ] as const satisfies readonly (keyof AppCapabilities)[];
@@ -102,7 +101,6 @@ export type AppRuntimeOps = {
     /** Platform-side auth mode: 'platform' (secret + HMAC) or 'none'. */
     auth: WebhookAuth;
   };
-  storage: { enabled: boolean; url: string | null; objectCount: number };
   kv: { enabled: boolean; url: string | null; entryCount: number };
 };
 
@@ -153,10 +151,6 @@ export async function getAppDetailForAgent(
   const cronJobs = caps?.cron
     ? await import('./scheduler').then((m) => m.listCronJobs(id))
     : [];
-  const objects =
-    caps?.storage && app.status === 'deployed'
-      ? await import('./storage').then((m) => m.listObjects(id))
-      : [];
   const kvCount = caps?.kv
     ? await import('./kv').then((m) => m.countKv(id))
     : 0;
@@ -193,11 +187,6 @@ export async function getAppDetailForAgent(
           (manifest?.webhook?.auth ?? 'platform') === 'platform' &&
           Boolean(app.webhookSecret),
         auth: manifest?.webhook?.auth ?? 'platform',
-      },
-      storage: {
-        enabled: Boolean(caps?.storage),
-        url: manifest?.storage?.url ?? null,
-        objectCount: objects.length,
       },
       kv: {
         enabled: Boolean(caps?.kv),

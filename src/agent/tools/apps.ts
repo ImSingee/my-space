@@ -78,7 +78,7 @@ export function createAppTools(options: {
     label: 'Get app details',
     description:
       "Get one app's details: status, live version, capabilities, the " +
-      'normalized manifest (app/widget/RPC/webhook/storage URLs), runtime ' +
+      'normalized manifest (app/widget/RPC/webhook URLs), runtime ' +
       'state (backend running, cron jobs), and deployment history. Mirrors ' +
       'the app management panel.',
     parameters: Type.Object({
@@ -117,11 +117,6 @@ export function createAppTools(options: {
           ? `Webhook: ${detail.ops.webhook.url ?? 'n/a'}${
               detail.ops.webhook.hasSecret ? ' [secret set]' : ''
             }`
-          : null,
-        detail.ops.storage.enabled
-          ? `Storage: ${detail.ops.storage.url ?? 'n/a'} (${
-              detail.ops.storage.objectCount
-            } object(s))`
           : null,
         detail.ops.cron.enabled
           ? `Cron: ${

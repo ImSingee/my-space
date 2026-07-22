@@ -140,7 +140,6 @@ function manifest(
         backend: true,
         cron: true,
         webhook: false,
-        storage: false,
       },
       backendMode: 'serverless',
       rpc: { proto: 'proto/service.proto', service: 'app.v1.CounterService' },

@@ -5,6 +5,42 @@ import {
   snapToSupportedSize,
 } from './manifest';
 
+describe('app capabilities manifest', () => {
+  const manifest = (capabilities: Record<string, unknown>) => ({
+    id: 'demo',
+    name: 'Demo',
+    capabilities,
+  });
+
+  it('accepts known capabilities and applies their defaults', () => {
+    const parsed = parseSourceManifest(manifest({ backend: true }));
+
+    expect(parsed.capabilities).toMatchObject({
+      backend: true,
+      frontend: false,
+      kv: false,
+    });
+  });
+
+  it('rejects the retired storage capability and other unknown fields', () => {
+    expect(() =>
+      parseSourceManifest(manifest({ backend: true, storage: true })),
+    ).toThrow(/storage/);
+    expect(() =>
+      parseSourceManifest(manifest({ backend: true, madeUp: true })),
+    ).toThrow(/madeUp/);
+  });
+
+  it('does not emit a storage flag or URL when normalizing', () => {
+    const normalized = normalizeManifest(
+      parseSourceManifest(manifest({ backend: true, kv: true })),
+    );
+
+    expect(normalized.capabilities).not.toHaveProperty('storage');
+    expect(normalized).not.toHaveProperty('storage');
+  });
+});
+
 describe('app route manifest', () => {
   const parseRoutes = (routes?: unknown[]) =>
     normalizeManifest(

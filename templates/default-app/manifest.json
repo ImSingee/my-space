@@ -9,8 +9,7 @@
     "widgets": true,
     "backend": true,
     "cron": false,
-    "webhook": false,
-    "storage": false
+    "webhook": false
   },
   "backendMode": "serverless",
   "rpc": {

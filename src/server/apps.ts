@@ -180,7 +180,7 @@ export const setAppSlugFn = createServerFn({ method: 'POST' })
     return renameAppSlug(data.id, data.slug);
   });
 
-/** ================== capabilities (cron / webhook / storage / backend) ========= */
+/** ================== capabilities (cron / webhook / backend) ================== */
 
 export type CronJobView = {
   name: string;
@@ -188,13 +188,6 @@ export type CronJobView = {
   method: string | null;
   path: string | null;
   nextRun: string | null;
-};
-
-export type StorageObjectView = {
-  key: string;
-  size: number;
-  contentType: string;
-  updatedAt: string;
 };
 
 export type AppKvEntryView = {
@@ -219,11 +212,6 @@ export type AppOps = {
     /** Platform-side auth mode: 'platform' (secret + HMAC) or 'none'. */
     auth: WebhookAuth;
   };
-  storage: {
-    enabled: boolean;
-    url: string | null;
-    objects: StorageObjectView[];
-  };
   /** KV entries are fetched separately (they mutate live); this just gates the UI. */
   kv: { enabled: boolean };
 };
@@ -240,7 +228,6 @@ export const getAppOps = createServerFn({ method: 'GET' })
         backend: { capable: false, mode: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
-        storage: { enabled: false, url: null, objects: [] },
         kv: { enabled: false },
       };
     }
@@ -250,11 +237,6 @@ export const getAppOps = createServerFn({ method: 'GET' })
     const cronJobs = caps?.cron
       ? await import('./apps/scheduler').then((m) => m.listCronJobs(id))
       : [];
-    const objects =
-      caps?.storage && app.status === 'deployed'
-        ? await import('./apps/storage').then((m) => m.listObjects(id))
-        : [];
-
     return {
       backend: {
         capable: Boolean(caps?.backend),
@@ -272,11 +254,6 @@ export const getAppOps = createServerFn({ method: 'GET' })
             ? (app.webhookSecret ?? null)
             : null,
         auth: manifest?.webhook?.auth ?? 'platform',
-      },
-      storage: {
-        enabled: Boolean(caps?.storage),
-        url: manifest?.storage?.url ?? null,
-        objects,
       },
       kv: { enabled: Boolean(caps?.kv) },
     };
@@ -331,21 +308,6 @@ export const listCronRunsFn = createServerFn({ method: 'GET' })
   .handler(async ({ data: id }): Promise<AppCronRunView[]> => {
     const { listCronRuns } = await import('./apps/scheduler');
     return listCronRuns(id);
-  });
-
-export const deleteStorageObjectFn = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
-  .validator((input: { id: string; key: string }) =>
-    // Storage keys have no write-side length cap (the storage route accepts
-    // whatever safeKey normalizes), so this must accept anything the API could
-    // have stored — the bound only exceeds PATH_MAX so no on-disk key is ever
-    // rejected here. Path safety itself is enforced by safeKey/resolvePaths.
-    z.object({ id: idSchema, key: z.string().min(1).max(8192) }).parse(input),
-  )
-  .handler(async ({ data }) => {
-    const { deleteObject } = await import('./apps/storage');
-    const ok = await deleteObject(data.id, data.key);
-    return { ok };
   });
 
 /** ================== app KV (manage UI) ================== */

@@ -113,7 +113,6 @@ Keep `manifest.json` consistent with the files. Example:
     "backend": true,
     "cron": false,
     "webhook": false,
-    "storage": false,
     "kv": false,
     "userscripts": false
   },
@@ -348,7 +347,7 @@ Use `query_app_db` to create tables and inspect data while developing. The
 backend should also create its tables on startup (idempotent `create table if
 not exists`). Each app has its OWN database — no cross-app access.
 
-## Extended capabilities (cron, webhook, storage, long-running)
+## Extended capabilities (cron, webhook, long-running)
 
 Turn these on in the manifest `capabilities` block. When a backend needs to
 serve plain HTTP paths (webhook, or legacy cron `path` jobs) alongside Connect
@@ -491,20 +490,12 @@ request (headers, body, `?secret=` if any) is forwarded untouched to
 GitHub/Stripe signature against your own secret). Use this to integrate
 third-party webhook providers that sign requests their own way.
 
-### storage
-
-Set `"storage": true`. The backend receives a writable `STORAGE_DIR` env var for
-blobs/files (use `node:fs/promises`). The frontend can use the authenticated
-HTTP API: `GET/PUT/DELETE /api/apps/<id>/storage/<key>`, and
-`GET /api/apps/<id>/storage/` returns a JSON list of objects.
-
 ### kv (key/value store)
 
 Set `"kv": true` for a simple per-app key/value store — small durable values like
 tokens, config, or counters — kept in the PLATFORM database. Use it instead of
-the heavier `database` capability when you only need a few values, and instead of
-`storage` when the data is small text (not blobs). Limits: key ≤ 512 chars, value
-≤ 64 KB, ≤ 1000 keys per app.
+the heavier `database` capability when you only need a few values. Limits: key ≤
+512 chars, value ≤ 64 KB, ≤ 1000 keys per app.
 
 After the app has been deployed with `kv` enabled, use `query_app_kv` to list,
 read, initialize, update, or delete its entries during development. The tool is
