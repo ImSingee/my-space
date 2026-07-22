@@ -22,9 +22,9 @@ describe('internalPlatformUrl', () => {
     );
   });
 
-  it('does not depend on the Better Auth public origin', () => {
+  it('does not depend on the public app origin', () => {
     vi.stubEnv('PORT', undefined);
-    vi.stubEnv('BETTER_AUTH_URL', 'https://public.example.test');
+    vi.stubEnv('APP_URL', 'https://public.example.test');
 
     expect(internalPlatformUrl('/api/workflow-hooks/demo/run')).toBe(
       'http://127.0.0.1:3700/api/workflow-hooks/demo/run',

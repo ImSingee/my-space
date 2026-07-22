@@ -60,7 +60,7 @@ wished existed, built for an audience of one: you.
 All you need is Docker. From the folder containing `docker-compose.yml`:
 
 ```bash
-printf 'SECRET=%s\nAGENT_RUNNER_TOKEN=%s\n' \
+printf 'APP_URL=http://localhost:3700\nSECRET=%s\nAGENT_RUNNER_TOKEN=%s\n' \
   "$(openssl rand -hex 32)" \
   "$(openssl rand -hex 32)" > .env
 docker compose up -d
@@ -80,7 +80,11 @@ Then open [http://localhost:3700](http://localhost:3700) and:
 
 Everything persists in Docker volumes (your apps, their databases, and their
 files), and `docker compose up -d` pulls the latest release whenever you want
-to upgrade. Set `HATCH_PORT` in `.env` to serve on a different port.
+to upgrade. `APP_URL` must be the public origin used to reach Hatch: the
+scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
+`.env` to serve on a different host port, update `APP_URL` to match. When Hatch
+is behind a domain or reverse proxy, set `APP_URL` to that external origin
+(for example, `https://hatch.example.com`).
 
 ## Ideas to try
 

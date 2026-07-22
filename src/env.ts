@@ -8,6 +8,8 @@ const DEV_AGENT_RUNNER_TOKEN = 'hatch-dev-runner-token';
 
 /** Immutable startup configuration for the Platform process. */
 export type PlatformEnv = Readonly<{
+  /** Public application origin without a trailing slash. */
+  appUrl: string;
   /** Root key used to derive per-app database passwords. */
   secret: string;
   /** Better Auth key, falling back to `secret` when not configured separately. */
@@ -35,11 +37,44 @@ export type AgentRunnerEnv = Readonly<{
 let platformEnv: PlatformEnv | undefined;
 let agentRunnerEnv: AgentRunnerEnv | undefined;
 
+function resolveAppUrl(): string {
+  const configuredAppUrl = process.env.APP_URL?.trim();
+  if (!configuredAppUrl) {
+    throw new Error('APP_URL is not set');
+  }
+
+  try {
+    const appUrl = new URL(configuredAppUrl);
+    const isHttpOrigin =
+      appUrl.protocol === 'http:' || appUrl.protocol === 'https:';
+    const hasOnlyOrigin =
+      !appUrl.username &&
+      !appUrl.password &&
+      appUrl.pathname === '/' &&
+      !appUrl.search &&
+      !appUrl.hash;
+    const hasValidOriginSyntax =
+      /^https?:\/\/(?:\[[^\]]+\]|[^:/?#@\\\s]+)(?::\d+)?\/?$/i.test(
+        configuredAppUrl,
+      );
+
+    if (!isHttpOrigin || !hasOnlyOrigin || !hasValidOriginSyntax) {
+      throw new Error();
+    }
+
+    return appUrl.origin;
+  } catch {
+    throw new Error('APP_URL must be a valid HTTP(S) origin');
+  }
+}
+
 function resolvePlatformEnv(): PlatformEnv {
   const secret = process.env.SECRET;
   if (!secret?.trim()) {
     throw new Error('SECRET is not set');
   }
+
+  const appUrl = resolveAppUrl();
 
   const configuredBetterAuthSecret = process.env.BETTER_AUTH_SECRET;
   const betterAuthSecret = configuredBetterAuthSecret?.trim()
@@ -56,6 +91,7 @@ function resolvePlatformEnv(): PlatformEnv {
     : configuredAgentRunnerToken || DEV_AGENT_RUNNER_TOKEN;
 
   return Object.freeze({
+    appUrl,
     secret,
     betterAuthSecret,
     agentRunnerToken,
