@@ -2,6 +2,7 @@ import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ENV_KEYS = [
+  'APP_URL',
   'SECRET',
   'BETTER_AUTH_SECRET',
   'AGENT_RUNNER_TOKEN',
@@ -16,6 +17,7 @@ const ENV_KEYS = [
 beforeEach(() => {
   vi.resetModules();
   for (const key of ENV_KEYS) vi.stubEnv(key, undefined);
+  vi.stubEnv('APP_URL', 'http://localhost:3700');
 });
 
 afterEach(() => {
@@ -23,6 +25,50 @@ afterEach(() => {
 });
 
 describe('getPlatformEnv', () => {
+  it.each([undefined, '', '   '])(
+    'requires APP_URL when it is %s',
+    async (appUrl) => {
+      vi.stubEnv('SECRET', 'platform-secret');
+      vi.stubEnv('APP_URL', appUrl);
+      const { getPlatformEnv } = await import('./env');
+
+      expect(() => getPlatformEnv()).toThrow('APP_URL is not set');
+    },
+  );
+
+  it.each([
+    'ftp://app.example.test',
+    'https://user@app.example.test',
+    'https://@app.example.test',
+    'https://app.example.test:',
+    'https://app.example.test\\',
+    'https://app.example.test/path',
+    'https://app.example.test?mode=test',
+    'https://app.example.test#section',
+    'not a URL',
+  ])('rejects non-origin APP_URL %s', async (appUrl) => {
+    vi.stubEnv('SECRET', 'platform-secret');
+    vi.stubEnv('APP_URL', appUrl);
+    const { getPlatformEnv } = await import('./env');
+
+    expect(() => getPlatformEnv()).toThrow(
+      'APP_URL must be a valid HTTP(S) origin',
+    );
+  });
+
+  it.each([
+    ['https://app.example.test', 'https://app.example.test'],
+    ['  https://app.example.test:8443/  ', 'https://app.example.test:8443'],
+    ['HTTP://APP.EXAMPLE.TEST:80/', 'http://app.example.test'],
+    ['http://[::1]:3700/', 'http://[::1]:3700'],
+  ])('normalizes APP_URL %s to %s', async (appUrl, expected) => {
+    vi.stubEnv('SECRET', 'platform-secret');
+    vi.stubEnv('APP_URL', appUrl);
+    const { getPlatformEnv } = await import('./env');
+
+    expect(getPlatformEnv().appUrl).toBe(expected);
+  });
+
   it.each([undefined, '', '   '])(
     'requires SECRET when it is %s',
     async (secret) => {
@@ -107,17 +153,20 @@ describe('getPlatformEnv', () => {
 
   it('returns one frozen snapshot and ignores later environment changes', async () => {
     vi.stubEnv('SECRET', 'first-secret');
+    vi.stubEnv('APP_URL', 'https://first.example.test/');
     vi.stubEnv('AGENT_INTERNAL_PORT', '4701');
     const { getPlatformEnv } = await import('./env');
 
     const first = getPlatformEnv();
     vi.stubEnv('SECRET', 'second-secret');
+    vi.stubEnv('APP_URL', 'https://second.example.test/');
     vi.stubEnv('AGENT_INTERNAL_PORT', '5701');
     const second = getPlatformEnv();
 
     expect(Object.isFrozen(first)).toBe(true);
     expect(second).toBe(first);
     expect(second.secret).toBe('first-secret');
+    expect(second.appUrl).toBe('https://first.example.test');
     expect(second.agentInternalPort).toBe(4701);
   });
 });

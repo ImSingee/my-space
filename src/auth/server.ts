@@ -8,7 +8,7 @@ import { db } from '../db';
 import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 
-const { betterAuthSecret } = getPlatformEnv();
+const { appUrl, betterAuthSecret } = getPlatformEnv();
 
 // Single-tenant platform: self-service sign-up is a runtime platform setting
 // (`auth.allowSignup` in platform_config), toggled from Settings → Users, not
@@ -20,6 +20,7 @@ const { betterAuthSecret } = getPlatformEnv();
 // It also has no empty-table bootstrap race: the check reads a config row, not
 // the user count, so a fresh deploy defaults to open and can create its owner.
 export const auth = betterAuth({
+  baseURL: appUrl,
   secret: betterAuthSecret,
   database: drizzleAdapter(db, {
     provider: 'pg',

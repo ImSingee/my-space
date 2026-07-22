@@ -6,6 +6,7 @@ beforeEach(() => {
     'APP_DATABASE_URL',
     'postgres://admin:admin-password@db.example.test:5432/platform?sslmode=require',
   );
+  vi.stubEnv('APP_URL', 'https://public.example.test');
   vi.stubEnv('SECRET', 'platform-secret');
   vi.stubEnv('BETTER_AUTH_SECRET', 'auth-secret');
 });

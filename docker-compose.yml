@@ -37,6 +37,9 @@ services:
       # Admin connection used to create/drop a database per app. Each app's
       # DATABASE_URL (host, port, credentials) is derived from this URL.
       APP_DATABASE_URL: postgres://postgres@db:5432/postgres
+      # REQUIRED: public origin used to reach Hatch. Keep it aligned with the
+      # published HATCH_PORT or the external reverse-proxy URL.
+      APP_URL: ${APP_URL:?set APP_URL in .env (e.g. http://localhost:3700)}
       # Image defaults; uncomment to override.
       # PORT: '3700'
       # HOST: 0.0.0.0
