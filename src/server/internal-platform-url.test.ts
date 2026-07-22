@@ -10,7 +10,7 @@ describe('internalPlatformUrl', () => {
     vi.stubEnv('PORT', undefined);
 
     expect(internalPlatformUrl('/api/apps/demo/kv')).toBe(
-      'http://127.0.0.1:3700/api/apps/demo/kv',
+      'http://localhost:3700/api/apps/demo/kv',
     );
   });
 
@@ -18,7 +18,7 @@ describe('internalPlatformUrl', () => {
     vi.stubEnv('PORT', '4711');
 
     expect(internalPlatformUrl('/api/apps/demo/kv')).toBe(
-      'http://127.0.0.1:4711/api/apps/demo/kv',
+      'http://localhost:4711/api/apps/demo/kv',
     );
   });
 
@@ -27,7 +27,7 @@ describe('internalPlatformUrl', () => {
     vi.stubEnv('BETTER_AUTH_URL', 'https://public.example.test');
 
     expect(internalPlatformUrl('/api/workflow-hooks/demo/run')).toBe(
-      'http://127.0.0.1:3700/api/workflow-hooks/demo/run',
+      'http://localhost:3700/api/workflow-hooks/demo/run',
     );
   });
 });
