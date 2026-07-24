@@ -50,8 +50,10 @@ services:
       # reach 3701, including generated app backends, impersonate the runner).
       # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
-      # REQUIRED: platform root secret used to derive every app database
-      # password. Also signs auth sessions unless BETTER_AUTH_SECRET overrides it.
+      # REQUIRED: stable platform root secret used to encrypt and decrypt app
+      # database credentials. Direct rotation makes existing encrypted
+      # credentials unreadable. Also signs auth sessions unless
+      # BETTER_AUTH_SECRET overrides it.
       # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
       SECRET: ${SECRET:?set SECRET in .env (e.g. openssl rand -hex 32)}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-${SECRET}}

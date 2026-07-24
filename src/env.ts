@@ -10,7 +10,10 @@ const DEV_AGENT_RUNNER_TOKEN = 'hatch-dev-runner-token';
 export type PlatformEnv = Readonly<{
   /** Public application origin without a trailing slash. */
   appUrl: string;
-  /** Root key used to derive per-app database passwords. */
+  /**
+   * Stable root key used to encrypt and decrypt per-app database credentials.
+   * Direct rotation makes credentials encrypted with the previous key unreadable.
+   */
   secret: string;
   /** Better Auth key, falling back to `secret` when not configured separately. */
   betterAuthSecret: string;

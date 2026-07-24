@@ -4,6 +4,7 @@
  * connection strings; the runner calls this through the internal API.
  */
 import { ensureAppDatabase } from './provision';
+import { refreshAppBackendDatabaseCredentials } from './runtime';
 
 /** Cap on rendered query output characters returned to the model. */
 export const MAX_QUERY_CHARS = 60000;
@@ -26,7 +27,10 @@ export async function queryAppDatabase(
   signal?: AbortSignal,
 ): Promise<AppDbQueryResult> {
   const postgres = (await import('postgres')).default;
-  const url = await ensureAppDatabase(id);
+  const { url, passwordMigrated } = await ensureAppDatabase(id);
+  if (passwordMigrated) {
+    await refreshAppBackendDatabaseCredentials(id);
+  }
   // Bound the statement so a runaway query (e.g. an accidental cross join or
   // `pg_sleep`) can't hang the tool — and thus the whole agent turn — for
   // minutes. Abort tears the connection down promptly on cancel.
