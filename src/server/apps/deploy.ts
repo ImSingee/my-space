@@ -22,7 +22,12 @@ import {
 } from './git';
 import type { NormalizedManifest } from './manifest';
 import { ensureAppDatabase, appDbName } from './provision';
-import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
+import {
+  ensureAppRunning,
+  refreshAppBackendDatabaseCredentials,
+  setKeepAlive,
+  stopApp,
+} from './runtime';
 import { reloadScheduler } from './scheduler';
 
 export type DeployResult = {
@@ -265,7 +270,10 @@ async function deployAppInner(
 
     let dbName = app.dbName ?? null;
     if (build.source.capabilities.database) {
-      await ensureAppDatabase(id);
+      const { passwordMigrated } = await ensureAppDatabase(id);
+      if (passwordMigrated) {
+        await refreshAppBackendDatabaseCredentials(id);
+      }
       dbName = appDbName(id);
     }
 

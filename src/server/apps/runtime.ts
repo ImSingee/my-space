@@ -359,7 +359,7 @@ async function startBackend(id: string): Promise<number> {
     throw new Error(`App "${id}" has no built backend. Deploy it first.`);
   }
 
-  const databaseUrl = await ensureAppDatabase(id);
+  const { url: databaseUrl } = await ensureAppDatabase(id);
   const port = await freePort();
 
   const storageDir = appStorageDir(id);
@@ -696,6 +696,37 @@ export function getBackendRuntimeView(id: string): BackendRuntimeView {
     restartCount: snap?.restartCount ?? 0,
     keepAlive: keepAliveSet().has(id),
   };
+}
+
+/**
+ * Refresh a live backend after its database password was migrated. A stopped
+ * backend will receive the current credential on its next normal start, so it
+ * needs no work here. Restart failures are isolated from the successful
+ * credential migration: they are recorded for diagnosis, while a later request
+ * can retry the backend boot normally.
+ */
+export async function refreshAppBackendDatabaseCredentials(
+  id: string,
+): Promise<void> {
+  const runtime = getBackendRuntimeView(id);
+  if (runtime.state === 'stopped') return;
+
+  try {
+    stopApp(id);
+    await startAppBackend(id, { keepAlive: runtime.keepAlive });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[runtime] failed to refresh database credentials for app "${id}":`,
+      message,
+    );
+    await recordBackendLog(
+      id,
+      'error',
+      'backend restart after database password migration failed',
+      { error: message },
+    );
+  }
 }
 
 /**

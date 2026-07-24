@@ -148,6 +148,11 @@ export const apps = pgTable(
     backendMode: text().$type<'serverless' | 'long-running'>(),
     /** Provisioned per-app Postgres database name, when database capability is on. */
     dbName: text(),
+    /**
+     * Versioned authenticated ciphertext for the per-app database password.
+     * Never stores the plaintext credential.
+     */
+    dbPasswordCiphertext: text(),
     /** Shared secret for verifying inbound webhook calls (webhook capability). */
     webhookSecret: text(),
     /**

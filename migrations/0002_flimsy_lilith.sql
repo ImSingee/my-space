@@ -1,0 +1,1 @@
+ALTER TABLE "apps" ADD COLUMN "db_password_ciphertext" text;
