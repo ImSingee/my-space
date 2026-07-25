@@ -11,6 +11,7 @@ import { createTools } from './tools';
 
 const tempRoots: string[] = [];
 const stubPlatform = {} as PlatformClient;
+const appUrl = 'https://hatch.example.com';
 
 function textOf(result: { content: { type: string; text?: string }[] }) {
   return result.content
@@ -71,7 +72,7 @@ describe('Agent skills', () => {
     tempRoots.push(root);
     const env = new NodeExecutionEnv({ cwd: root });
     const skills = await loadAgentSkills(env, SKILLS_DIR);
-    const prompt = buildSystemPrompt(skills);
+    const prompt = buildSystemPrompt(appUrl, skills);
     const readFileTool = createTools(env, {
       platform: stubPlatform,
       readOnlyRoots: [SKILLS_DIR],

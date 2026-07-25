@@ -97,6 +97,7 @@ function extractToolDetails(
 }
 
 export type RunAgentTurnOptions = {
+  appUrl: string;
   priorMessages: AgentMessage[];
   sessionId: string;
   userText: string;
@@ -164,7 +165,8 @@ export async function runAgentTurn(
     model: picked.model,
     tools,
     resources: { skills },
-    systemPrompt: ({ resources }) => buildSystemPrompt(resources.skills ?? []),
+    systemPrompt: ({ resources }) =>
+      buildSystemPrompt(opts.appUrl, resources.skills ?? []),
     thinkingLevel: picked.model.reasoning ? 'medium' : 'off',
   });
 

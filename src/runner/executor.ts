@@ -40,6 +40,8 @@ export class RunnerExecutor {
 
   constructor(
     private opts: {
+      /** Public Hatch origin captured from the Runner's startup environment. */
+      appUrl: string;
       platform: PlatformClient;
       /** Send a message to the platform; false when offline (kept buffered). */
       send: (message: RunnerMessage) => boolean;
@@ -105,6 +107,7 @@ export class RunnerExecutor {
       };
 
       run.done = runAgentTurn({
+        appUrl: this.opts.appUrl,
         priorMessages: payload.priorMessages as AgentMessage[],
         sessionId: payload.sessionId,
         userText: payload.userText,

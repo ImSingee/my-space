@@ -63,6 +63,7 @@ async function runWithResponses(
   };
 
   return runAgentTurn({
+    appUrl: 'https://hatch.example.test',
     priorMessages: [],
     sessionId,
     userText: 'hello',
