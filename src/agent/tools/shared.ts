@@ -47,7 +47,7 @@ export function unwrap<T>(
   return result.value;
 }
 
-/** Cap on file/tool output characters returned to the model. */
+/** Cap on file page content and per-stream command output characters. */
 export const MAX_FILE_CHARS = 60000;
 
 /**

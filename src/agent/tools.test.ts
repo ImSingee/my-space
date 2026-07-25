@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
+import { validateToolCall } from '@earendil-works/pi-ai';
 import {
   mkdtemp,
   mkdir,
@@ -19,6 +20,7 @@ import {
   MAX_EDIT_DETAILS_BYTES,
   MAX_EDIT_DIFF_INPUT_LINES,
 } from './tools/edit-diff';
+import { MAX_FILE_CHARS } from './tools/shared';
 import { createTools } from './tools';
 
 /** These tests only exercise file tools; platform calls must never happen. */
@@ -89,6 +91,167 @@ function editDetailsOf(result: { details?: unknown }): EditFileDetails {
 }
 
 describe('agent file tools', () => {
+  it('reads a complete file with the default pagination values', async () => {
+    const { getTool } = await setup({ 'app.ts': 'const value = 1;\n' });
+
+    const result = await getTool('read_file').execute('read', {
+      path: 'app.ts',
+    });
+
+    expect(textOf(result)).toBe('const value = 1;\n');
+    expect(result.details).toEqual({
+      path: 'app.ts',
+      offset: 0,
+      limit: MAX_FILE_CHARS,
+      truncated: false,
+    });
+  });
+
+  it('returns a continuation offset when the default read is truncated', async () => {
+    const firstPage = 'a'.repeat(MAX_FILE_CHARS);
+    const { getTool } = await setup({
+      'large.txt': `${firstPage}remaining`,
+    });
+
+    const first = await getTool('read_file').execute('first', {
+      path: 'large.txt',
+    });
+    expect(textOf(first)).toBe(
+      `${firstPage}\n\n` +
+        `[File content truncated. Continue reading with offset=${MAX_FILE_CHARS}.]`,
+    );
+    expect(first.details).toEqual({
+      path: 'large.txt',
+      offset: 0,
+      limit: MAX_FILE_CHARS,
+      truncated: true,
+      nextOffset: MAX_FILE_CHARS,
+    });
+
+    const second = await getTool('read_file').execute('second', {
+      path: 'large.txt',
+      offset: MAX_FILE_CHARS,
+    });
+    expect(textOf(second)).toBe('remaining');
+    expect(second.details).toEqual({
+      path: 'large.txt',
+      offset: MAX_FILE_CHARS,
+      limit: MAX_FILE_CHARS,
+      truncated: false,
+    });
+    expect(textOf(first).slice(0, MAX_FILE_CHARS) + textOf(second)).toBe(
+      `${firstPage}remaining`,
+    );
+  });
+
+  it('keeps a Unicode character intact across page boundaries', async () => {
+    const prefix = 'a'.repeat(MAX_FILE_CHARS - 1);
+    const { getTool } = await setup({
+      'unicode.txt': `${prefix}🙂remaining`,
+    });
+
+    const first = await getTool('read_file').execute('first', {
+      path: 'unicode.txt',
+    });
+    expect(textOf(first).startsWith(`${prefix}🙂`)).toBe(true);
+    expect(first.details).toMatchObject({
+      truncated: true,
+      nextOffset: MAX_FILE_CHARS + 1,
+    });
+
+    const second = await getTool('read_file').execute('second', {
+      path: 'unicode.txt',
+      offset: MAX_FILE_CHARS + 1,
+    });
+    expect(textOf(second)).toBe('remaining');
+  });
+
+  it('supports custom read windows and reports the next offset', async () => {
+    const { getTool } = await setup({ 'digits.txt': '0123456789' });
+
+    const result = await getTool('read_file').execute('read', {
+      path: 'digits.txt',
+      offset: 2,
+      limit: 3,
+    });
+
+    expect(textOf(result)).toBe(
+      '234\n\n[File content truncated. Continue reading with offset=5.]',
+    );
+    expect(result.details).toEqual({
+      path: 'digits.txt',
+      offset: 2,
+      limit: 3,
+      truncated: true,
+      nextOffset: 5,
+    });
+  });
+
+  it('does not report another page at or beyond the end of the file', async () => {
+    const { getTool } = await setup({ 'digits.txt': '0123456789' });
+
+    const finalPage = await getTool('read_file').execute('final', {
+      path: 'digits.txt',
+      offset: 5,
+      limit: 5,
+    });
+    expect(textOf(finalPage)).toBe('56789');
+    expect(finalPage.details).toEqual({
+      path: 'digits.txt',
+      offset: 5,
+      limit: 5,
+      truncated: false,
+    });
+
+    for (const offset of [10, 11]) {
+      const atOrPastEnd = await getTool('read_file').execute('at-or-past-end', {
+        path: 'digits.txt',
+        offset,
+        limit: 5,
+      });
+      expect(textOf(atOrPastEnd)).toBe('');
+      expect(atOrPastEnd.details).toEqual({
+        path: 'digits.txt',
+        offset,
+        limit: 5,
+        truncated: false,
+      });
+    }
+  });
+
+  it('validates bounded integer pagination parameters', async () => {
+    const { getTool } = await setup();
+    const readFileTool = getTool('read_file');
+    const validate = (arguments_: Record<string, unknown>) =>
+      validateToolCall([readFileTool], {
+        type: 'toolCall',
+        id: 'read',
+        name: 'read_file',
+        arguments: arguments_,
+      });
+
+    expect(validate({ path: 'app.ts' })).toEqual({ path: 'app.ts' });
+    expect(
+      validate({ path: 'app.ts', offset: 2, limit: MAX_FILE_CHARS }),
+    ).toEqual({ path: 'app.ts', offset: 2, limit: MAX_FILE_CHARS });
+    expect(readFileTool.parameters).toMatchObject({
+      properties: {
+        offset: { type: 'integer' },
+        limit: { type: 'integer' },
+      },
+    });
+    for (const arguments_ of [
+      { path: 'app.ts', offset: -1 },
+      { path: 'app.ts', offset: Number.MAX_SAFE_INTEGER + 1 },
+      { path: 'app.ts', limit: 0 },
+      { path: 'app.ts', limit: MAX_FILE_CHARS + 1 },
+    ]) {
+      expect(() => validate(arguments_)).toThrow(
+        /Validation failed for tool "read_file"/,
+      );
+    }
+  });
+
   it('edits a file with an exact replacement', async () => {
     const { root, getTool } = await setup({
       'src/app.ts': 'const greeting = "hello";\n',

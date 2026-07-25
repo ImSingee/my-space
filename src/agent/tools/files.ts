@@ -29,6 +29,15 @@ function countOccurrences(content: string, needle: string): number {
   }
 }
 
+function completeUnicodeBoundary(content: string, end: number): number {
+  if (end <= 0 || end >= content.length) return end;
+  const before = content.charCodeAt(end - 1);
+  const after = content.charCodeAt(end);
+  const splitsSurrogatePair =
+    before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
+  return splitsSurrogatePair ? end + 1 : end;
+}
+
 function applyExactReplacement(
   content: string,
   oldString: string,
@@ -224,11 +233,26 @@ export function createFileTools(
     name: 'read_file',
     label: 'Read file',
     description:
-      'Read a UTF-8 text file in the workspace, or an absolute file under a ' +
-      'read-only resource root referenced by the system prompt.',
+      'Read a page of a UTF-8 text file in the workspace, or an absolute file ' +
+      'under a read-only resource root referenced by the system prompt. When ' +
+      'the result is truncated, call again with the returned offset.',
     executionMode: 'sequential',
     parameters: Type.Object({
       path: Type.String({ description: 'File path to read.' }),
+      offset: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          maximum: Number.MAX_SAFE_INTEGER,
+          description: 'Zero-based character offset. Defaults to 0.',
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: MAX_FILE_CHARS,
+          description: `Maximum characters to return. Defaults to ${MAX_FILE_CHARS}.`,
+        }),
+      ),
     }),
     execute: async (_id, params, signal) => {
       const resolved = await resolveReadablePath(
@@ -241,10 +265,22 @@ export function createFileTools(
       const content = unwrap(
         await env.readTextFile(resolved.canonicalPath, signal),
       );
-      const truncated = content.length > MAX_FILE_CHARS;
-      return text(truncated ? content.slice(0, MAX_FILE_CHARS) : content, {
+      const offset = params.offset ?? 0;
+      const limit = params.limit ?? MAX_FILE_CHARS;
+      const requestedEnd = Math.min(offset + limit, content.length);
+      const nextOffset = completeUnicodeBoundary(content, requestedEnd);
+      const page = content.slice(offset, nextOffset);
+      const truncated = nextOffset < content.length;
+      const output = truncated
+        ? `${page}${page.endsWith('\n') ? '\n' : '\n\n'}` +
+          `[File content truncated. Continue reading with offset=${nextOffset}.]`
+        : page;
+      return text(output, {
         path: resolved.displayPath,
+        offset,
+        limit,
         truncated,
+        ...(truncated ? { nextOffset } : {}),
       });
     },
   });
