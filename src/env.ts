@@ -25,6 +25,8 @@ export type PlatformEnv = Readonly<{
 
 /** Immutable startup configuration for the Agent Runner process. */
 export type AgentRunnerEnv = Readonly<{
+  /** Public application origin without a trailing slash. */
+  appUrl: string;
   /** Platform internal API base URL without a trailing slash. */
   platformUrl: string;
   /** WebSocket control-channel URL derived from `platformUrl`. */
@@ -106,6 +108,7 @@ function resolvePlatformEnv(): PlatformEnv {
 
 function resolveAgentRunnerEnv(): AgentRunnerEnv {
   const production = process.env.NODE_ENV === 'production';
+  const appUrl = resolveAppUrl();
   const platformUrl = (
     process.env.HATCH_PLATFORM_URL ?? 'http://127.0.0.1:3701'
   ).replace(/\/+$/, '');
@@ -119,6 +122,7 @@ function resolveAgentRunnerEnv(): AgentRunnerEnv {
   }
 
   return Object.freeze({
+    appUrl,
     platformUrl,
     wsUrl: platformUrl.replace(/^http/, 'ws') + RUNNER_WS_PATH,
     token,

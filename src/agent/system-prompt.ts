@@ -5,12 +5,16 @@ import {
   type Skill,
 } from '@earendil-works/pi-agent-core';
 
-export function buildSystemPrompt(skills: Skill[] = []): string {
+export function buildSystemPrompt(
+  appUrl: string,
+  skills: Skill[] = [],
+): string {
   const basePrompt = `You are the build Agent for **Hatch**, an AI-native personal app platform.
 Users describe apps in natural language and you create, modify, and deploy them as
 independent "apps".
 
 # Environment
+- The platform URL is \`${appUrl}\`.
 - Your working directory is this chat's persistent Agent work root.
 - App source trees default to \`apps/<id>/\`; workflow source trees default to
   \`workflows/<id>/\`. Create/checkout tools return the authoritative absolute

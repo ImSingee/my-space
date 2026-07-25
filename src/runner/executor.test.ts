@@ -11,6 +11,8 @@ vi.mock('~agent/runtime', () => {
 const { runAgentTurn } = await import('~agent/runtime');
 const { RunnerExecutor } = await import('./executor');
 
+const APP_URL = 'https://hatch.example.test';
+
 const stubPlatform = new Proxy({} as PlatformClient, {
   get(_target, prop) {
     return () => {
@@ -48,6 +50,7 @@ type FinishedMessage = Extract<RunnerMessage, { type: 'run.finished' }>;
 function setupExecutor() {
   const sent: RunnerMessage[] = [];
   const executor = new RunnerExecutor({
+    appUrl: APP_URL,
     platform: stubPlatform,
     send: (message) => {
       sent.push(message);
@@ -83,6 +86,10 @@ describe('RunnerExecutor terminal outcomes', () => {
 
     expect(executor.start(payload)).toEqual({ accepted: true });
     await vi.waitFor(() => expect(finished()).toBeDefined());
+
+    expect(runAgentTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ appUrl: APP_URL }),
+    );
 
     expect(finished()).toEqual({
       type: 'run.finished',

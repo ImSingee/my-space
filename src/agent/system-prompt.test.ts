@@ -2,6 +2,8 @@ import type { Skill } from '@earendil-works/pi-agent-core';
 import { describe, expect, it } from 'vitest';
 import { buildSystemPrompt } from './system-prompt';
 
+const appUrl = 'https://hatch.example.com';
+
 const visibleSkill: Skill = {
   name: 'building-apps',
   description: 'Build and modify Hatch apps.',
@@ -11,7 +13,7 @@ const visibleSkill: Skill = {
 
 describe('Agent system prompt skills', () => {
   it('requires frontend route metadata to stay synchronized', () => {
-    const prompt = buildSystemPrompt();
+    const prompt = buildSystemPrompt(appUrl);
 
     expect(prompt).toMatch(/Keep\s+`app\.routes`/);
     expect(prompt).toContain('{ path, description }');
@@ -20,7 +22,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('makes widgets responsive by default', () => {
-    const prompt = buildSystemPrompt();
+    const prompt = buildSystemPrompt(appUrl);
 
     expect(prompt).toMatch(
       /Make widgets responsive by default\s+and omit `supportedSizes`/,
@@ -29,7 +31,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('keeps existing checkout synchronization non-destructive', () => {
-    const prompt = buildSystemPrompt();
+    const prompt = buildSystemPrompt(appUrl);
 
     expect(prompt).toMatch(/clean `master` checkout may\s+fast-forward/);
     expect(prompt).toContain('otherwise checkout preserves the target');
@@ -38,8 +40,16 @@ describe('Agent system prompt skills', () => {
     );
   });
 
+  it('identifies the current APP_URL', () => {
+    const prompt = buildSystemPrompt(appUrl);
+
+    expect(prompt).toContain(
+      '# Environment\n- The platform URL is `https://hatch.example.com`.',
+    );
+  });
+
   it('lists visible skill metadata without eagerly including its body', () => {
-    const prompt = buildSystemPrompt([visibleSkill]);
+    const prompt = buildSystemPrompt(appUrl, [visibleSkill]);
 
     expect(prompt).toContain('<available_skills>');
     expect(prompt).toContain('<name>building-apps</name>');
@@ -49,7 +59,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('requires import and build Skills before opening source archives', () => {
-    const prompt = buildSystemPrompt([
+    const prompt = buildSystemPrompt(appUrl, [
       visibleSkill,
       {
         ...visibleSkill,
@@ -75,7 +85,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('hides skills disabled for model invocation', () => {
-    const prompt = buildSystemPrompt([
+    const prompt = buildSystemPrompt(appUrl, [
       { ...visibleSkill, disableModelInvocation: true },
     ]);
 
@@ -84,6 +94,6 @@ describe('Agent system prompt skills', () => {
   });
 
   it('does not render an empty skill section', () => {
-    expect(buildSystemPrompt()).not.toContain('<available_skills>');
+    expect(buildSystemPrompt(appUrl)).not.toContain('<available_skills>');
   });
 });

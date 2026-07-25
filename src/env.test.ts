@@ -176,6 +176,7 @@ describe('getAgentRunnerEnv', () => {
     const { getAgentRunnerEnv } = await import('./env');
 
     expect(getAgentRunnerEnv()).toEqual({
+      appUrl: 'http://localhost:3700',
       platformUrl: 'http://127.0.0.1:3701',
       wsUrl: 'ws://127.0.0.1:3701/internal/agent/runner/ws',
       token: 'hatch-dev-runner-token',
@@ -187,6 +188,7 @@ describe('getAgentRunnerEnv', () => {
 
   it('reads production runner configuration', async () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('APP_URL', '  https://app.example.test:8443/  ');
     vi.stubEnv('HATCH_PLATFORM_URL', 'https://platform.example.test:4701///');
     vi.stubEnv('AGENT_RUNNER_TOKEN', '  runner-token  ');
     vi.stubEnv('HATCH_RUNNER_ID', '  runner-one  ');
@@ -194,6 +196,7 @@ describe('getAgentRunnerEnv', () => {
     const { getAgentRunnerEnv } = await import('./env');
 
     expect(getAgentRunnerEnv()).toEqual({
+      appUrl: 'https://app.example.test:8443',
       platformUrl: 'https://platform.example.test:4701',
       wsUrl: 'wss://platform.example.test:4701/internal/agent/runner/ws',
       token: 'runner-token',
@@ -201,6 +204,30 @@ describe('getAgentRunnerEnv', () => {
       production: true,
       allowUnsandboxed: true,
     });
+  });
+
+  it.each([undefined, '', '   '])(
+    'requires APP_URL when it is %s',
+    async (appUrl) => {
+      vi.stubEnv('APP_URL', appUrl);
+      const { getAgentRunnerEnv } = await import('./env');
+
+      expect(() => getAgentRunnerEnv()).toThrow('APP_URL is not set');
+    },
+  );
+
+  it.each([
+    'ftp://app.example.test',
+    'https://app.example.test/path',
+    'https://app.example.test?mode=test',
+    'not a URL',
+  ])('rejects non-origin APP_URL %s', async (appUrl) => {
+    vi.stubEnv('APP_URL', appUrl);
+    const { getAgentRunnerEnv } = await import('./env');
+
+    expect(() => getAgentRunnerEnv()).toThrow(
+      'APP_URL must be a valid HTTP(S) origin',
+    );
   });
 
   it.each([undefined, '', '   '])(
@@ -217,17 +244,20 @@ describe('getAgentRunnerEnv', () => {
   );
 
   it('returns one frozen snapshot and ignores later environment changes', async () => {
+    vi.stubEnv('APP_URL', 'https://first.example.test/');
     vi.stubEnv('AGENT_RUNNER_TOKEN', 'first-token');
     vi.stubEnv('HATCH_RUNNER_ID', 'runner-one');
     const { getAgentRunnerEnv } = await import('./env');
 
     const first = getAgentRunnerEnv();
+    vi.stubEnv('APP_URL', 'https://second.example.test/');
     vi.stubEnv('AGENT_RUNNER_TOKEN', 'second-token');
     vi.stubEnv('HATCH_RUNNER_ID', 'runner-two');
     const second = getAgentRunnerEnv();
 
     expect(Object.isFrozen(first)).toBe(true);
     expect(second).toBe(first);
+    expect(second.appUrl).toBe('https://first.example.test');
     expect(second.token).toBe('first-token');
     expect(second.runnerId).toBe('runner-one');
   });

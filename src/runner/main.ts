@@ -74,7 +74,11 @@ function send(message: RunnerMessage): boolean {
   }
 }
 
-const executor = new RunnerExecutor({ platform, send });
+const executor = new RunnerExecutor({
+  appUrl: config.appUrl,
+  platform,
+  send,
+});
 
 function scheduleReconnect(): void {
   if (shuttingDown || reconnectTimer) return;
