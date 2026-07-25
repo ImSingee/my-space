@@ -44,7 +44,7 @@ describe('Agent system prompt skills', () => {
     const prompt = buildSystemPrompt(appUrl);
 
     expect(prompt).toContain(
-      '# Environment\n- Current `$APP_URL`: `https://hatch.example.com`.',
+      '# Environment\n- The platform URL is `https://hatch.example.com`.',
     );
   });
 
