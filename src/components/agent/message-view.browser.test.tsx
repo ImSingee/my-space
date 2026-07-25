@@ -6,6 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
+import { userEvent } from 'vitest/browser';
 import { expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { MessageView } from './message-view';
@@ -109,8 +110,38 @@ function deployResult(isError = false): ToolResultMessage {
   };
 }
 
+function runCommandCall(id: string, command: string): ToolCallBlock {
+  return {
+    type: 'toolCall',
+    id,
+    name: 'run_command',
+    arguments: { command },
+  };
+}
+
+const longCommand = [
+  "  env MODE='full command' pnpm exec tsx <<'EOF'",
+  'const payload = {',
+  `  token: '${'x'.repeat(240)}',`,
+  '};',
+  ...Array.from(
+    { length: 24 },
+    (_, index) => `console.log(${index}, payload.token);`,
+  ),
+  'EOF',
+  '',
+].join('\n');
+
+const longEditPathSuffix = [
+  'apps/customer-support/src/features',
+  'notification-preferences-and-delivery-channels',
+  `${'nested-editor-'.repeat(16)}settings.tsx`,
+].join('/');
+const attemptedEditPath = `/workspace/${longEditPathSuffix}`;
+const canonicalEditPath = longEditPathSuffix;
+
 const editDetails: EditFileDetails = {
-  path: 'src/app.ts',
+  path: canonicalEditPath,
   replacements: 1,
   diff: ' 1 const value = true;\n-2 const oldName = 1;\n+2 const newName = 1;\n   \\ No newline at end of file',
   patch:
@@ -308,6 +339,193 @@ test('wraps long and multiline provider errors inside a narrow message', async (
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
 
+test('reveals a complete persisted command without overflowing a narrow message', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [runCommandCall('command-long', longCommand)],
+    },
+    {
+      width: 320,
+      toolResults: new Map([
+        [
+          'command-long',
+          {
+            role: 'toolResult',
+            toolName: 'run_command',
+            content: [{ type: 'text', text: 'Command finished.' }],
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /Run command/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  const controlledId = toggle.element().getAttribute('aria-controls');
+  expect(controlledId).toBeTruthy();
+  expect(document.getElementById(controlledId as string)).not.toBeNull();
+  toggle.element().focus();
+  await userEvent.keyboard('{Enter}');
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
+  await userEvent.keyboard('{Space}');
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await userEvent.keyboard('{Space}');
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
+
+  const commandRegion = screen.getByRole('region', { name: 'Command' });
+  const outputRegion = screen.getByRole('region', { name: 'Output' });
+  await expect.element(commandRegion).toBeVisible();
+  await expect.element(outputRegion).toBeVisible();
+  const commandCode = commandRegion.element().lastElementChild;
+  expect(commandCode).toBeInstanceOf(HTMLElement);
+  expect(commandCode?.textContent).toBe(longCommand);
+  const commandStyle = getComputedStyle(commandCode as HTMLElement);
+  expect(commandStyle.whiteSpace).toBe('pre-wrap');
+  expect(commandStyle.overflowWrap).toBe('anywhere');
+  expect((commandCode as HTMLElement).scrollWidth).toBeLessThanOrEqual(
+    (commandCode as HTMLElement).clientWidth,
+  );
+  expect((commandCode as HTMLElement).scrollHeight).toBeGreaterThan(
+    (commandCode as HTMLElement).clientHeight,
+  );
+  expect((commandCode as HTMLElement).clientHeight).toBeLessThanOrEqual(260);
+  await expect
+    .element(outputRegion.getByText('Command finished.'))
+    .toBeVisible();
+
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('keeps an incomplete persisted command expandable without a result', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [runCommandCall('command-incomplete', longCommand)],
+  });
+
+  await screen.getByRole('button', { name: /Run command/ }).click();
+  const commandRegion = screen.getByRole('region', { name: 'Command' });
+  await expect.element(commandRegion).toBeVisible();
+  expect(commandRegion.element().lastElementChild?.textContent).toBe(
+    longCommand,
+  );
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+});
+
+test('shows the complete command while a live command is running', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <Box data-testid="live-command-shell" w={320}>
+        <StreamingToolStep
+          tool={{
+            id: 'command-running',
+            name: 'run_command',
+            args: { command: longCommand },
+            done: false,
+          }}
+        />
+      </Box>
+    </MantineProvider>,
+  );
+
+  const commandRegion = screen.getByRole('region', { name: 'Command' });
+  await expect.element(commandRegion).toBeVisible();
+  expect(commandRegion.element().lastElementChild?.textContent).toBe(
+    longCommand,
+  );
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+  const shell = screen.getByTestId('live-command-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('collapses a live command after completion and preserves its details', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'command-output',
+          name: 'run_command',
+          args: { command: longCommand },
+          done: false,
+          output: 'partial output',
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const commandRegion = screen.getByRole('region', { name: 'Command' });
+  const outputRegion = screen.getByRole('region', { name: 'Output' });
+  await expect.element(commandRegion).toBeVisible();
+  await expect.element(outputRegion).toBeVisible();
+  expect(commandRegion.element().lastElementChild?.textContent).toBe(
+    longCommand,
+  );
+  await expect.element(outputRegion).toHaveTextContent('partial output');
+
+  await screen.rerender(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'command-output',
+          name: 'run_command',
+          args: { command: longCommand },
+          done: true,
+          output: 'final output',
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const toggle = screen.getByRole('button', { name: /Run command/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  const controlledId = toggle.element().getAttribute('aria-controls');
+  const collapsedBody = document.getElementById(controlledId as string);
+  expect(collapsedBody).toHaveAttribute('aria-hidden', 'true');
+  expect(collapsedBody).toHaveAttribute('inert');
+  await vi.waitFor(() =>
+    expect(getComputedStyle(collapsedBody as HTMLElement).display).toBe('none'),
+  );
+  expect(screen.getByRole('region', { name: 'Command' }).query()).toBeNull();
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+  await toggle.click();
+  const completedCommand = screen.getByRole('region', { name: 'Command' });
+  const completedOutput = screen.getByRole('region', { name: 'Output' });
+  await expect.element(completedCommand).toBeVisible();
+  await expect.element(completedOutput).toHaveTextContent('final output');
+  expect(completedCommand.element().lastElementChild?.textContent).toBe(
+    longCommand,
+  );
+});
+
+test('reveals a completed live command even when it produced no output', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'command-done',
+          name: 'run_command',
+          args: { command: longCommand },
+          done: true,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const toggle = screen.getByRole('button', { name: /Run command/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
+  const commandRegion = screen.getByRole('region', { name: 'Command' });
+  await expect.element(commandRegion).toBeVisible();
+  expect(commandRegion.element().lastElementChild?.textContent).toBe(
+    longCommand,
+  );
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toHaveTextContent('(no output)');
+});
+
 test('renders a persisted edit result as a colored diff', async () => {
   const screen = await renderMessage(
     {
@@ -317,7 +535,7 @@ test('renders a persisted edit result as a colored diff', async () => {
           type: 'toolCall',
           id: 'edit-app',
           name: 'edit_file',
-          arguments: { path: 'src/app.ts' },
+          arguments: { path: attemptedEditPath },
         },
       ],
     },
@@ -332,7 +550,7 @@ test('renders a persisted edit result as a colored diff', async () => {
             content: [
               {
                 type: 'text',
-                text: 'Edited src/app.ts: replaced 1 occurrence(s).',
+                text: `Edited ${canonicalEditPath}: replaced 1 occurrence(s).`,
               },
             ],
             details: editDetails,
@@ -343,6 +561,12 @@ test('renders a persisted edit result as a colored diff', async () => {
   );
 
   await screen.getByRole('button', { name: /Edit file/ }).click();
+  const fileRegion = screen.getByRole('region', { name: 'File path' });
+  await expect.element(fileRegion).toBeVisible();
+  const filePath = fileRegion.element().lastElementChild as HTMLElement;
+  expect(filePath.textContent).toBe(canonicalEditPath);
+  expect(getComputedStyle(filePath).overflowWrap).toBe('anywhere');
+  expect(filePath.scrollWidth).toBeLessThanOrEqual(filePath.clientWidth);
   await expect
     .element(screen.getByRole('region', { name: 'File changes' }))
     .toBeVisible();
@@ -357,33 +581,129 @@ test('renders a persisted edit result as a colored diff', async () => {
     getComputedStyle(added.element()).backgroundColor,
   );
   expect(document.body.textContent).not.toContain(
-    'Edited src/app.ts: replaced 1 occurrence(s).',
+    `Edited ${canonicalEditPath}`,
   );
   const shell = screen.getByTestId('message-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
 
-test('renders a completed live edit result with the same diff view', async () => {
+test('preserves a live edit path from execution through its completed diff', async () => {
   const screen = await render(
     <MantineProvider>
       <StreamingToolStep
         tool={{
           id: 'edit-live',
           name: 'edit_file',
-          args: { path: 'src/app.ts' },
+          args: { path: attemptedEditPath },
+          done: false,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const liveFile = screen.getByRole('region', { name: 'File path' });
+  await expect.element(liveFile).toBeVisible();
+  expect(liveFile.element().lastElementChild?.textContent).toBe(
+    attemptedEditPath,
+  );
+
+  await screen.rerender(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'edit-live',
+          name: 'edit_file',
+          args: { path: attemptedEditPath },
           done: true,
-          output: 'Edited src/app.ts: replaced 1 occurrence(s).',
+          output: `Edited ${canonicalEditPath}: replaced 1 occurrence(s).`,
           details: editDetails,
         }}
       />
     </MantineProvider>,
   );
 
-  await screen.getByRole('button', { name: /Edit file/ }).click();
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  const toggle = screen.getByRole('button', { name: /Edit file/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  const completedFile = screen.getByRole('region', { name: 'File path' });
+  await expect.element(completedFile).toBeVisible();
+  expect(completedFile.element().lastElementChild?.textContent).toBe(
+    canonicalEditPath,
+  );
   await expect
     .element(screen.getByRole('region', { name: 'File changes' }))
     .toBeVisible();
   await expect.element(screen.getByText('+2 const newName = 1;')).toBeVisible();
+});
+
+test('reveals the attempted path for an incomplete persisted edit', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [
+      {
+        type: 'toolCall',
+        id: 'edit-incomplete',
+        name: 'edit_file',
+        arguments: { path: attemptedEditPath },
+      },
+    ],
+  });
+
+  await screen.getByRole('button', { name: /Edit file/ }).click();
+  const fileRegion = screen.getByRole('region', { name: 'File path' });
+  await expect.element(fileRegion).toBeVisible();
+  expect(fileRegion.element().lastElementChild?.textContent).toBe(
+    attemptedEditPath,
+  );
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+  expect(
+    screen.getByRole('region', { name: 'File changes' }).query(),
+  ).toBeNull();
+});
+
+test('keeps the attempted path and error for a failed paired edit', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'edit-failed',
+          name: 'edit_file',
+          arguments: { path: attemptedEditPath },
+        },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'edit-failed',
+          {
+            role: 'toolResult',
+            toolName: 'edit_file',
+            content: [{ type: 'text', text: 'old_string was not found.' }],
+            details: editDetails,
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  await screen.getByRole('button', { name: /Edit file/ }).click();
+  const fileRegion = screen.getByRole('region', { name: 'File path' });
+  const outputRegion = screen.getByRole('region', { name: 'Output' });
+  await expect.element(fileRegion).toBeVisible();
+  expect(fileRegion.element().lastElementChild?.textContent).toBe(
+    attemptedEditPath,
+  );
+  await expect
+    .element(outputRegion.getByText('old_string was not found.'))
+    .toBeVisible();
+  expect(
+    screen.getByRole('region', { name: 'File changes' }).query(),
+  ).toBeNull();
 });
 
 test('falls back to result text for legacy and failed edit results', async () => {

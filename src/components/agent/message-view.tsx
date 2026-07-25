@@ -218,6 +218,7 @@ function AssistantBlocks({
         <ToolStep
           key={index}
           name={block.name}
+          args={block.arguments}
           detail={toolDetail(block.name, block.arguments)}
           status="done"
           result={

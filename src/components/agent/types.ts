@@ -154,6 +154,23 @@ export function toolDetail(
   return oneLine.length > 48 ? `${oneLine.slice(0, 48)}…` : oneLine;
 }
 
+export type ToolInputDetail = { label: string; value: string };
+
+/** Complete inputs that need an inspectable form beyond the compact summary. */
+export function toolInputDetail(
+  name: string,
+  args: Record<string, unknown> | undefined,
+): ToolInputDetail | undefined {
+  if (!args) return undefined;
+  if (name === 'run_command' && typeof args.command === 'string') {
+    return { label: 'Command', value: args.command };
+  }
+  if (name === 'edit_file' && typeof args.path === 'string') {
+    return { label: 'File path', value: args.path };
+  }
+  return undefined;
+}
+
 /**
  * App ids that an assistant turn successfully deployed, in call order.
  *
