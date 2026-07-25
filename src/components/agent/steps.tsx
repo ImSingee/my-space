@@ -7,23 +7,39 @@ import {
   IconChevronRight,
   IconSparkles,
 } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, type Ref, useEffect, useId, useRef } from 'react';
 import { isEditFileDetails } from '~agent/edit-file-details';
 import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
-import { toolDetail, toolLabel } from './types';
+import {
+  type ToolInputDetail,
+  toolDetail,
+  toolInputDetail,
+  toolLabel,
+} from './types';
 import classes from './chat.module.css';
 
 export type ToolStatus = 'running' | 'done' | 'error';
 
 type ToolResult = { text: string; details?: unknown; isError?: boolean };
 
-function successfulEditDiff(name: string, result?: ToolResult) {
+function successfulEditDetails(name: string, result?: ToolResult) {
   return name === 'edit_file' &&
     result?.isError !== true &&
     isEditFileDetails(result?.details)
-    ? result.details.diff
+    ? result.details
     : undefined;
+}
+
+function resolvedToolInput(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  result?: ToolResult,
+): ToolInputDetail | undefined {
+  const editDetails = successfulEditDetails(name, result);
+  return editDetails
+    ? { label: 'File path', value: editDetails.path }
+    : toolInputDetail(name, args);
 }
 
 /**
@@ -46,6 +62,7 @@ function StepRow({
   children?: ReactNode;
 }) {
   const [open, handlers] = useDisclosure(false);
+  const bodyId = useId();
   const expandable = Boolean(children);
   const inner = (
     <>
@@ -67,6 +84,8 @@ function StepRow({
       {expandable ? (
         <UnstyledButton
           className={classes.stepHeader}
+          aria-controls={bodyId}
+          aria-expanded={open}
           onClick={handlers.toggle}
         >
           {inner}
@@ -74,7 +93,77 @@ function StepRow({
       ) : (
         <Box className={classes.stepHeader}>{inner}</Box>
       )}
-      {expandable ? <Collapse expanded={open}>{children}</Collapse> : null}
+      {expandable ? (
+        <Collapse id={bodyId} expanded={open}>
+          {children}
+        </Collapse>
+      ) : null}
+    </Box>
+  );
+}
+
+function ToolBodySection({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Box
+      component="section"
+      aria-label={label}
+      className={classes.stepBodySection}
+    >
+      <Box className={classes.stepBodyLabel}>{label}</Box>
+      {children}
+    </Box>
+  );
+}
+
+function ToolStepBody({
+  input,
+  output,
+  outputRef,
+  editDiff,
+}: {
+  input?: ToolInputDetail;
+  output?: string;
+  outputRef?: Ref<HTMLDivElement>;
+  editDiff?: string;
+}) {
+  const hasInput = input !== undefined;
+  const hasOutput = output !== undefined || editDiff !== undefined;
+  const outputNode = (
+    <Box ref={outputRef} className={classes.stepBodyCode}>
+      {output || '(no output)'}
+    </Box>
+  );
+
+  return (
+    <Box className={classes.stepBody}>
+      {input ? (
+        <ToolBodySection label={input.label}>
+          <Box className={classes.stepInputCode}>
+            {input.value || `(empty ${input.label.toLowerCase()})`}
+          </Box>
+        </ToolBodySection>
+      ) : null}
+      {editDiff ? (
+        hasInput ? (
+          <Box className={classes.stepBodySection}>
+            <EditDiff diff={editDiff} />
+          </Box>
+        ) : (
+          <EditDiff diff={editDiff} />
+        )
+      ) : hasOutput ? (
+        hasInput ? (
+          <ToolBodySection label="Output">{outputNode}</ToolBodySection>
+        ) : (
+          outputNode
+        )
+      ) : null}
     </Box>
   );
 }
@@ -92,17 +181,20 @@ export function ThinkingStep({ text }: { text: string }) {
 
 export function ToolStep({
   name,
+  args,
   detail,
   status,
   result,
 }: {
   name: string;
+  args?: Record<string, unknown>;
   detail?: string;
   status: ToolStatus;
   result?: ToolResult;
 }) {
   const isError = status === 'error' || result?.isError === true;
-  const editDiff = successfulEditDiff(name, result);
+  const editDetails = successfulEditDetails(name, result);
+  const input = resolvedToolInput(name, args, result);
   const icon =
     status === 'running' ? (
       <Loader size={11} color="gray" />
@@ -118,16 +210,12 @@ export function ToolStep({
       detail={detail}
       error={isError}
     >
-      {result ? (
-        <Box className={classes.stepBody}>
-          {editDiff ? (
-            <EditDiff diff={editDiff} />
-          ) : (
-            <Box className={classes.stepBodyCode}>
-              {result.text || '(no output)'}
-            </Box>
-          )}
-        </Box>
+      {input !== undefined || result ? (
+        <ToolStepBody
+          input={input}
+          output={result?.text}
+          editDiff={editDetails?.diff}
+        />
       ) : null}
     </StepRow>
   );
@@ -147,6 +235,7 @@ export function StreamingThinkingStep({
 }) {
   const [open, handlers] = useDisclosure(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyId = useId();
 
   useEffect(() => {
     if (active && bodyRef.current) {
@@ -183,6 +272,8 @@ export function StreamingThinkingStep({
       {expandable ? (
         <UnstyledButton
           className={classes.stepHeader}
+          aria-controls={bodyId}
+          aria-expanded={open}
           onClick={handlers.toggle}
         >
           {header}
@@ -190,13 +281,13 @@ export function StreamingThinkingStep({
       ) : (
         <Box className={classes.stepHeader}>{header}</Box>
       )}
-      {showBody ? (
+      <Collapse id={bodyId} expanded={showBody}>
         <Box className={classes.stepBody}>
           <Box ref={bodyRef} className={classes.stepBodyText}>
             {text.trimStart()}
           </Box>
         </Box>
-      ) : null}
+      </Collapse>
     </Box>
   );
 }
@@ -209,14 +300,23 @@ export function StreamingThinkingStep({
 export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   const [open, handlers] = useDisclosure(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyId = useId();
   const running = !tool.done;
   const isError = tool.isError === true;
-  const editDiff = successfulEditDiff(tool.name, {
+  const result = {
     text: tool.output ?? '',
     details: tool.details,
     isError: tool.isError,
-  });
-  const hasBody = Boolean(tool.output || editDiff);
+  };
+  const editDetails = successfulEditDetails(tool.name, result);
+  const input = resolvedToolInput(tool.name, tool.args, result);
+  const output = tool.output
+    ? tool.output
+    : tool.done && tool.name === 'run_command' && input !== undefined
+      ? ''
+      : undefined;
+  const hasBody =
+    input !== undefined || output !== undefined || editDetails !== undefined;
   const showBody = running ? hasBody : open && hasBody;
   const expandable = !running && hasBody;
 
@@ -256,6 +356,8 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       {expandable ? (
         <UnstyledButton
           className={classes.stepHeader}
+          aria-controls={bodyId}
+          aria-expanded={open}
           onClick={handlers.toggle}
         >
           {header}
@@ -263,16 +365,15 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       ) : (
         <Box className={classes.stepHeader}>{header}</Box>
       )}
-      {showBody ? (
-        <Box className={classes.stepBody}>
-          {editDiff ? (
-            <EditDiff diff={editDiff} />
-          ) : (
-            <Box ref={bodyRef} className={classes.stepBodyCode}>
-              {tool.output}
-            </Box>
-          )}
-        </Box>
+      {hasBody ? (
+        <Collapse id={bodyId} expanded={showBody}>
+          <ToolStepBody
+            input={input}
+            output={output}
+            outputRef={bodyRef}
+            editDiff={editDetails?.diff}
+          />
+        </Collapse>
       ) : null}
     </Box>
   );

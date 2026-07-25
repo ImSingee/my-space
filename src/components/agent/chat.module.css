@@ -176,16 +176,35 @@ button.stepHeader:hover {
 }
 
 .stepBody {
+  min-width: 0;
   margin: 2px 0 6px 15px;
   padding: 2px 0 2px 12px;
   border-left: 2px solid var(--mantine-color-default-border);
 }
 
+.stepBodySection {
+  min-width: 0;
+}
+
+.stepBodySection + .stepBodySection {
+  margin-top: 6px;
+}
+
+.stepBodyLabel {
+  margin-bottom: 2px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+}
+
 .stepBodyText {
+  min-width: 0;
+  max-width: 100%;
   font-size: var(--mantine-font-size-xs);
   line-height: 1.6;
   color: var(--mantine-color-dimmed);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   max-height: 260px;
   overflow: auto;
@@ -194,6 +213,11 @@ button.stepHeader:hover {
 .stepBodyCode {
   composes: stepBodyText;
   font-family: var(--mantine-font-family-monospace);
+}
+
+.stepInputCode {
+  composes: stepBodyCode;
+  color: var(--mantine-color-text);
 }
 
 .editDiff {
