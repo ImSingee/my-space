@@ -12,26 +12,15 @@
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --transition-fast: 120ms var(--ease-out-quart);
   --transition-base: 180ms var(--ease-out-quart);
+  --surface-panel: #faf8f5;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f6f3ee;
 }
 
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-}
-
-/* Scheme-aware surface layers. The body stays a true (warm-ink) white; the
- * panel layer carries only a whisper of warmth so the sidebar reads as a
- * distinct surface without becoming a "sand" background. */
-[data-mantine-color-scheme='light'] {
-  --surface-panel: #faf8f5;
-  --surface-raised: #ffffff;
-  --surface-sunken: #f6f3ee;
-}
-[data-mantine-color-scheme='dark'] {
-  --surface-panel: var(--mantine-color-secondary-9);
-  --surface-raised: var(--mantine-color-secondary-8);
-  --surface-sunken: #0a0807;
 }
 
 /* Display headings: serif only for the large, hero-level titles (h1/h2).
@@ -75,14 +64,6 @@ p {
 ::selection {
   background-color: var(--mantine-color-ember-2);
   color: var(--mantine-color-ember-9);
-}
-[data-mantine-color-scheme='dark'] ::selection {
-  background-color: color-mix(
-    in srgb,
-    var(--mantine-color-ember-6) 45%,
-    transparent
-  );
-  color: var(--mantine-color-ember-1);
 }
 
 /* Quiet, theme-aware scrollbars. */

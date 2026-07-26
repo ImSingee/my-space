@@ -385,7 +385,7 @@ export const baseTheme: MantineThemeOverride = createTheme({
   focusRing: 'never',
   scale: 1,
   primaryColor: 'primary',
-  primaryShade: { light: 8, dark: 0 },
+  primaryShade: 8,
   autoContrast: true,
   luminanceThreshold: 0.3,
   fontFamily:

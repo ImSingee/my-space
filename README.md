@@ -18,7 +18,7 @@ wished existed, built for an audience of one: you.
 2. **Watch it ship.** The agent scaffolds the app, writes the code,
    provisions a database, and deploys a versioned release you can open right
    away at its own clean URL.
-3. **Iterate forever.** "Make the chart weekly." "Add dark mode." Every
+3. **Iterate forever.** "Make the chart weekly." "Add CSV export." Every
    change becomes a new deployment — and if you liked it better before, one
    click rolls it back.
 

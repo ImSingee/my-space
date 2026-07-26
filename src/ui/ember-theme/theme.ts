@@ -10,7 +10,7 @@ import type { MantineThemeOverride } from '@mantine/core';
  */
 export const emberTheme: MantineThemeOverride = {
   ...baseTheme,
-  primaryShade: { light: 6, dark: 6 },
+  primaryShade: 6,
   // Show a focus ring for keyboard users (base theme disables it entirely).
   focusRing: 'auto',
   defaultRadius: 'md',

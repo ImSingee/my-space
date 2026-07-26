@@ -299,7 +299,7 @@ export function createAppTools(options: {
       message: Type.String({
         description:
           'Required release note describing what this deployment changes ' +
-          '(e.g. "Add dark mode toggle"). Shown in the deployment history.',
+          '(e.g. "Add CSV export"). Shown in the deployment history.',
       }),
       allow_destructive_data_migration: Type.Optional(
         Type.Boolean({

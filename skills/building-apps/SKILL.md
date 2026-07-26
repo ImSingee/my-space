@@ -83,7 +83,7 @@ use native git locally:
 3. Edit files under the exact returned source path.
 4. Run `git status`, `git add ...`, and `git commit -m "message"` there.
 5. Call `deploy_app` with that `source_path` and a required `message` (a concise
-   release note, e.g. "Add dark mode toggle"); deploy publishes the clean
+   release note, e.g. "Add CSV export"); deploy publishes the clean
    commit, updates `master`, creates the `deploy/v<version>` tag, and records the
    artifact and message in the deployment history.
 

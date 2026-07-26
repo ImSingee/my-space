@@ -24,9 +24,10 @@
      warm-ink text color) rather than a solid gray block, so it reads as a
      gentle container, not a heavy chip. No border, and override the theme's
      default Paper shadow so the bubble stays flat. */
-  background-color: light-dark(
-    color-mix(in srgb, var(--mantine-color-text) 4%, transparent),
-    color-mix(in srgb, var(--mantine-color-text) 8%, transparent)
+  background-color: color-mix(
+    in srgb,
+    var(--mantine-color-text) 4%,
+    transparent
   );
   color: var(--mantine-color-text);
   border: none;

@@ -63,13 +63,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang="en" {...mantineHtmlProps}>
       <head>
         <HeadContent />
-        <ColorSchemeScript defaultColorScheme="auto" />
+        <ColorSchemeScript forceColorScheme="light" />
       </head>
       <body>
         <MantineProvider
           theme={appTheme}
           cssVariablesResolver={appCssVariablesResolver}
-          defaultColorScheme="auto"
+          forceColorScheme="light"
         >
           <ModalsProvider>{children}</ModalsProvider>
 

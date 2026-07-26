@@ -3,7 +3,7 @@ import type { MantineThemeOverride } from '@mantine/core';
 
 export const blueTheme: MantineThemeOverride = {
   ...baseTheme,
-  primaryShade: { light: 6, dark: 5 },
+  primaryShade: 6,
   colors: {
     ...baseTheme.colors,
     primary: baseTheme.colors?.blue ?? baseTheme.colors?.primary,
