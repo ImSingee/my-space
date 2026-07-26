@@ -1,3 +1,8 @@
+.measure {
+  width: 100%;
+  min-width: 0;
+}
+
 .grid {
   position: relative;
 }
@@ -16,7 +21,7 @@
 
 /* Smooth movement for non-dragged items. */
 .grid :global(.react-grid-item.cssTransforms) {
-  transition: transform 180ms ease;
+  transition: transform var(--transition-base);
 }
 
 .grid :global(.react-grid-item.react-grid-item--resizing),
@@ -35,19 +40,26 @@
 
 /* Make the bottom-right resize handle visible and themed. */
 .grid :global(.react-resizable-handle) {
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   background-image: none;
+  touch-action: none;
 }
 
 .grid :global(.react-resizable-handle)::after {
   content: '';
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
+  right: 6px;
+  bottom: 6px;
+  width: 10px;
+  height: 10px;
   border-right: 2px solid var(--mantine-color-dimmed);
   border-bottom: 2px solid var(--mantine-color-dimmed);
-  opacity: 0.6;
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid :global(.react-grid-item.cssTransforms) {
+    transition-duration: 0.01ms;
+  }
 }

@@ -24,7 +24,7 @@ export function Page({
         <Group
           justify="space-between"
           align="flex-end"
-          wrap="nowrap"
+          wrap="wrap"
           gap="md"
           className={classes.header}
         >
@@ -39,7 +39,7 @@ export function Page({
             ) : null}
           </Stack>
           {actions ? (
-            <Group gap="xs" wrap="nowrap">
+            <Group gap="xs" wrap="wrap" className={classes.actions}>
               {actions}
             </Group>
           ) : null}

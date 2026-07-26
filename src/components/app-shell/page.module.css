@@ -29,3 +29,14 @@
 .body {
   margin-top: 28px;
 }
+
+@media (max-width: 47.99em) {
+  .header {
+    align-items: flex-start;
+  }
+
+  .titleBlock,
+  .actions {
+    width: 100%;
+  }
+}

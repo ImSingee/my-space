@@ -17,19 +17,27 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
+import type { DashboardLayoutItem } from '~/lib/dashboard-layout';
 import type { DashboardItem } from '~server/dashboards';
 import {
   WIDGET_CHANNEL,
   toModuleDataUrl,
   widgetFrameHtml,
 } from './widget-frame';
+import classes from './widget-card.module.css';
 
 export function WidgetCard({
   item,
+  geometry,
+  editing,
+  removeDisabled = false,
   onRemove,
   refreshSignal = 0,
 }: {
   item: DashboardItem;
+  geometry: DashboardLayoutItem;
+  editing: boolean;
+  removeDisabled?: boolean;
   onRemove: () => void;
   /**
    * Monotonic counter bumped by dashboard-wide manual and automatic refreshes.
@@ -55,8 +63,8 @@ export function WidgetCard({
   // Read the latest grid units inside the (url-keyed) load effect without
   // rebuilding the frame when only the size changes — those go down as `units`
   // messages instead, so a resize never reloads the widget.
-  const unitsRef = useRef({ w: item.w, h: item.h });
-  unitsRef.current = { w: item.w, h: item.h };
+  const unitsRef = useRef({ w: geometry.w, h: geometry.h });
+  unitsRef.current = { w: geometry.w, h: geometry.h };
 
   // Fetch the (authenticated, same-origin) bundle in the host, then hand it to
   // the iframe as an inlined `data:` module. Fetching here keeps the request
@@ -175,10 +183,15 @@ export function WidgetCard({
     const generation = frameGenerationRef.current;
     if (!generation) return;
     frameRef.current?.contentWindow?.postMessage(
-      { [WIDGET_CHANNEL]: 'units', generation, w: item.w, h: item.h },
+      {
+        [WIDGET_CHANNEL]: 'units',
+        generation,
+        w: geometry.w,
+        h: geometry.h,
+      },
       '*',
     );
-  }, [item.w, item.h, status]);
+  }, [geometry.h, geometry.w, status]);
 
   // Ask a refresh-capable widget to refetch in place. The request id ties the
   // loading state to this exact refresh, and the ref prevents manual, global,
@@ -225,29 +238,31 @@ export function WidgetCard({
       withBorder
       radius="md"
       padding="sm"
-      style={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
+      className={classes.card}
+      data-editing={editing || undefined}
     >
       <Group
         justify="space-between"
         mb={6}
         wrap="nowrap"
-        className="widget-drag-handle"
-        style={{ cursor: 'grab', userSelect: 'none', WebkitUserSelect: 'none' }}
+        className={editing ? `widget-drag-handle ${classes.dragHeader}` : ''}
       >
         <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-          <IconGripVertical size={15} stroke={1.6} opacity={0.4} />
+          {editing ? (
+            <IconGripVertical size={17} stroke={1.7} className={classes.grip} />
+          ) : null}
           <AppGlyph name={item.appName} seed={item.appId} size="sm" />
           <Text size="sm" fw={600} truncate>
             {item.name}
           </Text>
         </Group>
-        <Group gap={2} wrap="nowrap" className="widget-no-drag">
-          {refreshSupported || refreshing ? (
+        <Group
+          gap={2}
+          wrap="nowrap"
+          className={`widget-no-drag ${classes.actions}`}
+          data-visible={editing || undefined}
+        >
+          {!editing && (refreshSupported || refreshing) ? (
             <Tooltip label={refreshing ? 'Refreshing' : 'Refresh'} withArrow>
               <ActionIcon
                 variant="subtle"
@@ -263,41 +278,45 @@ export function WidgetCard({
               </ActionIcon>
             </Tooltip>
           ) : null}
-          <Tooltip label="Open app" withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              aria-label="Open app"
-              renderRoot={(props) => (
-                <Link
-                  to="/app/$appSlug"
-                  params={{ appSlug: item.appSlug }}
-                  {...props}
-                />
-              )}
-            >
-              <IconAppWindow size={15} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Remove from dashboard" withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              aria-label="Remove widget"
-              onClick={onRemove}
-            >
-              <IconX size={15} />
-            </ActionIcon>
-          </Tooltip>
+          {!editing ? (
+            <Tooltip label="Open app" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                aria-label="Open app"
+                renderRoot={(props) => (
+                  <Link
+                    to="/app/$appSlug"
+                    params={{ appSlug: item.appSlug }}
+                    {...props}
+                  />
+                )}
+              >
+                <IconAppWindow size={15} />
+              </ActionIcon>
+            </Tooltip>
+          ) : (
+            <Tooltip label="Remove from dashboard" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                size="sm"
+                aria-label="Remove widget"
+                disabled={removeDisabled}
+                onClick={onRemove}
+              >
+                <IconX size={16} />
+              </ActionIcon>
+            </Tooltip>
+          )}
         </Group>
       </Group>
 
       {/* The iframe stays laid out under any loading/error overlay so the
           widget's in-frame ResizeObserver measures its real pixel size from the
           first mount (a display:none frame would report 0x0 until shown). */}
-      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+      <div className={classes.frameContainer}>
         <iframe
           ref={frameRef}
           title={item.name}
@@ -307,33 +326,21 @@ export function WidgetCard({
           // widgetFrameHtml for why this is a robustness — not hard-security —
           // boundary.
           sandbox="allow-scripts allow-same-origin"
+          className={classes.frame}
+          data-editing={editing || undefined}
           style={{
-            display: 'block',
-            border: 0,
-            width: '100%',
-            height: '100%',
             visibility: effectiveStatus === 'ready' ? 'visible' : 'hidden',
           }}
         />
         {effectiveStatus === 'loading' ? (
-          <Stack
-            gap="xs"
-            px={4}
-            py={2}
-            style={{ position: 'absolute', inset: 0 }}
-          >
+          <Stack gap="xs" px={4} py={2} className={classes.overlay}>
             <Skeleton height={26} width="55%" radius="sm" />
             <Skeleton height={11} radius="sm" />
             <Skeleton height={11} width="80%" radius="sm" />
           </Stack>
         ) : null}
         {effectiveStatus === 'error' ? (
-          <Text
-            size="xs"
-            c="red"
-            py="sm"
-            style={{ position: 'absolute', inset: 0 }}
-          >
+          <Text size="xs" c="red" py="sm" className={classes.overlay}>
             Failed to load widget. Try redeploying the app.
           </Text>
         ) : null}

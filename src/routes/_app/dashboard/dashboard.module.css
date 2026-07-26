@@ -1,10 +1,59 @@
-.canvas {
-  background:
-    radial-gradient(
-      80% 60% at 50% 0%,
-      var(--mantine-color-default-hover) 0%,
-      transparent 70%
-    ),
-    var(--mantine-color-body);
-  border-style: dashed;
+.editorToolbar {
+  margin-bottom: var(--mantine-spacing-md);
+  padding-bottom: var(--mantine-spacing-md);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.draftStatus {
+  min-height: 28px;
+  white-space: nowrap;
+}
+
+.draftError {
+  min-height: 28px;
+  color: var(--mantine-color-red-text);
+}
+
+.previewStage {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  padding: var(--mantine-spacing-lg);
+  border-radius: var(--mantine-radius-md);
+  background: var(--surface-sunken);
+}
+
+.previewViewport {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.previewFrame {
+  flex: 0 0 auto;
+  margin-inline: auto;
+}
+
+.previewCanvas {
+  min-width: 0;
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--surface-raised);
+  transform-origin: top left;
+}
+
+.previewCanvas[data-breakpoint='mobile'] {
+  padding: var(--mantine-spacing-sm);
+}
+
+@media (max-width: 47.99em) {
+  .previewStage {
+    padding: var(--mantine-spacing-xs);
+  }
+
+  .previewCanvas {
+    padding: var(--mantine-spacing-xs);
+  }
 }

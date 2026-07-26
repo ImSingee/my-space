@@ -1,11 +1,21 @@
 /** Server functions for dashboards and the widgets placed on them. */
 import { createServerFn } from '@tanstack/react-start';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
-import { db, schema } from '~/db';
-import { liveAppManifests, normalizedManifestFor } from './apps/access';
-import { snapToSupportedSize } from './apps/manifest';
+import { db, schema, type TX } from '~/db';
+import {
+  DASHBOARD_BREAKPOINT_ORDER,
+  deriveDashboardLayouts,
+  type DashboardLayoutItem,
+  type DashboardLayouts,
+  type PersistedDashboardLayouts,
+} from '~/lib/dashboard-layout';
+import {
+  dashboardWidgetIdsToRemove,
+  dashboardWidgetKey,
+} from '~/lib/dashboard-widget';
+import { liveAppManifests } from './apps/access';
 import { authMiddleware } from './auth';
 import { persistSortOrder } from './sort-order';
 import { idListSchema, idSchema, nameSchema } from './validation';
@@ -15,6 +25,12 @@ import { idListSchema, idSchema, nameSchema } from './validation';
 // workflowDeployLock=2 (workflows/deploy.ts), APP_KV_LOCK_NS=3
 // (apps/kv.ts), SIDEBAR_PIN_LOCK_NS=4 (sidebar.ts).
 const DASHBOARDS_LOCK_NS = 5;
+
+async function lockDashboard(tx: TX, dashboardId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(${DASHBOARDS_LOCK_NS}, hashtext(${dashboardId}))`,
+  );
+}
 
 export type Dashboard = {
   id: string;
@@ -175,22 +191,86 @@ export type DashboardItem = {
   widgetId: string;
   name: string;
   url: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  sortOrder: number;
+  defaultSize: { w: number; h: number };
   /** Discrete footprints the widget supports; empty means free-form resizing. */
   supportedSizes: { w: number; h: number }[];
+};
+
+export type DashboardData = {
+  /** Monotonic version of widget membership and all breakpoint layouts. */
+  revision: number;
+  widgets: DashboardItem[];
+  layouts: DashboardLayouts;
 };
 
 export const getDashboard = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((dashboardId: string) => idSchema.parse(dashboardId))
-  .handler(async ({ data: dashboardId }): Promise<DashboardItem[]> => {
-    const placements = await db.query.dashboardWidgets.findMany({
-      where: (w, { eq: e }) => e(w.dashboardId, dashboardId),
-      orderBy: (w, { asc }) => [asc(w.sortOrder), asc(w.createdAt)],
+  .handler(async ({ data: dashboardId }): Promise<DashboardData> => {
+    // The lock makes failed-save reconciliation wait for any in-flight commit.
+    // The joined statement then reads membership and layouts from one snapshot,
+    // so a response can never combine opposite sides of the same transaction.
+    const snapshot = await db.transaction(async (tx) => {
+      await lockDashboard(tx, dashboardId);
+      const rows = await tx
+        .select({
+          revision: schema.dashboards.editorRevision,
+          id: schema.dashboardWidgets.id,
+          appId: schema.dashboardWidgets.appId,
+          widgetId: schema.dashboardWidgets.widgetId,
+          sortOrder: schema.dashboardWidgets.sortOrder,
+          breakpoint: schema.dashboardWidgetLayouts.breakpoint,
+          x: schema.dashboardWidgetLayouts.x,
+          y: schema.dashboardWidgetLayouts.y,
+          w: schema.dashboardWidgetLayouts.w,
+          h: schema.dashboardWidgetLayouts.h,
+        })
+        .from(schema.dashboards)
+        .leftJoin(
+          schema.dashboardWidgets,
+          eq(schema.dashboardWidgets.dashboardId, schema.dashboards.id),
+        )
+        .leftJoin(
+          schema.dashboardWidgetLayouts,
+          eq(
+            schema.dashboardWidgetLayouts.dashboardWidgetId,
+            schema.dashboardWidgets.id,
+          ),
+        )
+        .where(eq(schema.dashboards.id, dashboardId))
+        .orderBy(
+          asc(schema.dashboardWidgets.sortOrder),
+          asc(schema.dashboardWidgets.createdAt),
+          asc(schema.dashboardWidgetLayouts.breakpoint),
+        );
+      if (rows.length === 0) throw new Error('Dashboard not found.');
+      return { revision: rows[0].revision, rows };
     });
+    const placements: Array<{
+      id: string;
+      appId: string;
+      widgetId: string;
+      sortOrder: number;
+    }> = [];
+    const seenPlacements = new Set<string>();
+    for (const row of snapshot.rows) {
+      if (
+        row.id === null ||
+        row.appId === null ||
+        row.widgetId === null ||
+        row.sortOrder === null
+      )
+        continue;
+      if (seenPlacements.has(row.id)) continue;
+      seenPlacements.add(row.id);
+      placements.push({
+        id: row.id,
+        appId: row.appId,
+        widgetId: row.widgetId,
+        sortOrder: row.sortOrder,
+      });
+    }
     // Resolve through the LIVE manifest (non-archived, widgets-capable) so a
     // placement for an archived/retired app is dropped rather than rendered as a
     // permanently failing card — the widget bundle route rejects those too.
@@ -214,18 +294,6 @@ export const getDashboard = createServerFn({ method: 'GET' })
       // Deployments made before widget supportedSizes existed have no such field
       // in their stored manifest; default to free-form ([]) for them.
       const supportedSizes = widget.supportedSizes ?? [];
-      // A placement saved while the widget was free-form (or before it declared
-      // sizes) can hold a footprint the widget no longer supports. Snap it on
-      // read so the widget opens at a supported size and RGL compacts using it;
-      // the snapped value is persisted later on the next user drag/resize (we
-      // don't auto-write on load — edits persist only on explicit user action).
-      const size =
-        supportedSizes.length > 0
-          ? (snapToSupportedSize(supportedSizes, {
-              w: placement.w,
-              h: placement.h,
-            }) ?? { w: placement.w, h: placement.h })
-          : { w: placement.w, h: placement.h };
       items.push({
         id: placement.id,
         appId: placement.appId,
@@ -234,23 +302,52 @@ export const getDashboard = createServerFn({ method: 'GET' })
         widgetId: widget.id,
         name: widget.name,
         url: widget.url,
-        x: placement.x,
-        y: placement.y,
-        w: size.w,
-        h: size.h,
+        sortOrder: placement.sortOrder,
+        defaultSize: widget.defaultSize,
         supportedSizes,
       });
     }
-    return items;
+
+    const validIds = new Set(items.map((item) => item.id));
+    const persisted: PersistedDashboardLayouts = {};
+    for (const row of snapshot.rows) {
+      if (
+        row.id === null ||
+        !validIds.has(row.id) ||
+        row.breakpoint === null ||
+        row.x === null ||
+        row.y === null ||
+        row.w === null ||
+        row.h === null
+      )
+        continue;
+      const layout = persisted[row.breakpoint] ?? [];
+      layout.push({
+        id: row.id,
+        x: row.x,
+        y: row.y,
+        w: row.w,
+        h: row.h,
+      });
+      persisted[row.breakpoint] = layout;
+    }
+
+    return {
+      revision: snapshot.revision,
+      widgets: items,
+      layouts: deriveDashboardLayouts(items, persisted),
+    };
   });
 
 export type AvailableWidget = {
   appId: string;
+  appSlug: string;
   appName: string;
   widgetId: string;
   name: string;
   url: string;
   defaultSize: { w: number; h: number };
+  supportedSizes: { w: number; h: number }[];
 };
 
 export const listAvailableWidgets = createServerFn({ method: 'GET' })
@@ -258,7 +355,7 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' })
   .handler(async (): Promise<AvailableWidget[]> => {
     const deployed = await db.query.apps.findMany({
       where: (s, { eq: e }) => e(s.status, 'deployed'),
-      columns: { id: true },
+      columns: { id: true, slug: true },
     });
     const manifests = await liveAppManifests(
       deployed.map((app) => app.id),
@@ -271,152 +368,323 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' })
       for (const widget of manifest.widgets) {
         items.push({
           appId: app.id,
+          appSlug: app.slug,
           appName: manifest.name,
           widgetId: widget.id,
           name: widget.name,
           url: widget.url,
           defaultSize: widget.defaultSize,
+          supportedSizes: widget.supportedSizes ?? [],
         });
       }
     }
     return items;
   });
 
-export const addDashboardWidget = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
-  .validator(
-    (input: { dashboardId: string; appId: string; widgetId: string }) =>
-      z
-        .object({ dashboardId: idSchema, appId: idSchema, widgetId: idSchema })
-        .parse(input),
-  )
-  .handler(async ({ data }) => {
-    const manifest = await normalizedManifestFor(data.appId);
-    const widget = manifest?.widgets.find((w) => w.id === data.widgetId);
-    if (!widget) {
-      throw new Error('Widget not found in the deployed app.');
+export type DashboardDraftWidget = {
+  /** Existing placement id or a client-only id for a newly added widget. */
+  id: string;
+  appId: string;
+  widgetId: string;
+};
+
+export type DashboardDraftInput = {
+  dashboardId: string;
+  expectedRevision: number;
+  /** Existing placements the user explicitly removed from the visible draft. */
+  removedWidgetIds: string[];
+  widgets: DashboardDraftWidget[];
+  layouts: DashboardLayouts;
+};
+
+export type DashboardDraftSaveResult =
+  | { status: 'saved'; data: DashboardData }
+  | { status: 'conflict' };
+
+const layoutItemSchema = z.object({
+  id: idSchema,
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+});
+
+const layoutSchema = z.array(layoutItemSchema).max(1000);
+
+function assertCompleteLayouts(
+  widgets: DashboardDraftWidget[],
+  layouts: DashboardLayouts,
+): void {
+  const widgetIds = new Set(widgets.map((widget) => widget.id));
+  for (const breakpoint of DASHBOARD_BREAKPOINT_ORDER) {
+    const ids = layouts[breakpoint].map((item) => item.id);
+    if (
+      ids.length !== widgetIds.size ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !widgetIds.has(id))
+    ) {
+      throw new Error(
+        `${breakpoint} layout must contain every dashboard widget exactly once.`,
+      );
     }
-    const existing = await db.query.dashboardWidgets.findFirst({
-      where: (w, { eq: e }) =>
-        and(
-          e(w.dashboardId, data.dashboardId),
-          e(w.appId, data.appId),
-          e(w.widgetId, data.widgetId),
-        ),
-    });
-    if (existing) return existing;
-
-    // Place the new widget in a tidy grid flow (12 cols) so multiple widgets
-    // don't all pile up at (0,0) before the user arranges them. The flow index
-    // is only a placement heuristic — react-grid-layout resolves any overlap on
-    // render — but sortOrder must not collide, so it's assigned max+1 in SQL.
-    const all = await db.query.dashboardWidgets.findMany({
-      where: (w, { eq: e }) => e(w.dashboardId, data.dashboardId),
-    });
-    const w = widget.defaultSize.w;
-    const h = widget.defaultSize.h;
-    const perRow = Math.max(1, Math.floor(12 / w));
-    const index = all.length;
-    const x = (index % perRow) * w;
-    const y = Math.floor(index / perRow) * h;
-
-    const [row] = await db
-      .insert(schema.dashboardWidgets)
-      .values({
-        dashboardId: data.dashboardId,
-        appId: data.appId,
-        widgetId: data.widgetId,
-        x,
-        y,
-        w,
-        h,
-        sortOrder: sql`(select coalesce(max(${schema.dashboardWidgets.sortOrder}), -1) + 1 from ${schema.dashboardWidgets} where ${schema.dashboardWidgets.dashboardId} = ${data.dashboardId})`,
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (row) return row;
-    // Lost a concurrent add race: return the placement the winner created.
-    return db.query.dashboardWidgets.findFirst({
-      where: (col, { eq: e }) =>
-        and(
-          e(col.dashboardId, data.dashboardId),
-          e(col.appId, data.appId),
-          e(col.widgetId, data.widgetId),
-        ),
-    });
-  });
-
-export const removeDashboardWidget = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
-  .validator((id: string) => idSchema.parse(id))
-  .handler(async ({ data: id }) => {
-    await db
-      .delete(schema.dashboardWidgets)
-      .where(eq(schema.dashboardWidgets.id, id));
-    return { ok: true };
-  });
-
-/** ================== widget layout ================== */
-
-type LayoutPatch = { id: string; x: number; y: number; w: number; h: number };
-
-/** react-grid-layout column count (mirrors COLS in dashboard-grid.tsx). */
-const DASHBOARD_GRID_COLS = 12;
-const DASHBOARD_MAX_H = 100;
-const DASHBOARD_MAX_Y = 10_000;
-
-function clampInt(
-  value: number,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  const n = Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.min(max, Math.max(min, n));
+  }
 }
 
-export const updateDashboardLayout = createServerFn({ method: 'POST' })
+/**
+ * Commit the complete editor draft as one transaction. Nothing in edit mode
+ * writes before this call, so Cancel remains a purely local operation.
+ */
+export const saveDashboardDraft = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((items: LayoutPatch[]) =>
+  .validator((input: DashboardDraftInput) =>
     z
-      .array(
-        z.object({
-          id: idSchema,
-          x: z.number(),
-          y: z.number(),
-          w: z.number(),
-          h: z.number(),
+      .object({
+        dashboardId: idSchema,
+        expectedRevision: z.number().int().nonnegative(),
+        removedWidgetIds: idListSchema.refine(
+          (ids) => new Set(ids).size === ids.length,
+          'Dashboard draft contains duplicate removals.',
+        ),
+        widgets: z
+          .array(
+            z.object({
+              id: idSchema,
+              appId: idSchema,
+              widgetId: idSchema,
+            }),
+          )
+          .max(1000)
+          .refine(
+            (widgets) =>
+              new Set(widgets.map((widget) => widget.id)).size ===
+              widgets.length,
+            'Dashboard draft contains duplicate client ids.',
+          )
+          .refine(
+            (widgets) =>
+              new Set(widgets.map(dashboardWidgetKey)).size === widgets.length,
+            'Dashboard draft contains duplicate widgets.',
+          ),
+        layouts: z.object({
+          desktop: layoutSchema,
+          tablet: layoutSchema,
+          mobile: layoutSchema,
         }),
-      )
-      .max(1000)
-      .parse(items),
+      })
+      .refine((draft) => {
+        const retainedIds = new Set(draft.widgets.map((widget) => widget.id));
+        return draft.removedWidgetIds.every((id) => !retainedIds.has(id));
+      }, 'A dashboard widget cannot be retained and removed in the same draft.')
+      .parse(input),
   )
-  .handler(async ({ data: items }) => {
-    // Clamp before writing: never persist client-supplied coords verbatim — a
-    // crafted call could otherwise store negative or out-of-grid values that
-    // break later react-grid-layout renders.
-    const patches = items.map((item, index) => {
-      const w = clampInt(item.w, 1, DASHBOARD_GRID_COLS, 1);
-      return {
-        id: item.id,
-        w,
-        x: clampInt(item.x, 0, DASHBOARD_GRID_COLS - w, 0),
-        y: clampInt(item.y, 0, DASHBOARD_MAX_Y, 0),
-        h: clampInt(item.h, 1, DASHBOARD_MAX_H, 1),
-        sortOrder: index,
-      };
-    });
-    // One transaction, rows updated in id order: a mid-flight failure can't
-    // strand half the grid on the old layout, and two concurrent saves take
-    // row locks in the same sequence instead of deadlocking.
-    await db.transaction(async (tx) => {
-      const ordered = [...patches].sort((a, b) => a.id.localeCompare(b.id));
-      for (const { id, ...patch } of ordered) {
+  .handler(async ({ data }) => {
+    return db.transaction(async (tx): Promise<DashboardDraftSaveResult> => {
+      // Acquire the dashboard fence before any asynchronous preparation. A
+      // reconciliation read taking the same lock cannot pass a save that is
+      // still validating manifests, normalizing layouts, or committing rows.
+      await lockDashboard(tx, data.dashboardId);
+
+      const [dashboard] = await tx
+        .select({
+          id: schema.dashboards.id,
+          editorRevision: schema.dashboards.editorRevision,
+        })
+        .from(schema.dashboards)
+        .where(eq(schema.dashboards.id, data.dashboardId));
+      if (!dashboard) throw new Error('Dashboard not found.');
+      if (dashboard.editorRevision !== data.expectedRevision) {
+        return { status: 'conflict' };
+      }
+
+      assertCompleteLayouts(data.widgets, data.layouts);
+
+      const appIds = [...new Set(data.widgets.map((widget) => widget.appId))];
+      const [manifests, apps] = await Promise.all([
+        liveAppManifests(appIds, 'widgets', tx),
+        appIds.length === 0
+          ? Promise.resolve([])
+          : tx.query.apps.findMany({
+              where: inArray(schema.apps.id, appIds),
+              columns: { id: true, slug: true },
+            }),
+      ]);
+      const appSlugById = new Map(apps.map((app) => [app.id, app.slug]));
+      const widgetInfo = new Map<
+        string,
+        Omit<DashboardItem, 'id' | 'sortOrder'>
+      >();
+      for (const draftWidget of data.widgets) {
+        const manifest = manifests.get(draftWidget.appId);
+        const appSlug = appSlugById.get(draftWidget.appId);
+        const widget = manifest?.widgets.find(
+          (candidate) => candidate.id === draftWidget.widgetId,
+        );
+        if (!manifest || !appSlug || !widget) {
+          throw new Error('A dashboard widget is no longer available.');
+        }
+        widgetInfo.set(draftWidget.id, {
+          appId: draftWidget.appId,
+          appSlug,
+          appName: manifest.name,
+          widgetId: draftWidget.widgetId,
+          name: widget.name,
+          url: widget.url,
+          defaultSize: widget.defaultSize,
+          supportedSizes: widget.supportedSizes ?? [],
+        });
+      }
+
+      // Reuse the read-time normalization on untrusted input: clamp coordinates,
+      // enforce declared widget footprints, and repair collisions deterministically.
+      const normalizedLayouts = deriveDashboardLayouts(
+        data.widgets.map((widget, sortOrder) => {
+          const info = widgetInfo.get(widget.id);
+          if (!info) throw new Error('Dashboard widget metadata is missing.');
+          return {
+            id: widget.id,
+            sortOrder,
+            defaultSize: info.defaultSize,
+            supportedSizes: info.supportedSizes,
+          };
+        }),
+        data.layouts,
+      );
+
+      const current = await tx
+        .select({
+          id: schema.dashboardWidgets.id,
+          appId: schema.dashboardWidgets.appId,
+          widgetId: schema.dashboardWidgets.widgetId,
+        })
+        .from(schema.dashboardWidgets)
+        .where(eq(schema.dashboardWidgets.dashboardId, data.dashboardId));
+      const currentById = new Map(current.map((row) => [row.id, row]));
+      const currentByKey = new Map(
+        current.map((row) => [dashboardWidgetKey(row), row]),
+      );
+      const clientToActual = new Map<string, string>();
+
+      for (const [sortOrder, draftWidget] of data.widgets.entries()) {
+        const existingById = currentById.get(draftWidget.id);
+        if (
+          existingById &&
+          (existingById.appId !== draftWidget.appId ||
+            existingById.widgetId !== draftWidget.widgetId)
+        ) {
+          throw new Error('Dashboard widget identity cannot be changed.');
+        }
+
+        let placement =
+          existingById ?? currentByKey.get(dashboardWidgetKey(draftWidget));
+        if (!placement) {
+          [placement] = await tx
+            .insert(schema.dashboardWidgets)
+            .values({
+              dashboardId: data.dashboardId,
+              appId: draftWidget.appId,
+              widgetId: draftWidget.widgetId,
+              sortOrder,
+            })
+            .returning({
+              id: schema.dashboardWidgets.id,
+              appId: schema.dashboardWidgets.appId,
+              widgetId: schema.dashboardWidgets.widgetId,
+            });
+        }
+        if (!placement) throw new Error('Could not save dashboard widget.');
+        clientToActual.set(draftWidget.id, placement.id);
+      }
+
+      // Missing rows are not removals: getDashboard intentionally hides
+      // placements whose app/widget is temporarily unavailable. Delete only
+      // placement ids that were visible and explicitly removed by the user.
+      const retainedIds = [...clientToActual.values()];
+      const removedWidgetIds = dashboardWidgetIdsToRemove(
+        data.removedWidgetIds,
+        retainedIds,
+      );
+      if (removedWidgetIds.length > 0) {
+        await tx
+          .delete(schema.dashboardWidgets)
+          .where(
+            and(
+              eq(schema.dashboardWidgets.dashboardId, data.dashboardId),
+              inArray(schema.dashboardWidgets.id, removedWidgetIds),
+            ),
+          );
+      }
+
+      if (retainedIds.length > 0) {
+        await tx
+          .delete(schema.dashboardWidgetLayouts)
+          .where(
+            inArray(
+              schema.dashboardWidgetLayouts.dashboardWidgetId,
+              retainedIds,
+            ),
+          );
+      }
+
+      const layoutRows = DASHBOARD_BREAKPOINT_ORDER.flatMap((breakpoint) =>
+        normalizedLayouts[breakpoint].map((item) => ({
+          dashboardWidgetId: clientToActual.get(item.id) as string,
+          breakpoint,
+          x: item.x,
+          y: item.y,
+          w: item.w,
+          h: item.h,
+        })),
+      );
+      if (layoutRows.length > 0) {
+        await tx.insert(schema.dashboardWidgetLayouts).values(layoutRows);
+      }
+
+      for (const [sortOrder, item] of normalizedLayouts.desktop.entries()) {
+        const id = clientToActual.get(item.id);
+        if (!id) throw new Error('Dashboard widget id mapping is missing.');
         await tx
           .update(schema.dashboardWidgets)
-          .set(patch)
+          .set({ sortOrder })
           .where(eq(schema.dashboardWidgets.id, id));
       }
+
+      const revision = dashboard.editorRevision + 1;
+      await tx
+        .update(schema.dashboards)
+        .set({ editorRevision: revision, updatedAt: new Date() })
+        .where(eq(schema.dashboards.id, data.dashboardId));
+
+      const layouts = Object.fromEntries(
+        DASHBOARD_BREAKPOINT_ORDER.map((breakpoint) => [
+          breakpoint,
+          normalizedLayouts[breakpoint].map(
+            (item): DashboardLayoutItem => ({
+              ...item,
+              id: clientToActual.get(item.id) as string,
+            }),
+          ),
+        ]),
+      ) as DashboardLayouts;
+      const desktopOrder = new Map(
+        normalizedLayouts.desktop.map((item, index) => [item.id, index]),
+      );
+      const widgets = data.widgets
+        .map((widget): DashboardItem => {
+          const info = widgetInfo.get(widget.id);
+          const id = clientToActual.get(widget.id);
+          if (!info || !id)
+            throw new Error('Saved dashboard data is incomplete.');
+          return {
+            id,
+            ...info,
+            sortOrder: desktopOrder.get(widget.id) ?? 0,
+          };
+        })
+        .sort((left, right) => left.sortOrder - right.sortOrder);
+
+      return {
+        status: 'saved',
+        data: { revision, widgets, layouts },
+      };
     });
-    return { ok: true };
   });

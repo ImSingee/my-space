@@ -43,6 +43,13 @@
       "when": 1786635620376,
       "tag": "0005_slippery_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786702438403,
+      "tag": "0006_groovy_impossible_man",
+      "breakpoints": true
     }
   ]
 }

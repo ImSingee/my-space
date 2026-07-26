@@ -1,6 +1,6 @@
 /** Server-only: authorize runtime serving of a deployed app's built assets. */
 import { inArray } from 'drizzle-orm';
-import { db, schema } from '~/db';
+import { db, schema, type DB } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
 import { type NormalizedManifest, projectAppManifestUrls } from './manifest';
 
@@ -151,12 +151,13 @@ export async function liveAppDeployment(
 export async function liveAppManifests(
   ids: string[],
   capability: keyof AppCapabilities,
+  database: Pick<DB, 'query'> = db,
 ): Promise<Map<string, NormalizedManifest>> {
   const result = new Map<string, NormalizedManifest>();
   const unique = [...new Set(ids)];
   if (unique.length === 0) return result;
 
-  const apps = await db.query.apps.findMany({
+  const apps = await database.query.apps.findMany({
     where: inArray(schema.apps.id, unique),
   });
   const servable = apps.filter(
@@ -167,7 +168,7 @@ export async function liveAppManifests(
   );
   if (servable.length === 0) return result;
 
-  const deployments = await db.query.deployments.findMany({
+  const deployments = await database.query.deployments.findMany({
     where: inArray(
       schema.deployments.id,
       servable.map((app) => app.currentDeploymentId as string),

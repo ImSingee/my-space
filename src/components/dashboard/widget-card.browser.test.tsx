@@ -112,10 +112,8 @@ function dashboardItem(id: string): DashboardItem {
     widgetId: `widget-${id}`,
     name: `Widget ${id}`,
     url: `/widgets/${id}.js`,
-    x: 0,
-    y: 0,
-    w: 4,
-    h: 3,
+    sortOrder: 0,
+    defaultSize: { w: 4, h: 3 },
     supportedSizes: [],
   };
 }
@@ -123,6 +121,7 @@ function dashboardItem(id: string): DashboardItem {
 async function renderDashboard(
   items: DashboardItem[],
   bundles: Record<string, string>,
+  editing = false,
 ) {
   vi.stubGlobal(
     'fetch',
@@ -160,6 +159,8 @@ async function renderDashboard(
               <div key={item.id} style={{ width: 420, height: 280 }}>
                 <WidgetCard
                   item={item}
+                  geometry={{ id: item.id, x: 0, y: 0, w: 4, h: 3 }}
+                  editing={editing}
                   refreshSignal={refreshSignal}
                   onRemove={() => {}}
                 />
@@ -239,6 +240,29 @@ test('widget without onRefresh hides refresh and global refresh does not reload 
   } finally {
     window.removeEventListener('message', onMessage);
   }
+});
+
+test('edit mode shields the iframe and exposes only the remove action', async () => {
+  const item = dashboardItem('editing');
+  const screen = await renderDashboard(
+    [item],
+    { [item.url]: UNSUPPORTED_WIDGET },
+    true,
+  );
+  const iframe = screen.container.querySelector('iframe');
+  expect(iframe).toBeTruthy();
+
+  await vi.waitFor(() =>
+    expect(iframeText(iframe!)).toBe('unsupported-content'),
+  );
+  expect(window.getComputedStyle(iframe!).pointerEvents).toBe('none');
+  expect(
+    screen.container.querySelector('[aria-label="Remove widget"]'),
+  ).toBeTruthy();
+  expect(screen.container.querySelector('[aria-label="Open app"]')).toBeNull();
+  expect(
+    screen.container.querySelector('[aria-label="Refresh widget"]'),
+  ).toBeNull();
 });
 
 test('stale capability from a replaced bundle generation is ignored', async () => {

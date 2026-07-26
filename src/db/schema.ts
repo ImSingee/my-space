@@ -6,7 +6,9 @@ import {
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
+  primaryKey,
   text,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -646,10 +648,18 @@ export const dashboards = pgTable('dashboards', {
    * periodically refreshes every widget (Grafana-style).
    */
   autoRefresh: integer('auto_refresh').notNull().default(0),
+  /** Monotonic version for widget membership and breakpoint layout drafts. */
+  editorRevision: integer('editor_revision').notNull().default(0),
   sortOrder: integer().notNull().default(0),
   createdAt,
   updatedAt,
 });
+
+export const dashboardBreakpoint = pgEnum('dashboard_breakpoint', [
+  'desktop',
+  'tablet',
+  'mobile',
+]);
 
 export const dashboardWidgets = pgTable(
   'dashboard_widgets',
@@ -663,10 +673,6 @@ export const dashboardWidgets = pgTable(
       .references(() => apps.id, { onDelete: 'cascade' }),
     /** Widget id as declared in the app manifest. */
     widgetId: text().notNull(),
-    x: integer().notNull().default(0),
-    y: integer().notNull().default(0),
-    w: integer().notNull().default(4),
-    h: integer().notNull().default(3),
     config: jsonb().$type<JsonObject>(),
     sortOrder: integer().notNull().default(0),
     createdAt,
@@ -679,6 +685,23 @@ export const dashboardWidgets = pgTable(
       table.appId,
       table.widgetId,
     ),
+  ],
+);
+
+export const dashboardWidgetLayouts = pgTable(
+  'dashboard_widget_layouts',
+  {
+    dashboardWidgetId: text('dashboard_widget_id')
+      .notNull()
+      .references(() => dashboardWidgets.id, { onDelete: 'cascade' }),
+    breakpoint: dashboardBreakpoint().notNull(),
+    x: integer().notNull().default(0),
+    y: integer().notNull().default(0),
+    w: integer().notNull().default(4),
+    h: integer().notNull().default(3),
+  },
+  (table) => [
+    primaryKey({ columns: [table.dashboardWidgetId, table.breakpoint] }),
   ],
 );
 
