@@ -24,6 +24,7 @@ import { AppGlyph } from '~components/apps/app-glyph';
 import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
 import { AgentErrorNotice } from './agent-error-notice';
+import { splitAssistantTurn } from './chat-turns';
 import { Markdownish } from './markdownish';
 import { ThinkingStep, ToolStep } from './steps';
 import {
@@ -35,6 +36,7 @@ import {
   successfullyDeployedAppIds,
   toolDetail,
 } from './types';
+import { WorkDisclosure } from './work-disclosure';
 import classes from './chat.module.css';
 
 type ToolResultMap = Map<string, ToolResultMessage>;
@@ -239,8 +241,18 @@ function AssistantBlocks({
   return <>{out}</>;
 }
 
+function hasVisibleBlocks(blocks: AssistantBlock[]): boolean {
+  return blocks.some((block) => {
+    if (block.type === 'toolCall') return true;
+    return (
+      (block.type === 'text' ? block.text : block.thinking).trim().length > 0
+    );
+  });
+}
+
 export function MessageView({
   message,
+  lastAssistantMessageStart,
   toolResults,
   onRetry,
   retrying = false,
@@ -248,6 +260,7 @@ export function MessageView({
   apps,
 }: {
   message: ChatMessage;
+  lastAssistantMessageStart?: number;
   toolResults?: ToolResultMap;
   onRetry?: () => void;
   retrying?: boolean;
@@ -327,9 +340,21 @@ export function MessageView({
     );
   }
 
+  const { work, final } = splitAssistantTurn(
+    message.content,
+    lastAssistantMessageStart ?? 0,
+    message.stopReason,
+  );
+  const showWork = hasVisibleBlocks(work);
+
   return (
     <Box className={classes.assistantRow}>
-      <AssistantBlocks blocks={message.content} toolResults={toolResults} />
+      {showWork ? (
+        <WorkDisclosure>
+          <AssistantBlocks blocks={work} toolResults={toolResults} />
+        </WorkDisclosure>
+      ) : null}
+      <AssistantBlocks blocks={final} toolResults={toolResults} />
       <AppActions
         ids={successfullyDeployedAppIds(message.content, toolResults)}
         apps={apps}

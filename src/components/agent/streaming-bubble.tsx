@@ -7,6 +7,7 @@ import { AskForm } from './ask-form';
 import { Markdownish } from './markdownish';
 import { StreamingThinkingStep, StreamingToolStep } from './steps';
 import type { StreamState } from './use-agent-stream';
+import { WorkDisclosure } from './work-disclosure';
 import classes from './chat.module.css';
 
 export function StreamingBubble({
@@ -81,6 +82,9 @@ export function StreamingBubble({
     state.thinkingActive &&
     lastThinkingBlock?.kind === 'thinking' &&
     Boolean(lastThinkingBlock.text.trim());
+  const hasVisibleWork = state.blocks.some((block) =>
+    block.kind === 'tool' ? true : Boolean(block.text.trim()),
+  );
   const working =
     state.active &&
     !state.terminalError &&
@@ -91,7 +95,11 @@ export function StreamingBubble({
 
   return (
     <Box className={classes.assistantRow}>
-      {out}
+      {state.terminalError && hasVisibleWork ? (
+        <WorkDisclosure>{out}</WorkDisclosure>
+      ) : (
+        out
+      )}
       {ask ? (
         <AskForm
           key={ask.askId}

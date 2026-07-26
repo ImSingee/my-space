@@ -133,6 +133,26 @@ button.stepHeader:hover {
   background-color: var(--mantine-color-default-hover);
 }
 
+.workDisclosure {
+  margin: 2px 0;
+}
+
+.workDisclosureHeader {
+  composes: stepHeader;
+}
+
+button.workDisclosureHeader:focus-visible {
+  outline: 2px solid var(--mantine-color-ember-filled);
+  outline-offset: 2px;
+}
+
+.workDisclosureBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+
 .stepIcon {
   flex-shrink: 0;
   display: inline-flex;

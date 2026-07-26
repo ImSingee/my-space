@@ -70,11 +70,13 @@ test('keeps the live error until the persisted transcript is ready', async () =>
   );
   const screen = await render(<StreamHarness onTerminal={onTerminal} />);
 
-  await expect.element(screen.getByText('Partial reply')).toBeVisible();
+  await expect.element(screen.getByText('Partial reply')).not.toBeVisible();
   await expect
     .element(screen.getByRole('alert'))
     .toHaveTextContent('OpenAI API error (402)');
   expect(onTerminal).toHaveBeenCalledWith('OpenAI API error (402)');
+  await screen.getByRole('button', { name: 'Show work' }).click();
+  await expect.element(screen.getByText('Partial reply')).toBeVisible();
 
   resolveTerminal(true);
 
@@ -98,9 +100,11 @@ test('keeps the inline error when the transcript refetch fails', async () => {
     />,
   );
 
-  await expect.element(screen.getByText('Partial reply')).toBeVisible();
+  await expect.element(screen.getByText('Partial reply')).not.toBeVisible();
   await expect
     .element(screen.getByRole('alert'))
     .toHaveTextContent('OpenAI API error (402)');
   expect(toast.error).not.toHaveBeenCalled();
+  await screen.getByRole('button', { name: 'Show work' }).click();
+  await expect.element(screen.getByText('Partial reply')).toBeVisible();
 });

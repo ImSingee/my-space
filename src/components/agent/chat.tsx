@@ -355,6 +355,9 @@ export function Chat({ sessionId }: { sessionId: string }) {
                       : {}),
                   }
             }
+            lastAssistantMessageStart={
+              turn.kind === 'assistant' ? turn.lastMessageStart : undefined
+            }
             toolResults={toolResults}
             apps={appsQuery.data}
             onRetry={showRetry ? retry : undefined}

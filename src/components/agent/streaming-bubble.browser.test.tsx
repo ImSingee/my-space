@@ -80,10 +80,59 @@ test('keeps partial output and announces a live terminal error', async () => {
     </MantineProvider>,
   );
 
-  await expect.element(screen.getByText('Partial reply')).toBeVisible();
+  await expect.element(screen.getByText('Partial reply')).not.toBeVisible();
   await expect
     .element(screen.getByRole('alert'))
     .toHaveTextContent('OpenAI API error (402)');
+  await screen.getByRole('button', { name: 'Show work' }).click();
+  await expect.element(screen.getByText('Partial reply')).toBeVisible();
+});
+
+test('keeps active thinking, prose, and tools flat', async () => {
+  const state: StreamState = {
+    active: true,
+    runId: 'run-1',
+    blocks: [
+      { kind: 'thinking', text: 'Planning the implementation.' },
+      { kind: 'text', text: 'I found the relevant component.' },
+      {
+        kind: 'tool',
+        tool: {
+          id: 'read-chat',
+          name: 'read_file',
+          args: { path: 'src/components/agent/chat.tsx' },
+          done: true,
+          output: 'Read chat.tsx',
+        },
+      },
+      {
+        kind: 'tool',
+        tool: {
+          id: 'edit-chat',
+          name: 'edit_file',
+          args: { path: 'src/components/agent/chat.tsx' },
+          done: false,
+        },
+      },
+    ],
+    thinkingActive: false,
+  };
+
+  const screen = await render(
+    <MantineProvider>
+      <StreamingBubble state={state} onAnswer={noop} />
+    </MantineProvider>,
+  );
+
+  expect(screen.getByRole('button', { name: 'Show work' }).query()).toBeNull();
+  await expect.element(screen.getByText('Thinking')).toBeVisible();
+  await expect
+    .element(screen.getByText('I found the relevant component.'))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: /Read file/ }))
+    .toBeVisible();
+  await expect.element(screen.getByText('Edit file')).toBeVisible();
 });
 
 test('keeps the live error when transcript refresh fails', async () => {

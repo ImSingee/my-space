@@ -22,6 +22,7 @@ type RenderOptions = {
   retryDisabled?: boolean;
   apps?: AppListItem[];
   toolResults?: Map<string, ToolResultMessage>;
+  lastAssistantMessageStart?: number;
 };
 
 function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
@@ -36,6 +37,7 @@ function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
             message={message}
             apps={options.apps}
             toolResults={options.toolResults}
+            lastAssistantMessageStart={options.lastAssistantMessageStart}
             onRetry={options.onRetry}
             retrying={options.retrying}
             retryDisabled={options.retryDisabled}
@@ -149,6 +151,106 @@ const editDetails: EditFileDetails = {
   firstChangedLine: 2,
 };
 
+test('collapses finished work while keeping the final answer visible', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Planning the implementation.' },
+        { type: 'text', text: 'I found the relevant component.' },
+        {
+          type: 'toolCall',
+          id: 'read-chat',
+          name: 'read_file',
+          arguments: { path: 'src/components/agent/chat.tsx' },
+        },
+        {
+          type: 'toolCall',
+          id: 'edit-chat',
+          name: 'edit_file',
+          arguments: { path: 'src/components/agent/chat.tsx' },
+        },
+        { type: 'thinking', thinking: 'Verifying the finished change.' },
+        { type: 'text', text: 'The conversation history now folds correctly.' },
+      ],
+      stopReason: 'stop',
+    },
+    {
+      lastAssistantMessageStart: 4,
+      toolResults: new Map([
+        [
+          'read-chat',
+          {
+            role: 'toolResult',
+            toolName: 'read_file',
+            content: [{ type: 'text', text: 'Read chat.tsx' }],
+          },
+        ],
+        [
+          'edit-chat',
+          {
+            role: 'toolResult',
+            toolName: 'edit_file',
+            content: [{ type: 'text', text: 'Edited chat.tsx' }],
+          },
+        ],
+      ]),
+    },
+  );
+
+  const showWork = screen.getByRole('button', { name: 'Show work' });
+  await expect.element(showWork).toBeVisible();
+  expect(showWork.element()).toHaveAttribute('aria-expanded', 'false');
+  const contentId = showWork.element().getAttribute('aria-controls');
+  expect(contentId).toBeTruthy();
+  expect(document.getElementById(contentId!)).not.toBeNull();
+  await expect
+    .element(screen.getByText('The conversation history now folds correctly.'))
+    .toBeVisible();
+  await expect
+    .element(screen.getByText('I found the relevant component.'))
+    .not.toBeVisible();
+
+  showWork.element().focus();
+  await userEvent.keyboard('{Enter}');
+
+  const hideWork = screen.getByRole('button', { name: 'Hide work' });
+  expect(hideWork.element()).toHaveAttribute('aria-expanded', 'true');
+  await expect
+    .element(screen.getByText('I found the relevant component.'))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: /Read file/ }))
+    .toBeVisible();
+  await screen.getByRole('button', { name: /Read file/ }).click();
+  await expect.element(screen.getByText('Read chat.tsx')).toBeVisible();
+
+  hideWork.element().focus();
+  await userEvent.keyboard('{Space}');
+  await expect
+    .element(screen.getByRole('button', { name: 'Show work' }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByText('I found the relevant component.'))
+    .not.toBeVisible();
+});
+
+test('does not add an empty disclosure to a pure final answer', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [
+      { type: 'thinking', thinking: '   ' },
+      { type: 'text', text: 'Nothing else needs to change.' },
+    ],
+    stopReason: 'stop',
+  });
+
+  await expect
+    .element(screen.getByText('Nothing else needs to change.'))
+    .toBeVisible();
+  expect(screen.getByRole('button', { name: 'Show work' }).query()).toBeNull();
+});
+
 test('shows a persisted model error even when the reply has no content', async () => {
   const screen = await renderMessage({
     role: 'assistant',
@@ -255,8 +357,10 @@ test('renders the terminal error after partial assistant content', async () => {
     'Partial answer before the provider failed.',
   );
   const notice = screen.getByRole('note');
-  await expect.element(partial).toBeVisible();
+  await expect.element(partial).not.toBeVisible();
   await expect.element(notice).toBeVisible();
+  await screen.getByRole('button', { name: 'Show work' }).click();
+  await expect.element(partial).toBeVisible();
   expect(
     partial.element().compareDocumentPosition(notice.element()) &
       Node.DOCUMENT_POSITION_FOLLOWING,
@@ -271,6 +375,10 @@ test('does not present an aborted reply as an error', async () => {
     errorMessage: 'Request was aborted',
   });
 
+  await expect
+    .element(screen.getByText('Work stopped here.'))
+    .not.toBeVisible();
+  await screen.getByRole('button', { name: 'Show work' }).click();
   await expect.element(screen.getByText('Work stopped here.')).toBeVisible();
   expect(document.querySelector('[role="note"]')).toBeNull();
   expect(
@@ -360,6 +468,7 @@ test('reveals a complete persisted command without overflowing a narrow message'
     },
   );
 
+  await screen.getByRole('button', { name: 'Show work' }).click();
   const toggle = screen.getByRole('button', { name: /Run command/ });
   expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
   const controlledId = toggle.element().getAttribute('aria-controls');
@@ -404,6 +513,7 @@ test('keeps an incomplete persisted command expandable without a result', async 
     content: [runCommandCall('command-incomplete', longCommand)],
   });
 
+  await screen.getByRole('button', { name: 'Show work' }).click();
   await screen.getByRole('button', { name: /Run command/ }).click();
   const commandRegion = screen.getByRole('region', { name: 'Command' });
   await expect.element(commandRegion).toBeVisible();
@@ -560,6 +670,7 @@ test('renders a persisted edit result as a colored diff', async () => {
     },
   );
 
+  await screen.getByRole('button', { name: 'Show work' }).click();
   await screen.getByRole('button', { name: /Edit file/ }).click();
   const fileRegion = screen.getByRole('region', { name: 'File path' });
   await expect.element(fileRegion).toBeVisible();
@@ -650,6 +761,7 @@ test('reveals the attempted path for an incomplete persisted edit', async () => 
     ],
   });
 
+  await screen.getByRole('button', { name: 'Show work' }).click();
   await screen.getByRole('button', { name: /Edit file/ }).click();
   const fileRegion = screen.getByRole('region', { name: 'File path' });
   await expect.element(fileRegion).toBeVisible();
@@ -691,6 +803,7 @@ test('keeps the attempted path and error for a failed paired edit', async () => 
     },
   );
 
+  await screen.getByRole('button', { name: 'Show work' }).click();
   await screen.getByRole('button', { name: /Edit file/ }).click();
   const fileRegion = screen.getByRole('region', { name: 'File path' });
   const outputRegion = screen.getByRole('region', { name: 'Output' });
