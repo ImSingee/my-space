@@ -25,24 +25,49 @@ import {
   recordBackendStopped,
 } from './runtime-state';
 
+export type BackendArtifact = {
+  entry: string;
+  format?: 'bundle-v1';
+};
+
+export function backendArtifactEnv(
+  buildDir: string,
+  artifact: BackendArtifact,
+): Record<string, string> {
+  if (artifact.format !== 'bundle-v1') return {};
+  return {
+    HATCH_ASSETS_DIR: path.resolve(buildDir, 'backend', 'assets'),
+  };
+}
+
 /**
- * Resolve the backend's source-relative entry file from the staged normalized
- * manifest. Falls back to the scaffold convention (`backend/main.ts`) for older
+ * Resolve the backend artifact recorded in the staged normalized manifest.
+ * Falls back to the scaffold convention (`backend/main.ts`) for older
  * artifacts whose manifest predates the recorded `backend.entry`.
  */
-function resolveBackendEntry(buildDir: string): string {
+export function resolveBackendArtifact(buildDir: string): BackendArtifact {
   try {
     const raw = readFileSync(
       path.join(buildDir, 'manifest.normalized.json'),
       'utf8',
     );
-    const entry = (JSON.parse(raw) as { backend?: { entry?: unknown } }).backend
-      ?.entry;
-    if (typeof entry === 'string' && entry.length > 0) return entry;
+    const backend = (
+      JSON.parse(raw) as {
+        backend?: { entry?: unknown; format?: unknown };
+      }
+    ).backend;
+    const entry =
+      typeof backend?.entry === 'string' && backend.entry.length > 0
+        ? backend.entry
+        : 'backend/main.ts';
+    if (backend?.format === 'bundle-v1') {
+      return { entry, format: 'bundle-v1' };
+    }
+    return { entry };
   } catch {
     /* fall back to the convention below */
   }
-  return 'backend/main.ts';
+  return { entry: 'backend/main.ts' };
 }
 
 /** Outbound workflow calls the app declared, read from the staged manifest. */
@@ -100,8 +125,8 @@ async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
 
 /**
  * Resolve Deno's module cache directory (`DENO_DIR` or the platform default).
- * Staged backends load their npm/jsr deps from here at runtime, and some
- * packages read their own bundled files from the cache, so it must be readable.
+ * Legacy source artifacts load npm/jsr deps from here at runtime, and some
+ * packages read their own cached files, so that compatibility path needs access.
  */
 function denoCacheDir(): string | null {
   if (process.env.DENO_DIR) return process.env.DENO_DIR;
@@ -116,6 +141,58 @@ function denoCacheDir(): string | null {
   }
   const xdgCache = process.env.XDG_CACHE_HOME ?? path.join(home, '.cache');
   return path.join(xdgCache, 'deno');
+}
+
+type BackendDenoArgsOptions = {
+  artifact: BackendArtifact;
+  buildDir: string;
+  storageDir: string;
+  cacheDir: string | null;
+  certPaths: readonly string[];
+  hasLock: boolean;
+};
+
+/** Build the sandboxed Deno invocation for a staged backend artifact. */
+export function buildBackendDenoArgs({
+  artifact,
+  buildDir,
+  storageDir,
+  cacheDir,
+  certPaths,
+  hasLock,
+}: BackendDenoArgsOptions): string[] {
+  const bundled = artifact.format === 'bundle-v1';
+  const allowRead = bundled
+    ? [path.resolve(buildDir, 'backend', 'assets'), storageDir]
+    : [buildDir, storageDir];
+  if (!bundled && cacheDir) allowRead.push(cacheDir);
+  allowRead.push(...certPaths);
+
+  const denoArgs = ['run'];
+  if (bundled) {
+    denoArgs.push(
+      '--no-config',
+      '--no-lock',
+      '--no-npm',
+      '--no-remote',
+      '--cached-only',
+    );
+  } else {
+    // Legacy source artifacts resolve dependencies from the build-time cache.
+    denoArgs.push('--node-modules-dir=none');
+  }
+  denoArgs.push(
+    `--allow-read=${allowRead.join(',')}`,
+    `--allow-write=${storageDir}`,
+    '--allow-net',
+    '--allow-env',
+    '--no-prompt',
+  );
+  if (!bundled && hasLock) {
+    denoArgs.push('--lock=deno.lock', '--frozen');
+  }
+  denoArgs.push(artifact.entry);
+  return denoArgs;
 }
 
 type RunningBackend = {
@@ -354,8 +431,8 @@ async function startBackend(id: string): Promise<number> {
   // instead of registering/serving a build the caller has since superseded.
   const epoch = stopEpoch(id);
   const buildDir = appBuildDir(id);
-  const backendEntry = resolveBackendEntry(buildDir);
-  if (!existsSync(path.join(buildDir, backendEntry))) {
+  const backendArtifact = resolveBackendArtifact(buildDir);
+  if (!existsSync(path.join(buildDir, backendArtifact.entry))) {
     throw new Error(`App "${id}" has no built backend. Deploy it first.`);
   }
 
@@ -388,63 +465,28 @@ async function startBackend(id: string): Promise<number> {
     ? internalPlatformUrl(`/api/apps/${id}/kv`)
     : null;
 
-  // Scope filesystem access to the app's own build (read) and storage
-  // (read/write) so one deployed backend can't read another app's build/storage
-  // or platform files. Static imports of the bundled entry aren't gated by
-  // --allow-read, so the build dir suffices for the program's own reads; TLS
-  // trust stores are added when configured so HTTPS keeps working.
-  const allowRead = [buildDir, storageDir];
-  const allowWrite = [storageDir];
-  // Staged backends resolve npm/jsr deps from Deno's cache at runtime; without
-  // read access there, packages that read their own bundled files fail with
-  // NotCapable.
+  // Bundles may read only their fixed asset directory and writable storage;
+  // legacy source artifacts retain build/cache access for source imports and
+  // dependency resolution. TLS trust stores are included when configured.
   const cacheDir = denoCacheDir();
-  if (cacheDir) allowRead.push(cacheDir);
+  const certPaths: string[] = [];
   for (const certVar of [
     'NODE_EXTRA_CA_CERTS',
     'SSL_CERT_FILE',
     'SSL_CERT_DIR',
   ]) {
     const certPath = process.env[certVar];
-    if (certPath) allowRead.push(certPath);
+    if (certPath) certPaths.push(certPath);
   }
 
-  const denoArgs = [
-    'run',
-    // Resolve npm deps from Deno's module cache (primed by `deno install` +
-    // `deno cache` at build time) instead of a per-app node_modules:
-    // package.json apps stage only package.json + deno.lock, and legacy
-    // deno.json import maps still work. Avoids staging (and read-sandboxing) a
-    // heavy node_modules tree.
-    //
-    // We deliberately do NOT pass `--cached-only`: the build pre-caches the
-    // whole graph so a healthy backend never hits the network at startup, but
-    // older artifacts (built before pre-caching) and cache-loss scenarios must
-    // still be able to resolve their imports rather than fail to boot.
-    '--node-modules-dir=none',
-    `--allow-read=${allowRead.join(',')}`,
-    `--allow-write=${allowWrite.join(',')}`,
-    // Outbound network stays open: apps legitimately call external APIs and
-    // their own per-app Postgres. The env is sandboxed below, so --allow-env
-    // exposes only the app's own variables, not platform secrets. Localhost is
-    // reachable too (other apps' ports, Postgres), so the DB credentials are a
-    // per-app restricted role and platform-forwarded RPC carries a per-app
-    // signature a sibling app cannot forge.
-    '--allow-net',
-    '--allow-env',
-    '--no-prompt',
-  ];
-  // Enforce the staged dependency lock when present so the backend runs the
-  // exact versions baked into the artifact, overriding any app deno.json
-  // `"lock": false`. `--frozen` makes the lock authoritative and read-only:
-  // Deno errors instead of silently updating/downloading newer versions, and
-  // never tries to rewrite the lock (which the write sandbox would block). The
-  // lock is complete (built via `deno install --lock` + `deno cache --lock`), so
-  // a healthy artifact passes. Older artifacts without a staged lock skip this.
-  if (existsSync(path.join(buildDir, 'deno.lock'))) {
-    denoArgs.push('--lock=deno.lock', '--frozen');
-  }
-  denoArgs.push(backendEntry);
+  const denoArgs = buildBackendDenoArgs({
+    artifact: backendArtifact,
+    buildDir,
+    storageDir,
+    cacheDir,
+    certPaths,
+    hasLock: existsSync(path.join(buildDir, 'deno.lock')),
+  });
 
   const proc = spawn('deno', denoArgs, {
     cwd: buildDir,
@@ -455,6 +497,7 @@ async function startBackend(id: string): Promise<number> {
       PORT: String(port),
       DATABASE_URL: databaseUrl,
       STORAGE_DIR: storageDir,
+      ...backendArtifactEnv(buildDir, backendArtifact),
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
       ...(kvUrl ? { HATCH_KV_URL: kvUrl } : {}),

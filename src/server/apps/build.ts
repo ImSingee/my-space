@@ -77,6 +77,146 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+function backendBundleEntry(sourceEntry: string): string {
+  const normalized = sourceEntry.replaceAll('\\', '/');
+  const extension = path.posix.extname(normalized);
+  const stem = extension ? normalized.slice(0, -extension.length) : normalized;
+  return `${stem}.bundle.js`;
+}
+
+async function copyBackendAssetNode(
+  source: string,
+  destination: string,
+  relativePath: string,
+): Promise<void> {
+  const stat = await fs.lstat(source).catch(() => null);
+  if (!stat) {
+    throw new Error(`backend asset disappeared during build: ${relativePath}`);
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(
+      `backend asset must not be a symbolic link: ${relativePath}`,
+    );
+  }
+  if (stat.isDirectory()) {
+    await fs.mkdir(destination, { recursive: true });
+    for (const entry of await fs.readdir(source)) {
+      await copyBackendAssetNode(
+        path.join(source, entry),
+        path.join(destination, entry),
+        path.posix.join(relativePath, entry),
+      );
+    }
+    return;
+  }
+  if (!stat.isFile()) {
+    throw new Error(
+      `backend asset must be a regular file or directory: ${relativePath}`,
+    );
+  }
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(source, destination);
+}
+
+async function copyBackendAssets(
+  sourceRoot: string,
+  outputRoot: string,
+): Promise<void> {
+  const backendPath = 'backend';
+  const backendSource = path.join(sourceRoot, backendPath);
+  const backendStat = await fs.lstat(backendSource).catch(() => null);
+  if (backendStat?.isSymbolicLink()) {
+    throw new Error(
+      `backend source directory must not be a symbolic link: ${backendPath}`,
+    );
+  }
+  if (backendStat && !backendStat.isDirectory()) {
+    throw new Error(`backend source path must be a directory: ${backendPath}`);
+  }
+
+  const relativePath = 'backend/assets';
+  const source = path.join(sourceRoot, relativePath);
+  const destination = path.join(outputRoot, relativePath);
+  const stat = await fs.lstat(source).catch(() => null);
+
+  // The runtime contract always points at this directory, including for apps
+  // that do not ship static files.
+  await fs.mkdir(destination, { recursive: true });
+  if (!stat) return;
+  if (stat.isSymbolicLink()) {
+    throw new Error(
+      `backend asset directory must not be a symbolic link: ${relativePath}`,
+    );
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`backend asset path must be a directory: ${relativePath}`);
+  }
+  for (const entry of await fs.readdir(source)) {
+    await copyBackendAssetNode(
+      path.join(source, entry),
+      path.join(destination, entry),
+      path.posix.join(relativePath, entry),
+    );
+  }
+}
+
+async function validateBackendBundleSourceNode(
+  sourceRoot: string,
+  relativePath: string,
+): Promise<void> {
+  // Assets have their own stricter copy-time walk and diagnostics below.
+  if (
+    relativePath === 'backend/assets' ||
+    relativePath.startsWith('backend/assets/')
+  ) {
+    return;
+  }
+
+  const source = path.join(sourceRoot, relativePath);
+  const stat = await fs.lstat(source).catch(() => null);
+  if (!stat) {
+    throw new Error(
+      `backend bundle source disappeared during build: ${relativePath}`,
+    );
+  }
+  if (stat.isSymbolicLink()) {
+    if (relativePath === 'backend') {
+      throw new Error(
+        'backend source directory must not be a symbolic link: backend',
+      );
+    }
+    throw new Error(
+      `backend bundle source must not be a symbolic link: ${relativePath}`,
+    );
+  }
+  if (stat.isDirectory()) {
+    for (const entry of await fs.readdir(source)) {
+      await validateBackendBundleSourceNode(
+        sourceRoot,
+        path.posix.join(relativePath, entry),
+      );
+    }
+    return;
+  }
+  if (!stat.isFile()) {
+    throw new Error(
+      `backend bundle source must be a regular file or directory: ${relativePath}`,
+    );
+  }
+}
+
+async function validateBackendBundleSourceTree(
+  sourceRoot: string,
+): Promise<void> {
+  // Check the platform-defined backend/generated roots. Installed packages
+  // legitimately contain package-manager links, and unrelated app content
+  // should not be rejected merely because the app also has a backend.
+  for (const root of ['backend', 'gen']) {
+    const stat = await fs.lstat(path.join(sourceRoot, root)).catch(() => null);
+    if (stat) await validateBackendBundleSourceNode(sourceRoot, root);
+  }
+}
+
 async function readManifest(src: string): Promise<SourceManifest> {
   const raw = await fs.readFile(path.join(src, 'manifest.json'), 'utf8');
   let json: unknown;
@@ -220,7 +360,23 @@ export async function buildApp(
   await fs.mkdir(path.dirname(tempSrc), { recursive: true });
   await fs.cp(originalSrc, tempSrc, {
     recursive: true,
-    filter: (src) => path.basename(src) !== '.git',
+    // Reproduce dependencies from the committed lock below; never trust or
+    // waste time copying a source checkout's pre-existing installations. The
+    // fixed assets directory is copied byte-for-byte later, so names that have
+    // build meaning elsewhere remain ordinary resource names inside it.
+    filter: (source) => {
+      const relative = path
+        .relative(originalSrc, source)
+        .split(path.sep)
+        .join('/');
+      if (
+        relative === 'backend/assets' ||
+        relative.startsWith('backend/assets/')
+      ) {
+        return true;
+      }
+      return !['.git', 'node_modules'].includes(path.basename(source));
+    },
   });
 
   const src = tempSrc;
@@ -304,6 +460,7 @@ export async function buildApp(
     };
 
     const define = browserDefine(id, manifest.name);
+    let bundledBackendEntry: string | undefined;
 
     // 3) Bundle the frontend SPA -> static app/app.js + index.html.
     if (manifest.capabilities.frontend && manifest.app) {
@@ -410,55 +567,63 @@ export async function buildApp(
       }
     }
 
-    // 5) Stage the Deno backend + generated stubs + dependency manifest for the
-    // runtime. We stage package.json + deno.lock (not node_modules): the backend
-    // runs with --node-modules-dir=none and resolves deps from Deno's module
-    // cache (primed by `deno install` above). deno.json carries the reviewed
-    // lifecycle-script policy used during dependency installation.
+    // 5) Bundle the Deno backend, generated stubs, and npm dependencies into one
+    // runtime entry. Source files and dependency manifests remain build inputs;
+    // only files below the fixed backend/assets directory enter the artifact.
     if (manifest.capabilities.backend && manifest.backend) {
-      // Pre-cache the backend's full module graph into Deno's global cache so a
-      // healthy backend never resolves deps from the network at startup, and bad
-      // deps fail the deploy instead of the first request. `--node-modules-dir=
-      // none` mirrors the runtime flag so the cache is primed for the exact
-      // resolution mode used there; `--lock=deno.lock` completes/pins the lock
-      // (covering any backend imports beyond package.json) even under
-      // `"lock": false`. Cache exactly the declared entry the runtime runs.
-      const backendEntry = manifest.backend.entry;
-      const cache = await run(
-        'deno',
-        [
-          'cache',
-          '--node-modules-dir=none',
-          '--lock=deno.lock',
-          '--frozen',
-          backendEntry,
-        ],
-        { cwd: src, env: subprocessSandboxEnv() },
-      );
-      logs.push(
-        `$ deno cache --node-modules-dir=none --lock=deno.lock --frozen ${backendEntry}\n${cache.output.trim()}`,
-      );
-      if (cache.code !== 0) {
-        throw new Error(`Backend dependency cache failed:\n${cache.output}`);
+      await copyBackendAssets(src, out);
+      await validateBackendBundleSourceTree(src);
+
+      const sourceEntry = manifest.backend.entry;
+      bundledBackendEntry = backendBundleEntry(sourceEntry);
+      const bundlePath = path.join(out, bundledBackendEntry);
+      await fs.mkdir(path.dirname(bundlePath), { recursive: true });
+      const bundleArgs = [
+        'bundle',
+        '--platform=deno',
+        '--packages=bundle',
+        '--node-modules-dir=auto',
+        '--lock=deno.lock',
+        '--frozen',
+        '-o',
+        bundlePath,
+        sourceEntry,
+      ];
+      const bundle = await run('deno', bundleArgs, {
+        cwd: src,
+        env: subprocessSandboxEnv(),
+      });
+      logs.push(`$ deno ${bundleArgs.join(' ')}\n${bundle.output.trim()}`);
+      if (bundle.code !== 0 || !(await pathExists(bundlePath))) {
+        throw new Error(`Backend bundle failed:\n${bundle.output}`);
       }
-      // The manifest schema constrains `backend.entry` to live under `backend/`,
-      // so staging these two trees always includes the declared entry + stubs.
-      for (const dir of ['backend', 'gen']) {
-        const from = path.join(src, dir);
-        if (await pathExists(from)) {
-          await fs.cp(from, path.join(out, dir), { recursive: true });
-        }
+
+      const checkArgs = [
+        'check',
+        '--no-config',
+        '--no-lock',
+        '--no-npm',
+        '--no-remote',
+        bundlePath,
+      ];
+      const checked = await run('deno', checkArgs, {
+        cwd: out,
+        env: subprocessSandboxEnv(),
+      });
+      logs.push(`$ deno ${checkArgs.join(' ')}\n${checked.output.trim()}`);
+      if (checked.code !== 0) {
+        throw new Error(`Backend bundle validation failed:\n${checked.output}`);
       }
-      for (const file of ['package.json', 'deno.lock', 'deno.json']) {
-        const from = path.join(src, file);
-        if (await pathExists(from)) {
-          await fs.copyFile(from, path.join(out, file));
-        }
-      }
-      logs.push('staged Deno backend');
+      logs.push(`bundled backend -> ${bundledBackendEntry}`);
     }
 
     const normalized = normalizeManifest(manifest);
+    if (bundledBackendEntry && normalized.backend) {
+      normalized.backend = {
+        entry: bundledBackendEntry,
+        format: 'bundle-v1',
+      };
+    }
     if (api) normalized.api = api;
     await fs.writeFile(
       path.join(out, 'manifest.normalized.json'),

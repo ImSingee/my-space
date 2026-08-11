@@ -2,7 +2,7 @@
  * Server-only: bounded subprocess runner shared by the app/workflow builders.
  *
  * Build steps run tools over untrusted, author-controlled sources (buf, deno
- * install/cache/bundle), so every invocation is bounded: a hard timeout stops a
+ * install/bundle/check), so every invocation is bounded: a hard timeout stops a
  * hung tool (or a stalled dependency fetch) from wedging a deploy forever, and
  * captured output is capped so a runaway log can't exhaust memory.
  */

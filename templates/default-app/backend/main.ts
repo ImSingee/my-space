@@ -1,11 +1,17 @@
 /**
  * Deno Connect backend for the app.
  *
- * The platform runs this with `deno run` and injects:
+ * The platform bundles this entry into a single JavaScript file, runs that
+ * bundle with Deno, and injects:
  *   - DATABASE_URL: connection string for this app's own Postgres database
  *   - PORT: the port to listen on
+ *   - HATCH_ASSETS_DIR: absolute path to the read-only backend/assets directory
  *
- * Generated Connect stubs live in ../gen (created by the platform on deploy).
+ * Generated Connect stubs live in ../gen during the build and are included in
+ * the bundle. Put runtime file resources in backend/assets and resolve them
+ * from HATCH_ASSETS_DIR, not import.meta.url. Source, generated files, package
+ * metadata, and lockfiles are not staged in the deployed artifact. Mutable
+ * files belong in STORAGE_DIR when the storage capability is enabled.
  */
 import http from 'node:http';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
