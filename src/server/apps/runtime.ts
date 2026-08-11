@@ -1,6 +1,6 @@
 /** Server-only: lazy Deno backend process manager + Connect reverse proxy. */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,9 +26,163 @@ import {
 } from './runtime-state';
 
 export type BackendArtifact = {
-  entry: string;
+  /** Validated absolute path to the runtime entry inside artifact/backend/. */
+  entryPath: string;
   format?: 'bundle-v1';
 };
+
+const LEGACY_BACKEND_ENTRY = 'backend/main.ts';
+const NORMALIZED_MANIFEST = 'manifest.normalized.json';
+
+function invalidBackendArtifact(message: string): Error {
+  return new Error(`Invalid backend artifact: ${message}`);
+}
+
+function isMissingPath(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error as NodeJS.ErrnoException).code === 'ENOENT'
+  );
+}
+
+function validateBackendEntryPath(buildDir: string, entry: string): string {
+  if (
+    entry.length === 0 ||
+    entry.includes('\0') ||
+    entry.includes('\\') ||
+    path.posix.isAbsolute(entry) ||
+    entry.split('/').includes('..')
+  ) {
+    throw invalidBackendArtifact(
+      `backend.entry must be a relative path inside "backend/": ${JSON.stringify(entry)}`,
+    );
+  }
+
+  const normalized = path.posix.normalize(entry);
+  if (normalized === 'backend' || !normalized.startsWith('backend/')) {
+    throw invalidBackendArtifact(
+      `backend.entry must be a relative path inside "backend/": ${JSON.stringify(entry)}`,
+    );
+  }
+
+  const backendRoot = path.resolve(buildDir, 'backend');
+  const absoluteEntry = path.resolve(buildDir, ...normalized.split('/'));
+  const relativeToBackend = path.relative(backendRoot, absoluteEntry);
+  if (
+    relativeToBackend === '' ||
+    relativeToBackend === '..' ||
+    relativeToBackend.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeToBackend)
+  ) {
+    throw invalidBackendArtifact(
+      `backend.entry escapes the artifact backend directory: ${JSON.stringify(entry)}`,
+    );
+  }
+
+  let cursor = path.resolve(buildDir);
+  const segments = normalized.split('/');
+  for (const [index, segment] of segments.entries()) {
+    cursor = path.join(cursor, segment);
+    let stat;
+    try {
+      stat = lstatSync(cursor);
+    } catch (error) {
+      if (isMissingPath(error)) {
+        throw invalidBackendArtifact(
+          `backend.entry does not exist: ${JSON.stringify(normalized)}`,
+        );
+      }
+      throw invalidBackendArtifact(
+        `cannot inspect backend.entry ${JSON.stringify(normalized)}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    if (stat.isSymbolicLink()) {
+      throw invalidBackendArtifact(
+        `backend.entry must not traverse symbolic links: ${JSON.stringify(normalized)}`,
+      );
+    }
+    const finalSegment = index === segments.length - 1;
+    if (!finalSegment && !stat.isDirectory()) {
+      throw invalidBackendArtifact(
+        `backend.entry parent is not a directory: ${JSON.stringify(normalized)}`,
+      );
+    }
+    if (finalSegment && !stat.isFile()) {
+      throw invalidBackendArtifact(
+        `backend.entry is not a regular file: ${JSON.stringify(normalized)}`,
+      );
+    }
+  }
+
+  return absoluteEntry;
+}
+
+function readBackendArtifactMetadata(buildDir: string): {
+  entry: string;
+  format?: 'bundle-v1';
+} {
+  const manifestPath = path.join(buildDir, NORMALIZED_MANIFEST);
+  let manifestStat;
+  try {
+    manifestStat = lstatSync(manifestPath);
+  } catch (error) {
+    if (isMissingPath(error)) {
+      throw invalidBackendArtifact(`${NORMALIZED_MANIFEST} does not exist`);
+    }
+    throw invalidBackendArtifact(
+      `cannot inspect ${NORMALIZED_MANIFEST}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (manifestStat.isSymbolicLink() || !manifestStat.isFile()) {
+    throw invalidBackendArtifact(
+      `${NORMALIZED_MANIFEST} must be a regular file and not a symbolic link`,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    throw invalidBackendArtifact(
+      `${NORMALIZED_MANIFEST} is not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw invalidBackendArtifact(
+      `${NORMALIZED_MANIFEST} must contain an object`,
+    );
+  }
+
+  const manifest = parsed as Record<string, unknown>;
+  if (!Object.hasOwn(manifest, 'backend')) {
+    return { entry: LEGACY_BACKEND_ENTRY };
+  }
+  const backend = manifest.backend;
+  if (!backend || typeof backend !== 'object' || Array.isArray(backend)) {
+    throw invalidBackendArtifact('backend metadata must be an object');
+  }
+
+  const metadata = backend as Record<string, unknown>;
+  if (typeof metadata.entry !== 'string' || metadata.entry.length === 0) {
+    throw invalidBackendArtifact('backend.entry must be a non-empty string');
+  }
+  const entry = metadata.entry;
+
+  if (!Object.hasOwn(metadata, 'format')) return { entry };
+  if (metadata.format !== 'bundle-v1') {
+    throw invalidBackendArtifact(
+      `unsupported backend format: ${JSON.stringify(metadata.format)}`,
+    );
+  }
+  return { entry, format: 'bundle-v1' };
+}
 
 export function backendArtifactEnv(
   buildDir: string,
@@ -46,28 +200,11 @@ export function backendArtifactEnv(
  * artifacts whose manifest predates the recorded `backend.entry`.
  */
 export function resolveBackendArtifact(buildDir: string): BackendArtifact {
-  try {
-    const raw = readFileSync(
-      path.join(buildDir, 'manifest.normalized.json'),
-      'utf8',
-    );
-    const backend = (
-      JSON.parse(raw) as {
-        backend?: { entry?: unknown; format?: unknown };
-      }
-    ).backend;
-    const entry =
-      typeof backend?.entry === 'string' && backend.entry.length > 0
-        ? backend.entry
-        : 'backend/main.ts';
-    if (backend?.format === 'bundle-v1') {
-      return { entry, format: 'bundle-v1' };
-    }
-    return { entry };
-  } catch {
-    /* fall back to the convention below */
-  }
-  return { entry: 'backend/main.ts' };
+  const metadata = readBackendArtifactMetadata(buildDir);
+  const entryPath = validateBackendEntryPath(buildDir, metadata.entry);
+  return metadata.format === 'bundle-v1'
+    ? { entryPath, format: 'bundle-v1' }
+    : { entryPath };
 }
 
 /** Outbound workflow calls the app declared, read from the staged manifest. */
@@ -191,7 +328,7 @@ export function buildBackendDenoArgs({
   if (!bundled && hasLock) {
     denoArgs.push('--lock=deno.lock', '--frozen');
   }
-  denoArgs.push(artifact.entry);
+  denoArgs.push(artifact.entryPath);
   return denoArgs;
 }
 
@@ -431,9 +568,16 @@ async function startBackend(id: string): Promise<number> {
   // instead of registering/serving a build the caller has since superseded.
   const epoch = stopEpoch(id);
   const buildDir = appBuildDir(id);
-  const backendArtifact = resolveBackendArtifact(buildDir);
-  if (!existsSync(path.join(buildDir, backendArtifact.entry))) {
-    throw new Error(`App "${id}" has no built backend. Deploy it first.`);
+  let backendArtifact: BackendArtifact;
+  try {
+    backendArtifact = resolveBackendArtifact(buildDir);
+  } catch (error) {
+    throw new Error(
+      `App "${id}" has an invalid backend artifact. Redeploy or restore a ` +
+        `valid deployment before starting it: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+    );
   }
 
   const { url: databaseUrl } = await ensureAppDatabase(id);
