@@ -273,7 +273,7 @@ export function createAppTools(options: {
     name: 'deploy_app',
     label: 'Deploy app',
     description:
-      'Build (Connect codegen + bundle app/widgets + stage Deno backend) and ' +
+      'Build (Connect codegen + bundle app/widgets/backend) and ' +
       'deploy an app so it becomes live. Requires package.json, deno.json, and ' +
       'a committed deno.lock; load the building-apps Skill to repair dependency ' +
       'configuration errors. Reports the app/widget/RPC URLs.',

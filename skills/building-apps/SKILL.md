@@ -17,7 +17,8 @@ serving.
 apps/<id>/
   manifest.json          declares id, name, capabilities, widgets, rpc service
   proto/service.proto    Connect RPC service (one service per app)
-  backend/main.ts        Deno Connect server implementing the service
+  backend/main.ts        Deno Connect server entry (bundled on deploy)
+  backend/assets/        optional read-only runtime files (copied on deploy)
   app/index.html         HTML host that loads ./app.js
   app/main.tsx           React SPA entry (TanStack Router, hash history) + Query
   widgets/<name>.tsx     dashboard widget(s); each exports mount(element)
@@ -33,6 +34,13 @@ build (it runs `buf generate`) and is git-ignored, so it is regenerated on every
 deploy. Never write files under `gen/` yourself. On deploy the platform also
 records the app's declared API (services + methods) from the proto and shows it
 on the app's manage page.
+
+Deploy bundles the backend entry and all statically imported code into a single
+JavaScript file. Backend source files, `gen/`, `package.json`, `deno.json`, and
+`deno.lock` are source or build inputs and are not copied into the deployed
+artifact. The fixed `backend/assets/` directory is the only source directory
+copied beside the bundle. The runtime therefore cannot read other build-only
+files from disk.
 
 `create_app` scaffolds a runnable **Counter** example you adapt in place — not a
 blank tree. The exact files are `manifest.json` (rpc service
@@ -141,6 +149,31 @@ Keep `manifest.json` consistent with the files. Example:
 
 The `service` value must be the fully-qualified proto service name
 (`<package>.<ServiceName>`), and the widget `id` is what the dashboard pins.
+
+Keep backend code statically bundleable. A normal static `import` is included in
+the backend bundle. Put every non-module, read-only runtime file in the fixed
+`backend/assets/` directory; deploy copies that whole directory to
+`artifact/backend/assets/` and injects `HATCH_ASSETS_DIR` as its absolute runtime
+path. Read assets through that environment variable, for example:
+
+```ts
+import path from 'node:path';
+
+const assetsDir = Deno.env.get('HATCH_ASSETS_DIR')!;
+const template = await Deno.readTextFile(
+  path.join(assetsDir, 'email-template.html'),
+);
+```
+
+Do not locate runtime files relative to a source module's `import.meta.url`:
+after bundling, every module sees the bundle URL instead. Store mutable files in
+`STORAGE_DIR` with the `storage` capability enabled, never in
+`HATCH_ASSETS_DIR`. Computed dynamic imports, separate Worker entrypoints,
+native addons, FFI libraries, runtime sidecars, runtime-generated package files,
+and packages that depend on their own relative runtime resources are not
+supported by the `bundle-v1` runtime. The platform deliberately does not copy
+the backend source tree into the artifact.
+
 Keep `app.routes` synchronized with every user-navigable frontend route so the
 platform can autocomplete app entry points. Each path starts with `/` and has a
 concise user-facing description; dynamic route templates use TanStack Router's
@@ -224,7 +257,8 @@ missing or stale dependency files. If deploy reports a legacy deno.json-only
 source, load this Skill, migrate its npm imports to `package.json`, run the
 command above, and commit all three files before deploying again. Deno reads
 `package.json` natively, so bare imports (`import x from 'pkg'`) work in the
-backend too.
+backend too. Deploy then bundles backend dependencies; package metadata,
+lockfiles, and installed modules are not present at runtime.
 
 ### npm lifecycle scripts
 

@@ -1,9 +1,65 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type NormalizedManifest,
   normalizeManifest,
   parseSourceManifest,
   snapToSupportedSize,
+  sourceManifestSchema,
 } from './manifest';
+
+describe('backend manifest', () => {
+  const source = (backend: Record<string, unknown>) => ({
+    id: 'demo',
+    name: 'Demo',
+    capabilities: { backend: true },
+    backend: { entry: 'backend/main.ts', ...backend },
+  });
+
+  it('rejects the removed backend assets field instead of stripping it', () => {
+    const result = sourceManifestSchema.safeParse(
+      source({ assets: ['backend/assets'] }),
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unrecognized_keys',
+        keys: ['assets'],
+        path: ['backend'],
+      }),
+    );
+  });
+
+  it.each([
+    'backend/assets',
+    'backend/assets/main.ts',
+    'backend/./assets/main.ts',
+  ])('rejects the reserved assets directory as backend entry: %s', (entry) => {
+    expect(() => parseSourceManifest(source({ entry }))).toThrow(
+      /reserved.*backend\/assets/,
+    );
+  });
+
+  it('supports bundle-v1 while legacy normalized manifests omit format', () => {
+    const legacy: NormalizedManifest = normalizeManifest(
+      parseSourceManifest(source({})),
+    );
+    const bundled: NormalizedManifest = {
+      ...legacy,
+      backend: {
+        entry: 'backend/main.bundle.js',
+        format: 'bundle-v1',
+      },
+    };
+
+    expect(legacy.backend).toEqual({ entry: 'backend/main.ts' });
+    expect(bundled.backend).toEqual({
+      entry: 'backend/main.bundle.js',
+      format: 'bundle-v1',
+    });
+  });
+});
 
 describe('app route manifest', () => {
   const parseRoutes = (routes?: unknown[]) =>
