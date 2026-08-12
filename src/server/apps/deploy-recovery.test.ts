@@ -692,7 +692,9 @@ describe('App deployment activation recovery', () => {
     const app = appState(id, {
       status: 'draft',
       currentDeploymentId: null,
-      capabilities: { backend: false, dataTable: false },
+      capabilities: null,
+      manifest: null,
+      backendMode: null,
       dataDbName: null,
       dataSchemaHash: null,
       dataActivationId: null,
@@ -739,6 +741,10 @@ describe('App deployment activation recovery', () => {
 
     expect(app).toMatchObject({
       status: 'failed',
+      currentDeploymentId: null,
+      capabilities: null,
+      manifest: null,
+      backendMode: null,
       dataDbName: `data_${id}`,
       dataActivationId: null,
     });

@@ -5,10 +5,9 @@ import { ulid } from 'ulid';
 import { TEMPLATES_DIR } from '~agent/paths';
 import type { ScaffoldFile } from '~agent/protocol';
 import { db, schema } from '~/db';
-import type { JsonObject } from '~/db/schema';
 import { slugConflictExists } from './access';
 import { ensureAppRepo } from './git';
-import { isValidAppSlug, parseSourceManifest } from './manifest';
+import { isValidAppSlug } from './manifest';
 
 /**
  * Escape a value for insertion *inside* an existing pair of JSON quotes (the
@@ -71,12 +70,6 @@ export async function renderTemplate(
   return files;
 }
 
-function fileContent(files: ScaffoldFile[], rel: string): string {
-  const file = files.find((f) => f.path === rel);
-  if (!file) throw new Error(`Template is missing ${rel}.`);
-  return Buffer.from(file.contentBase64, 'base64').toString('utf8');
-}
-
 export type CreateAppInput = {
   /**
    * Mutable, human-facing URL slug (kebab-case). The immutable internal `id`
@@ -86,10 +79,9 @@ export type CreateAppInput = {
   name: string;
   description?: string;
   /**
-   * Whether to pin the new app to the sidebar. Defaults to the scaffolded
-   * manifest's `frontend` capability. The template is always frontend-capable,
-   * so in practice frontend apps are pinned on creation and the Agent opts out
-   * (`pin: false`) for backend-only / widget-only apps.
+   * Whether to pin the new app to the sidebar. Defaults to true. Pinning is a
+   * navigation preference, independent of the capabilities that become active
+   * only after a successful deployment.
    */
   pin?: boolean;
 };
@@ -151,10 +143,6 @@ export async function createApp(
     { exclude: ['gen'] },
   );
 
-  const manifest = parseSourceManifest(
-    JSON.parse(fileContent(files, 'manifest.json')),
-  );
-
   const [created] = await db
     .insert(schema.apps)
     .values({
@@ -163,19 +151,15 @@ export async function createApp(
       name,
       description: description || null,
       status: 'draft',
-      capabilities: manifest.capabilities,
-      manifest: manifest as unknown as JsonObject,
       repoPath,
-      backendMode: manifest.backendMode,
     })
     .returning({ createdAt: schema.apps.createdAt });
   if (!created) throw new Error('Failed to create app.');
 
-  // Pin frontend apps to the sidebar so a freshly created app is reachable
-  // immediately. The scaffold always declares a frontend, so the choice is
-  // really the Agent's: it passes `pin: false` for backend-only / widget-only
-  // apps. Mirrors the insert in `setSidebarPin`.
-  const shouldPin = input.pin ?? manifest.capabilities.frontend;
+  // Pinning is independent of deploy-time capabilities. A draft has none yet;
+  // deploy_app declares them from the source manifest after the build succeeds.
+  // Mirrors the insert in `setSidebarPin`.
+  const shouldPin = input.pin ?? true;
   if (shouldPin) {
     const pins = await db.query.sidebarItems.findMany();
     await db

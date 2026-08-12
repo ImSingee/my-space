@@ -303,15 +303,21 @@ describe('App Data lifecycle recovery', () => {
   });
 
   it('removes a pending backup before clearing a resolved activation fence', async () => {
+    const targetManifest = {
+      name: 'Example',
+      description: 'Previous deployment',
+      capabilities: { dataTable: true, backend: false, cron: true },
+      backendMode: 'serverless',
+    };
     mocks.findApp.mockResolvedValue({
       id: APP_ID,
       name: 'Example',
       status: 'deployed',
       currentDeploymentId: CURRENT_DEPLOYMENT_ID,
       currentSourceCommit: 'source-commit-v2',
-      capabilities: { dataTable: true, backend: false },
-      backendMode: 'serverless',
-      manifest: {},
+      capabilities: { dataTable: true, backend: true, cron: false },
+      backendMode: 'long-running',
+      manifest: { name: 'Current deployment' },
       dataDbName: 'data-example',
       dataSchemaHash: 'last-known-hash',
       dataActivationId: 'pending-deployment',
@@ -322,12 +328,7 @@ describe('App Data lifecycle recovery', () => {
       version: 1,
       status: 'deployed',
       sourceTag: 'deploy/v1',
-      manifestNormalized: {
-        name: 'Example',
-        description: '',
-        capabilities: { dataTable: true, backend: false },
-        backendMode: 'serverless',
-      },
+      manifestNormalized: targetManifest,
       dataSchemaHash: 'committed-hash',
     });
     mocks.recoverCurrentDataSchema.mockResolvedValue({
@@ -354,6 +355,10 @@ describe('App Data lifecycle recovery', () => {
     expect(mocks.updates).toContainEqual(
       expect.objectContaining({
         currentDeploymentId: TARGET_DEPLOYMENT_ID,
+        description: 'Previous deployment',
+        capabilities: targetManifest.capabilities,
+        backendMode: targetManifest.backendMode,
+        manifest: targetManifest,
         dataSchemaHash: 'committed-hash',
         dataActivationId: null,
       }),
