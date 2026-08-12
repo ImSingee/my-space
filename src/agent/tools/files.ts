@@ -29,13 +29,25 @@ function countOccurrences(content: string, needle: string): number {
   }
 }
 
+function splitsSurrogatePair(content: string, boundary: number): boolean {
+  if (boundary <= 0 || boundary >= content.length) return false;
+  const before = content.charCodeAt(boundary - 1);
+  const after = content.charCodeAt(boundary);
+  return (
+    before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff
+  );
+}
+
 function completeUnicodeBoundary(content: string, end: number): number {
-  if (end <= 0 || end >= content.length) return end;
-  const before = content.charCodeAt(end - 1);
-  const after = content.charCodeAt(end);
-  const splitsSurrogatePair =
-    before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
-  return splitsSurrogatePair ? end + 1 : end;
+  return splitsSurrogatePair(content, end) ? end + 1 : end;
+}
+
+function validateUnicodeBoundary(content: string, offset: number): void {
+  if (!splitsSurrogatePair(content, offset)) return;
+  throw new Error(
+    `Invalid offset ${offset}: it falls inside a UTF-16 surrogate pair. ` +
+      `Use offset=${offset - 1} or offset=${offset + 1}.`,
+  );
 }
 
 function applyExactReplacement(
@@ -243,7 +255,9 @@ export function createFileTools(
         Type.Integer({
           minimum: 0,
           maximum: Number.MAX_SAFE_INTEGER,
-          description: 'Zero-based character offset. Defaults to 0.',
+          description:
+            'Zero-based UTF-16 offset. Must not split a surrogate pair. ' +
+            'Defaults to 0.',
         }),
       ),
       limit: Type.Optional(
@@ -267,6 +281,7 @@ export function createFileTools(
       );
       const offset = params.offset ?? 0;
       const limit = params.limit ?? MAX_FILE_CHARS;
+      validateUnicodeBoundary(content, offset);
       const requestedEnd = Math.min(offset + limit, content.length);
       const nextOffset = completeUnicodeBoundary(content, requestedEnd);
       const page = content.slice(offset, nextOffset);
