@@ -140,13 +140,15 @@ export const apps = pgTable(
     name: text().notNull(),
     description: text(),
     status: text().$type<AppStatus>().notNull().default('draft'),
+    /** Capabilities of the current successful deployment; null before one exists. */
     capabilities: jsonb().$type<AppCapabilities>(),
-    /** Latest source manifest.json (as authored by the Agent). */
+    /** Manifest metadata for the current successful deployment; null before one exists. */
     manifest: jsonb().$type<JsonObject>(),
     /** Git bare repository path for this app's source. */
     repoPath: text(),
     /** Current commit of the authoritative master branch. */
     currentSourceCommit: text(),
+    /** Backend mode of the current successful deployment; null before one exists. */
     backendMode: text().$type<'serverless' | 'long-running'>(),
     /** Provisioned per-app Postgres database name, when database capability is on. */
     dbName: text(),
