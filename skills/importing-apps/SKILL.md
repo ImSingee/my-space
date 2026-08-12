@@ -63,7 +63,10 @@ Only after the review passes, follow `building-apps` to choose the name and
 slug and create a new app. Keep the new worktree's `.git`; replace only its
 authored source with the reviewed source root contents. Never copy quarantined
 Git metadata, dependencies, generated output, credentials, database dumps, or
-runtime data.
+runtime data. Preserve Hatch's generated `node_modules/@hatch/data` SDK and
+`node_modules/@hatch/import-map.json`, but never copy imported `node_modules`;
+both generated entries are platform-owned and are neither App dependencies nor
+committed source.
 
 Update the imported manifest to the newly created immutable app id. Compare the
 source with the current scaffold and adapt it as required by `building-apps`,

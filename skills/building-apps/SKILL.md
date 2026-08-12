@@ -21,9 +21,12 @@ apps/<id>/
   backend/assets/        optional read-only runtime files (copied on deploy)
   app/index.html         HTML host that loads ./app.js
   app/main.tsx           React SPA entry (TanStack Router, hash history) + Query
+  data/schema.ts         optional managed Data Table schema
   widgets/<name>.tsx     dashboard widget(s); each exports mount(element)
+  node_modules/@hatch/data generated platform SDK (never edit or commit)
+  node_modules/@hatch/import-map.json generated SDK map (never edit or commit)
   package.json           npm dependencies (installed only with Deno)
-  deno.json              reviewed npm lifecycle-script allowlist
+  deno.json              reviewed lifecycle-script policy
   deno.lock              Deno dependency lock (commit this file)
   buf.yaml, buf.gen.yaml Connect codegen config (rarely needs changes)
 ```
@@ -123,6 +126,7 @@ Keep `manifest.json` consistent with the files. Example:
     "webhook": false,
     "storage": false,
     "kv": false,
+    "dataTable": false,
     "userscripts": false
   },
   "backendMode": "serverless",
@@ -209,8 +213,10 @@ Method names become camelCase in generated code (`list`, `add`).
 
 ## Backend (Deno + Connect)
 
-The platform injects `DATABASE_URL` and `PORT`. Create tables on startup so the
-app works on a fresh database. Import generated stubs with an explicit `.ts`.
+The platform always injects `PORT`. It injects `DATABASE_URL` only when
+`capabilities.database` is enabled; create tables on startup so an App using that
+capability works on a fresh database. Import generated stubs with an explicit
+`.ts`.
 
 ```ts
 import http from 'node:http';
@@ -252,13 +258,34 @@ deno install --package-json --node-modules-dir=auto --lock=deno.lock
 ```
 
 Commit `package.json`, `deno.json`, and the resulting `deno.lock`. Do not commit
-`node_modules`. `deploy_app` repeats the Deno install with `--frozen` and rejects
-missing or stale dependency files. If deploy reports a legacy deno.json-only
-source, load this Skill, migrate its npm imports to `package.json`, run the
-command above, and commit all three files before deploying again. Deno reads
-`package.json` natively, so bare imports (`import x from 'pkg'`) work in the
-backend too. Deploy then bundles backend dependencies; package metadata,
-lockfiles, and installed modules are not present at runtime.
+`node_modules`. Hatch materializes built-in `@hatch/*` SDKs there at checkout
+along with `node_modules/@hatch/import-map.json`. Never add Hatch SDKs to
+`package.json`, version them, edit them, or expect them in `deno.lock`; never
+edit or commit the generated import map. `deploy_app` repeats the Deno install
+with `--frozen`, applies the generated map during schema evaluation and backend
+bundling, and rejects missing or stale dependency files. The SDK code is
+inlined into the backend bundle; the generated SDK directory, import map,
+package metadata, lockfile, and installed modules are not present at runtime.
+
+If deploy reports a legacy deno.json-only source, migrate its npm imports to
+`package.json`, run the command above, and commit all three dependency files. If
+an older App declares `@hatch/data` as a dependency, remove it before
+regenerating `deno.lock`; Hatch supplies that SDK. Deno reads `package.json`
+natively, so other bare package imports work in the backend too.
+
+For local Deno commands that resolve App source imports, run them from the App
+source root and explicitly use Hatch's generated map:
+
+```bash
+deno check --import-map=node_modules/@hatch/import-map.json ...
+deno run --import-map=node_modules/@hatch/import-map.json ...
+deno test --import-map=node_modules/@hatch/import-map.json ...
+deno cache --import-map=node_modules/@hatch/import-map.json ...
+```
+
+This applies to any `check`, `run`, `test`, or `cache` invocation that may reach
+an `@hatch/*` import. `deno install` only resolves `package.json` dependencies
+and does not need the import-map flag.
 
 ### npm lifecycle scripts
 
@@ -381,6 +408,73 @@ Treat first load and background refresh as different states:
 Use `query_app_db` to create tables and inspect data while developing. The
 backend should also create its tables on startup (idempotent `create table if
 not exists`). Each app has its OWN database — no cross-app access.
+
+## Managed Data Tables
+
+Use `capabilities.dataTable` for typed CRUD data that does not need arbitrary
+SQL, joins, or aggregates. It works without a backend, automatically migrates
+on deploy, and provides realtime reactive queries. The platform provisions a
+separate database and never exposes its credentials.
+
+Create `data/schema.ts`:
+
+```ts
+import { defineSchema, defineTable, t } from '@hatch/data';
+
+export default defineSchema({
+  todos: defineTable({
+    title: t.string(),
+    completed: t.boolean().default(false),
+    dueAt: t.datetime().optional(),
+  }).index('by_completed', ['completed']),
+});
+```
+
+Tables automatically include `id`, `createdAt`, and `updatedAt`. Use
+`renamedFrom(...)` for table or field renames so migrations preserve data.
+Adding optional/defaulted fields and compatible indexes migrates automatically.
+Dropping tables/fields or narrowing types is destructive: the first deploy
+returns a migration preview without changing data. Ask the user for explicit
+approval, then retry `deploy_app` with
+`allow_destructive_data_migration: true` and the exact
+`data_migration_approval_token` returned by that preview. A token is bound to
+the source schema, target schema, and generated SQL; use a new token whenever
+the preview changes. Rollback restores code only and warns when the live Data
+Table schema differs; it never runs a down migration.
+
+Frontend example:
+
+```ts
+import schema from '../data/schema';
+import { createDataClient } from '@hatch/data';
+
+declare const __DATA_BASE_URL__: string;
+export const data = createDataClient<typeof schema>({
+  baseUrl: __DATA_BASE_URL__,
+});
+
+const todos = await data.query({
+  table: 'todos',
+  index: 'by_completed',
+  where: [{ field: 'completed', op: 'eq', value: false }],
+});
+
+await data.patch('todos', todoId, {}, { unset: ['dueAt'] });
+
+// Database-atomic arithmetic on a required integer/number field.
+await data.increment('counters', counterId, 'value', 1);
+```
+
+Use `data.watch(query, callback)` or `useDataQuery` from `@hatch/data/react`
+for realtime results. A backend creates the same client with `HATCH_DATA_URL`
+and `HATCH_SIGNING_SECRET`. `@hatch/data` is supplied by Hatch, not installed or
+locked by the App; Hatch resolves it with the generated
+`node_modules/@hatch/import-map.json`. Use the `unset` patch option to clear
+optional fields to SQL `NULL`. For JSON fields, assigning `null` stores an
+explicit JSON null instead. `increment` accepts only required `integer` or
+`number` fields, updates the stored value atomically, and returns `null` when
+the row no longer exists. Its raw mutation form can be combined with other
+operations in `data.transaction`.
 
 ## Extended capabilities (cron, webhook, storage, long-running)
 

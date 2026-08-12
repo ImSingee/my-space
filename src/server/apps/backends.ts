@@ -83,7 +83,7 @@ export async function listAppBackends(): Promise<AppBackendView[]> {
  */
 async function requireBackendApp(
   id: string,
-): Promise<{ id: string; mode: BackendMode }> {
+): Promise<{ id: string; mode: BackendMode; deploymentId: string }> {
   const app = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.id, id),
     columns: {
@@ -103,14 +103,21 @@ async function requireBackendApp(
   if (!app.currentDeploymentId) {
     throw new AppError('This app has never been deployed.', 400);
   }
-  return { id: app.id, mode: app.backendMode ?? 'serverless' };
+  return {
+    id: app.id,
+    mode: app.backendMode ?? 'serverless',
+    deploymentId: app.currentDeploymentId,
+  };
 }
 
 export async function startBackendForApp(
   id: string,
 ): Promise<AppBackendRuntime> {
-  const { mode } = await requireBackendApp(id);
-  await startAppBackend(id, { keepAlive: mode === 'long-running' });
+  const { mode, deploymentId } = await requireBackendApp(id);
+  await startAppBackend(id, {
+    keepAlive: mode === 'long-running',
+    expectedDeploymentId: deploymentId,
+  });
   return serializeRuntime(getBackendRuntimeView(id));
 }
 
@@ -126,7 +133,10 @@ export async function stopBackendForApp(
 export async function restartBackendForApp(
   id: string,
 ): Promise<AppBackendRuntime> {
-  const { mode } = await requireBackendApp(id);
-  await restartAppBackend(id, { keepAlive: mode === 'long-running' });
+  const { mode, deploymentId } = await requireBackendApp(id);
+  await restartAppBackend(id, {
+    keepAlive: mode === 'long-running',
+    expectedDeploymentId: deploymentId,
+  });
   return serializeRuntime(getBackendRuntimeView(id));
 }

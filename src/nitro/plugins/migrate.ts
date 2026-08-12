@@ -7,6 +7,7 @@ import {
 } from '~server/agent-runs';
 import { startAgentInternalServer } from '~server/agent-runner/internal-server';
 import { hardenPlatformDatabase } from '~server/apps/provision';
+import { reconcilePendingAppActivations } from '~server/apps/deploy';
 import { warmLongRunningBackends } from '~server/apps/runtime';
 import { ensureScheduler } from '~server/apps/scheduler';
 import { ensureRetentionSweep } from '~server/retention';
@@ -23,6 +24,9 @@ export default definePlugin(async () => {
   // Lock down PUBLIC connect on the platform DB so per-app roles (same server)
   // can't open a connection to it. Independent of the rest of boot.
   await hardenPlatformDatabase();
+  // Resolve deploys whose platform COMMIT acknowledgement or post-commit
+  // cleanup was interrupted before starting cron jobs/backends from DB state.
+  await reconcilePendingAppActivations();
   // Agent runs execute on remote runners: bring up the runner-facing internal
   // server (WS control channel + REST API), then reap only runs whose lease
   // already expired — runs with live leases survive a platform restart, their

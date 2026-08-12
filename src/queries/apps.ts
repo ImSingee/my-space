@@ -3,6 +3,7 @@ import {
   getAppOps,
   getDeploymentBuildLog,
   getNormalizedManifest,
+  inspectAppDataTablesFn,
   listAppBackendsFn,
   listAppKvFn,
   listApps,
@@ -71,6 +72,12 @@ export const appKvQueryOptions = (id: string) =>
   queryOptions({
     queryKey: ['apps', id, 'kv'],
     queryFn: () => listAppKvFn({ data: id }),
+  });
+
+export const appDataTablesQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ['apps', id, 'data-tables'],
+    queryFn: () => inspectAppDataTablesFn({ data: id }),
   });
 
 export const userscriptInstallLinksQueryOptions = (id: string) =>

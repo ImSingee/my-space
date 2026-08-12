@@ -10,7 +10,6 @@
     "npm:@tanstack/react-router@^1.170.15": "1.170.16_react@19.2.7_react-dom@19.2.7__react@19.2.7",
     "npm:@types/react-dom@^19.2.3": "19.2.3_@types+react@19.2.17",
     "npm:@types/react@^19.2.17": "19.2.17",
-    "npm:postgres@^3.4.9": "3.4.9",
     "npm:react-dom@^19.2.7": "19.2.7_react@19.2.7",
     "npm:react@^19.2.7": "19.2.7",
     "npm:zod@^4.4.3": "4.4.3"
@@ -115,9 +114,6 @@
     "isbot@5.1.44": {
       "integrity": "sha512-PGEHtwMnKbZpeSEXW2Utx+/JWed7dp6DiH0WWg33vGSDA7RUvpUeJSVlLrVkQ1RCpvDOUc/eH9ql7VsdbBZ8pA=="
     },
-    "postgres@3.4.9": {
-      "integrity": "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="
-    },
     "react-dom@19.2.7_react@19.2.7": {
       "integrity": "sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ==",
       "dependencies": [
@@ -162,7 +158,6 @@
         "npm:@tanstack/react-router@^1.170.15",
         "npm:@types/react-dom@^19.2.3",
         "npm:@types/react@^19.2.17",
-        "npm:postgres@^3.4.9",
         "npm:react-dom@^19.2.7",
         "npm:react@^19.2.7",
         "npm:zod@^4.4.3"

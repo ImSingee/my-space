@@ -69,8 +69,8 @@ function About() {
       <h1>About</h1>
       <p className="muted">
         Scaffolded by Hatch: a React SPA (TanStack Router hash history +
-        TanStack Query), a Deno Connect backend, and its own Postgres database.
-        Add npm packages to package.json and import them from anywhere.
+        TanStack Query), a Deno Connect backend, and a managed Data Table. Add
+        npm packages to package.json and import them from anywhere.
       </p>
     </div>
   );

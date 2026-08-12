@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { HATCH_SDK_IMPORT_MAP } from '~agent/hatch-sdk';
 import { buildApp } from './build';
 
 const tempDirs: string[] = [];
@@ -470,6 +471,271 @@ describe('buildApp userscripts', () => {
 
     await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
       /userscript entry not found/,
+    );
+  });
+});
+
+describe('buildApp managed Data Tables', () => {
+  it('rejects source symlinks before writing platform build files', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { dataTable: true },
+      },
+      {
+        'data/schema.ts': 'export default { descriptor: {} };',
+      },
+    );
+    const external = path.join(path.dirname(sourceDir), 'external');
+    const externalFile = path.join(external, 'keep.txt');
+    await fs.mkdir(external, { recursive: true });
+    await fs.writeFile(externalFile, 'do not overwrite', 'utf8');
+    await fs.symlink(external, path.join(sourceDir, 'linked'), 'dir');
+
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /may not contain symbolic links: linked/,
+    );
+    await expect(fs.readFile(externalFile, 'utf8')).resolves.toBe(
+      'do not overwrite',
+    );
+  });
+
+  it('evaluates schemas and inlines the platform-provided Data SDK', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { dataTable: true, frontend: true, backend: true },
+        backend: { entry: 'backend/main.ts' },
+        app: {
+          entry: 'app/main.ts',
+          html: 'app/index.html',
+          routes: [],
+        },
+      },
+      {
+        'deno.json': JSON.stringify({
+          allowScripts: [],
+          imports: { '#data/': './data/' },
+          scopes: {
+            './backend/': {
+              '#runtime-value': './backend/runtime-value.ts',
+            },
+          },
+        }),
+        'app/main.ts': `
+          import { useDataQuery } from '@hatch/data/react';
+          document.body.dataset.deploymentId = __DATA_DEPLOYMENT_ID__;
+          document.body.dataset.sdk = typeof useDataQuery;
+        `,
+        'app/index.html': '<html><body></body></html>',
+        'backend/main.ts': `
+          import schema from '#data/schema.ts';
+          import { runtimeValue } from '#runtime-value';
+          import { createDataClient } from '@hatch/data';
+          export const data = createDataClient<typeof schema>({
+            baseUrl: Deno.env.get('HATCH_DATA_URL') ?? '',
+          });
+          export const importedRuntimeValue = runtimeValue;
+          export const incrementAttempts = (id: string) =>
+            data.increment('todos', id, 'attempts', 1);
+          console.log(JSON.stringify({
+            runtime: importedRuntimeValue,
+            sdk: typeof data.increment,
+          }));
+        `,
+        'backend/runtime-value.ts':
+          "export const runtimeValue = 'runtime-alias';\n",
+        'data/fields.ts': "export const titleFieldName = 'title' as const;\n",
+        'data/schema.ts': `
+          import { titleFieldName } from '#data/fields.ts';
+          import { defineSchema, defineTable, t } from '@hatch/data';
+          export default defineSchema({
+            todos: defineTable({
+              [titleFieldName]: t.string(),
+              completed: t.boolean().default(false),
+              attempts: t.integer().default(0),
+            }).index('by_completed', ['completed']),
+          });
+        `,
+      },
+    );
+
+    const result = await buildApp('demo', {
+      sourceDir,
+      outputDir,
+      deploymentId: 'deployment-123',
+    });
+
+    expect(result.dataSchema?.tables.todos).toMatchObject({
+      fields: {
+        title: { kind: 'string', optional: false },
+        completed: { kind: 'boolean', optional: false, default: false },
+        attempts: { kind: 'integer', optional: false, default: 0 },
+      },
+      indexes: [{ name: 'by_completed', fields: ['completed'], unique: false }],
+    });
+    expect(result.normalized.dataTable).toEqual({
+      url: '/api/apps/demo/data',
+    });
+    await expect(
+      fs.readFile(path.join(outputDir, 'app', 'index.html'), 'utf8'),
+    ).resolves.toContain('deployment-123');
+    await expect(
+      fs.readFile(path.join(outputDir, 'deployment.json'), 'utf8'),
+    ).resolves.toContain('deployment-123');
+    expect(result.normalized.backend).toEqual({
+      entry: 'backend/main.bundle.js',
+      format: 'bundle-v1',
+    });
+
+    const bundlePath = path.join(outputDir, 'backend', 'main.bundle.js');
+    await expect(fs.access(bundlePath)).resolves.toBeUndefined();
+    for (const buildOnlyPath of [
+      HATCH_SDK_IMPORT_MAP,
+      'node_modules/@hatch/data',
+      'node_modules/react',
+      'backend/main.ts',
+      'backend/runtime-value.ts',
+      'data/schema.ts',
+      'data/fields.ts',
+      'deno.json',
+      'deno.lock',
+    ]) {
+      await expect(
+        fs.access(path.join(outputDir, buildOnlyPath)),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+
+    // The aliases and SDK must already be inside the bundle: the final artifact
+    // runs with an empty cache and all external dependency resolution disabled.
+    const recoveryCache = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'hatch-data-recovery-cache-'),
+    );
+    tempDirs.push(recoveryCache);
+    const executed = await execFileAsync(
+      'deno',
+      [
+        'run',
+        '--no-config',
+        '--no-lock',
+        '--no-npm',
+        '--no-remote',
+        '--cached-only',
+        '--allow-env=HATCH_DATA_URL,HATCH_DATA_DEPLOYMENT_ID',
+        bundlePath,
+      ],
+      {
+        cwd: outputDir,
+        env: { ...process.env, DENO_DIR: recoveryCache },
+      },
+    );
+    expect(JSON.parse(executed.stdout.trim())).toEqual({
+      runtime: 'runtime-alias',
+      sdk: 'function',
+    });
+  });
+
+  it('bundles aliases from a local external import map', async () => {
+    const externalMap = {
+      imports: { '#helper': '../backend/helper.ts' },
+    };
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts' },
+      },
+      {
+        'deno.json': JSON.stringify({
+          allowScripts: [],
+          importMap: './config/import-map.json',
+        }),
+        'config/import-map.json': JSON.stringify(externalMap),
+        'backend/helper.ts': "export const helper = 'helper';\n",
+        'backend/main.ts': `
+          import { helper } from '#helper';
+          export const importedHelper = helper;
+          console.log(importedHelper);
+        `,
+      },
+    );
+
+    await buildApp('demo', { sourceDir, outputDir });
+
+    const bundlePath = path.join(outputDir, 'backend', 'main.bundle.js');
+    await expect(fs.access(bundlePath)).resolves.toBeUndefined();
+    for (const buildOnlyPath of [
+      'config/import-map.json',
+      HATCH_SDK_IMPORT_MAP,
+      'backend/main.ts',
+      'backend/helper.ts',
+    ]) {
+      await expect(
+        fs.access(path.join(outputDir, buildOnlyPath)),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+
+    const recoveryCache = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'hatch-external-map-cache-'),
+    );
+    tempDirs.push(recoveryCache);
+    const executed = await execFileAsync(
+      'deno',
+      [
+        'run',
+        '--no-config',
+        '--no-lock',
+        '--no-npm',
+        '--no-remote',
+        '--cached-only',
+        bundlePath,
+      ],
+      {
+        cwd: outputDir,
+        env: { ...process.env, DENO_DIR: recoveryCache },
+      },
+    );
+    expect(executed.stdout.trim()).toBe('helper');
+  });
+
+  it('rejects schema dependencies missing from the committed lock', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { dataTable: true },
+      },
+      {
+        'data/schema.ts': `
+          import 'npm:zod@4.4.3';
+          import { defineSchema, defineTable, t } from '@hatch/data';
+          export default defineSchema({
+            todos: defineTable({ title: t.string() }),
+          });
+        `,
+      },
+    );
+
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /Data Table schema evaluation failed:[\s\S]*(not a dependency|lockfile|frozen)/i,
+    );
+  });
+
+  it('rejects a Data Table capability without data/schema.ts', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { dataTable: true },
+      },
+      {},
+    );
+
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /data\/schema\.ts does not exist/,
     );
   });
 });

@@ -20,6 +20,10 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { agentWorkDir } from '~agent/paths';
+import {
+  materializeWorktree,
+  type WorktreeMaterializer,
+} from '~agent/worktree-materializer';
 
 export const SOURCE_BRANCH = 'master';
 export const DEPLOY_TAG_PREFIX = 'deploy/';
@@ -54,6 +58,7 @@ export type GitSourceConfig = {
   repoDir: (id: string) => string;
   deployCheckoutDir: (id: string) => string;
   agentCheckoutDir: (sessionId: string, id: string) => string;
+  agentCheckoutMaterializer?: WorktreeMaterializer;
 };
 
 async function pathExists(p: string): Promise<boolean> {
@@ -233,6 +238,7 @@ exit 0
         );
       }
       await setLocalGitIdentity(worktree);
+      await materializeWorktree(worktree, cfg.agentCheckoutMaterializer);
       return describeCheckout(sessionId, id, worktree);
     }
 
@@ -248,6 +254,7 @@ exit 0
       await runGit(['remote', 'add', 'origin', repoDir], { cwd: worktree });
     }
     await setLocalGitIdentity(worktree);
+    await materializeWorktree(worktree, cfg.agentCheckoutMaterializer);
     return describeCheckout(sessionId, id, worktree);
   }
 

@@ -62,6 +62,8 @@ export type AppCapabilities = {
   storage: boolean;
   /** Simple per-app key/value store (platform DB) for small tokens/config. */
   kv: boolean;
+  /** Platform-managed typed tables with migrations and realtime queries. */
+  dataTable?: boolean;
   /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
   userscripts: boolean;
 };
@@ -153,6 +155,20 @@ export const apps = pgTable(
      * Never stores the plaintext credential.
      */
     dbPasswordCiphertext: text(),
+    /** Reserved or provisioned platform-managed Postgres database name. */
+    dataDbName: text(),
+    /**
+     * Versioned authenticated ciphertext for the managed Data Table database
+     * password. Never stores the plaintext credential.
+     */
+    dataDbPasswordCiphertext: text(),
+    /** Hash of the latest successfully applied managed Data Table schema. */
+    dataSchemaHash: text(),
+    /**
+     * Deployment currently cutting over a managed Data Table schema. While set,
+     * Data Table APIs fail closed until matching code has been activated.
+     */
+    dataActivationId: ulid(),
     /** Shared secret for verifying inbound webhook calls (webhook capability). */
     webhookSecret: text(),
     /**
@@ -206,6 +222,11 @@ export const deployments = pgTable(
     message: text(),
     /** Normalized manifest produced by the builder (deployed URLs etc). */
     manifestNormalized: jsonb().$type<JsonObject>(),
+    /** Managed Data Table schema associated with this code deployment. */
+    dataSchemaSnapshot: jsonb().$type<JsonObject>(),
+    dataSchemaHash: text(),
+    /** Generated migration plan applied for this deployment. */
+    dataMigrationSummary: jsonb().$type<JsonObject>(),
     /** Commit deployed from the app's master branch. */
     sourceCommit: text(),
     /** Immutable deploy/v<version> Git tag for this deployment. */

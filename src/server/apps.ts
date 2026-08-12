@@ -14,6 +14,7 @@ import type {
 } from './apps/manifest';
 import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
+import { AppError } from './errors';
 import {
   idAndDeploymentSchema,
   idAndKeySchema,
@@ -226,6 +227,11 @@ export type AppOps = {
   };
   /** KV entries are fetched separately (they mutate live); this just gates the UI. */
   kv: { enabled: boolean };
+  dataTable: {
+    enabled: boolean;
+    dbName: string | null;
+    schemaHash: string | null;
+  };
 };
 
 export const getAppOps = createServerFn({ method: 'GET' })
@@ -242,6 +248,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false, url: null, objects: [] },
         kv: { enabled: false },
+        dataTable: { enabled: false, dbName: null, schemaHash: null },
       };
     }
     const caps = app.capabilities;
@@ -279,6 +286,11 @@ export const getAppOps = createServerFn({ method: 'GET' })
         objects,
       },
       kv: { enabled: Boolean(caps?.kv) },
+      dataTable: {
+        enabled: Boolean(caps?.dataTable),
+        dbName: app.dataDbName ?? null,
+        schemaHash: app.dataSchemaHash ?? null,
+      },
     };
   });
 
@@ -417,6 +429,62 @@ export const deleteAppKvFn = createServerFn({ method: 'POST' })
     await requireKvApp(data.id);
     const { deleteKv } = await import('./apps/kv');
     return { ok: await deleteKv(data.id, data.key) };
+  });
+
+/** ================== managed Data Tables (manage UI) ================== */
+
+async function requireDataTableApp(id: string): Promise<void> {
+  const app = await db.query.apps.findFirst({
+    where: (row, { eq }) => eq(row.id, id),
+    columns: {
+      status: true,
+      capabilities: true,
+      currentDeploymentId: true,
+      dataActivationId: true,
+    },
+  });
+  if (
+    !app ||
+    app.status === 'archived' ||
+    !app.currentDeploymentId ||
+    !app.capabilities?.dataTable
+  ) {
+    throw new Error('App not found');
+  }
+  if (app.dataActivationId) {
+    throw new AppError('Data Table deployment is being finalized.', 503);
+  }
+}
+
+export const inspectAppDataTablesFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .validator((id: string) => idSchema.parse(id))
+  .handler(async ({ data: id }) => {
+    await requireDataTableApp(id);
+    const { inspectDataTables } = await import('./apps/data-table/service');
+    return inspectDataTables(id);
+  });
+
+export const queryAppDataTableFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; query: unknown }) =>
+    z.object({ id: idSchema, query: z.unknown() }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    await requireDataTableApp(data.id);
+    const { queryDataTable } = await import('./apps/data-table/service');
+    return queryDataTable(data.id, data.query);
+  });
+
+export const mutateAppDataTableFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; mutation: unknown }) =>
+    z.object({ id: idSchema, mutation: z.unknown() }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    await requireDataTableApp(data.id);
+    const { mutateDataTable } = await import('./apps/data-table/service');
+    return mutateDataTable(data.id, data.mutation);
   });
 
 /** ================== userscripts (manage UI) ================== */

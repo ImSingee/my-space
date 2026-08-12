@@ -378,6 +378,8 @@ export const capabilitiesSchema = z.object({
   storage: z.boolean().default(false),
   /** Simple per-app key/value store (platform DB) for small tokens/config. */
   kv: z.boolean().default(false),
+  /** Platform-managed typed tables with migrations and realtime queries. */
+  dataTable: z.boolean().default(false),
   /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
   userscripts: z.boolean().default(false),
 });
@@ -624,6 +626,8 @@ export type NormalizedManifest = {
   storage?: { url: string };
   /** KV REST base URL, when the kv capability is enabled. */
   kv?: { url: string };
+  /** Managed Data Table REST/SSE base URL. */
+  dataTable?: { url: string };
   /**
    * The app's declared RPC API, captured from its proto at build time. Absent
    * for apps without an RPC service. Lets the platform (and the manage UI) know
@@ -675,6 +679,11 @@ export function storageUrl(id: string): string {
 /** Per-app KV REST base. The backend calls it with an HMAC signature. */
 export function kvUrl(id: string): string {
   return `${appBasePath(id)}/kv`;
+}
+
+/** Managed Data Table API base used by browsers and app backends. */
+export function dataTableUrl(id: string): string {
+  return `${appBasePath(id)}/data`;
 }
 
 /** Public inbound webhook URL (token appended at call time as `?secret=`). */
@@ -780,6 +789,9 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   // gate a backendless app would advertise a KV URL that always 404s.
   if (src.capabilities.kv && src.capabilities.backend && src.backend) {
     out.kv = { url: kvUrl(src.id) };
+  }
+  if (src.capabilities.dataTable) {
+    out.dataTable = { url: dataTableUrl(src.id) };
   }
   // Workflow calls are outbound from the backend (the platform injects each
   // target's secret into the backend env), so they only apply to apps that

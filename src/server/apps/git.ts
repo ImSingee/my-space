@@ -4,6 +4,7 @@ import {
   appDeployCheckoutDir,
   appRepoDir,
 } from '~agent/paths';
+import { appHatchSdkMaterializer } from '~agent/hatch-sdk';
 import {
   DEPLOY_TAG_PREFIX,
   SOURCE_BRANCH,
@@ -25,6 +26,7 @@ const core = createGitSource({
   repoDir: appRepoDir,
   deployCheckoutDir: appDeployCheckoutDir,
   agentCheckoutDir: agentAppWorkDir,
+  agentCheckoutMaterializer: appHatchSdkMaterializer,
 });
 
 export const ensureAppRepo = core.ensureRepo;

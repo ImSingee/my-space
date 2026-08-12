@@ -87,9 +87,11 @@ async function cronJobsFor(appId: string): Promise<CronJob[]> {
  * RPC service name (for `method` jobs) and the per-app signing secret used to
  * sign the call. Read fresh at fire time so a redeploy is picked up.
  */
-async function cronInvokeContext(
-  appId: string,
-): Promise<{ service?: string; signingSecret?: string }> {
+async function cronInvokeContext(appId: string): Promise<{
+  service?: string;
+  signingSecret?: string;
+  deploymentId?: string;
+}> {
   const app = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.id, appId),
     columns: { signingSecret: true, currentDeploymentId: true },
@@ -103,6 +105,7 @@ async function cronInvokeContext(
   return {
     service: manifest?.rpc?.service,
     signingSecret: app.signingSecret ?? undefined,
+    deploymentId: app.currentDeploymentId,
   };
 }
 
@@ -118,7 +121,8 @@ async function invokeCron(
 ): Promise<{ status: number; body: string; target: string }> {
   const firedAt = new Date().toISOString();
   const timestamp = String(Date.now());
-  const { service, signingSecret } = await cronInvokeContext(appId);
+  const { service, signingSecret, deploymentId } =
+    await cronInvokeContext(appId);
 
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -152,11 +156,16 @@ async function invokeCron(
     body = JSON.stringify({ job: job.name, firedAt });
   }
 
-  const res = await callAppBackend(appId, target, {
-    method: 'POST',
-    headers,
-    body,
-  });
+  const res = await callAppBackend(
+    appId,
+    target,
+    {
+      method: 'POST',
+      headers,
+      body,
+    },
+    deploymentId,
+  );
   return { ...res, target };
 }
 

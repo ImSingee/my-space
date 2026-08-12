@@ -9,7 +9,6 @@
  * `@noframes`, `@description`) from dedicated manifest fields, so a manifest can
  * never inject or override them.
  */
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { appBuildDir } from '~agent/paths';
 import { secretsMatch } from '~server/secrets';
@@ -86,7 +85,7 @@ export function renderUserscript(
 /** Outcome of a `.user.js` request, mapped to an HTTP status by the route. */
 export type UserscriptDownloadResult =
   | { ok: true; body: string }
-  | { ok: false; reason: 'not_found' | 'forbidden' };
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'unavailable' };
 
 /**
  * Resolve and render a userscript for a public `.user.js` request. Auth is the
@@ -146,12 +145,14 @@ export async function resolveUserscriptDownload(
     return { ok: false, reason: 'not_found' };
   }
 
-  let body: string;
-  try {
-    body = await fs.readFile(filePath, 'utf8');
-  } catch {
-    return { ok: false, reason: 'not_found' };
-  }
+  const { readLiveBuildFile } = await import('./build-identity');
+  const file = await readLiveBuildFile(
+    id,
+    app.currentDeploymentId,
+    path.relative(appBuildDir(id), filePath),
+  );
+  if (!file.ok) return { ok: false, reason: file.reason };
+  const body = file.data.toString('utf8');
 
   // Re-encode the verified token into the update/download URLs so Tampermonkey
   // re-requests the exact same secret on every auto-update.

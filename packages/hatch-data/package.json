@@ -1,0 +1,28 @@
+{
+  "name": "@hatch/data",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/data.d.ts",
+      "default": "./dist/data.js"
+    },
+    "./react": {
+      "types": "./dist/data-react.d.ts",
+      "default": "./dist/data-react.js"
+    }
+  },
+  "sideEffects": false,
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}

@@ -16,6 +16,7 @@ import {
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
+import { buildMatchesDeployment } from './build-identity';
 import { appDeployLock } from './deploy';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
 import {
@@ -24,6 +25,15 @@ import {
   isValidAppSlug,
 } from './manifest';
 import { dropAppDatabase } from './provision';
+import {
+  dropAppDataDatabase,
+  withAppDataCutoverLock,
+} from './data-table/provision';
+import {
+  recoverCurrentDataSchema,
+  waitForDataMigrationBarrier,
+} from './data-table/migrate';
+import { closeDataRealtime } from './data-table/realtime';
 import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
 
@@ -53,6 +63,8 @@ export type DeploymentSummary = {
   hasArtifact: boolean;
   /** Whether a build log exists; the log itself is fetched lazily on expand. */
   hasBuildLog: boolean;
+  /** True when rolling back code would keep a newer/different Data Table schema. */
+  dataSchemaMismatch: boolean;
 };
 
 /** List an app's deployment history, newest first, with rollback hints. */
@@ -66,6 +78,11 @@ export async function listDeployments(
     where: (d, { eq: e }) => e(d.appId, id),
     orderBy: (d, { desc }) => [desc(d.version)],
   });
+  const liveDataSchemaHash = app?.dataSchemaHash ?? null;
+  const dataActivationPending = Boolean(
+    app?.dataActivationId &&
+    (app.dataDbName || app.dataSchemaHash || app.capabilities?.dataTable),
+  );
   const current = app?.currentDeploymentId ?? null;
   return Promise.all(
     rows.map(async (d) => {
@@ -86,6 +103,10 @@ export async function listDeployments(
         sourceTag: d.sourceTag,
         hasArtifact,
         hasBuildLog: Boolean(d.buildLog),
+        dataSchemaMismatch:
+          (dataActivationPending && !isCurrent) ||
+          (Boolean(d.dataSchemaHash || liveDataSchemaHash) &&
+            (d.dataSchemaHash ?? null) !== liveDataSchemaHash),
         canRollback:
           !isCurrent &&
           d.status === 'deployed' &&
@@ -114,7 +135,19 @@ export async function deploymentBuildLog(
 }
 
 /** Archive (or unarchive) an app. Archiving stops its backend. */
-export async function setAppArchived(
+export function setAppArchived(
+  id: string,
+  archived: boolean,
+): Promise<{ status: schema.AppStatus }> {
+  // Match deploy/rollback/delete lock ordering. An archive requested during a
+  // build queues behind that release and is then the deterministic last writer
+  // instead of being overwritten by the release transaction.
+  return appDeployLock.withLock(id, () =>
+    withAppDataCutoverLock(id, () => setAppArchivedInner(id, archived)),
+  );
+}
+
+async function setAppArchivedInner(
   id: string,
   archived: boolean,
 ): Promise<{ status: schema.AppStatus }> {
@@ -131,7 +164,16 @@ export async function setAppArchived(
 
   await db.update(schema.apps).set({ status }).where(eq(schema.apps.id, id));
 
-  if (archived) stopApp(id);
+  if (archived) {
+    stopApp(id);
+    if (app.dataDbName || app.dataActivationId || app.capabilities?.dataTable) {
+      await closeDataRealtime(id);
+      // A Data request may already hold the shared migration lock after checking
+      // the previous live status. Drain it before reporting archive complete, so
+      // no mutation can commit after the user sees the App as archived.
+      await waitForDataMigrationBarrier(id);
+    }
+  }
   // Archived apps must not keep firing cron; restored ones resume.
   await reloadScheduler();
   return { status };
@@ -187,14 +229,16 @@ export async function renameAppSlug(
 export function rollbackApp(
   id: string,
   deploymentId: string,
-): Promise<{ version: number }> {
-  return appDeployLock.withLock(id, () => rollbackAppInner(id, deploymentId));
+): Promise<{ version: number; dataSchemaMismatch: boolean }> {
+  return appDeployLock.withLock(id, () =>
+    withAppDataCutoverLock(id, () => rollbackAppInner(id, deploymentId)),
+  );
 }
 
 async function rollbackAppInner(
   id: string,
   deploymentId: string,
-): Promise<{ version: number }> {
+): Promise<{ version: number; dataSchemaMismatch: boolean }> {
   const app = await db.query.apps.findFirst({
     where: (s, { eq: e }) => e(s.id, id),
   });
@@ -219,6 +263,11 @@ async function rollbackAppInner(
         'Only deployments built with artifact support can be restored.',
     );
   }
+  if (!(await buildMatchesDeployment(id, deploymentId, snapshot))) {
+    throw new Error(
+      `The artifact for v${deployment.version} does not match its deployment.`,
+    );
+  }
   if (!deployment.sourceTag) {
     throw new Error(
       `Deployment v${deployment.version} has no source tag and cannot ` +
@@ -227,6 +276,25 @@ async function rollbackAppInner(
   }
   const sourceTag = deployment.sourceTag;
   const manifest = deployment.manifestNormalized as NormalizedManifest | null;
+  let latestDataSchemaHash = app.dataSchemaHash ?? null;
+  // A pending activation may represent a migration whose COMMIT acknowledgement
+  // was lost. Clear that fence only after taking the migration barrier and
+  // reading the committed schema authoritatively. Code rollback stays available
+  // when the Data DB is down, but Data access remains fenced until recovery.
+  let dataMigrationResolved = !app.dataActivationId;
+  if (app.dataDbName || app.dataActivationId) {
+    try {
+      latestDataSchemaHash = (await recoverCurrentDataSchema(id))?.hash ?? null;
+      dataMigrationResolved = true;
+    } catch {
+      // Retain the last known hash. If an activation is pending, retaining its
+      // fence is what prevents an unconfirmed schema from reaching restored code.
+    }
+  }
+  const pendingActivationBackup =
+    dataMigrationResolved && app.dataActivationId
+      ? `${appBuildDir(id)}.bak-${app.dataActivationId}`
+      : null;
 
   // Mutate the live build dir, Git master, and the app row under the same
   // advisory lock deploy holds for its version→tag→record step, so a concurrent
@@ -236,8 +304,23 @@ async function rollbackAppInner(
     const live = appBuildDir(id);
     await fs.rm(live, { recursive: true, force: true });
     await fs.mkdir(live, { recursive: true });
+    // Legacy artifacts predate the immutable deployment marker. Always stamp
+    // the live copy before changing the platform pointer so another worker can
+    // distinguish rollback bytes from the still-current deployment while this
+    // transaction is in flight.
+    await fs.writeFile(
+      path.join(live, 'deployment.json'),
+      JSON.stringify({ deploymentId: deployment.id }, null, 2),
+      'utf8',
+    );
     await fs.cp(snapshot, live, { recursive: true });
     const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
+    if (pendingActivationBackup) {
+      // The activation id is the durable key used to find this recovery state.
+      // Remove the backup before the transaction clears that key so a crash can
+      // never leave a snapshot that no later lifecycle operation can identify.
+      await fs.rm(pendingActivationBackup, { recursive: true, force: true });
+    }
 
     await tx
       .update(schema.apps)
@@ -254,6 +337,11 @@ async function rollbackAppInner(
         capabilities: manifest?.capabilities ?? app.capabilities,
         backendMode: manifest?.backendMode ?? app.backendMode,
         manifest: deployment.manifestNormalized ?? app.manifest,
+        dataSchemaHash: latestDataSchemaHash,
+        // Rollback is an explicit user-selected cutover. It may intentionally
+        // restore code whose forward-only Data schema differs. Clear a failed
+        // deployment's fence only after its migration outcome was resolved.
+        dataActivationId: dataMigrationResolved ? null : app.dataActivationId,
         // Rollback must also bump the served userscript `@version`: Tampermonkey
         // only fetches when the remote version INCREASES, so re-serving the old
         // deployment's number (v3 → v2) would read as "older" and installed
@@ -273,14 +361,20 @@ async function rollbackAppInner(
   if (longRunning) {
     setKeepAlive(id, true);
     try {
-      await ensureAppRunning(id);
+      await ensureAppRunning(id, deployment.id);
     } catch {
       /* warm-start is best-effort; requests will retry the boot */
     }
   }
   // Reload schedules from the restored deployment's manifest.
   await reloadScheduler();
-  return { version: deployment.version };
+  return {
+    version: deployment.version,
+    dataSchemaMismatch:
+      !dataMigrationResolved ||
+      (Boolean(deployment.dataSchemaHash || latestDataSchemaHash) &&
+        (deployment.dataSchemaHash ?? null) !== latestDataSchemaHash),
+  };
 }
 
 /**
@@ -292,7 +386,7 @@ async function rollbackAppInner(
 export async function rollbackAppToVersion(
   id: string,
   version: number,
-): Promise<{ version: number }> {
+): Promise<{ version: number; dataSchemaMismatch: boolean }> {
   const deployment = await db.query.deployments.findFirst({
     where: (d, { eq: e, and: a }) => a(e(d.appId, id), e(d.version, version)),
   });
@@ -303,7 +397,7 @@ export async function rollbackAppToVersion(
 }
 
 /** Permanently delete an app: process, database, rows, and all artifacts. */
-export async function deleteApp(id: string): Promise<{ ok: true }> {
+export function deleteApp(id: string): Promise<{ ok: true }> {
   // The id flows into `fs.rm(..., { force: true })` on several per-app dirs, so
   // reject anything that isn't a valid app slug before touching the filesystem.
   // Otherwise a crafted id like "../../src" (which matches no DB row) would
@@ -311,8 +405,51 @@ export async function deleteApp(id: string): Promise<{ ok: true }> {
   if (!isValidAppId(id)) {
     throw new Error(`Invalid app id: ${id}`);
   }
+  // Match deploy/rollback lock ordering. The cross-process cutover lock keeps a
+  // migration from provisioning or mutating the Data DB while deletion drains
+  // readers and drops it; the process lock also serializes local filesystem work.
+  return appDeployLock.withLock(id, () =>
+    withAppDataCutoverLock(id, () => deleteAppInner(id)),
+  );
+}
+
+async function deleteAppInner(id: string): Promise<{ ok: true }> {
+  const app = await db.query.apps.findFirst({
+    where: (row, { eq: equal }) => equal(row.id, id),
+    columns: {
+      capabilities: true,
+      dataDbName: true,
+      dataSchemaHash: true,
+      dataActivationId: true,
+    },
+  });
+  const hasManagedData = Boolean(
+    app?.dataDbName ||
+    app?.dataSchemaHash ||
+    app?.dataActivationId ||
+    app?.capabilities?.dataTable,
+  );
+
+  // Fail closed before draining Data transactions. New requests now reject on
+  // platform state while an exclusive migration barrier waits for requests that
+  // had already passed their guard.
+  await db
+    .update(schema.apps)
+    .set({ status: 'archived' })
+    .where(eq(schema.apps.id, id));
   stopApp(id);
-  // Drop the per-app database (best-effort; ignore if it never existed).
+  if (hasManagedData) {
+    await closeDataRealtime(id);
+    await waitForDataMigrationBarrier(id);
+
+    // Data DB ownership is derived from the reusable App id. Do not delete the
+    // platform row when cleanup fails: losing that ownership record would let a
+    // future App with the same id inherit an orphaned database and its rows.
+    await dropAppDataDatabase(id);
+  }
+
+  // Drop the legacy raw-SQL App database best-effort, preserving its established
+  // lifecycle behavior. Managed Data cleanup above is the strict boundary.
   try {
     await dropAppDatabase(id);
   } catch {

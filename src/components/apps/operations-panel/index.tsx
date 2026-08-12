@@ -11,6 +11,7 @@ import {
 import { appBackendsQueryOptions, appOpsQueryOptions } from '~queries/apps';
 import type { AppOps } from '~server/apps';
 import { CronSection } from './cron-section';
+import { DataTableSection } from './data-table-section';
 import { KvSection } from './kv-section';
 import { SectionHeader } from './section-header';
 import { StorageSection } from './storage-section';
@@ -168,7 +169,8 @@ export function OperationsPanel({
     ops.cron.enabled ||
     ops.webhook.enabled ||
     ops.storage.enabled ||
-    ops.kv.enabled;
+    ops.kv.enabled ||
+    ops.dataTable.enabled;
 
   return (
     <Box component="section">
@@ -178,8 +180,8 @@ export function OperationsPanel({
 
       {!anyEnabled ? (
         <Text size="sm" c="dimmed">
-          No database, backend, scheduled jobs, webhook, storage, or KV to
-          manage for this app.
+          No database, Data Tables, backend, scheduled jobs, webhook, storage,
+          or KV to manage for this app.
         </Text>
       ) : (
         <Stack gap="lg">
@@ -187,6 +189,7 @@ export function OperationsPanel({
             <BackendSection appId={appId} backend={ops.backend} />
           ) : null}
           {dbEnabled ? <DatabaseSection dbName={dbName} /> : null}
+          {ops.dataTable.enabled ? <DataTableSection appId={appId} /> : null}
           {ops.cron.enabled ? (
             <CronSection appId={appId} cron={ops.cron} />
           ) : null}

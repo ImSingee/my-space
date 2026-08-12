@@ -27,9 +27,17 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     url.origin,
   );
   if (!result.ok) {
+    if (result.reason === 'unavailable') {
+      return new Response('App deployment is being finalized.', {
+        status: 503,
+        headers: { 'retry-after': '1' },
+      });
+    }
     return new Response(
       result.reason === 'forbidden' ? 'Forbidden' : 'Not found',
-      { status: result.reason === 'forbidden' ? 403 : 404 },
+      {
+        status: result.reason === 'forbidden' ? 403 : 404,
+      },
     );
   }
 

@@ -42,12 +42,16 @@ Each app is an independent application with this source layout:
 apps/<id>/
   manifest.json        # declares id, name, capabilities, widgets, rpc service
   proto/service.proto  # Connect RPC service definition (one service)
-  backend/main.ts      # Deno Connect server implementing the service
+  backend/main.ts      # Deno Connect server entry (bundled on deploy)
+  backend/assets/      # optional read-only runtime files
   app/index.html       # HTML host for the SPA (loads ./app.js)
   app/main.tsx         # React SPA entry (TanStack Router hash history + Query)
+  data/schema.ts       # optional managed Data Table schema
   widgets/<name>.tsx   # dashboard widget(s): export "mount(element)"
+  node_modules/@hatch/data # generated platform SDK; never edit or commit
+  node_modules/@hatch/import-map.json # generated SDK map; never edit or commit
   package.json         # npm dependencies (installed only with Deno)
-  deno.json            # reviewed npm lifecycle-script allowlist
+  deno.json            # lifecycle-script allowlist
   deno.lock            # Deno lockfile; generate locally and commit
   buf.yaml/buf.gen.yaml# Connect codegen config (don't usually need to touch)
 \`\`\`
@@ -62,6 +66,15 @@ apps/<id>/
   \`deno install\` locally, and commit deno.lock. Never use npm or pnpm. Deno
   skips lifecycle scripts by default; only add an exact package version to
   deno.json allowScripts after auditing the command and everything it invokes.
+  Hatch materializes \`@hatch/*\` SDKs under node_modules in App checkouts and
+  temporary build trees. Never add them to package.json or deno.lock, and never
+  edit or commit the SDK or generated map. Hatch applies the map during schema
+  evaluation and backend bundling; SDK code is inlined, while the generated SDK
+  directory and import map are not runtime artifact dependencies.
+  For local \`deno check\`, \`run\`, \`test\`, or \`cache\` commands that resolve
+  App imports, pass
+  \`--import-map=node_modules/@hatch/import-map.json\`; \`deno install\` does not
+  need it.
 - **Frontend**: React SPA using TanStack Router (hash history) + TanStack Query.
   It calls the backend through a generated Connect client whose base URL is the
   injected global \`__RPC_BASE_URL__\`. The template already wires this up. Add
@@ -71,8 +84,9 @@ apps/<id>/
   \`$param\` syntax for dynamic route templates. This is discoverability
   metadata for path autocomplete, not runtime route registration.
 - **Backend**: a Deno process exposing a Connect service via
-  \`connectNodeAdapter\`. Keep handlers small and serverless-style. It reads
-  \`DATABASE_URL\` (injected by the platform) for persistence.
+  \`connectNodeAdapter\`. Keep handlers small and serverless-style. When the
+  manifest enables the database capability, the platform injects
+  \`DATABASE_URL\` for persistence.
 - **Database**: when the app needs persistence it gets its OWN Postgres
   database. Use \`query_app_db\` to create tables and inspect data (it
   provisions the database on first use).
@@ -114,6 +128,16 @@ apps/<id>/
     \`query_app_kv\` to inspect or initialize entries; secret values are masked
     unless you explicitly pass \`reveal_secrets: true\` to a list or get action.
     Requires a backend. See the building-apps skill.
+  - \`dataTable\`: platform-managed typed tables with automatic forward-only
+    migrations and realtime reactive queries. Define \`data/schema.ts\` with
+    \`@hatch/data\`; browsers use \`__DATA_BASE_URL__\`, and backends use the
+    injected \`HATCH_DATA_URL\` plus \`HATCH_SIGNING_SECRET\`. It does not
+    require a backend. Hatch supplies this SDK through its generated import map;
+    never add it to package.json or deno.lock. Destructive schema changes make
+    deploy return a preview; ask the user for explicit
+    approval before retrying with
+    \`allow_destructive_data_migration: true\` and the returned
+    \`data_migration_approval_token\`. Never reuse a token for a changed preview.
   - \`userscripts\`: publish Tampermonkey userscripts. Declare a top-level
     \`userscripts\` array (each \`{ id, name, entry, matches, ... }\`); the build
     bundles each \`entry\` to a browser script and the platform serves a
@@ -190,8 +214,10 @@ apps/<id>/
    server rejects Agent branch/tag pushes. If deploy says master advanced,
    call checkout again with the same source path, then fetch and rebase onto
    \`origin/master\`, resolve conflicts, and retry.
-6. If the app stores data, design the schema and create tables with
-   \`query_app_db\`. The backend should create its own tables on startup too.
+6. For simple structured application data, prefer the managed \`dataTable\`
+   capability and define \`data/schema.ts\`; use the full Postgres database and
+   \`query_app_db\` only for arbitrary SQL, joins, aggregates, or ORM control.
+   Database-backed apps should still create their own tables on startup.
 7. Call \`deploy_app\` with that exact \`source_path\` to publish the current
    clean commit, tag it as a
    deployment, build an artifact, and start it. Always pass a concise

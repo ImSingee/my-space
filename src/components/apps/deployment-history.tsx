@@ -1,4 +1,5 @@
 import { Box, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from '@tanstack/react-router';
 import { IconDownload, IconFileZip } from '@tabler/icons-react';
@@ -15,6 +16,10 @@ import {
   normalizedManifestQueryOptions,
 } from '~queries/apps';
 import { rollbackAppFn } from '~server/apps';
+import {
+  requiresDataSchemaConfirmation,
+  rollbackNotification,
+} from './deployment-history-policy';
 
 // Fetch the (potentially large) build log only once the row is expanded.
 function AppBuildLog({
@@ -42,7 +47,8 @@ export function DeploymentHistory({ appId }: { appId: string }) {
     mutationFn: (deploymentId: string) =>
       rollbackAppFn({ data: { id: appId, deploymentId } }),
     onSuccess: (result) => {
-      toast.success(`Restored v${result.version}`);
+      const notification = rollbackNotification(result);
+      toast[notification.tone](notification.message);
       void qc.invalidateQueries(deploymentsQueryOptions(appId));
       // Rolling back can change backend/cron/webhook/storage capabilities, so
       // refresh the Operations panel on this page too; the deployments + loader
@@ -56,12 +62,33 @@ export function DeploymentHistory({ appId }: { appId: string }) {
     },
   });
 
+  const requestRollback = (deploymentId: string) => {
+    const deployment = query.data?.find((item) => item.id === deploymentId);
+    if (!requiresDataSchemaConfirmation(deployment)) {
+      rollback.mutate(deploymentId);
+      return;
+    }
+    modals.openConfirmModal({
+      title: 'Restore code with a different Data Table schema?',
+      children: (
+        <Text size="sm">
+          This restores the app code, but managed Data Table migrations are
+          forward-only. The current Data Table schema and data will remain
+          unchanged, so this older code may be incompatible.
+        </Text>
+      ),
+      labels: { confirm: 'Restore code', cancel: 'Cancel' },
+      confirmProps: { color: 'orange' },
+      onConfirm: () => rollback.mutate(deploymentId),
+    });
+  };
+
   return (
     <DeploymentHistoryView
       deployments={query.data ?? []}
       isLoading={query.isLoading}
       emptyNoun="app"
-      onRollback={(deploymentId) => rollback.mutate(deploymentId)}
+      onRollback={requestRollback}
       rollingId={rollback.isPending ? (rollback.variables ?? null) : null}
       renderArtifact={(deployment) =>
         deployment.hasArtifact ? (

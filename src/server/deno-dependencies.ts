@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 type SourceKind = 'app' | 'workflow';
+type JsonObject = Record<string, unknown>;
 
 const EXACT_NPM_PACKAGE =
   /^npm:(@[^/\s]+\/[^@\s]+|[^@/\s][^@\s]*)@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/;
@@ -41,6 +42,77 @@ async function readJson(file: string, label: string): Promise<unknown> {
       `${label} is not valid JSON: ${
         error instanceof Error ? error.message : String(error)
       }`,
+    );
+  }
+}
+
+function jsonObject(value: unknown, label: string): JsonObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must contain a JSON object.`);
+  }
+  return value as JsonObject;
+}
+
+function isHatchPackage(value: string): boolean {
+  return /^(?:npm:|jsr:)?@hatch\//.test(value);
+}
+
+function assertNoAppManagedHatchSdk(
+  packageJson: JsonObject,
+  lock: JsonObject,
+): void {
+  for (const section of [
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+  ]) {
+    const dependencies = packageJson[section];
+    if (!dependencies || typeof dependencies !== 'object') continue;
+    const name = Object.keys(dependencies).find(isHatchPackage);
+    if (name) {
+      throw new Error(
+        `${name} is provided by Hatch and must not be declared in ` +
+          `${section}. Remove it from package.json and regenerate deno.lock ` +
+          'with `deno install`.',
+      );
+    }
+  }
+
+  const specifiers = lock.specifiers;
+  const npm = lock.npm;
+  const jsr = lock.jsr;
+  const workspace =
+    lock.workspace &&
+    typeof lock.workspace === 'object' &&
+    !Array.isArray(lock.workspace)
+      ? (lock.workspace as JsonObject)
+      : {};
+  const workspacePackageJson =
+    workspace.packageJson &&
+    typeof workspace.packageJson === 'object' &&
+    !Array.isArray(workspace.packageJson)
+      ? (workspace.packageJson as JsonObject)
+      : {};
+  const workspaceDependencies = [
+    ...(Array.isArray(workspace.dependencies) ? workspace.dependencies : []),
+    ...(Array.isArray(workspacePackageJson.dependencies)
+      ? workspacePackageJson.dependencies
+      : []),
+  ].filter((value): value is string => typeof value === 'string');
+  const lockedName = [
+    ...(specifiers && typeof specifiers === 'object'
+      ? Object.keys(specifiers)
+      : []),
+    ...(npm && typeof npm === 'object' ? Object.keys(npm) : []),
+    ...(jsr && typeof jsr === 'object' ? Object.keys(jsr) : []),
+    ...workspaceDependencies,
+  ].find(isHatchPackage);
+  if (lockedName) {
+    throw new Error(
+      `${lockedName} is a stale App-managed Hatch SDK entry in deno.lock. ` +
+        'Run `deno install` after removing @hatch/* from package.json, then ' +
+        'commit the regenerated lockfile.',
     );
   }
 }
@@ -87,14 +159,18 @@ export async function validateDenoDependencySource(
     );
   }
 
-  await readJson(packagePath, 'package.json');
-  const config = await readJson(configPath, 'deno.json');
-  const lock = await readJson(lockPath, 'deno.lock');
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    throw new Error('deno.json must contain a JSON object.');
-  }
+  const packageJson = jsonObject(
+    await readJson(packagePath, 'package.json'),
+    'package.json',
+  );
+  const config = jsonObject(
+    await readJson(configPath, 'deno.json'),
+    'deno.json',
+  );
+  const lock = jsonObject(await readJson(lockPath, 'deno.lock'), 'deno.lock');
+  assertNoAppManagedHatchSdk(packageJson, lock);
 
-  const allowScripts = (config as Record<string, unknown>).allowScripts;
+  const allowScripts = config.allowScripts;
   if (allowScripts !== undefined && !Array.isArray(allowScripts)) {
     throw new Error(
       'deno.json allowScripts must be an array of reviewed, exact npm package ' +
@@ -104,7 +180,7 @@ export async function validateDenoDependencySource(
 
   const npmLock =
     lock && typeof lock === 'object' && !Array.isArray(lock)
-      ? (lock as { npm?: unknown }).npm
+      ? lock.npm
       : undefined;
   const lockedPackages =
     npmLock && typeof npmLock === 'object' && !Array.isArray(npmLock)

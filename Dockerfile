@@ -65,7 +65,7 @@ COPY --from=deno /deno /usr/local/bin/deno
 
 # Runtime needs: the built server, the full dependency tree (esbuild bundling +
 # buf/protoc-gen-es codegen happen on every deploy), the scaffold template, the
-# agent skills, and the SQL migrations applied on startup.
+# agent skills, the built-in Hatch SDK, and SQL migrations applied on startup.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 # The Agent Runner service: same image, alternate entrypoint
@@ -74,6 +74,8 @@ COPY package.json ./
 COPY migrations ./migrations
 COPY templates ./templates
 COPY skills ./skills
+COPY --from=build /app/packages/hatch-data/package.json ./packages/hatch-data/package.json
+COPY --from=build /app/packages/hatch-data/dist ./packages/hatch-data/dist
 
 # Runtime data lives in /app/workspace; dependency/tool caches live in /cache.
 RUN mkdir -p /app/workspace /cache/deno

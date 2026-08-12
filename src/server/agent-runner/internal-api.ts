@@ -253,6 +253,8 @@ async function handleApps(
       const result = await deployApp(id, {
         sourceDir: staged.dir,
         message: body.message,
+        allowDestructiveDataMigration: body.allowDestructiveDataMigration,
+        dataMigrationApprovalToken: body.dataMigrationApprovalToken,
       });
       const { appSlug } = await import('~server/apps/access');
       json(res, 200, {

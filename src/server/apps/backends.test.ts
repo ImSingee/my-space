@@ -160,11 +160,13 @@ describe('backend controls', () => {
     await startBackendForApp('long');
     expect(runtime.startAppBackend).toHaveBeenLastCalledWith('long', {
       keepAlive: true,
+      expectedDeploymentId: 'dep-long',
     });
 
     await startBackendForApp('plain');
     expect(runtime.startAppBackend).toHaveBeenLastCalledWith('plain', {
       keepAlive: false,
+      expectedDeploymentId: 'dep-plain',
     });
   });
 
@@ -173,6 +175,7 @@ describe('backend controls', () => {
     await restartBackendForApp('long');
     expect(runtime.restartAppBackend).toHaveBeenCalledWith('long', {
       keepAlive: true,
+      expectedDeploymentId: 'dep-long',
     });
   });
 

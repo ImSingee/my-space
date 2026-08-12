@@ -53,6 +53,11 @@ import {
   resolveAgentWorkspacePath,
   type AgentWorkspacePath,
 } from './workspace-paths';
+import {
+  materializeWorktree,
+  prepareWorktreeMaterialization,
+  type WorktreeMaterializer,
+} from './worktree-materializer';
 
 export const SOURCE_BRANCH = 'master';
 
@@ -77,6 +82,7 @@ export type LocalCheckout = {
 export type CheckoutFromBundleOptions = {
   targetPath?: string;
   force?: boolean;
+  materializer?: WorktreeMaterializer;
 };
 
 const workspaceMutationChains = new Map<string, Promise<unknown>>();
@@ -843,10 +849,12 @@ async function synchronizeExistingCheckout(
   kind: SourceKind,
   source: SourceBundleResponse,
   resolved: AgentWorkspacePath,
+  materializer?: WorktreeMaterializer,
 ): Promise<LocalCheckout | null> {
   if (!source.bundleBase64 || !source.masterCommit) return null;
 
   const worktree = resolved.absolutePath;
+  await prepareWorktreeMaterialization(worktree, materializer);
   const [branchBeforeFetch, statusBeforeFetch] = await Promise.all([
     worktreeBranch(worktree),
     worktreeStatus(worktree),
@@ -893,7 +901,26 @@ async function synchronizeExistingCheckout(
   // A fast-forward merge reaches the validated remote commit while refusing
   // to discard a concurrent commit or edit.
   await runGit(['merge', '--ff-only', remoteRef], { cwd: worktree });
-  const [branchAfterMerge, checkout] = await Promise.all([
+  const [branchAfterMerge, statusAfterMerge, headAfterMerge] =
+    await Promise.all([
+      worktreeBranch(worktree),
+      worktreeStatus(worktree),
+      worktreeHead(worktree),
+    ]);
+  if (
+    branchAfterMerge !== SOURCE_BRANCH ||
+    statusAfterMerge ||
+    headAfterMerge !== source.masterCommit
+  ) {
+    throw new Error(
+      `Checkout target "${resolved.path}" changed while it was being ` +
+        'synchronized. No local changes were discarded; inspect the worktree ' +
+        'and retry checkout.',
+    );
+  }
+
+  await materializeWorktree(worktree, materializer);
+  const [branchAfterMaterialize, checkout] = await Promise.all([
     worktreeBranch(worktree),
     describeCheckout(
       sessionId,
@@ -906,7 +933,7 @@ async function synchronizeExistingCheckout(
     ),
   ]);
   if (
-    branchAfterMerge !== SOURCE_BRANCH ||
+    branchAfterMaterialize !== SOURCE_BRANCH ||
     checkout.dirty ||
     checkout.headCommit !== source.masterCommit
   ) {
@@ -975,6 +1002,7 @@ export async function checkoutFromBundle(
         kind,
         source,
         resolved,
+        options.materializer,
       );
       if (synchronized) return synchronized;
     }
@@ -1038,6 +1066,7 @@ export async function checkoutFromBundle(
     }
     await rename(prepared.worktree, worktree);
     installedWorktree = true;
+    await materializeWorktree(worktree, options.materializer);
     const checkout = await describeCheckout(
       sessionId,
       kind,
@@ -1159,6 +1188,7 @@ export async function initNewWorktree(
   generation: string,
   writeFiles: (root: string) => Promise<void>,
   targetPath?: string,
+  materializer?: WorktreeMaterializer,
 ): Promise<LocalCheckout> {
   const resolved = await assertWorktreeAvailable(
     sessionId,
@@ -1180,6 +1210,7 @@ export async function initNewWorktree(
   await runGit(['remote', 'add', 'origin', bundle], { cwd: worktree });
   await setLocalGitIdentity(worktree);
   await writeFiles(worktree);
+  await materializeWorktree(worktree, materializer);
   await registerWorkspace(sessionId, {
     kind,
     id,

@@ -69,6 +69,7 @@ export async function handle({
     try {
       return await proxyAppRequest(id, request, base, '/__webhook', {
         preserveAuthorization: true,
+        expectedDeploymentId: app.currentDeploymentId,
       });
     } catch (error) {
       return fail(error);
@@ -96,6 +97,7 @@ export async function handle({
       // `Authorization` header is the external caller's own credential for the
       // app's webhook handler, not the platform session, so forward it.
       preserveAuthorization: true,
+      expectedDeploymentId: app.currentDeploymentId,
       // Sign the forwarded request so the backend can verify the platform
       // vetted it (the secret itself is never forwarded). Absent only for apps
       // deployed before signing keys existed — they redeploy to gain one.

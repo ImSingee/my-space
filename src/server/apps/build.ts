@@ -10,15 +10,24 @@ import {
   appSrcDir,
 } from '~agent/paths';
 import {
+  appHatchImportMapPath,
+  materializeAppHatchSdk,
+} from '~agent/hatch-sdk';
+import {
   type AppApi,
   type NormalizedManifest,
   type ProtoFile,
   type RpcServiceApi,
   type SourceManifest,
+  dataTableUrl,
   normalizeManifest,
   parseSourceManifest,
   rpcUrl,
 } from './manifest';
+import {
+  parseDataSchemaDescriptor,
+  type DataSchemaDescriptor,
+} from './data-table/schema';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import { validateDenoDependencySource } from '../deno-dependencies';
 import { run as runSubprocess } from '../subprocess';
@@ -26,12 +35,14 @@ import { run as runSubprocess } from '../subprocess';
 export type BuildResult = {
   source: SourceManifest;
   normalized: NormalizedManifest;
+  dataSchema?: DataSchemaDescriptor;
   log: string;
 };
 
 export type BuildAppOptions = {
   sourceDir?: string;
   outputDir?: string;
+  deploymentId?: string;
 };
 
 const BIN_DIR = path.join(REPO_ROOT, 'node_modules', '.bin');
@@ -217,6 +228,59 @@ async function validateBackendBundleSourceTree(
   }
 }
 
+/**
+ * Source trees are untrusted. The builder overwrites platform-managed files and
+ * invokes tools inside its temporary copy, so even one preserved symlink could
+ * redirect a write/read outside that copy. Validate the copied tree before the
+ * first manifest read or generated-file write and never recurse through links.
+ */
+async function assertSourceHasNoSymlinks(root: string): Promise<void> {
+  const rootStat = await fs.lstat(root);
+  if (rootStat.isSymbolicLink()) {
+    throw new Error('App source may not contain symbolic links: .');
+  }
+
+  async function walk(dir: string): Promise<void> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const relative = path.relative(root, full).split(path.sep).join('/');
+      if (entry.isSymbolicLink()) {
+        if (relative === 'backend') {
+          throw new Error(
+            'backend source directory must not be a symbolic link: backend',
+          );
+        }
+        if (relative === 'backend/assets') {
+          throw new Error(
+            'backend asset directory must not be a symbolic link: backend/assets',
+          );
+        }
+        if (relative.startsWith('backend/assets/')) {
+          throw new Error(
+            `backend asset must not be a symbolic link: ${relative}`,
+          );
+        }
+        if (
+          relative.startsWith('backend/') ||
+          relative === 'gen' ||
+          relative.startsWith('gen/')
+        ) {
+          throw new Error(
+            `backend bundle source must not be a symbolic link: ${relative}`,
+          );
+        }
+        throw new Error(
+          `App source may not contain symbolic links: ${relative}`,
+        );
+      }
+      if (entry.isDirectory()) await walk(full);
+    }
+  }
+
+  await walk(root);
+}
+
 async function readManifest(src: string): Promise<SourceManifest> {
   const raw = await fs.readFile(path.join(src, 'manifest.json'), 'utf8');
   let json: unknown;
@@ -335,12 +399,74 @@ async function extractAppApi(src: string): Promise<AppApi> {
 }
 
 /** Shared esbuild define for browser bundles (app + widgets). */
-function browserDefine(id: string, name: string): Record<string, string> {
+function browserDefine(
+  id: string,
+  name: string,
+  deploymentId: string | undefined,
+): Record<string, string> {
   return {
     __RPC_BASE_URL__: JSON.stringify(rpcUrl(id)),
+    __DATA_BASE_URL__: JSON.stringify(dataTableUrl(id)),
+    __DATA_DEPLOYMENT_ID__: JSON.stringify(deploymentId ?? ''),
     __APP_NAME__: JSON.stringify(name),
     'process.env.NODE_ENV': '"production"',
   };
+}
+
+const DATA_SCHEMA_SENTINEL = '[[hatch-data-schema]]';
+
+async function describeDataSchema(
+  src: string,
+  logs: string[],
+): Promise<DataSchemaDescriptor> {
+  const schemaPath = path.join(src, 'data', 'schema.ts');
+  if (!(await pathExists(schemaPath))) {
+    throw new Error(
+      'capabilities.dataTable is true but data/schema.ts does not exist.',
+    );
+  }
+  const runner = path.join(src, '__hatch_describe_data.ts');
+  await fs.writeFile(
+    runner,
+    `import schema from './data/schema.ts';\n` +
+      `console.log(${JSON.stringify(DATA_SCHEMA_SENTINEL)} + JSON.stringify(schema.descriptor));\n`,
+    'utf8',
+  );
+  const describeArgs = [
+    'run',
+    '--no-prompt',
+    '--node-modules-dir=auto',
+    `--import-map=${appHatchImportMapPath(src)}`,
+    '--lock=deno.lock',
+    '--frozen',
+    `--allow-read=${src}`,
+    runner,
+  ];
+  const result = await run('deno', describeArgs, {
+    cwd: src,
+    env: subprocessSandboxEnv(),
+  });
+  logs.push(`$ deno ${describeArgs.join(' ')}\n${result.output.trim()}`);
+  if (result.code !== 0) {
+    throw new Error(`Data Table schema evaluation failed:\n${result.output}`);
+  }
+  const line = result.output
+    .split('\n')
+    .find((value) => value.startsWith(DATA_SCHEMA_SENTINEL));
+  if (!line) {
+    throw new Error('Data Table schema did not produce a descriptor.');
+  }
+  try {
+    return parseDataSchemaDescriptor(
+      JSON.parse(line.slice(DATA_SCHEMA_SENTINEL.length)),
+    );
+  } catch (error) {
+    throw new Error(
+      `Data Table schema is invalid: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 export async function buildApp(
@@ -358,30 +484,35 @@ export async function buildApp(
   const tempSrc = path.join(BUILD_WORK_DIR, id, randomUUID());
   await fs.rm(tempSrc, { recursive: true, force: true });
   await fs.mkdir(path.dirname(tempSrc), { recursive: true });
-  await fs.cp(originalSrc, tempSrc, {
-    recursive: true,
-    // Reproduce dependencies from the committed lock below; never trust or
-    // waste time copying a source checkout's pre-existing installations. The
-    // fixed assets directory is copied byte-for-byte later, so names that have
-    // build meaning elsewhere remain ordinary resource names inside it.
-    filter: (source) => {
-      const relative = path
-        .relative(originalSrc, source)
-        .split(path.sep)
-        .join('/');
-      if (
-        relative === 'backend/assets' ||
-        relative.startsWith('backend/assets/')
-      ) {
-        return true;
-      }
-      return !['.git', 'node_modules'].includes(path.basename(source));
-    },
-  });
-
   const src = tempSrc;
 
   try {
+    await fs.cp(originalSrc, tempSrc, {
+      recursive: true,
+      // Reproduce dependencies from the committed lock below; never trust or
+      // waste time copying a source checkout's pre-existing installations. The
+      // fixed assets directory is copied byte-for-byte later, so names that have
+      // build meaning elsewhere remain ordinary resource names inside it.
+      filter: (source) => {
+        const relative = path
+          .relative(originalSrc, source)
+          .split(path.sep)
+          .join('/');
+        if (
+          relative === 'backend/assets' ||
+          relative.startsWith('backend/assets/')
+        ) {
+          return true;
+        }
+        return !['.git', 'node_modules'].includes(path.basename(source));
+      },
+    });
+    await assertSourceHasNoSymlinks(tempSrc);
+    // Agent worktree dependencies are intentionally absent from deploy bundles.
+    // Always materialize a trusted copy of the platform SDK in this disposable
+    // build checkout before any Deno or esbuild resolution.
+    await materializeAppHatchSdk(src);
+
     const manifest = await readManifest(src);
 
     // The manifest id drives every generated URL (app/widget/RPC/storage), but
@@ -450,6 +581,16 @@ export async function buildApp(
           `dependency files, and deploy again:\n${install.output}`,
       );
     }
+
+    // Dependency installation validates the package.json graph, but schema.ts
+    // may also contain direct npm:/jsr:/HTTPS imports. Evaluate author code only
+    // after the frozen install and keep the schema run frozen as well, so it can
+    // never add an unreviewed dependency to the temporary lockfile and bless it
+    // for the rest of this build.
+    let dataSchema: DataSchemaDescriptor | undefined;
+    if (manifest.capabilities.dataTable) {
+      dataSchema = await describeDataSchema(src, logs);
+    }
     // esbuild resolves bare imports by walking node_modules up from each entry
     // file, then falling back to `nodePaths`. The app's node_modules from Deno
     // takes precedence; platform packages remain a fallback for dependencies
@@ -459,7 +600,7 @@ export async function buildApp(
       nodePaths: [path.join(REPO_ROOT, 'node_modules')],
     };
 
-    const define = browserDefine(id, manifest.name);
+    const define = browserDefine(id, manifest.name, options.deploymentId);
     let bundledBackendEntry: string | undefined;
 
     // 3) Bundle the frontend SPA -> static app/app.js + index.html.
@@ -583,6 +724,7 @@ export async function buildApp(
         '--platform=deno',
         '--packages=bundle',
         '--node-modules-dir=auto',
+        `--import-map=${appHatchImportMapPath(src)}`,
         '--lock=deno.lock',
         '--frozen',
         '-o',
@@ -630,8 +772,22 @@ export async function buildApp(
       JSON.stringify(normalized, null, 2),
       'utf8',
     );
+    if (options.deploymentId) {
+      // Runtime workers use this immutable marker to reject/restart a backend
+      // whose process was spawned from a superseded shared build directory.
+      await fs.writeFile(
+        path.join(out, 'deployment.json'),
+        JSON.stringify({ deploymentId: options.deploymentId }, null, 2),
+        'utf8',
+      );
+    }
 
-    return { source: manifest, normalized, log: logs.join('\n') };
+    return {
+      source: manifest,
+      normalized,
+      dataSchema,
+      log: logs.join('\n'),
+    };
   } finally {
     await fs.rm(tempSrc, { recursive: true, force: true });
   }

@@ -88,6 +88,28 @@ describe('app database passwords', () => {
     expect(decryptAppDbPassword(APP_ID, second)).toBe(PASSWORD);
   });
 
+  it('encrypts Data Table passwords in an independent authenticated domain', async () => {
+    const {
+      decryptAppDataDbPassword,
+      decryptAppDbPassword,
+      encryptAppDataDbPassword,
+      encryptAppDbPassword,
+      generateAppDataDbPassword,
+    } = await loadPasswordModule();
+    const dataPassword = generateAppDataDbPassword();
+    const dataEnvelope = encryptAppDataDbPassword(APP_ID, dataPassword);
+    const appEnvelope = encryptAppDbPassword(APP_ID, PASSWORD);
+
+    expect(dataPassword).toMatch(/^[0-9a-f]{64}$/);
+    expect(decryptAppDataDbPassword(APP_ID, dataEnvelope)).toBe(dataPassword);
+    expect(() => decryptAppDbPassword(APP_ID, dataEnvelope)).toThrow(
+      'authentication failed or ciphertext is corrupted',
+    );
+    expect(() => decryptAppDataDbPassword(APP_ID, appEnvelope)).toThrow(
+      'authentication failed or ciphertext is corrupted',
+    );
+  });
+
   it('rejects a password that is not 64 lowercase hex characters', async () => {
     const { encryptAppDbPassword } = await loadPasswordModule();
 

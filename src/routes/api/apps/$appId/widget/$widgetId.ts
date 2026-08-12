@@ -1,4 +1,3 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createFileRoute } from '@tanstack/react-router';
 import { appBuildDir } from '~agent/paths';
@@ -22,11 +21,12 @@ async function handle({ request }: { request: Request }): Promise<Response> {
   // Only serve a widget bundle for a live, non-archived widgets app and only
   // for an id that exists in its current manifest — otherwise stale placements
   // or direct URLs could keep executing a retired app's widget code.
-  const { liveAppManifest } = await import('~server/apps/access');
-  const manifest = await liveAppManifest(id, 'widgets');
-  if (!manifest || !manifest.widgets.some((w) => w.id === widgetId)) {
+  const { liveAppDeployment } = await import('~server/apps/access');
+  const live = await liveAppDeployment(id, 'widgets');
+  if (!live || !live.manifest.widgets.some((w) => w.id === widgetId)) {
     return new Response('Not found', { status: 404 });
   }
+  const { readLiveBuildFile } = await import('~server/apps/build-identity');
 
   const widgetsDir = path.join(appBuildDir(id), 'widgets');
   const filePath = path.normalize(path.join(widgetsDir, `${widgetId}.js`));
@@ -34,17 +34,26 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     return new Response('Forbidden', { status: 403 });
   }
 
-  try {
-    const data = await fs.readFile(filePath);
-    return new Response(new Uint8Array(data), {
-      headers: {
-        'content-type': 'text/javascript; charset=utf-8',
-        'cache-control': 'no-cache',
-      },
+  const result = await readLiveBuildFile(
+    id,
+    live.deploymentId,
+    path.relative(appBuildDir(id), filePath),
+  );
+  if (!result.ok && result.reason === 'unavailable') {
+    return new Response('App deployment is being finalized.', {
+      status: 503,
+      headers: { 'retry-after': '1' },
     });
-  } catch {
+  }
+  if (!result.ok) {
     return new Response('Not found', { status: 404 });
   }
+  return new Response(new Uint8Array(result.data), {
+    headers: {
+      'content-type': 'text/javascript; charset=utf-8',
+      'cache-control': 'no-cache',
+    },
+  });
 }
 
 export const Route = createFileRoute('/api/apps/$appId/widget/$widgetId')({

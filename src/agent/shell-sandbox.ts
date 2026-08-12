@@ -213,6 +213,27 @@ export function sandboxSpawn(argv: [string, ...string[]]): SandboxedSpawn {
 }
 
 /**
+ * Transfer Runner-generated files to the UID used by Agent subprocesses.
+ * Outside the Linux UID sandbox, the Runner and Agent already share an owner.
+ */
+export function setAgentOwned(targets: readonly string[]): void {
+  if (targets.length === 0 || !canSetpriv()) return;
+  const chown = spawnSync(
+    'chown',
+    ['-hR', `${SANDBOX_USER}:${SANDBOX_USER}`, '--', ...targets],
+    { encoding: 'utf8' },
+  );
+  if (chown.status === 0) return;
+
+  const stderr = chown.stderr?.trim();
+  const reason =
+    chown.error?.message || stderr || `exit ${chown.status ?? 'unknown'}`;
+  throw new Error(
+    `[shell-sandbox] Could not transfer generated files to ${SANDBOX_USER}: ${reason}`,
+  );
+}
+
+/**
  * Prepare the Agent Runner process for UID-sandboxed children. Call once at
  * runner startup, before any run executes:
  *

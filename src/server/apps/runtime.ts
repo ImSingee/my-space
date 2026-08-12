@@ -4,7 +4,13 @@ import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { appBuildDir, appStorageDir } from '~agent/paths';
+import {
+  appBuildDir,
+  appStorageDir,
+  deploymentArtifactDir,
+  deploymentBuildDir,
+} from '~agent/paths';
+import { HATCH_SDK_IMPORT_MAP } from '~agent/hatch-sdk';
 import { db, schema } from '~/db';
 import { internalPlatformUrl } from '../internal-platform-url';
 import { subprocessSandboxEnv } from '../sandbox-env';
@@ -13,7 +19,11 @@ import {
   HATCH_TIMESTAMP_HEADER,
   hatchSignature,
 } from '../secrets';
-import { ensureAppDatabase } from './provision';
+import {
+  buildMatchesDeployment,
+  readBuildDeploymentMarker,
+} from './build-identity';
+import { appDatabaseRuntimeEnv } from './runtime-database';
 import {
   type BackendRuntimeSnapshot,
   getBackendSnapshot,
@@ -230,6 +240,15 @@ function readWorkflowRefs(
   }
 }
 
+/** Prefer immutable deployment bytes; fall back only for legacy artifacts. */
+function runtimeBuildDir(id: string, deploymentId: string): string {
+  const artifact = deploymentArtifactDir(id, deploymentId);
+  if (existsSync(artifact)) return artifact;
+  const legacy = deploymentBuildDir(id, deploymentId);
+  if (existsSync(legacy)) return legacy;
+  return appBuildDir(id);
+}
+
 /**
  * Build the `HATCH_WORKFLOWS` env value: a JSON map of alias →
  * `{ workflow, name, url, secret }` so the backend can invoke each declared
@@ -286,6 +305,7 @@ type BackendDenoArgsOptions = {
   storageDir: string;
   cacheDir: string | null;
   certPaths: readonly string[];
+  importMap?: string | null;
   hasLock: boolean;
 };
 
@@ -296,6 +316,7 @@ export function buildBackendDenoArgs({
   storageDir,
   cacheDir,
   certPaths,
+  importMap,
   hasLock,
 }: BackendDenoArgsOptions): string[] {
   const bundled = artifact.format === 'bundle-v1';
@@ -325,6 +346,9 @@ export function buildBackendDenoArgs({
     '--allow-env',
     '--no-prompt',
   );
+  if (!bundled && importMap) {
+    denoArgs.push(`--import-map=${importMap}`);
+  }
   if (!bundled && hasLock) {
     denoArgs.push('--lock=deno.lock', '--frozen');
   }
@@ -335,14 +359,20 @@ export function buildBackendDenoArgs({
 type RunningBackend = {
   proc: ChildProcess;
   port: number;
+  deploymentId: string;
   startedAt: number;
   ready: Promise<void>;
   getLog: () => string;
 };
 
+type StartingBackend = {
+  deploymentId: string | undefined;
+  promise: Promise<number>;
+};
+
 type RuntimeGlobal = typeof globalThis & {
   __hatchAppRuntime__?: Map<string, RunningBackend>;
-  __hatchAppStarting__?: Map<string, Promise<number>>;
+  __hatchAppStarting__?: Map<string, StartingBackend>;
   __hatchAppStopEpoch__?: Map<string, number>;
   __hatchAppKeepAlive__?: Set<string>;
   __hatchAppRestarts__?: Map<string, number>;
@@ -356,9 +386,9 @@ function registry(): Map<string, RunningBackend> {
 }
 
 /** In-flight cold starts, so concurrent callers coalesce onto one process. */
-function startingRegistry(): Map<string, Promise<number>> {
+function startingRegistry(): Map<string, StartingBackend> {
   const g = globalThis as RuntimeGlobal;
-  g.__hatchAppStarting__ ??= new Map<string, Promise<number>>();
+  g.__hatchAppStarting__ ??= new Map<string, StartingBackend>();
   return g.__hatchAppStarting__;
 }
 
@@ -457,7 +487,7 @@ export async function warmLongRunningBackends(): Promise<void> {
       continue;
     }
     setKeepAlive(app.id, true);
-    void ensureAppRunning(app.id).catch((error) => {
+    void ensureAppRunning(app.id, app.currentDeploymentId).catch((error) => {
       console.error(
         `[runtime] warm start of long-running backend "${app.id}" failed:`,
         error instanceof Error ? error.message : error,
@@ -532,15 +562,28 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
 }
 
 /** Start (or reuse) the Deno backend for an app and return its local port. */
-export async function ensureAppRunning(id: string): Promise<number> {
+export async function ensureAppRunning(
+  id: string,
+  expectedDeploymentId?: string,
+): Promise<number> {
   const reg = registry();
   const existing = reg.get(id);
   if (existing) {
     if (existing.proc.exitCode === null && !existing.proc.killed) {
-      await existing.ready;
-      return existing.port;
+      if (
+        !expectedDeploymentId ||
+        existing.deploymentId === expectedDeploymentId
+      ) {
+        await existing.ready;
+        return existing.port;
+      }
+      // Another platform process activated a deployment after this backend was
+      // spawned. Preserve keep-alive intent while invalidating only the stale
+      // local process; the replacement below boots the expected artifact.
+      invalidateLocalBackend(id, true);
+    } else {
+      reg.delete(id);
     }
-    reg.delete(id);
   }
 
   // Coalesce concurrent cold starts. Without this, two requests that both find
@@ -549,25 +592,89 @@ export async function ensureAppRunning(id: string): Promise<number> {
   // a pending-start promise that later callers await instead of starting again.
   const starting = startingRegistry();
   const pending = starting.get(id);
-  if (pending) return pending;
+  if (pending) {
+    if (
+      !expectedDeploymentId ||
+      pending.deploymentId === expectedDeploymentId
+    ) {
+      return pending.promise;
+    }
+    invalidateLocalBackend(id, true);
+  }
 
-  const startPromise = startBackend(id);
-  starting.set(id, startPromise);
+  const startPromise = startBackend(id, expectedDeploymentId);
+  const start = { deploymentId: expectedDeploymentId, promise: startPromise };
+  starting.set(id, start);
   try {
     return await startPromise;
   } finally {
     // Only clear our own entry: a stopApp() during startup deletes this entry
     // and a later ensureAppRunning() may register a fresh one we must not drop.
-    if (starting.get(id) === startPromise) starting.delete(id);
+    if (starting.get(id) === start) starting.delete(id);
   }
 }
 
-async function startBackend(id: string): Promise<number> {
+async function startBackend(
+  id: string,
+  expectedDeploymentId?: string,
+): Promise<number> {
   const reg = registry();
   // Snapshot the stop epoch: if stopApp() runs while we're spawning, we abort
   // instead of registering/serving a build the caller has since superseded.
   const epoch = stopEpoch(id);
-  const buildDir = appBuildDir(id);
+  const initialApp = await db.query.apps.findFirst({
+    where: (row, { eq }) => eq(row.id, id),
+    columns: {
+      status: true,
+      capabilities: true,
+      currentDeploymentId: true,
+    },
+  });
+  if (!initialApp || initialApp.status === 'archived') {
+    setKeepAlive(id, false);
+    throw new Error(`App "${id}" is not available.`);
+  }
+  if (!initialApp.capabilities?.backend) {
+    setKeepAlive(id, false);
+    throw new Error(`App "${id}" has no active backend.`);
+  }
+  const targetDeploymentId = initialApp.currentDeploymentId;
+  if (!targetDeploymentId) {
+    throw new Error(`App "${id}" has no active deployment.`);
+  }
+  if (expectedDeploymentId && targetDeploymentId !== expectedDeploymentId) {
+    throw new Error(
+      `App "${id}" deployment changed before its backend started. Retry ` +
+        'against the active deployment.',
+    );
+  }
+  const buildDir = runtimeBuildDir(id, targetDeploymentId);
+  const buildMarker = readBuildDeploymentMarker(buildDir);
+  if (buildMarker.kind === 'invalid') {
+    throw new Error(
+      `App "${id}" build has an invalid deployment marker. Redeploy or ` +
+        'restore a valid deployment before starting its backend.',
+    );
+  }
+  if (
+    buildMarker.kind === 'deployment' &&
+    buildMarker.id !== targetDeploymentId
+  ) {
+    throw new Error(
+      `App "${id}" build belongs to deployment ${buildMarker.id}, not active ` +
+        `${targetDeploymentId}. Retry after deployment finalization.`,
+    );
+  }
+  if (
+    buildMarker.kind === 'missing' &&
+    !(await buildMatchesDeployment(id, targetDeploymentId, buildDir))
+  ) {
+    throw new Error(
+      `App "${id}" build has no deployment marker and is not a verified ` +
+        'legacy artifact. Redeploy or restore a valid deployment before ' +
+        'starting its backend.',
+    );
+  }
   let backendArtifact: BackendArtifact;
   try {
     backendArtifact = resolveBackendArtifact(buildDir);
@@ -579,9 +686,6 @@ async function startBackend(id: string): Promise<number> {
         }`,
     );
   }
-
-  const { url: databaseUrl } = await ensureAppDatabase(id);
-  const port = await freePort();
 
   const storageDir = appStorageDir(id);
   mkdirSync(storageDir, { recursive: true });
@@ -596,17 +700,52 @@ async function startBackend(id: string): Promise<number> {
   // and the cron call still reaches them.
   const appRow = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.id, id),
-    columns: { signingSecret: true, capabilities: true },
+    columns: {
+      status: true,
+      signingSecret: true,
+      capabilities: true,
+      currentDeploymentId: true,
+    },
   });
-  const signingSecret = appRow?.signingSecret ?? null;
+  if (!appRow || appRow.status === 'archived') {
+    setKeepAlive(id, false);
+    throw new Error(`App "${id}" is not available.`);
+  }
+  if (!appRow.capabilities?.backend) {
+    setKeepAlive(id, false);
+    throw new Error(`App "${id}" has no active backend.`);
+  }
+  const activeDeploymentId = appRow.currentDeploymentId ?? null;
+  if (!activeDeploymentId) {
+    throw new Error(`App "${id}" has no active deployment.`);
+  }
+  if (
+    activeDeploymentId !== targetDeploymentId ||
+    (buildMarker.kind === 'deployment' && buildMarker.id !== activeDeploymentId)
+  ) {
+    throw new Error(
+      `App "${id}" deployment changed while its backend was starting. Retry ` +
+        'against the active deployment.',
+    );
+  }
+  const backendDeploymentId = targetDeploymentId;
+  const signingSecret = appRow.signingSecret ?? null;
+  const databaseEnv = await appDatabaseRuntimeEnv(
+    id,
+    appRow.capabilities.database,
+  );
+  const port = await freePort();
 
   // KV is stored in the platform DB (not reachable from the sandboxed
   // subprocess), so a KV-capable backend talks to it over HTTP at an absolute
   // URL, signing each request with HATCH_SIGNING_SECRET. Inject the endpoint so
   // the app doesn't hardcode the platform origin. Relative URLs have no host
   // inside the subprocess, so use the platform's loopback HTTP endpoint.
-  const kvUrl = appRow?.capabilities?.kv
+  const kvUrl = appRow.capabilities?.kv
     ? internalPlatformUrl(`/api/apps/${id}/kv`)
+    : null;
+  const dataUrl = appRow.capabilities?.dataTable
+    ? internalPlatformUrl(`/api/apps/${id}/data`)
     : null;
 
   // Bundles may read only their fixed asset directory and writable storage;
@@ -629,6 +768,9 @@ async function startBackend(id: string): Promise<number> {
     storageDir,
     cacheDir,
     certPaths,
+    importMap: existsSync(path.join(buildDir, HATCH_SDK_IMPORT_MAP))
+      ? HATCH_SDK_IMPORT_MAP
+      : null,
     hasLock: existsSync(path.join(buildDir, 'deno.lock')),
   });
 
@@ -639,12 +781,14 @@ async function startBackend(id: string): Promise<number> {
     // runtime variables.
     env: subprocessSandboxEnv({
       PORT: String(port),
-      DATABASE_URL: databaseUrl,
+      ...databaseEnv,
       STORAGE_DIR: storageDir,
       ...backendArtifactEnv(buildDir, backendArtifact),
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
       ...(kvUrl ? { HATCH_KV_URL: kvUrl } : {}),
+      ...(dataUrl ? { HATCH_DATA_URL: dataUrl } : {}),
+      HATCH_DEPLOYMENT_ID: backendDeploymentId,
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -696,6 +840,7 @@ async function startBackend(id: string): Promise<number> {
   const backend: RunningBackend = {
     proc,
     port,
+    deploymentId: backendDeploymentId,
     startedAt: Date.now(),
     ready: Promise.resolve(),
     getLog: () => log,
@@ -747,6 +892,8 @@ async function startBackend(id: string): Promise<number> {
       );
       const timer = setTimeout(() => {
         if (keepAliveSet().has(id) && !registry().has(id)) {
+          // Resolve the currently active deployment afresh. Another platform
+          // process may have deployed while this backend was running.
           void ensureAppRunning(id).catch(() => {
             /* will retry on next exit / request */
           });
@@ -812,8 +959,9 @@ export async function callAppBackend(
   id: string,
   pathAndQuery: string,
   init?: RequestInit,
+  expectedDeploymentId?: string,
 ): Promise<{ status: number; body: string }> {
-  const port = await ensureAppRunning(id);
+  const port = await ensureAppRunning(id, expectedDeploymentId);
   const path = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
   const upstream = await fetch(`http://127.0.0.1:${port}${path}`, {
     ...init,
@@ -924,16 +1072,16 @@ export async function refreshAppBackendDatabaseCredentials(
  */
 export async function startAppBackend(
   id: string,
-  opts: { keepAlive: boolean },
+  opts: { keepAlive: boolean; expectedDeploymentId?: string },
 ): Promise<void> {
   if (opts.keepAlive) setKeepAlive(id, true);
-  await ensureAppRunning(id);
+  await ensureAppRunning(id, opts.expectedDeploymentId);
 }
 
 /** Stop-then-start an app backend (Backends page restart action). */
 export async function restartAppBackend(
   id: string,
-  opts: { keepAlive: boolean },
+  opts: { keepAlive: boolean; expectedDeploymentId?: string },
 ): Promise<void> {
   stopApp(id);
   await startAppBackend(id, opts);
@@ -944,7 +1092,11 @@ export async function restartAppBackend(
  * mark so long-running backends are not auto-restarted by an intentional stop.
  */
 export function stopApp(id: string): void {
-  keepAliveSet().delete(id);
+  invalidateLocalBackend(id, false);
+}
+
+function invalidateLocalBackend(id: string, preserveKeepAlive: boolean): void {
+  if (!preserveKeepAlive) keepAliveSet().delete(id);
   // Invalidate any in-flight cold start so a subsequent ensureAppRunning() (e.g.
   // the long-running warm start right after a deploy/rollback) boots the current
   // build instead of coalescing onto a start for the build we're replacing.
@@ -989,9 +1141,10 @@ export async function proxyAppRequest(
     stripSecretParam?: boolean;
     preserveAuthorization?: boolean;
     signWithSecret?: string;
+    expectedDeploymentId?: string;
   } = {},
 ): Promise<Response> {
-  const port = await ensureAppRunning(id);
+  const port = await ensureAppRunning(id, options.expectedDeploymentId);
   const url = new URL(request.url);
   const stripped = url.pathname.startsWith(stripPrefix)
     ? url.pathname.slice(stripPrefix.length)

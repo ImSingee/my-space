@@ -4,13 +4,16 @@
   "description": "__APP_DESCRIPTION__",
   "version": 1,
   "capabilities": {
-    "database": true,
+    "database": false,
     "frontend": true,
     "widgets": true,
     "backend": true,
     "cron": false,
     "webhook": false,
-    "storage": false
+    "storage": false,
+    "kv": false,
+    "dataTable": true,
+    "userscripts": false
   },
   "backendMode": "serverless",
   "rpc": {

@@ -317,6 +317,8 @@ export const createWorkflowRequestSchema = z.object({
 
 export const deploySourceRequestSchema = z.object({
   message: z.string().min(1),
+  allowDestructiveDataMigration: z.boolean().optional(),
+  dataMigrationApprovalToken: z.string().min(1).optional(),
   /** Entity creation token observed before the runner bundled the worktree. */
   generation: z.string().min(1),
   /** Git bundle of the worktree HEAD, base64-encoded. */

@@ -24,6 +24,7 @@ workspace
 # Git
 .git
 .gitignore
+!templates/**/.gitignore
 
 # IDE
 .idea

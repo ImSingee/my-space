@@ -49,7 +49,9 @@ describe('validateDenoDependencySource', () => {
   it('accepts exact reviewed lifecycle packages present in the lock', async () => {
     const dir = await source({
       'package.json': { dependencies: { '@scope/pkg': '^1.2.0' } },
-      'deno.json': { allowScripts: ['npm:@scope/pkg@1.2.3'] },
+      'deno.json': {
+        allowScripts: ['npm:@scope/pkg@1.2.3'],
+      },
       'deno.lock': {
         version: '5',
         npm: { '@scope/pkg@1.2.3_peer@4.0.0': { integrity: 'test' } },
@@ -85,6 +87,34 @@ describe('validateDenoDependencySource', () => {
 
     await expect(validateDenoDependencySource(dir, 'workflow')).rejects.toThrow(
       /not present.*deno\.lock/s,
+    );
+  });
+
+  it('rejects an App-managed Hatch SDK dependency', async () => {
+    const dir = await source({
+      'package.json': { dependencies: { '@hatch/data': '1.0.0' } },
+      'deno.json': { allowScripts: [] },
+      'deno.lock': { version: '5', npm: {} },
+    });
+
+    await expect(validateDenoDependencySource(dir, 'app')).rejects.toThrow(
+      /provided by Hatch.*must not be declared.*regenerate deno\.lock/s,
+    );
+  });
+
+  it('rejects a stale Hatch SDK lock entry', async () => {
+    const dir = await source({
+      'package.json': {},
+      'deno.json': { allowScripts: [] },
+      'deno.lock': {
+        version: '5',
+        specifiers: { 'npm:@hatch/data@1.0.0': '1.0.0' },
+        npm: { '@hatch/data@1.0.0': { integrity: 'old' } },
+      },
+    });
+
+    await expect(validateDenoDependencySource(dir, 'app')).rejects.toThrow(
+      /stale App-managed Hatch SDK entry.*deno install/s,
     );
   });
 });

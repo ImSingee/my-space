@@ -62,6 +62,14 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
+function appSdkManifest(worktree: string): string {
+  return path.join(worktree, 'node_modules', '@hatch', 'data', 'package.json');
+}
+
+function appSdkImportMap(worktree: string): string {
+  return path.join(worktree, 'node_modules', '@hatch', 'import-map.json');
+}
+
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const result = await run('git', args, { cwd });
   return result.stdout.trim();
@@ -282,6 +290,23 @@ describe('runner source paths', () => {
       'fulfilled',
       'rejected',
     ]);
+    await expect(
+      readFile(
+        appSdkManifest(path.join(agentWorkDir(sessionId), 'custom/shared')),
+        'utf8',
+      ),
+    ).resolves.not.toContain('"version"');
+    await expect(
+      readFile(
+        appSdkImportMap(path.join(agentWorkDir(sessionId), 'custom/shared')),
+        'utf8',
+      ),
+    ).resolves.toContain('"@hatch/data"');
+    const createdWorktree = path.join(agentWorkDir(sessionId), 'custom/shared');
+    await expect(git(createdWorktree, 'status', '--short')).resolves.toBe('');
+    await expect(
+      exists(path.join(createdWorktree, '.gitignore')),
+    ).resolves.toBe(false);
   });
 
   it('exposes force on app and workflow checkout tools', async () => {
@@ -395,6 +420,32 @@ describe('runner source paths', () => {
       id: 'app-id',
       target_path: 'custom/sync-app',
     });
+    const appWorktree = path.join(agentWorkDir(sessionId), 'custom/sync-app');
+    await expect(
+      readFile(
+        appSdkManifest(path.join(agentWorkDir(sessionId), 'custom/sync-app')),
+        'utf8',
+      ),
+    ).resolves.toContain('"name": "@hatch/data"');
+    await expect(
+      readFile(appSdkImportMap(appWorktree), 'utf8'),
+    ).resolves.toContain('"./data/dist/data.js"');
+    await expect(git(appWorktree, 'status', '--short')).resolves.toBe('');
+    await expect(exists(path.join(appWorktree, '.gitignore'))).resolves.toBe(
+      false,
+    );
+    const excludePath = path.join(appWorktree, '.git', 'info', 'exclude');
+    const exclude = await readFile(excludePath, 'utf8');
+    expect(exclude.match(/^\/node_modules\/@hatch\/$/gm)).toHaveLength(1);
+
+    // Simulate a checkout materialized before Hatch installed its local rule.
+    await writeFile(
+      excludePath,
+      exclude.replace('/node_modules/@hatch/\n', ''),
+    );
+    await expect(git(appWorktree, 'status', '--short')).resolves.toContain(
+      '?? node_modules/',
+    );
     const synchronizedApp = await app.execute('app-sync', {
       id: 'app-id',
       target_path: 'custom/sync-app',
@@ -406,11 +457,29 @@ describe('runner source paths', () => {
       replacedExisting: false,
       synchronizedExisting: true,
     });
+    await expect(git(appWorktree, 'status', '--short')).resolves.toBe('');
+    await expect(readFile(excludePath, 'utf8')).resolves.toContain(
+      '/node_modules/@hatch/\n',
+    );
 
     await workflow.execute('workflow-first', {
       id: 'workflow-id',
       target_path: 'custom/sync-workflow',
     });
+    await expect(
+      exists(
+        appSdkManifest(
+          path.join(agentWorkDir(sessionId), 'custom/sync-workflow'),
+        ),
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      exists(
+        appSdkImportMap(
+          path.join(agentWorkDir(sessionId), 'custom/sync-workflow'),
+        ),
+      ),
+    ).resolves.toBe(false);
     const synchronizedWorkflow = await workflow.execute('workflow-sync', {
       id: 'workflow-id',
       target_path: 'custom/sync-workflow',

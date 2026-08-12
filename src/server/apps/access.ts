@@ -95,6 +95,38 @@ export async function liveAppManifest(
   return result.get(id) ?? null;
 }
 
+/** Single-app serving context including the deployment identity of its bytes. */
+export async function liveAppDeployment(
+  id: string,
+  capability: keyof AppCapabilities,
+): Promise<{
+  deploymentId: string;
+  manifest: NormalizedManifest;
+} | null> {
+  const app = await db.query.apps.findFirst({
+    where: (row, { eq }) => eq(row.id, id),
+    columns: {
+      status: true,
+      currentDeploymentId: true,
+      capabilities: true,
+    },
+  });
+  if (
+    !app ||
+    app.status === 'archived' ||
+    !app.currentDeploymentId ||
+    !app.capabilities?.[capability]
+  ) {
+    return null;
+  }
+  const deployment = await db.query.deployments.findFirst({
+    where: (row, { eq }) => eq(row.id, app.currentDeploymentId as string),
+    columns: { manifestNormalized: true },
+  });
+  const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
+  return manifest ? { deploymentId: app.currentDeploymentId, manifest } : null;
+}
+
 /**
  * Batch form of {@link liveAppManifest}: resolves many apps with two queries
  * instead of 2-per-app, for list endpoints (dashboard, sidebar). Apps that are

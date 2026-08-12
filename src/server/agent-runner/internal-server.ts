@@ -6,9 +6,7 @@
  *   - the runner WebSocket control channel (RUNNER_WS_PATH), and
  *   - the internal REST API the runner's PlatformClient calls.
  *
- * Every request/upgrade must present the shared AGENT_RUNNER_TOKEN as a
- * Bearer token. This server is the ONLY platform surface the Agent Runner
- * talks to — the runner never gets database credentials or a session cookie.
+ * Runner REST/WS requests must present AGENT_RUNNER_TOKEN.
  */
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
@@ -28,6 +26,23 @@ function bearerToken(header: string | undefined): string | null {
   return match ? match[1].trim() : null;
 }
 
+export function createInternalHttpHandler(
+  token: string | null,
+): http.RequestListener {
+  const authorized = (req: http.IncomingMessage): boolean =>
+    Boolean(token) &&
+    secretsMatch(bearerToken(req.headers.authorization), token);
+
+  return (req, res) => {
+    if (!authorized(req)) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+    void handleInternalApiRequest(req, res);
+  };
+}
+
 export function startAgentInternalServer(): void {
   const g = globalThis as InternalServerGlobal;
   if (g.__hatchInternalServer__) return;
@@ -40,7 +55,7 @@ export function startAgentInternalServer(): void {
   if (!token) {
     console.warn(
       '[agent-internal] AGENT_RUNNER_TOKEN is not set; the Agent Runner ' +
-        'endpoint is disabled and agent runs cannot be dispatched.',
+        'REST/WS endpoints are disabled.',
     );
     return;
   }
@@ -48,14 +63,7 @@ export function startAgentInternalServer(): void {
   const authorized = (req: http.IncomingMessage): boolean =>
     secretsMatch(bearerToken(req.headers.authorization), token);
 
-  const server = http.createServer((req, res) => {
-    if (!authorized(req)) {
-      res.writeHead(401, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
-      return;
-    }
-    void handleInternalApiRequest(req, res);
-  });
+  const server = http.createServer(createInternalHttpHandler(token));
 
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {

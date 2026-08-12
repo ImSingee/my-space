@@ -36,4 +36,51 @@ describe('default app template', () => {
       supportedSizes: [],
     });
   });
+
+  it('uses a managed Data Table instead of a raw App database', async () => {
+    const { manifest } = await loadDefaultManifest();
+    const template = new URL(
+      '../../../templates/default-app/',
+      import.meta.url,
+    );
+    const [backend, counter, dataSchema] = await Promise.all([
+      readFile(new URL('backend/main.ts', template), 'utf8'),
+      readFile(new URL('backend/counter.ts', template), 'utf8'),
+      readFile(new URL('data/schema.ts', template), 'utf8'),
+    ]);
+
+    expect(manifest.capabilities).toMatchObject({
+      database: false,
+      dataTable: true,
+    });
+    expect(backend).toContain('createDataClient<typeof schema>');
+    expect(backend).toContain("Deno.env.get('HATCH_DATA_URL')");
+    expect(backend).not.toContain('DATABASE_URL');
+    expect(backend).toContain(
+      "data.increment('counters', id, 'value', amount)",
+    );
+    expect(counter).not.toContain('current.value + amount');
+    expect(dataSchema).toContain("uniqueIndex('by_name', ['name'])");
+  });
+
+  it('uses the Hatch-provided Data SDK outside the App dependency graph', async () => {
+    const template = new URL(
+      '../../../templates/default-app/',
+      import.meta.url,
+    );
+    const [packageJson, denoJson, lock, gitignore] = await Promise.all([
+      readFile(new URL('package.json', template), 'utf8'),
+      readFile(new URL('deno.json', template), 'utf8'),
+      readFile(new URL('deno.lock', template), 'utf8'),
+      readFile(new URL('.gitignore', template), 'utf8'),
+    ]);
+    const manifest = JSON.parse(packageJson) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies).not.toHaveProperty('@hatch/data');
+    expect(manifest.dependencies).not.toHaveProperty('postgres');
+    expect(JSON.parse(denoJson)).toEqual({ allowScripts: [] });
+    expect(lock).not.toContain('@hatch/data');
+    expect(gitignore).toMatch(/^node_modules\/$/m);
+  });
 });

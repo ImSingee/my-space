@@ -7,6 +7,7 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import { appHatchSdkMaterializer } from '../hatch-sdk';
 import {
   assertWorkspacePathAvailable,
   bundleWorktreeForDeploy,
@@ -103,6 +104,10 @@ export function createAppTools(options: {
             : 'none'
         }`,
         `Database: ${detail.dbName ?? 'not provisioned'}`,
+        detail.ops.dataTable.enabled
+          ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +
+            `(${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+          : null,
         `Capabilities: ${
           detail.capabilities.length > 0
             ? detail.capabilities.join(', ')
@@ -140,7 +145,9 @@ export function createAppTools(options: {
             (d) =>
               `  v${d.version} — ${d.status}${d.isCurrent ? ' (current)' : ''}${
                 d.canRollback ? ' [rollbackable]' : ''
-              } · ${d.createdAt}`,
+              }${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${
+                d.createdAt
+              }`,
           ),
       ];
       return text(lines.filter((l) => l !== null).join('\n'), detail);
@@ -185,6 +192,7 @@ export function createAppTools(options: {
           const checkout = await checkoutFromBundle(sessionId, 'app', source, {
             targetPath: params.target_path,
             force: params.force ?? false,
+            materializer: appHatchSdkMaterializer,
           });
           return text(checkoutLines(source.id, checkout).join('\n'), checkout);
         },
@@ -248,6 +256,7 @@ export function createAppTools(options: {
             res.generation,
             (root) => writeScaffoldFiles(root, res.files),
             targetPath,
+            appHatchSdkMaterializer,
           );
           return text(
             `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
@@ -292,6 +301,22 @@ export function createAppTools(options: {
           'Required release note describing what this deployment changes ' +
           '(e.g. "Add dark mode toggle"). Shown in the deployment history.',
       }),
+      allow_destructive_data_migration: Type.Optional(
+        Type.Boolean({
+          description:
+            'Set true only after the user explicitly approves the destructive ' +
+            'Data Table migration preview returned by a previous deploy attempt.',
+        }),
+      ),
+      data_migration_approval_token: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'Exact approval token returned by the destructive Data Table ' +
+            'migration preview. Pass it together with ' +
+            'allow_destructive_data_migration: true.',
+        }),
+      ),
     }),
     execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
@@ -312,6 +337,9 @@ export function createAppTools(options: {
             message: params.message,
             generation: detail.createdAt,
             bundleBase64,
+            allowDestructiveDataMigration:
+              params.allow_destructive_data_migration,
+            dataMigrationApprovalToken: params.data_migration_approval_token,
           });
           const lines = [
             `Deployed "${detail.id}" (v${res.version}).`,
@@ -320,6 +348,9 @@ export function createAppTools(options: {
               ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
               : null,
             res.normalized.rpc ? `RPC: ${res.normalized.rpc.url}` : null,
+            res.normalized.dataTable
+              ? `Data Tables: ${res.normalized.dataTable.url}`
+              : null,
           ].filter(Boolean);
           return text(lines.join('\n'), res);
         },
@@ -348,6 +379,9 @@ export function createAppTools(options: {
       const res = await platform.rollbackApp(params.id, params.version);
       return text(
         `Rolled back "${params.id}" to v${res.version}. ` +
+          (res.dataSchemaMismatch
+            ? 'Warning: the managed Data Table schema was not rolled back and differs from this code version. '
+            : '') +
           'Existing Agent worktrees were not changed. Re-run checkout_app with ' +
           'the same target_path. It synchronizes only when remote master ' +
           'fast-forwards a clean local master; ahead or diverged work is ' +

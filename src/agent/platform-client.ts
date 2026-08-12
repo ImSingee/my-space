@@ -84,9 +84,18 @@ export type PlatformClient = {
   getAppSource(handle: string): Promise<SourceBundleResponse>;
   deployApp(
     id: string,
-    opts: { message: string; generation: string; bundleBase64: string },
+    opts: {
+      message: string;
+      generation: string;
+      bundleBase64: string;
+      allowDestructiveDataMigration?: boolean;
+      dataMigrationApprovalToken?: string;
+    },
   ): Promise<AppDeployResponse>;
-  rollbackApp(handle: string, version: number): Promise<{ version: number }>;
+  rollbackApp(
+    handle: string,
+    version: number,
+  ): Promise<{ version: number; dataSchemaMismatch: boolean }>;
   /** `signal` aborts the platform request (and the running statement). */
   queryAppDb(
     handle: string,

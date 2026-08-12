@@ -1,7 +1,7 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { appBuildDir } from '~agent/paths';
-import { liveAppManifest } from './access';
+import { liveAppDeployment } from './access';
+import { readLiveBuildFile } from './build-identity';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -28,10 +28,10 @@ export async function serveAppAppFile(
 ): Promise<Response> {
   // Don't serve a retired/never-deployed app's bundle from leftover build files
   // via a stale direct URL: require a live, non-archived frontend deployment.
-  if (!(await liveAppManifest(id, 'frontend'))) {
+  const live = await liveAppDeployment(id, 'frontend');
+  if (!live) {
     return new Response('Not found', { status: 404 });
   }
-
   let rel = decodeURIComponent(rawRel || '');
   if (rel === '' || rel.endsWith('/')) {
     rel += 'index.html';
@@ -43,16 +43,25 @@ export async function serveAppAppFile(
     return new Response('Forbidden', { status: 403 });
   }
 
-  try {
-    const data = await fs.readFile(filePath);
-    const ext = path.extname(filePath);
-    return new Response(new Uint8Array(data), {
-      headers: {
-        'content-type': CONTENT_TYPES[ext] ?? 'application/octet-stream',
-        'cache-control': 'no-cache',
-      },
+  const result = await readLiveBuildFile(
+    id,
+    live.deploymentId,
+    path.relative(appBuildDir(id), filePath),
+  );
+  if (!result.ok && result.reason === 'unavailable') {
+    return new Response('App deployment is being finalized.', {
+      status: 503,
+      headers: { 'retry-after': '1' },
     });
-  } catch {
+  }
+  if (!result.ok) {
     return new Response('Not found', { status: 404 });
   }
+  const ext = path.extname(filePath);
+  return new Response(new Uint8Array(result.data), {
+    headers: {
+      'content-type': CONTENT_TYPES[ext] ?? 'application/octet-stream',
+      'cache-control': 'no-cache',
+    },
+  });
 }

@@ -38,6 +38,7 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     // keys existed have no secret and are forwarded unsigned.
     return await proxyAppRequest(id, request, `/api/apps/${id}/rpc`, '', {
       signWithSecret: app.signingSecret ?? undefined,
+      expectedDeploymentId: app.currentDeploymentId,
     });
   } catch (error) {
     return new Response(

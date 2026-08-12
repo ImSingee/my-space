@@ -15,6 +15,7 @@ const CAPABILITY_KEYS = [
   'webhook',
   'storage',
   'kv',
+  'dataTable',
   'userscripts',
 ] as const satisfies readonly (keyof AppCapabilities)[];
 
@@ -77,6 +78,7 @@ export type AgentDeploymentSummary = {
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  dataSchemaMismatch: boolean;
 };
 
 export type AppRuntimeOps = {
@@ -104,6 +106,12 @@ export type AppRuntimeOps = {
   };
   storage: { enabled: boolean; url: string | null; objectCount: number };
   kv: { enabled: boolean; url: string | null; entryCount: number };
+  dataTable: {
+    enabled: boolean;
+    url: string | null;
+    dbName: string | null;
+    schemaHash: string | null;
+  };
 };
 
 export type AppDetail = {
@@ -114,6 +122,7 @@ export type AppDetail = {
   status: AppStatus;
   backendMode: 'serverless' | 'long-running' | null;
   dbName: string | null;
+  dataDbName: string | null;
   currentVersion: number | null;
   currentDeploymentId: string | null;
   currentSourceCommit: string | null;
@@ -170,6 +179,7 @@ export async function getAppDetailForAgent(
     status: app.status,
     backendMode: app.backendMode ?? null,
     dbName: app.dbName ?? null,
+    dataDbName: app.dataDbName ?? null,
     currentVersion: currentDeployment?.version ?? null,
     currentDeploymentId: app.currentDeploymentId ?? null,
     currentSourceCommit: app.currentSourceCommit ?? null,
@@ -204,6 +214,12 @@ export async function getAppDetailForAgent(
         url: manifest?.kv?.url ?? null,
         entryCount: kvCount,
       },
+      dataTable: {
+        enabled: Boolean(caps?.dataTable),
+        url: manifest?.dataTable?.url ?? null,
+        dbName: app.dataDbName ?? null,
+        schemaHash: app.dataSchemaHash ?? null,
+      },
     },
     deployments: deployments.map((d) => ({
       id: d.id,
@@ -213,6 +229,7 @@ export async function getAppDetailForAgent(
       createdAt: d.createdAt,
       isCurrent: d.isCurrent,
       canRollback: d.canRollback,
+      dataSchemaMismatch: d.dataSchemaMismatch,
     })),
   };
 }
