@@ -1,4 +1,4 @@
-import { Box, Group, NavLink, ScrollArea, Stack } from '@mantine/core';
+import { Box, NavLink, ScrollArea, Stack } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { IconSparkles } from '@tabler/icons-react';
 import { Brand } from '../brand';
@@ -6,7 +6,7 @@ import { PinnedApps } from './pinned-apps';
 import { PinnedDashboards } from './pinned-dashboards';
 import { PinnedWorkflows } from './pinned-workflows';
 import { useIsActive } from './section';
-import { ColorSchemeToggle, UserMenu } from './user-menu';
+import { UserMenu } from './user-menu';
 import classes from './sidebar.module.css';
 
 export function Sidebar() {
@@ -34,10 +34,9 @@ export function Sidebar() {
       </ScrollArea>
 
       <Box className={classes.footer}>
-        <Group justify="space-between" px="xs">
+        <Box px="xs">
           <UserMenu />
-          <ColorSchemeToggle />
-        </Group>
+        </Box>
       </Box>
     </Box>
   );

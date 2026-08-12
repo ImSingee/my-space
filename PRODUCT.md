@@ -62,4 +62,5 @@ gentle borders, and color used sparingly and on purpose.
   contrast, not muted-gray.
 - Visible keyboard focus ring (the ember theme enables `focusRing: 'auto'`).
 - Every animation has a `prefers-reduced-motion` fallback.
-- Full light and dark parity; never rely on color alone to convey state.
+- Hatch is light-only; supported light surfaces meet the contrast targets, and
+  color never conveys state alone.

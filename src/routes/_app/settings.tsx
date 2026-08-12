@@ -1,7 +1,6 @@
 import { Box, Text } from '@mantine/core';
 import { Link, Outlet, createFileRoute } from '@tanstack/react-router';
 import {
-  IconPalette,
   IconRobot,
   IconServer2,
   IconServerBolt,
@@ -21,7 +20,6 @@ const GROUPS = [
     items: [
       { to: '/settings/providers', label: 'AI Providers', icon: IconServer2 },
       { to: '/settings/users', label: 'Users', icon: IconUsers },
-      { to: '/settings/appearance', label: 'Appearance', icon: IconPalette },
     ],
   },
   {
@@ -37,7 +35,7 @@ function SettingsLayout() {
   return (
     <Page
       title="Settings"
-      description="Manage providers, users, backends, the Agent Runner, and how Hatch looks."
+      description="Manage providers, users, backends, and the Agent Runner."
       size={1040}
     >
       <Box className={classes.layout}>

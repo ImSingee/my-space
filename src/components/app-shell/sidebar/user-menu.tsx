@@ -1,48 +1,13 @@
-import {
-  ActionIcon,
-  Avatar,
-  Menu,
-  Text,
-  Tooltip,
-  useComputedColorScheme,
-  useMantineColorScheme,
-} from '@mantine/core';
+import { ActionIcon, Avatar, Menu, Text } from '@mantine/core';
 import { Link, useRouter } from '@tanstack/react-router';
 import {
   IconAppWindow,
   IconLayoutDashboard,
   IconLogout,
-  IconMoon,
   IconSettings,
-  IconSun,
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
-
-export function ColorSchemeToggle() {
-  const { setColorScheme } = useMantineColorScheme();
-  const computed = useComputedColorScheme('light', {
-    getInitialValueInEffect: true,
-  });
-  const next = computed === 'dark' ? 'light' : 'dark';
-  return (
-    <Tooltip label={`Switch to ${next} mode`} position="top" withArrow>
-      <ActionIcon
-        variant="default"
-        size="lg"
-        radius="md"
-        aria-label="Toggle color scheme"
-        onClick={() => setColorScheme(next)}
-      >
-        {computed === 'dark' ? (
-          <IconSun size={18} stroke={1.6} />
-        ) : (
-          <IconMoon size={18} stroke={1.6} />
-        )}
-      </ActionIcon>
-    </Tooltip>
-  );
-}
 
 export function UserMenu() {
   const router = useRouter();

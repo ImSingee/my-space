@@ -10,8 +10,8 @@ Source of truth: `src/ui/theme/base-theme.ts` (tokens + component defaults),
 ## Theme
 
 - Active theme: **ember** (`src/ui/theme/index.ts` → `defaultThemeName`).
-- Light + dark, full parity. Color scheme is user-toggled (stored), not
-  media-query driven.
+- Hatch is light-only. The platform forces the light color scheme; it has no
+  user toggle, stored scheme preference, or dark surface equivalents.
 
 ## Color
 
@@ -19,12 +19,11 @@ Source of truth: `src/ui/theme/base-theme.ts` (tokens + component defaults),
   `#ea580c` (orange-600) — a confident, warm orange, not brick-red. Hover/active
   darken to shade 7 `#c2410c`. Light tints (`ember-0..3`) carry hovers, badges,
   selection. This is the brand's one saturated voice.
-- **Neutrals (stone):** warm-gray ink, borders, and text (`stone` ramp). Dark
-  surfaces derive from `secondary`/`stone`.
+- **Neutrals (stone):** warm-gray ink, borders, and text (`stone` ramp) used
+  against the supported light surfaces.
 - **Surfaces:** body = true white (`--mantine-color-body`); panel layer
   `--surface-panel: #faf8f5` (sidebar, chat list) — a whisper of warmth, not
-  sand; `--surface-raised: #fff`; `--surface-sunken: #f6f3ee`. Dark equivalents
-  in `ember-theme/style.css`.
+  sand; `--surface-raised: #fff`; `--surface-sunken: #f6f3ee`.
 - **Status:** error=red, success=green, warning=amber, info=blue (Tailwind-style
   ramps). Use sparingly; prefer neutral + one accent.
 

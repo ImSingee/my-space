@@ -61,15 +61,6 @@
   min-width: 0;
 }
 
-/* Flat setting row: label block on the left, control on the right — no card. */
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mantine-spacing-md);
-  padding-block: var(--mantine-spacing-xs);
-}
-
 @media (max-width: 48em) {
   .layout {
     flex-direction: column;

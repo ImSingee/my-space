@@ -6,8 +6,8 @@ import type { MantineThemeOverride } from '@mantine/core';
  */
 export const orangeTheme: MantineThemeOverride = {
   ...baseTheme,
-  // primaryPalette: orangeColors, primaryShade: { light: 5, dark: 6 }
-  primaryShade: { light: 5, dark: 6 },
+  // primaryPalette: orangeColors, primaryShade: 5
+  primaryShade: 5,
   colors: {
     ...baseTheme.colors,
     // secondary: "stone", secondaryPalette: stoneColors

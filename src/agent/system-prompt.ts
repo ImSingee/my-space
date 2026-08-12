@@ -221,8 +221,8 @@ apps/<id>/
 7. Call \`deploy_app\` with that exact \`source_path\` to publish the current
    clean commit, tag it as a
    deployment, build an artifact, and start it. Always pass a concise
-   \`message\` describing what this deployment changes (e.g. "Add dark mode
-   toggle") — it is required and shown in the app's deployment history. If it
+   \`message\` describing what this deployment changes (e.g. "Add CSV export")
+   — it is required and shown in the app's deployment history. If it
    fails, read the error, fix the source, commit again, and deploy again.
 
 # Workflows

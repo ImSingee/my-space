@@ -17,6 +17,14 @@ async function loadDefaultManifest() {
   return { source, manifest: parseSourceManifest(source) };
 }
 
+async function renderDefaultIndexHtml() {
+  const template = await readFile(
+    new URL('../../../templates/default-app/app/index.html', import.meta.url),
+    'utf8',
+  );
+  return template.replaceAll('__APP_NAME__', 'Demo');
+}
+
 describe('default app template', () => {
   it('declares the scaffolded TanStack Router routes', async () => {
     const { manifest } = await loadDefaultManifest();
@@ -82,5 +90,14 @@ describe('default app template', () => {
     expect(JSON.parse(denoJson)).toEqual({ allowScripts: [] });
     expect(lock).not.toContain('@hatch/data');
     expect(gitignore).toMatch(/^node_modules\/$/m);
+  });
+
+  it('renders the scaffolded app with light-only color support', async () => {
+    const html = await renderDefaultIndexHtml();
+
+    expect(html).toContain('<title>Demo</title>');
+    expect(html).toContain('color-scheme: light;');
+    expect(html).not.toContain('color-scheme: light dark');
+    expect(html).not.toContain('prefers-color-scheme: dark');
   });
 });
