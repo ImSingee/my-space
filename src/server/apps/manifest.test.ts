@@ -5,6 +5,7 @@ import {
   parseSourceManifest,
   snapToSupportedSize,
   sourceManifestSchema,
+  withPublicAppUrl,
 } from './manifest';
 
 describe('backend manifest', () => {
@@ -149,6 +150,22 @@ describe('app route manifest', () => {
 
   it('defaults routes to an empty list for existing manifests', () => {
     expect(parseRoutes()).toEqual([]);
+  });
+
+  it('projects the current slug into the public app URL without mutation', () => {
+    const stored = normalizeManifest(
+      parseSourceManifest({
+        id: '01internalid',
+        name: 'Demo',
+        capabilities: { frontend: true },
+        app: { entry: 'app/main.tsx' },
+      }),
+    );
+
+    const projected = withPublicAppUrl(stored, 'friendly-demo');
+
+    expect(projected.app?.url).toBe('/app/friendly-demo/');
+    expect(stored.app?.url).toBe('/api/apps/01internalid/app/');
   });
 
   it('rejects duplicate route paths', () => {

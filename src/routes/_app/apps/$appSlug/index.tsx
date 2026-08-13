@@ -31,12 +31,12 @@ import { toast } from 'sonner';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { getAppViewState } from '~components/apps/app-view-policy';
 import { useAppDeploymentUpdate } from '~components/apps/use-app-deployment-update';
-import { getApp, getAppDeploymentRevision } from '~server/apps';
+import { getAppBySlug, getAppDeploymentRevision } from '~server/apps';
 import classes from './app-view.module.css';
 
-export const Route = createFileRoute('/_app/apps/$appId/')({
+export const Route = createFileRoute('/_app/apps/$appSlug/')({
   loader: async ({ params }) => {
-    const app = await getApp({ data: params.appId });
+    const app = await getAppBySlug({ data: params.appSlug });
     if (!app) throw notFound();
     return app;
   },
@@ -56,8 +56,8 @@ export function AppView() {
   const [loading, setLoading] = useState(true);
   const [frameKey, setFrameKey] = useState(0);
   const [reloading, setReloading] = useState(false);
-  // The shareable app URL uses the mutable slug; the route still resolves the
-  // immutable id too, so old `/app/<id>/` links keep working.
+  // Both human-facing routes use the same mutable slug. Immutable ids stay in
+  // technical API paths and never appear in these links.
   const src = `/app/${app.slug}/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const { canOpen, hasLiveDeployment } = getAppViewState({
@@ -288,8 +288,8 @@ export function AppView() {
                 leftSection={<IconSettings size={15} stroke={1.7} />}
                 renderRoot={(props) => (
                   <Link
-                    to="/apps/$appId/manage"
-                    params={{ appId: app.id }}
+                    to="/apps/$appSlug/manage"
+                    params={{ appSlug: app.slug }}
                     {...props}
                   />
                 )}
@@ -344,8 +344,8 @@ export function AppView() {
               leftSection={<IconSettings size={16} stroke={1.7} />}
               renderRoot={(props) => (
                 <Link
-                  to="/apps/$appId/manage"
-                  params={{ appId: app.id }}
+                  to="/apps/$appSlug/manage"
+                  params={{ appSlug: app.slug }}
                   {...props}
                 />
               )}

@@ -397,8 +397,8 @@ export const APP_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * Canonical app-slug shape: kebab-case, must start with a letter. Used in the
- * mutable, human-facing `/app/<slug>/` URL. Stricter than `APP_ID_RE` so slugs
- * stay readable and never collide with a bare numeric id.
+ * mutable, human-facing `/apps/<slug>` and `/app/<slug>/` URLs. Stricter than
+ * `APP_ID_RE` so slugs stay readable and never collide with a bare numeric id.
  */
 export const APP_SLUG_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -654,8 +654,25 @@ export function appBasePath(id: string): string {
   return `/api/apps/${id}`;
 }
 
-export function appUrl(id: string): string {
-  return `/app/${id}/`;
+/** Stable id-based asset URL persisted in deployment manifests. */
+export function appAssetUrl(id: string): string {
+  return `${appBasePath(id)}/app/`;
+}
+
+/**
+ * Replace the persisted build-time app URL with the app's current public slug.
+ * Deployment manifests are immutable and keyed by id, while slugs may change
+ * without a rebuild, so every outward-facing manifest view must project this
+ * field at read time instead of trusting the stored URL.
+ */
+export function withPublicAppUrl(
+  manifest: NormalizedManifest,
+  slug: string,
+): NormalizedManifest {
+  if (!manifest.app) return manifest;
+  const url = `/app/${slug}/`;
+  if (manifest.app.url === url) return manifest;
+  return { ...manifest, app: { ...manifest.app, url } };
 }
 
 export function widgetUrl(id: string, widgetId: string): string {
@@ -778,7 +795,7 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     out.backend = { entry: src.backend.entry };
   }
   if (src.capabilities.frontend && src.app) {
-    out.app = { url: appUrl(src.id), routes: src.app.routes };
+    out.app = { url: appAssetUrl(src.id), routes: src.app.routes };
   }
   if (src.capabilities.backend && src.rpc) {
     out.rpc = { url: rpcUrl(src.id), service: src.rpc.service };

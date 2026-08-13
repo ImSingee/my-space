@@ -79,18 +79,14 @@ export type AppDetail = {
   updatedAt: string;
 };
 
-export const getApp = createServerFn({ method: 'GET' })
+export const getAppBySlug = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => idSchema.parse(id))
-  .handler(async ({ data: idOrSlug }): Promise<AppDetail | null> => {
+  .validator((slug: string) => idSchema.parse(slug))
+  .handler(async ({ data: slug }): Promise<AppDetail | null> => {
     // Project to a display view: the raw row carries secrets/internal columns
     // (webhookSecret, repoPath, raw manifest) the app detail/manage pages never
     // need and must not ship to the browser. The live deployment id is exposed
     // only under the safe `deploymentRevision` view-model name.
-    //
-    // Accept either the immutable id or the mutable slug (id first) so the
-    // /apps/<x> management routes work even when a link carries the slug (e.g.
-    // an agent deploy_app call made with a slug handle).
     const columns = {
       id: true,
       slug: true,
@@ -104,15 +100,10 @@ export const getApp = createServerFn({ method: 'GET' })
       createdAt: true,
       updatedAt: true,
     } as const;
-    const row =
-      (await db.query.apps.findFirst({
-        where: (s, { eq: e }) => e(s.id, idOrSlug),
-        columns,
-      })) ??
-      (await db.query.apps.findFirst({
-        where: (s, { eq: e }) => e(s.slug, idOrSlug),
-        columns,
-      }));
+    const row = await db.query.apps.findFirst({
+      where: (s, { eq: e }) => e(s.slug, slug),
+      columns,
+    });
     if (!row) return null;
     const { currentDeploymentId, ...detail } = row;
     return {
@@ -135,7 +126,7 @@ export const getAppDeploymentRevision = createServerFn({ method: 'GET' })
     return app?.currentDeploymentId ?? null;
   });
 
-export type AppRow = NonNullable<Awaited<ReturnType<typeof getApp>>>;
+export type AppRow = NonNullable<Awaited<ReturnType<typeof getAppBySlug>>>;
 
 export const getNormalizedManifest = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])

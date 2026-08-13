@@ -33,8 +33,9 @@ type AppFixture = {
 type PinFixture = {
   id: string;
   appId: string;
+  appSlug: string;
   label: string;
-  entryHash: null;
+  entryHash: string | null;
   status: 'deployed';
 };
 
@@ -110,10 +111,10 @@ const capabilities = {
   userscripts: false,
 };
 
-function app(id: string): AppFixture {
+function app(id: string, slug = `slug-${id}`): AppFixture {
   return {
     id,
-    slug: id,
+    slug,
     name: `App ${id}`,
     description: null,
     status: 'deployed',
@@ -123,12 +124,19 @@ function app(id: string): AppFixture {
   };
 }
 
-function pin(id: string, appId: string): PinFixture {
+function pin(
+  id: string,
+  appId: string,
+  appSlug = `slug-${appId}`,
+  entryHash: string | null = null,
+  label = `Pinned ${appId}`,
+): PinFixture {
   return {
     id,
     appId,
-    label: `Pinned ${appId}`,
-    entryHash: null,
+    appSlug,
+    label,
+    entryHash,
     status: 'deployed',
   };
 }
@@ -145,7 +153,7 @@ function workflow(id: string, pinned: boolean): WorkflowFixture {
   };
 }
 
-async function renderSections() {
+async function renderSections(initialEntry = '/') {
   const [{ PinnedApps }, { PinnedWorkflows }] = await Promise.all([
     import('./pinned-apps'),
     import('./pinned-workflows'),
@@ -155,16 +163,18 @@ async function renderSections() {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
   });
-  const rootRoute = createRootRoute();
-  const indexRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/',
+  const rootRoute = createRootRoute({
     component: () => (
       <>
         <PinnedApps />
         <PinnedWorkflows />
       </>
     ),
+  });
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/',
+    component: () => null,
   });
   const agentRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -178,7 +188,7 @@ async function renderSections() {
   });
   const appRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/apps/$appId',
+    path: '/apps/$appSlug',
     component: () => null,
   });
   const workflowsRoute = createRoute({
@@ -200,7 +210,7 @@ async function renderSections() {
       workflowsRoute,
       workflowRoute,
     ]),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
 
   const screen = await render(
@@ -257,6 +267,23 @@ test('shows only the app section when only an app is pinned', async () => {
   await expect
     .element(screen.getByText('Workflows', { exact: true }))
     .not.toBeInTheDocument();
+});
+
+test('uses the app slug for links and hash-aware active state', async () => {
+  fixtures.apps = [app('01k-app', 'todo')];
+  fixtures.pins = [
+    pin('pin-root', '01k-app', 'todo', null, 'Todo home'),
+    pin('pin-settings', '01k-app', 'todo', 'settings', 'Todo settings'),
+  ];
+
+  const { screen } = await renderSections('/apps/todo#settings');
+
+  const home = screen.getByRole('link', { name: 'Todo home' });
+  const settings = screen.getByRole('link', { name: 'Todo settings' });
+  await expect.element(home).toHaveAttribute('href', '/apps/todo');
+  await expect.element(settings).toHaveAttribute('href', '/apps/todo#settings');
+  expect(home.element()).not.toHaveAttribute('data-active');
+  expect(settings.element()).toHaveAttribute('data-active', 'true');
 });
 
 test('shows only the workflow section when only a workflow is pinned', async () => {

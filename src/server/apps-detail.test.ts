@@ -34,7 +34,7 @@ vi.mock('./apps/access', () => ({
   normalizedManifestFor: vi.fn<() => void>(),
 }));
 
-import { getApp, getAppDeploymentRevision } from './apps';
+import { getAppBySlug, getAppDeploymentRevision } from './apps';
 
 const row = {
   id: 'app-one',
@@ -56,9 +56,9 @@ describe('App deployment revision views', () => {
   });
 
   it('maps the live deployment id to the safe detail revision field', async () => {
-    mocks.findApp.mockResolvedValueOnce(undefined).mockResolvedValueOnce(row);
+    mocks.findApp.mockResolvedValueOnce(row);
 
-    const detail = await getApp({ data: 'example' });
+    const detail = await getAppBySlug({ data: 'example' });
 
     expect(detail).toEqual({
       id: 'app-one',
@@ -74,8 +74,8 @@ describe('App deployment revision views', () => {
       updatedAt: '2026-08-13T01:00:00.000Z',
     });
     expect(detail).not.toHaveProperty('currentDeploymentId');
-    expect(mocks.findApp).toHaveBeenCalledTimes(2);
-    expect(mocks.findApp.mock.calls[1]?.[0]).toMatchObject({
+    expect(mocks.findApp).toHaveBeenCalledOnce();
+    expect(mocks.findApp.mock.calls[0]?.[0]).toMatchObject({
       columns: {
         currentDeploymentId: true,
         currentSourceCommit: true,

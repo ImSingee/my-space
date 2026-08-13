@@ -1,6 +1,6 @@
 /** Server functions for dashboards and the widgets placed on them. */
 import { createServerFn } from '@tanstack/react-start';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
 import { db, schema } from '~/db';
@@ -170,6 +170,7 @@ export const reorderDashboards = createServerFn({ method: 'POST' })
 export type DashboardItem = {
   id: string;
   appId: string;
+  appSlug: string;
   appName: string;
   widgetId: string;
   name: string;
@@ -193,15 +194,23 @@ export const getDashboard = createServerFn({ method: 'GET' })
     // Resolve through the LIVE manifest (non-archived, widgets-capable) so a
     // placement for an archived/retired app is dropped rather than rendered as a
     // permanently failing card — the widget bundle route rejects those too.
-    const manifests = await liveAppManifests(
-      placements.map((p) => p.appId),
-      'widgets',
-    );
+    const appIds = [...new Set(placements.map((placement) => placement.appId))];
+    const [manifests, apps] = await Promise.all([
+      liveAppManifests(appIds, 'widgets'),
+      appIds.length === 0
+        ? Promise.resolve([])
+        : db.query.apps.findMany({
+            where: inArray(schema.apps.id, appIds),
+            columns: { id: true, slug: true },
+          }),
+    ]);
+    const appSlugById = new Map(apps.map((app) => [app.id, app.slug]));
     const items: DashboardItem[] = [];
     for (const placement of placements) {
       const manifest = manifests.get(placement.appId);
+      const appSlug = appSlugById.get(placement.appId);
       const widget = manifest?.widgets.find((w) => w.id === placement.widgetId);
-      if (!manifest || !widget) continue;
+      if (!manifest || !appSlug || !widget) continue;
       // Deployments made before widget supportedSizes existed have no such field
       // in their stored manifest; default to free-form ([]) for them.
       const supportedSizes = widget.supportedSizes ?? [];
@@ -220,6 +229,7 @@ export const getDashboard = createServerFn({ method: 'GET' })
       items.push({
         id: placement.id,
         appId: placement.appId,
+        appSlug,
         appName: manifest.name,
         widgetId: widget.id,
         name: widget.name,

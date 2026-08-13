@@ -2,13 +2,12 @@
 import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
-import type { NormalizedManifest } from './manifest';
+import { type NormalizedManifest, withPublicAppUrl } from './manifest';
 
 /**
- * Resolve a path segment that may be either an app's immutable `id` (the stable
- * internal key) or its mutable `slug` (the human URL segment) to the canonical
- * id. Tries id first so legacy `/app/<id>/` links keep working unchanged, then
- * falls back to the slug. Returns null when neither matches.
+ * Resolve an internal Agent handle that may be either an app's immutable `id`
+ * or its mutable `slug` to the canonical id. Tries id first and returns null
+ * when neither matches. Human-facing routes must use {@link appIdForSlug}.
  */
 export async function resolveAppId(idOrSlug: string): Promise<string | null> {
   const byId = await db.query.apps.findFirst({
@@ -23,6 +22,15 @@ export async function resolveAppId(idOrSlug: string): Promise<string | null> {
   return bySlug?.id ?? null;
 }
 
+/** Resolve an app's current public slug to its immutable internal id. */
+export async function appIdForSlug(slug: string): Promise<string | null> {
+  const app = await db.query.apps.findFirst({
+    where: (s, { eq }) => eq(s.slug, slug),
+    columns: { id: true },
+  });
+  return app?.id ?? null;
+}
+
 /** Look up an app's current (mutable) slug by its immutable id. */
 export async function appSlug(id: string): Promise<string | null> {
   const app = await db.query.apps.findFirst({
@@ -33,10 +41,9 @@ export async function appSlug(id: string): Promise<string | null> {
 }
 
 /**
- * True when `candidate` would collide with another app's id or slug. Because
- * `resolveAppId` matches an id before a slug, a slug equal to a *different*
- * app's id would silently shadow that app at `/app/<candidate>/`. Reserving ids
- * (not just slugs) during create/rename keeps resolution unambiguous.
+ * True when `candidate` would collide with another app's id or slug. Internal
+ * Agent APIs use {@link resolveAppId}, which matches an id before a slug, so
+ * reserving ids during create/rename keeps those handles unambiguous.
  *
  * Pass `selfId` when renaming so an app can keep (or restore) a slug equal to
  * its own id without tripping the check.
@@ -66,14 +73,16 @@ export async function normalizedManifestFor(
 ): Promise<NormalizedManifest | null> {
   const app = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.id, id),
-    columns: { currentDeploymentId: true },
+    columns: { slug: true, currentDeploymentId: true },
   });
   if (!app?.currentDeploymentId) return null;
   const deployment = await db.query.deployments.findFirst({
     where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
     columns: { manifestNormalized: true },
   });
-  return (deployment?.manifestNormalized ?? null) as NormalizedManifest | null;
+  const manifest = (deployment?.manifestNormalized ??
+    null) as NormalizedManifest | null;
+  return manifest ? withPublicAppUrl(manifest, app.slug) : null;
 }
 
 /**

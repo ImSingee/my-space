@@ -214,9 +214,10 @@ export function createAppTools(options: {
     parameters: Type.Object({
       slug: Type.String({
         description:
-          'kebab-case URL slug, e.g. "todo" or "habit-tracker". Appears in the ' +
-          'app URL (/app/<slug>/) and can be changed later from the manage ' +
-          'page, so it is not permanent.',
+          'kebab-case URL slug, e.g. "todo" or "habit-tracker". Used in the ' +
+          'human-facing /apps/<slug> and /app/<slug>/ URLs. It can be changed ' +
+          'later from the manage page, so it is not permanent; technical APIs ' +
+          'use the immutable app id.',
       }),
       name: Type.String({ description: 'Human-readable name.' }),
       description: Type.Optional(

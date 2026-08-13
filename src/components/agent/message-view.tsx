@@ -114,8 +114,8 @@ function AppActions({
                       leftSection={<IconExternalLink size={14} stroke={1.8} />}
                       renderRoot={(props) => (
                         <Link
-                          to="/apps/$appId"
-                          params={{ appId: app.id }}
+                          to="/apps/$appSlug"
+                          params={{ appSlug: app.slug }}
                           {...props}
                         />
                       )}
@@ -129,8 +129,8 @@ function AppActions({
                       leftSection={<IconSettings size={14} stroke={1.8} />}
                       renderRoot={(props) => (
                         <Link
-                          to="/apps/$appId/manage"
-                          params={{ appId: app.id }}
+                          to="/apps/$appSlug/manage"
+                          params={{ appSlug: app.slug }}
                           {...props}
                         />
                       )}
@@ -157,8 +157,8 @@ function AppActions({
                           leftSection={<IconSettings size={15} stroke={1.7} />}
                           renderRoot={(props) => (
                             <Link
-                              to="/apps/$appId/manage"
-                              params={{ appId: app.id }}
+                              to="/apps/$appSlug/manage"
+                              params={{ appSlug: app.slug }}
                               {...props}
                             />
                           )}

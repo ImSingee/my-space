@@ -107,6 +107,7 @@ function dashboardItem(id: string): DashboardItem {
   return {
     id,
     appId: `app-${id}`,
+    appSlug: `slug-${id}`,
     appName: `App ${id}`,
     widgetId: `widget-${id}`,
     name: `Widget ${id}`,
@@ -171,7 +172,7 @@ async function renderDashboard(
   });
   const appRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/apps/$appId',
+    path: '/apps/$appSlug',
     component: () => null,
   });
   const router = createRouter({
@@ -193,6 +194,17 @@ function iframeText(iframe: HTMLIFrameElement): string {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+test('open app link uses the current slug instead of the app id', async () => {
+  const item = dashboardItem('open-link');
+  const screen = await renderDashboard([item], {
+    [item.url]: UNSUPPORTED_WIDGET,
+  });
+
+  await expect
+    .element(screen.getByRole('link', { name: 'Open app' }))
+    .toHaveAttribute('href', '/apps/slug-open-link');
 });
 
 test('widget without onRefresh hides refresh and global refresh does not reload it', async () => {
