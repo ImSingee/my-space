@@ -46,12 +46,12 @@ function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
   });
   const appRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/apps/$appId',
+    path: '/apps/$appSlug',
     component: () => null,
   });
   const manageRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/apps/$appId/manage',
+    path: '/apps/$appSlug/manage',
     component: () => null,
   });
   const router = createRouter({
@@ -1014,11 +1014,11 @@ test('renders one successful frontend deploy with Open and a Manage menu', async
   await expect.element(screen.getByText('Deployed app')).toBeVisible();
   await expect.element(screen.getByText('Todo', { exact: true })).toBeVisible();
   const open = screen.getByRole('link', { name: 'Open' });
-  await expect.element(open).toHaveAttribute('href', '/apps/app-todo');
+  await expect.element(open).toHaveAttribute('href', '/apps/todo');
 
   await screen.getByRole('button', { name: 'More actions for Todo' }).click();
   const manage = screen.getByRole('menuitem', { name: 'Manage app' });
-  await expect.element(manage).toHaveAttribute('href', '/apps/app-todo/manage');
+  await expect.element(manage).toHaveAttribute('href', '/apps/todo/manage');
 });
 
 test('groups successful deploys, resolves aliases, and uses state-aware actions', async () => {
@@ -1057,8 +1057,16 @@ test('groups successful deploys, resolves aliases, and uses state-aware actions'
   await expect.element(group.getByText('Draft App')).toBeVisible();
   await expect.element(group.getByText('deleted-app')).toBeVisible();
   await expect.element(group.getByText('Unavailable')).toBeVisible();
-  expect(group.getByRole('link', { name: 'Open' }).all()).toHaveLength(1);
-  expect(group.getByRole('link', { name: 'Manage' }).all()).toHaveLength(2);
+  const open = group.getByRole('link', { name: 'Open' });
+  await expect.element(open).toHaveAttribute('href', '/apps/todo');
+  const manage = group.getByRole('link', { name: 'Manage' }).all();
+  expect(manage).toHaveLength(2);
+  await expect
+    .element(manage[0])
+    .toHaveAttribute('href', '/apps/worker/manage');
+  await expect
+    .element(manage[1])
+    .toHaveAttribute('href', '/apps/draft-app/manage');
 
   const shell = screen.getByTestId('message-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);

@@ -97,8 +97,8 @@ function AppsPage() {
                     truncate
                     renderRoot={(props) => (
                       <Link
-                        to="/apps/$appId"
-                        params={{ appId: app.id }}
+                        to="/apps/$appSlug"
+                        params={{ appSlug: app.slug }}
                         {...props}
                         className={[props.className, classes.primaryLink]
                           .filter(Boolean)
@@ -122,8 +122,8 @@ function AppsPage() {
                   <Button
                     renderRoot={(props) => (
                       <Link
-                        to="/apps/$appId/manage"
-                        params={{ appId: app.id }}
+                        to="/apps/$appSlug/manage"
+                        params={{ appSlug: app.slug }}
                         {...props}
                       />
                     )}

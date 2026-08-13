@@ -17,6 +17,7 @@ const SIDEBAR_PIN_LOCK_NS = 4;
 export type SidebarItem = {
   id: string;
   appId: string;
+  appSlug: string;
   label: string;
   /** Hash entry point within the app (no leading '#'); null opens the root. */
   entryHash: string | null;
@@ -32,7 +33,7 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
     if (pins.length === 0) return [];
     const apps = await db.query.apps.findMany({
       where: inArray(schema.apps.id, [...new Set(pins.map((p) => p.appId))]),
-      columns: { id: true, name: true, status: true },
+      columns: { id: true, slug: true, name: true, status: true },
     });
     const appById = new Map(apps.map((app) => [app.id, app]));
     const items: SidebarItem[] = [];
@@ -42,6 +43,7 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
       items.push({
         id: pin.id,
         appId: pin.appId,
+        appSlug: app.slug,
         label: pin.label || app.name,
         entryHash: pin.entryHash ?? null,
         status: app.status,

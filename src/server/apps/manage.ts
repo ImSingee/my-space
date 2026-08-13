@@ -181,10 +181,11 @@ async function setAppArchivedInner(
 }
 
 /**
- * Change an app's mutable URL slug. The slug only appears in the human-facing
- * `/app/<slug>/` URL, so this is a cheap rename: no rebuild and no FK churn
- * (everything technical is keyed off the immutable `id`). Enforces shape and
- * uniqueness; the unique index on `slug` is the final backstop against races.
+ * Change an app's mutable URL slug. The slug appears in the human-facing
+ * `/apps/<slug>` and `/app/<slug>/` URLs, so this is a cheap rename: no rebuild
+ * and no FK churn (technical APIs and storage are keyed off the immutable
+ * `id`). Enforces shape and uniqueness; the unique index on `slug` is the final
+ * backstop against races.
  */
 export async function renameAppSlug(
   id: string,
@@ -205,8 +206,9 @@ export async function renameAppSlug(
   if (!app) throw new Error(`App "${id}" not found.`);
   if (app.slug === slug) return { slug };
 
-  // Reject a slug that matches any other app's id OR slug: id-first resolution
-  // means a slug equal to another app's id would shadow it at /app/<slug>/.
+  // Reject a slug that matches any other app's id OR slug: internal Agent
+  // handles still accept either form and resolve ids first, so their namespace
+  // must stay unambiguous even though human-facing routes use only slugs.
   const { slugConflictExists } = await import('./access');
   if (await slugConflictExists(slug, id)) {
     throw new Error(

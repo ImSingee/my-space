@@ -129,15 +129,15 @@ export type AgentRunStatus =
  * repo, build artifacts, every `/api/apps/<id>/...` runtime URL, and all FKs,
  * so it never changes once an app exists.
  *
- * `slug` is the mutable, unique, human-facing URL segment used only in
- * `/app/<slug>/`. Renaming it is cheap (no rebuild) because nothing technical
- * is keyed off it.
+ * `slug` is the mutable, unique, human-facing URL segment used in both
+ * `/apps/<slug>` and `/app/<slug>/`. Renaming it is cheap (no rebuild) because
+ * nothing technical is keyed off it.
  */
 export const apps = pgTable(
   'apps',
   {
     id: text().primaryKey(),
-    /** Mutable, unique URL slug used in the human-facing `/app/<slug>/` URL. */
+    /** Mutable, unique URL slug for `/apps/<slug>` and `/app/<slug>/`. */
     slug: text().notNull(),
     name: text().notNull(),
     description: text(),

@@ -86,8 +86,8 @@ function BackendRow({ backend }: { backend: AppBackendView }) {
               truncate
               renderRoot={(props) => (
                 <Link
-                  to="/apps/$appId/manage"
-                  params={{ appId: backend.id }}
+                  to="/apps/$appSlug/manage"
+                  params={{ appSlug: backend.slug }}
                   {...props}
                 />
               )}
@@ -147,8 +147,8 @@ function BackendRow({ backend }: { backend: AppBackendView }) {
               color="gray"
               renderRoot={(props) => (
                 <Link
-                  to="/apps/$appId/manage"
-                  params={{ appId: backend.id }}
+                  to="/apps/$appSlug/manage"
+                  params={{ appSlug: backend.slug }}
                   {...props}
                 />
               )}

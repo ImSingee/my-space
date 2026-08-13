@@ -42,7 +42,7 @@ vi.mock('~components/apps/use-app-deployment-update', () => ({
 }));
 
 vi.mock('~server/apps', () => ({
-  getApp: vi.fn<() => void>(),
+  getAppBySlug: vi.fn<() => void>(),
   getAppDeploymentRevision: vi.fn<() => void>(),
 }));
 
@@ -50,7 +50,7 @@ vi.mock('sonner', () => ({
   toast: { error: mocks.toastError },
 }));
 
-import { AppView } from '~/routes/_app/apps/$appId';
+import { AppView } from '~/routes/_app/apps/$appSlug';
 
 const frontendCapabilities = {
   database: false,

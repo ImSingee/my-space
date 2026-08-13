@@ -3,7 +3,11 @@ import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { listDeployments } from './manage';
-import type { NormalizedManifest, WebhookAuth } from './manifest';
+import {
+  type NormalizedManifest,
+  type WebhookAuth,
+  withPublicAppUrl,
+} from './manifest';
 
 /** Capability flags in the same order the management UI lists them. */
 const CAPABILITY_KEYS = [
@@ -154,8 +158,11 @@ export async function getAppDetailForAgent(
         where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
       })
     : null;
-  const manifest = (currentDeployment?.manifestNormalized ??
+  const storedManifest = (currentDeployment?.manifestNormalized ??
     null) as NormalizedManifest | null;
+  const manifest = storedManifest
+    ? withPublicAppUrl(storedManifest, app.slug)
+    : null;
 
   const caps = app.capabilities;
   const { isAppRunning } = await import('./runtime');

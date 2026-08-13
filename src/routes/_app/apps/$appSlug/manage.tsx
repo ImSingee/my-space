@@ -46,14 +46,23 @@ import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
 import { Field } from '~components/system/field';
 import { StatusBadge } from '~components/system/status-badge';
-import { appOpsQueryOptions, appsQueryOptions } from '~queries/apps';
+import {
+  appOpsQueryOptions,
+  appsQueryOptions,
+  normalizedManifestQueryOptions,
+} from '~queries/apps';
 import { sidebarItemsQueryOptions } from '~queries/sidebar';
-import { archiveAppFn, deleteAppFn, getApp, setAppSlugFn } from '~server/apps';
+import {
+  archiveAppFn,
+  deleteAppFn,
+  getAppBySlug,
+  setAppSlugFn,
+} from '~server/apps';
 import { setSidebarPin } from '~server/sidebar';
 
-export const Route = createFileRoute('/_app/apps/$appId/manage')({
+export const Route = createFileRoute('/_app/apps/$appSlug/manage')({
   loader: async ({ params }) => {
-    const app = await getApp({ data: params.appId });
+    const app = await getAppBySlug({ data: params.appSlug });
     if (!app) {
       throw notFound();
     }
@@ -154,7 +163,11 @@ function AppDetailPage() {
           {hasFrontend ? (
             <Button
               renderRoot={(props) => (
-                <Link to="/apps/$appId" params={{ appId: app.id }} {...props} />
+                <Link
+                  to="/apps/$appSlug"
+                  params={{ appSlug: app.slug }}
+                  {...props}
+                />
               )}
               disabled={app.status !== 'deployed'}
               leftSection={<IconExternalLink size={16} stroke={1.8} />}
@@ -279,9 +292,9 @@ function AppDetailPage() {
 
 /**
  * Editable URL-slug row. The slug is the only part of an app's identity that
- * users can change; it appears in the shareable `/app/<slug>/` URL and renaming
- * it never requires a rebuild (everything technical is keyed off the immutable
- * id).
+ * users can change; it appears in the human-facing `/apps/<slug>` and
+ * `/app/<slug>/` URLs. Renaming it never requires a rebuild because technical
+ * APIs and storage are keyed off the immutable id.
  */
 function SlugField({ appId, slug }: { appId: string; slug: string }) {
   const router = useRouter();
@@ -301,18 +314,29 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
     onSuccess: (result) => {
       toast.success(`URL slug is now "${result.slug}"`);
       setEditing(false);
-      void queryClient.invalidateQueries({
-        queryKey: appsQueryOptions.queryKey,
-      });
-      // The route may have been opened with the (now stale) old slug as its
-      // param; pin the URL to the immutable id before reloading so the loader
-      // doesn't refetch a slug that no longer resolves and 404.
       void navigate({
-        to: '/apps/$appId/manage',
-        params: { appId },
+        to: '/apps/$appSlug/manage',
+        params: { appSlug: result.slug },
+        search: true,
+        hash: true,
         replace: true,
+      }).then(async () => {
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: appsQueryOptions.queryKey,
+          }),
+          queryClient.invalidateQueries({
+            queryKey: sidebarItemsQueryOptions.queryKey,
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ['dashboard', 'widgets'],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: normalizedManifestQueryOptions(appId).queryKey,
+          }),
+        ]);
+        await router.invalidate();
       });
-      void router.invalidate();
     },
   });
 

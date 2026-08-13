@@ -69,10 +69,11 @@ use native git locally:
      the **slug**, suggesting a kebab-case slug derived from the chosen name.
      Never bundle them into one question or invent a slug without asking.
    - Both the name and the slug can be changed later (the slug from the manage
-     page), so reassure the user not to overthink it. The slug only appears in
-     the `/app/<slug>/` URL; the platform generates a separate immutable id that
-     keys the repo and database. Only after they agree to both, call
-     `create_app` (it takes the chosen `slug`).
+     page), so reassure the user not to overthink it. The slug is the
+     human-facing segment in both `/apps/<slug>` and `/app/<slug>/`; the
+     platform generates a separate immutable id that keys the repo, database
+     relations, and technical `/api/apps/<id>/...` URLs. Only after they agree
+     to both, call `create_app` (it takes the chosen `slug`).
      Pass `pin: true` when the app will have a user-facing frontend (the default)
      so it's pinned to the sidebar, or `pin: false` for backend-only /
      widget-only apps.

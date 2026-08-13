@@ -9,7 +9,7 @@ export const MAX_ENTRY_HASH_LEN = 512;
 /**
  * Normalize a user-supplied app entry point into the hash fragment we store:
  * trimmed, with any leading '#' removed (apps use hash routing, so a pin to
- * '/settings' deep-links via `/apps/<id>#/settings`). Control characters are
+ * '/settings' deep-links via `/apps/<slug>#/settings`). Control characters are
  * dropped and the result is length-capped. Returns null for empty input, which
  * means "open the app root".
  */

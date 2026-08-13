@@ -131,8 +131,12 @@ export function PinnedApps() {
   for (const p of pins) {
     pinCountByApp.set(p.appId, (pinCountByApp.get(p.appId) ?? 0) + 1);
   }
-  const isPinActive = (pin: { appId: string; entryHash: string | null }) => {
-    if (!isActive(`/apps/${pin.appId}`)) return false;
+  const isPinActive = (pin: {
+    appId: string;
+    appSlug: string;
+    entryHash: string | null;
+  }) => {
+    if (!isActive(`/apps/${pin.appSlug}`)) return false;
     if ((pinCountByApp.get(pin.appId) ?? 0) <= 1) return true;
     return hostHash === (pin.entryHash ?? '');
   };
@@ -230,8 +234,8 @@ export function PinnedApps() {
               <NavLink
                 renderRoot={(props) => (
                   <Link
-                    to="/apps/$appId"
-                    params={{ appId: pin.appId }}
+                    to="/apps/$appSlug"
+                    params={{ appSlug: pin.appSlug }}
                     hash={pin.entryHash ?? undefined}
                     draggable={false}
                     {...props}
