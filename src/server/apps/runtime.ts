@@ -2,7 +2,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import {
   appBuildDir,
@@ -10,7 +9,6 @@ import {
   deploymentArtifactDir,
   deploymentBuildDir,
 } from '~agent/paths';
-import { HATCH_SDK_IMPORT_MAP } from '~agent/hatch-sdk';
 import { db, schema } from '~/db';
 import { internalPlatformUrl } from '../internal-platform-url';
 import { subprocessSandboxEnv } from '../sandbox-env';
@@ -38,10 +36,8 @@ import {
 export type BackendArtifact = {
   /** Validated absolute path to the runtime entry inside artifact/backend/. */
   entryPath: string;
-  format?: 'bundle-v1';
 };
 
-const LEGACY_BACKEND_ENTRY = 'backend/main.ts';
 const NORMALIZED_MANIFEST = 'manifest.normalized.json';
 
 function invalidBackendArtifact(message: string): Error {
@@ -130,10 +126,7 @@ function validateBackendEntryPath(buildDir: string, entry: string): string {
   return absoluteEntry;
 }
 
-function readBackendArtifactMetadata(buildDir: string): {
-  entry: string;
-  format?: 'bundle-v1';
-} {
+function readBackendArtifactMetadata(buildDir: string): { entry: string } {
   const manifestPath = path.join(buildDir, NORMALIZED_MANIFEST);
   let manifestStat;
   try {
@@ -172,7 +165,7 @@ function readBackendArtifactMetadata(buildDir: string): {
 
   const manifest = parsed as Record<string, unknown>;
   if (!Object.hasOwn(manifest, 'backend')) {
-    return { entry: LEGACY_BACKEND_ENTRY };
+    throw invalidBackendArtifact('backend metadata is missing');
   }
   const backend = manifest.backend;
   if (!backend || typeof backend !== 'object' || Array.isArray(backend)) {
@@ -185,36 +178,28 @@ function readBackendArtifactMetadata(buildDir: string): {
   }
   const entry = metadata.entry;
 
-  if (!Object.hasOwn(metadata, 'format')) return { entry };
   if (metadata.format !== 'bundle-v1') {
+    if (!Object.hasOwn(metadata, 'format')) {
+      throw invalidBackendArtifact('backend.format must be "bundle-v1"');
+    }
     throw invalidBackendArtifact(
       `unsupported backend format: ${JSON.stringify(metadata.format)}`,
     );
   }
-  return { entry, format: 'bundle-v1' };
+  return { entry };
 }
 
-export function backendArtifactEnv(
-  buildDir: string,
-  artifact: BackendArtifact,
-): Record<string, string> {
-  if (artifact.format !== 'bundle-v1') return {};
+export function backendArtifactEnv(buildDir: string): Record<string, string> {
   return {
     HATCH_ASSETS_DIR: path.resolve(buildDir, 'backend', 'assets'),
   };
 }
 
-/**
- * Resolve the backend artifact recorded in the staged normalized manifest.
- * Falls back to the scaffold convention (`backend/main.ts`) for older
- * artifacts whose manifest predates the recorded `backend.entry`.
- */
+/** Resolve and validate the bundled backend recorded in the staged manifest. */
 export function resolveBackendArtifact(buildDir: string): BackendArtifact {
   const metadata = readBackendArtifactMetadata(buildDir);
   const entryPath = validateBackendEntryPath(buildDir, metadata.entry);
-  return metadata.format === 'bundle-v1'
-    ? { entryPath, format: 'bundle-v1' }
-    : { entryPath };
+  return { entryPath };
 }
 
 /** Outbound workflow calls the app declared, read from the staged manifest. */
@@ -279,34 +264,11 @@ async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
   return Object.keys(map).length > 0 ? JSON.stringify(map) : null;
 }
 
-/**
- * Resolve Deno's module cache directory (`DENO_DIR` or the platform default).
- * Legacy source artifacts load npm/jsr deps from here at runtime, and some
- * packages read their own cached files, so that compatibility path needs access.
- */
-function denoCacheDir(): string | null {
-  if (process.env.DENO_DIR) return process.env.DENO_DIR;
-  const home = os.homedir();
-  if (!home) return null;
-  if (process.platform === 'darwin') {
-    return path.join(home, 'Library', 'Caches', 'deno');
-  }
-  if (process.platform === 'win32') {
-    const local = process.env.LOCALAPPDATA;
-    return local ? path.join(local, 'deno') : null;
-  }
-  const xdgCache = process.env.XDG_CACHE_HOME ?? path.join(home, '.cache');
-  return path.join(xdgCache, 'deno');
-}
-
 type BackendDenoArgsOptions = {
   artifact: BackendArtifact;
   buildDir: string;
   storageDir: string;
-  cacheDir: string | null;
   certPaths: readonly string[];
-  importMap?: string | null;
-  hasLock: boolean;
 };
 
 /** Build the sandboxed Deno invocation for a staged backend artifact. */
@@ -314,46 +276,28 @@ export function buildBackendDenoArgs({
   artifact,
   buildDir,
   storageDir,
-  cacheDir,
   certPaths,
-  importMap,
-  hasLock,
 }: BackendDenoArgsOptions): string[] {
-  const bundled = artifact.format === 'bundle-v1';
-  const allowRead = bundled
-    ? [path.resolve(buildDir, 'backend', 'assets'), storageDir]
-    : [buildDir, storageDir];
-  if (!bundled && cacheDir) allowRead.push(cacheDir);
-  allowRead.push(...certPaths);
+  const allowRead = [
+    path.resolve(buildDir, 'backend', 'assets'),
+    storageDir,
+    ...certPaths,
+  ];
 
-  const denoArgs = ['run'];
-  if (bundled) {
-    denoArgs.push(
-      '--no-config',
-      '--no-lock',
-      '--no-npm',
-      '--no-remote',
-      '--cached-only',
-    );
-  } else {
-    // Legacy source artifacts resolve dependencies from the build-time cache.
-    denoArgs.push('--node-modules-dir=none');
-  }
-  denoArgs.push(
+  return [
+    'run',
+    '--no-config',
+    '--no-lock',
+    '--no-npm',
+    '--no-remote',
+    '--cached-only',
     `--allow-read=${allowRead.join(',')}`,
     `--allow-write=${storageDir}`,
     '--allow-net',
     '--allow-env',
     '--no-prompt',
-  );
-  if (!bundled && importMap) {
-    denoArgs.push(`--import-map=${importMap}`);
-  }
-  if (!bundled && hasLock) {
-    denoArgs.push('--lock=deno.lock', '--frozen');
-  }
-  denoArgs.push(artifact.entryPath);
-  return denoArgs;
+    artifact.entryPath,
+  ];
 }
 
 type RunningBackend = {
@@ -748,10 +692,8 @@ async function startBackend(
     ? internalPlatformUrl(`/api/apps/${id}/data`)
     : null;
 
-  // Bundles may read only their fixed asset directory and writable storage;
-  // legacy source artifacts retain build/cache access for source imports and
-  // dependency resolution. TLS trust stores are included when configured.
-  const cacheDir = denoCacheDir();
+  // Bundles may read only their fixed asset directory, writable storage, and
+  // configured TLS trust stores.
   const certPaths: string[] = [];
   for (const certVar of [
     'NODE_EXTRA_CA_CERTS',
@@ -766,12 +708,7 @@ async function startBackend(
     artifact: backendArtifact,
     buildDir,
     storageDir,
-    cacheDir,
     certPaths,
-    importMap: existsSync(path.join(buildDir, HATCH_SDK_IMPORT_MAP))
-      ? HATCH_SDK_IMPORT_MAP
-      : null,
-    hasLock: existsSync(path.join(buildDir, 'deno.lock')),
   });
 
   const proc = spawn('deno', denoArgs, {
@@ -783,7 +720,7 @@ async function startBackend(
       PORT: String(port),
       ...databaseEnv,
       STORAGE_DIR: storageDir,
-      ...backendArtifactEnv(buildDir, backendArtifact),
+      ...backendArtifactEnv(buildDir),
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
       ...(kvUrl ? { HATCH_KV_URL: kvUrl } : {}),

@@ -19,6 +19,7 @@ import {
   type ProtoFile,
   type RpcServiceApi,
   type SourceManifest,
+  backendBundleEntry,
   dataTableUrl,
   normalizeManifest,
   parseSourceManifest,
@@ -86,13 +87,6 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function backendBundleEntry(sourceEntry: string): string {
-  const normalized = sourceEntry.replaceAll('\\', '/');
-  const extension = path.posix.extname(normalized);
-  const stem = extension ? normalized.slice(0, -extension.length) : normalized;
-  return `${stem}.bundle.js`;
 }
 
 async function copyBackendAssetNode(
@@ -601,8 +595,6 @@ export async function buildApp(
     };
 
     const define = browserDefine(id, manifest.name, options.deploymentId);
-    let bundledBackendEntry: string | undefined;
-
     // 3) Bundle the frontend SPA -> static app/app.js + index.html.
     if (manifest.capabilities.frontend && manifest.app) {
       const entry = path.join(src, manifest.app.entry);
@@ -716,7 +708,7 @@ export async function buildApp(
       await validateBackendBundleSourceTree(src);
 
       const sourceEntry = manifest.backend.entry;
-      bundledBackendEntry = backendBundleEntry(sourceEntry);
+      const bundledBackendEntry = backendBundleEntry(sourceEntry);
       const bundlePath = path.join(out, bundledBackendEntry);
       await fs.mkdir(path.dirname(bundlePath), { recursive: true });
       const bundleArgs = [
@@ -760,12 +752,6 @@ export async function buildApp(
     }
 
     const normalized = normalizeManifest(manifest);
-    if (bundledBackendEntry && normalized.backend) {
-      normalized.backend = {
-        entry: bundledBackendEntry,
-        format: 'bundle-v1',
-      };
-    }
     if (api) normalized.api = api;
     await fs.writeFile(
       path.join(out, 'manifest.normalized.json'),
