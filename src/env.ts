@@ -34,7 +34,7 @@ export type AgentRunnerEnv = Readonly<{
   wsUrl: string;
   /** Shared bearer token sent to the Platform. */
   token: string;
-  /** Stable identity used for run lease ownership. */
+  /** Required stable identity used for run lease ownership. */
   runnerId: string;
   /** Tavily API key, or null to use Tavily's keyless access mode. */
   tavilyApiKey: string | null;

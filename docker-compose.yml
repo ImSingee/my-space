@@ -88,9 +88,9 @@ services:
       # Public origin shown to the Agent. Must match the platform value above.
       APP_URL: ${APP_URL:?set APP_URL in .env (e.g. http://localhost:3700)}
       HATCH_PLATFORM_URL: http://app:3701
-      # Stable identity permanently paired with agent_workspace below. Keep it
-      # unchanged when recreating this service, and never reuse it for another
-      # workspace volume.
+      # REQUIRED: stable identity permanently paired with agent_workspace
+      # below. Keep it unchanged when recreating this service, and never reuse
+      # it for another workspace volume.
       HATCH_RUNNER_ID: runner-1
       # Must match the platform's AGENT_RUNNER_TOKEN above.
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}

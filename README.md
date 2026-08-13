@@ -91,13 +91,13 @@ scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
 is behind a domain or reverse proxy, set `APP_URL` to that external origin
 (for example, `https://hatch.example.com`).
 
-The Agent Runner identity and its persistent workspace volume must remain a
-one-to-one pair. The default Compose deployment permanently pairs
-`HATCH_RUNNER_ID=runner-1` with the `agent_workspace` volume. Custom production
-deployments must set a non-empty `HATCH_RUNNER_ID`, preserve it whenever the
-container or pod is recreated with the same volume, and assign a different ID
-to every other workspace volume. Reusing an ID for another volume can make
-existing Agent sessions unavailable.
+`HATCH_RUNNER_ID` is required and must remain paired one-to-one with the Agent
+Runner's persistent workspace volume. The default Compose deployment
+permanently pairs `runner-1` with the `agent_workspace` volume. Other
+deployments must set a non-empty ID, preserve it whenever the container or pod
+is recreated with the same volume, and assign a different ID to every other
+workspace volume. Reusing an ID for another volume can make existing Agent
+sessions unavailable.
 
 On Kubernetes, use a StatefulSet identity with one persistent volume claim per
 replica, such as the stable pod name and its ordinal PVC, or inject another
