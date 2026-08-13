@@ -303,7 +303,6 @@ export type DataWhere = {
 
 export type DataQuery = {
   table: string;
-  index?: string;
   where?: DataWhere[];
   orderBy?: { field: string; direction?: 'asc' | 'desc' };
   cursor?: string;

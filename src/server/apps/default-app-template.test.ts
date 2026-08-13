@@ -67,6 +67,7 @@ describe('default app template', () => {
     expect(backend).toContain(
       "data.increment('counters', id, 'value', amount)",
     );
+    expect(backend).not.toMatch(/\bindex\s*:/);
     expect(counter).not.toContain('current.value + amount');
     expect(dataSchema).toContain("uniqueIndex('by_name', ['name'])");
   });

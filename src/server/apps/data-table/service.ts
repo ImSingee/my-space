@@ -9,12 +9,7 @@ import { AppError } from '~server/errors';
 import { DATA_MIGRATION_LOCK_KEY } from './migrate';
 import { resolveAppDataDatabaseUrl } from './provision';
 import { parseDataRevision } from './revision';
-import type {
-  DataField,
-  DataIndex,
-  DataSchemaDescriptor,
-  DataTable,
-} from './schema';
+import type { DataField, DataSchemaDescriptor, DataTable } from './schema';
 import {
   isDataDefaultNow,
   isValidDataDateTime,
@@ -54,7 +49,6 @@ const whereSchema = z.object({
 
 export const dataQueryRequestSchema = z.object({
   table: z.string().min(1),
-  index: z.string().min(1).optional(),
   where: z.array(whereSchema).max(16).default([]),
   orderBy: z
     .object({
@@ -286,7 +280,6 @@ function dataQueryFingerprint(id: string, query: DataQueryRequest): string {
   const identity = {
     appId: id,
     table: query.table,
-    index: query.index ?? null,
     where: query.where,
     orderBy: {
       field: query.orderBy?.field ?? 'id',
@@ -428,167 +421,6 @@ export async function acquireDataReadGuard(
   await assertDataTableAccess(id, options);
 }
 
-type QueryCondition = DataQueryRequest['where'][number];
-
-function physicalIndexFields(index: DataIndex): string[] {
-  // Keep this in sync with createIndexStep: non-unique indexes receive the
-  // deterministic row id as a physical tie-breaker without changing the
-  // public descriptor or the semantics of unique indexes.
-  if (index.unique || index.fields.includes('id')) return index.fields;
-  return [...index.fields, 'id'];
-}
-
-function conditionsGuaranteeNonNull(
-  conditions: readonly QueryCondition[],
-): boolean {
-  return conditions.some((condition) => {
-    if (condition.op === 'eq') return condition.value !== null;
-    if (condition.op === 'in') {
-      return (
-        Array.isArray(condition.value) &&
-        condition.value.length > 0 &&
-        condition.value.every((value) => value !== null)
-      );
-    }
-    return true;
-  });
-}
-
-function uniqueKeyIsNonNull(
-  table: DataTable,
-  index: DataIndex,
-  conditionsByField: ReadonlyMap<string, readonly QueryCondition[]>,
-): boolean {
-  return index.fields.every((name) => {
-    const field = queryFieldFromTable(table, name);
-    return (
-      !field.optional ||
-      conditionsGuaranteeNonNull(conditionsByField.get(name) ?? [])
-    );
-  });
-}
-
-function invalidIndexShape(index: DataIndex): never {
-  throw new AppError(
-    `Index "${index.name}" cannot support this query. Use equality filters ` +
-      'for its leading fields, at most one range field next, and order by ' +
-      'the next indexed field.',
-    400,
-  );
-}
-
-function isSingleKeyEquality(
-  table: DataTable,
-  fieldName: string,
-  condition: QueryCondition,
-): boolean {
-  if (condition.op !== 'eq') return false;
-  const field = queryFieldFromTable(table, fieldName);
-  return field.kind !== 'json' || condition.value !== null || !field.optional;
-}
-
-function validateIndexedQuery(table: DataTable, query: DataQueryRequest): void {
-  for (const condition of query.where) {
-    queryFieldFromTable(table, condition.field);
-  }
-  const orderField = query.orderBy?.field ?? 'id';
-  queryFieldFromTable(table, orderField);
-
-  const index = query.index
-    ? table.indexes.find((candidate) => candidate.name === query.index)
-    : undefined;
-  if (query.index && !index) {
-    throw new AppError(`Unknown Data Table index "${query.index}".`, 400);
-  }
-
-  const nonIdFields = new Set(
-    query.where
-      .map((condition) => condition.field)
-      .filter((field) => field !== 'id'),
-  );
-  if (orderField !== 'id') nonIdFields.add(orderField);
-  if (nonIdFields.size === 0) return;
-  if (!index) {
-    throw new AppError(
-      'Filtered or ordered Data Table queries must name a declared index.',
-      400,
-    );
-  }
-
-  const conditionsByField = new Map<string, QueryCondition[]>();
-  for (const condition of query.where) {
-    const conditions = conditionsByField.get(condition.field) ?? [];
-    conditions.push(condition);
-    conditionsByField.set(condition.field, conditions);
-  }
-
-  const remainingConditionFields = new Set(conditionsByField.keys());
-  const fields = physicalIndexFields(index);
-  let position = 0;
-  const equalityFields = new Set<string>();
-  while (position < fields.length) {
-    const field = fields[position]!;
-    const conditions = conditionsByField.get(field) ?? [];
-    if (
-      conditions.length === 0 ||
-      conditions.some(
-        (condition) => !isSingleKeyEquality(table, field, condition),
-      )
-    ) {
-      break;
-    }
-    equalityFields.add(field);
-    remainingConditionFields.delete(field);
-    position += 1;
-  }
-
-  // Non-unique indexes receive id as their final physical key. Equality over
-  // that complete key identifies at most one row, so no further ordering key is
-  // needed even though the public index descriptor itself is not unique.
-  if (position >= fields.length && equalityFields.has('id')) return;
-
-  const rangeField = fields[position];
-  const rangeConditions = rangeField
-    ? (conditionsByField.get(rangeField) ?? [])
-    : [];
-  if (rangeConditions.length > 0) {
-    const operators = rangeConditions.map((condition) => condition.op);
-    const isRange = operators.every((operator) =>
-      ['gt', 'gte', 'lt', 'lte'].includes(operator),
-    );
-    const isSingleIn = operators.length === 1 && operators[0] === 'in';
-    const isJsonNullEquality =
-      rangeConditions.length === 1 &&
-      rangeConditions[0]?.op === 'eq' &&
-      rangeConditions[0].value === null &&
-      queryFieldFromTable(table, rangeField!).kind === 'json';
-    if (!isRange && !isSingleIn && !isJsonNullEquality) {
-      invalidIndexShape(index);
-    }
-    remainingConditionFields.delete(rangeField!);
-  }
-  if (remainingConditionFields.size > 0) invalidIndexShape(index);
-
-  const uniqueCanTerminate =
-    index.unique && uniqueKeyIsNonNull(table, index, conditionsByField);
-  if (uniqueCanTerminate && position >= index.fields.length) return;
-
-  const effectiveOrderFields = equalityFields.has(orderField)
-    ? ['id']
-    : orderField === 'id'
-      ? ['id']
-      : [orderField, 'id'];
-  if (rangeConditions.length > 0 && effectiveOrderFields[0] !== rangeField) {
-    invalidIndexShape(index);
-  }
-
-  for (const field of effectiveOrderFields) {
-    if (fields[position] !== field) invalidIndexShape(index);
-    position += 1;
-    if (uniqueCanTerminate && position >= index.fields.length) return;
-  }
-}
-
 async function schemaInTransaction(
   tx: TransactionSql,
 ): Promise<DataSchemaDescriptor> {
@@ -605,7 +437,8 @@ function compileQuery(
   queryFingerprint: string,
 ) {
   const table = tableFromSchema(schema, query.table);
-  validateIndexedQuery(table, query);
+  const orderField = query.orderBy?.field ?? 'id';
+  queryFieldFromTable(table, orderField);
   const params: SqlParam[] = [];
   const clauses: string[] = [];
   for (const condition of query.where) {
@@ -668,7 +501,6 @@ function compileQuery(
     );
   }
 
-  const orderField = query.orderBy?.field ?? 'id';
   const orderColumn = qi(physicalField(orderField));
   const orderDirection = query.orderBy?.direction ?? 'asc';
   const cursor = decodeCursor(

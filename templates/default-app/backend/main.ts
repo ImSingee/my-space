@@ -32,7 +32,6 @@ const counter: CounterStore = {
   async find() {
     const result = await data.query({
       table: 'counters',
-      index: 'by_name',
       where: [{ field: 'name', op: 'eq', value: 'default' }],
       limit: 1,
     });

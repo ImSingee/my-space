@@ -11,6 +11,8 @@ import {
   type DataSchema,
   type DataInsert,
   type DataPatchOptions,
+  type DataQuery,
+  type DataQueryFor,
 } from '../../../../packages/hatch-data/src/data';
 
 describe('managed Data Table schema SDK', () => {
@@ -74,6 +76,53 @@ describe('managed Data Table schema SDK', () => {
 
     expect(options).toEqual({ unset: ['note'] });
     expect(invalidOptions).toBeTypeOf('function');
+  });
+
+  it('keeps index selection out of the query contract', () => {
+    const schema = defineSchema({
+      todos: defineTable({
+        title: t.string(),
+        completed: t.boolean(),
+      }).index('by_completed', ['completed']),
+    });
+    const query: DataQueryFor<typeof schema, 'todos'> = {
+      table: 'todos',
+      where: [{ field: 'completed', op: 'eq', value: false }],
+      orderBy: { field: 'title', direction: 'asc' },
+      limit: 25,
+    };
+    const client = createDataClient<typeof schema>({
+      baseUrl: 'https://hatch.test/api/apps/example/data',
+      deploymentId: 'deployment-v2',
+    });
+    const validQuery = () => client.query(query);
+    const invalidQueries = () => {
+      const untypedSchemaQuery: DataQuery = {
+        table: 'todos',
+        // @ts-expect-error indexes are declared on tables, not selected by queries.
+        index: 'by_completed',
+      };
+      const schemaQuery: DataQueryFor<typeof schema, 'todos'> = {
+        table: 'todos',
+        // @ts-expect-error indexes are declared on tables, not selected by queries.
+        index: 'by_completed',
+      };
+      client.query({
+        table: 'todos',
+        // @ts-expect-error indexes are declared on tables, not selected by queries.
+        index: 'by_completed',
+      });
+      return { untypedSchemaQuery, schemaQuery };
+    };
+
+    expect(query).toEqual({
+      table: 'todos',
+      where: [{ field: 'completed', op: 'eq', value: false }],
+      orderBy: { field: 'title', direction: 'asc' },
+      limit: 25,
+    });
+    expect(validQuery).toBeTypeOf('function');
+    expect(invalidQueries).toBeTypeOf('function');
   });
 
   it('rejects defaults that the deployment validator cannot accept', () => {

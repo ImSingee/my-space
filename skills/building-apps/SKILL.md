@@ -433,6 +433,11 @@ export default defineSchema({
 Tables automatically include `id`, `createdAt`, and `updatedAt`. Use
 `renamedFrom(...)` for table or field renames so migrations preserve data.
 Adding optional/defaulted fields and compatible indexes migrates automatically.
+`.index(...)` declares a physical database index, while `.uniqueIndex(...)`
+also enforces uniqueness. Queries do not name or require an index; PostgreSQL
+automatically chooses a usable declared index. Add indexes for fields that are
+filtered or ordered frequently. Queries without a suitable index are allowed,
+but may scan or sort enough data to reach the statement timeout.
 Dropping tables/fields or narrowing types is destructive: the first deploy
 returns a migration preview without changing data. Ask the user for explicit
 approval, then retry `deploy_app` with
@@ -455,7 +460,6 @@ export const data = createDataClient<typeof schema>({
 
 const todos = await data.query({
   table: 'todos',
-  index: 'by_completed',
   where: [{ field: 'completed', op: 'eq', value: false }],
 });
 
