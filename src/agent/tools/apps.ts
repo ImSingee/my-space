@@ -1,6 +1,6 @@
 /**
  * App lifecycle tools: list, inspect, checkout, create, deploy, rollback,
- * database, and KV.
+ * database, persistent storage, and KV.
  * All platform state flows through the injected PlatformClient (REST to the
  * platform's internal API); source trees live in runner-local worktrees fed
  * by git bundles.
@@ -107,6 +107,9 @@ export function createAppTools(options: {
         detail.ops.dataTable.enabled
           ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +
             `(${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+          : null,
+        detail.ops.storage.enabled
+          ? 'Persistent storage: enabled (backend STORAGE_DIR)'
           : null,
         `Capabilities: ${
           detail.capabilities.length > 0

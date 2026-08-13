@@ -8,12 +8,13 @@
  *   - HATCH_DEPLOYMENT_ID: active deployment identity for Data Table requests
  *   - PORT: the port to listen on
  *   - HATCH_ASSETS_DIR: absolute path to the read-only backend/assets directory
+ *   - STORAGE_DIR: private persistent directory when storage is enabled
  *
  * Generated Connect stubs live in ../gen during the build and are included in
  * the bundle. Put runtime file resources in backend/assets and resolve them
  * from HATCH_ASSETS_DIR, not import.meta.url. Source, generated files, package
- * metadata, and lockfiles are not staged in the deployed artifact. Mutable
- * files belong in STORAGE_DIR.
+ * metadata, and lockfiles are not staged in the deployed artifact. Enable the
+ * storage capability and use STORAGE_DIR when the backend needs mutable files.
  */
 import http from 'node:http';
 import { connectNodeAdapter } from '@connectrpc/connect-node';

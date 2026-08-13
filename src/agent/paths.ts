@@ -36,7 +36,7 @@ export const AGENT_HOME_DIR = path.resolve(WORKSPACE_ROOT, 'agent-home');
 export const CHECKOUTS_DIR = path.resolve(WORKSPACE_ROOT, 'checkouts');
 /** Deploy artifacts, one dir per deployment id (tagged deploy/v<version>). */
 export const ARTIFACTS_DIR = path.resolve(WORKSPACE_ROOT, 'artifacts');
-/** Persistent per-app blob storage: workspace/storage/<id>/<key>. */
+/** Private persistent directories for storage-capable app backends. */
 export const STORAGE_DIR = path.resolve(WORKSPACE_ROOT, 'storage');
 /** Original non-image files uploaded in Agent chats (Platform-side only). */
 export const AGENT_ATTACHMENTS_DIR = path.resolve(
@@ -149,7 +149,7 @@ export function deploymentArtifactDir(
   return path.resolve(ARTIFACTS_DIR, id, deploymentId);
 }
 
-/** Persistent storage root for an app's blobs. */
+/** Fixed persistent directory exposed to a storage-capable app backend. */
 export function appStorageDir(id: string): string {
   return path.resolve(STORAGE_DIR, id);
 }

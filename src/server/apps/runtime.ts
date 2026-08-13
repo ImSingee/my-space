@@ -204,6 +204,13 @@ export function backendArtifactEnv(
   };
 }
 
+/** Expose persistent storage only when the capability selected a directory. */
+export function backendStorageEnv(
+  storageDir: string | null,
+): Record<string, string> {
+  return storageDir ? { STORAGE_DIR: storageDir } : {};
+}
+
 /**
  * Resolve the backend artifact recorded in the staged normalized manifest.
  * Falls back to the scaffold convention (`backend/main.ts`) for older
@@ -302,7 +309,7 @@ function denoCacheDir(): string | null {
 type BackendDenoArgsOptions = {
   artifact: BackendArtifact;
   buildDir: string;
-  storageDir: string;
+  storageDir: string | null;
   cacheDir: string | null;
   certPaths: readonly string[];
   importMap?: string | null;
@@ -321,8 +328,9 @@ export function buildBackendDenoArgs({
 }: BackendDenoArgsOptions): string[] {
   const bundled = artifact.format === 'bundle-v1';
   const allowRead = bundled
-    ? [path.resolve(buildDir, 'backend', 'assets'), storageDir]
-    : [buildDir, storageDir];
+    ? [path.resolve(buildDir, 'backend', 'assets')]
+    : [buildDir];
+  if (storageDir) allowRead.push(storageDir);
   if (!bundled && cacheDir) allowRead.push(cacheDir);
   allowRead.push(...certPaths);
 
@@ -339,13 +347,9 @@ export function buildBackendDenoArgs({
     // Legacy source artifacts resolve dependencies from the build-time cache.
     denoArgs.push('--node-modules-dir=none');
   }
-  denoArgs.push(
-    `--allow-read=${allowRead.join(',')}`,
-    `--allow-write=${storageDir}`,
-    '--allow-net',
-    '--allow-env',
-    '--no-prompt',
-  );
+  denoArgs.push(`--allow-read=${allowRead.join(',')}`);
+  if (storageDir) denoArgs.push(`--allow-write=${storageDir}`);
+  denoArgs.push('--allow-net', '--allow-env', '--no-prompt');
   if (!bundled && importMap) {
     denoArgs.push(`--import-map=${importMap}`);
   }
@@ -686,9 +690,6 @@ async function startBackend(
         }`,
     );
   }
-  const storageDir = appStorageDir(id);
-  mkdirSync(storageDir, { recursive: true });
-
   // Resolve invocation config (URL + secret) for each declared workflow call so
   // the backend can trigger top-level workflows through the external API.
   const workflowsEnv = await buildWorkflowsEnv(buildDir);
@@ -729,6 +730,8 @@ async function startBackend(
   }
   const backendDeploymentId = targetDeploymentId;
   const signingSecret = appRow.signingSecret ?? null;
+  const storageDir = appRow.capabilities.storage ? appStorageDir(id) : null;
+  if (storageDir) mkdirSync(storageDir, { recursive: true });
   const databaseEnv = await appDatabaseRuntimeEnv(
     id,
     appRow.capabilities.database,
@@ -747,9 +750,10 @@ async function startBackend(
     ? internalPlatformUrl(`/api/apps/${id}/data`)
     : null;
 
-  // Bundles may read only their fixed asset directory and writable storage;
-  // legacy source artifacts retain build/cache access for source imports and
-  // dependency resolution. TLS trust stores are included when configured.
+  // Bundles may read only their fixed asset directory and, when enabled, the
+  // app's persistent storage. Legacy source artifacts retain build/cache access
+  // for source imports and dependency resolution. TLS trust stores are included
+  // when configured.
   const cacheDir = denoCacheDir();
   const certPaths: string[] = [];
   for (const certVar of [
@@ -781,7 +785,7 @@ async function startBackend(
     env: subprocessSandboxEnv({
       PORT: String(port),
       ...databaseEnv,
-      STORAGE_DIR: storageDir,
+      ...backendStorageEnv(storageDir),
       ...backendArtifactEnv(buildDir, backendArtifact),
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),

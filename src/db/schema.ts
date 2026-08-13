@@ -60,6 +60,8 @@ export type AppCapabilities = {
   backend: boolean;
   cron: boolean;
   webhook: boolean;
+  /** Private persistent directory exposed only to the app backend. */
+  storage?: boolean;
   /** Simple per-app key/value store (platform DB) for small tokens/config. */
   kv: boolean;
   /** Platform-managed typed tables with migrations and realtime queries. */

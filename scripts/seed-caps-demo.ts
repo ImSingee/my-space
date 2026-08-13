@@ -40,6 +40,7 @@ const MANIFEST = {
     frontend: false,
     widgets: false,
     backend: true,
+    storage: true,
     cron: true,
     webhook: true,
     kv: true,
@@ -55,7 +56,8 @@ import { createHmac } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const storageDir = Deno.env.get('STORAGE_DIR') ?? './storage';
+const storageDir = Deno.env.get('STORAGE_DIR');
+if (!storageDir) throw new Error('STORAGE_DIR is required');
 await mkdir(storageDir, { recursive: true });
 const beatFile = path.join(storageDir, 'heartbeats.txt');
 

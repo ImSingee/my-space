@@ -376,8 +376,8 @@ export const capabilitiesSchema = z
     backend: z.boolean().default(false),
     cron: z.boolean().default(false),
     webhook: z.boolean().default(false),
-    /** Accepted only so manifests from the retired scaffold remain deployable. */
-    storage: z.literal(false).optional(),
+    /** Private persistent directory exposed only to the app backend. */
+    storage: z.boolean().default(false),
     /** Simple per-app key/value store (platform DB) for small tokens/config. */
     kv: z.boolean().default(false),
     /** Platform-managed typed tables with migrations and realtime queries. */
@@ -385,11 +385,7 @@ export const capabilitiesSchema = z
     /** Tampermonkey userscripts the platform builds + serves as `.user.js`. */
     userscripts: z.boolean().default(false),
   })
-  .strict()
-  .transform(({ storage: legacyStorage, ...capabilities }) => {
-    void legacyStorage;
-    return capabilities;
-  });
+  .strict();
 
 /**
  * Canonical app-id shape: lowercase alphanumerics and hyphens, safe as a path
@@ -457,6 +453,18 @@ export const sourceManifestSchema = z
     userscripts: userscriptsSchema,
   })
   .superRefine((manifest, ctx) => {
+    if (
+      manifest.capabilities.storage &&
+      (!manifest.capabilities.backend || !manifest.backend)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'capabilities.storage requires capabilities.backend and backend.entry',
+        path: ['capabilities', 'storage'],
+      });
+    }
+
     // A userscript-capable app with no scripts would advertise the capability but
     // serve nothing — almost always a manifest mistake, so reject it (mirrors how
     // an enabled capability without its backing declaration is caught elsewhere).

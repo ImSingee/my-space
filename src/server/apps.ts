@@ -213,6 +213,7 @@ export type AppOps = {
     /** Platform-side auth mode: 'platform' (secret + HMAC) or 'none'. */
     auth: WebhookAuth;
   };
+  storage: { enabled: boolean };
   /** KV entries are fetched separately (they mutate live); this just gates the UI. */
   kv: { enabled: boolean };
   dataTable: {
@@ -234,6 +235,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
         backend: { capable: false, mode: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
+        storage: { enabled: false },
         kv: { enabled: false },
         dataTable: { enabled: false, dbName: null, schemaHash: null },
       };
@@ -262,6 +264,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
             : null,
         auth: manifest?.webhook?.auth ?? 'platform',
       },
+      storage: { enabled: Boolean(caps?.storage) },
       kv: { enabled: Boolean(caps?.kv) },
       dataTable: {
         enabled: Boolean(caps?.dataTable),

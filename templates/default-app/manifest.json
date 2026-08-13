@@ -8,6 +8,7 @@
     "frontend": true,
     "widgets": true,
     "backend": true,
+    "storage": false,
     "cron": false,
     "webhook": false,
     "kv": false,

@@ -13,6 +13,7 @@ const CAPABILITY_KEYS = [
   'database',
   'cron',
   'webhook',
+  'storage',
   'kv',
   'dataTable',
   'userscripts',
@@ -103,6 +104,7 @@ export type AppRuntimeOps = {
     /** Platform-side auth mode: 'platform' (secret + HMAC) or 'none'. */
     auth: WebhookAuth;
   };
+  storage: { enabled: boolean };
   kv: { enabled: boolean; url: string | null; entryCount: number };
   dataTable: {
     enabled: boolean;
@@ -198,6 +200,7 @@ export async function getAppDetailForAgent(
           Boolean(app.webhookSecret),
         auth: manifest?.webhook?.auth ?? 'platform',
       },
+      storage: { enabled: Boolean(caps?.storage) },
       kv: {
         enabled: Boolean(caps?.kv),
         url: manifest?.kv?.url ?? null,
