@@ -10,7 +10,7 @@ import {
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { IconAppWindow, IconSparkles } from '@tabler/icons-react';
+import { IconAppWindow, IconSettings, IconSparkles } from '@tabler/icons-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -223,6 +223,20 @@ export function PinnedApps() {
           onReorder={(ids) => reorder.mutate(ids)}
           renderItem={(pin) => (
             <PinnedRow
+              additionalMenuItems={
+                <Menu.Item
+                  leftSection={<IconSettings size={15} stroke={1.7} />}
+                  renderRoot={(props) => (
+                    <Link
+                      to="/app/$appSlug/manage"
+                      params={{ appSlug: pin.appSlug }}
+                      {...props}
+                    />
+                  )}
+                >
+                  Manage
+                </Menu.Item>
+              }
               renameLabel="Edit"
               onRename={() => {
                 setEditTarget({ id: pin.id, appId: pin.appId });

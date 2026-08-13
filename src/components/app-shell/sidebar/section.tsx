@@ -139,17 +139,20 @@ export function SectionHeading({
 
 /**
  * A pinned sidebar row: a full-width link with a kebab menu (revealed on hover)
- * exposing Rename (when `onRename` is given) / Unpin. The menu lives as an
- * absolutely-positioned sibling of the link so clicking it never triggers
- * navigation.
+ * exposing Rename (when `onRename` is given), Unpin, and optional additional
+ * items. The menu lives as an absolutely-positioned sibling of the link so
+ * clicking it never triggers navigation.
  */
 export function PinnedRow({
   children,
+  additionalMenuItems,
   onRename,
   onUnpin,
   renameLabel = 'Rename',
 }: {
   children: ReactNode;
+  /** Optional menu items rendered after the built-in Unpin action. */
+  additionalMenuItems?: ReactNode;
   onRename?: () => void;
   onUnpin: () => void;
   /** Label for the first (edit) menu item; defaults to "Rename". */
@@ -187,6 +190,7 @@ export function PinnedRow({
             >
               Unpin
             </Menu.Item>
+            {additionalMenuItems}
           </Menu.Dropdown>
         </Menu>
       </Box>

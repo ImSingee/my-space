@@ -191,6 +191,11 @@ async function renderSections(initialEntry = '/') {
     path: '/app/$appSlug',
     component: () => null,
   });
+  const appManageRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/app/$appSlug/manage',
+    component: () => null,
+  });
   const workflowsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/workflows',
@@ -207,6 +212,7 @@ async function renderSections(initialEntry = '/') {
       agentRoute,
       appsRoute,
       appRoute,
+      appManageRoute,
       workflowsRoute,
       workflowRoute,
     ]),
@@ -220,7 +226,7 @@ async function renderSections(initialEntry = '/') {
       </QueryClientProvider>
     </MantineProvider>,
   );
-  return { queryClient, screen };
+  return { queryClient, router, screen };
 }
 
 beforeEach(() => {
@@ -286,6 +292,34 @@ test('uses the app slug for links and hash-aware active state', async () => {
   expect(settings.element()).toHaveAttribute('data-active', 'true');
 });
 
+test('opens an app management page from the menu after Unpin', async () => {
+  fixtures.apps = [app('01k-app', 'todo')];
+  fixtures.pins = [
+    pin('pin-settings', '01k-app', 'todo', 'settings', 'Todo settings'),
+  ];
+
+  const { router, screen } = await renderSections('/app/todo#settings');
+
+  await screen.getByRole('button', { name: 'Options' }).click();
+  const edit = screen.getByRole('menuitem', { name: 'Edit' });
+  const unpin = screen.getByRole('menuitem', { name: 'Unpin' });
+  const manage = screen.getByRole('menuitem', { name: 'Manage' });
+
+  await expect.element(edit).toBeVisible();
+  await expect.element(unpin).toBeVisible();
+  await expect.element(manage).toHaveAttribute('href', '/app/todo/manage');
+  expect(
+    unpin.element().compareDocumentPosition(manage.element()) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  await manage.click();
+  await vi.waitFor(() => {
+    expect(router.state.location.pathname).toBe('/app/todo/manage');
+    expect(router.state.location.hash).toBe('');
+  });
+});
+
 test('shows only the workflow section when only a workflow is pinned', async () => {
   fixtures.apps = [app('one')];
   fixtures.workflows = [workflow('one', true)];
@@ -299,6 +333,11 @@ test('shows only the workflow section when only a workflow is pinned', async () 
     .element(screen.getByText('Workflows', { exact: true }))
     .toBeVisible();
   await expect.element(screen.getByText('Workflow one')).toBeVisible();
+
+  await screen.getByRole('button', { name: 'Options' }).click();
+  await expect
+    .element(screen.getByRole('menuitem', { name: 'Manage' }))
+    .not.toBeInTheDocument();
 });
 
 test('keeps both sections hidden while their pin queries are unresolved', async () => {
