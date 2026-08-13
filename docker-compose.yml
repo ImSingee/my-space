@@ -91,6 +91,8 @@ services:
       HATCH_RUNNER_ID: runner-1
       # Must match the platform's AGENT_RUNNER_TOKEN above.
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
+      # Optional. Without a key, web search/fetch use Tavily keyless access.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       # Runner-local worktrees + sandbox HOME (separate volume from the
       # platform's workspace on purpose).
       HATCH_DATA_DIR: /app/workspace

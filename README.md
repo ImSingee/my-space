@@ -91,6 +91,10 @@ scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
 is behind a domain or reverse proxy, set `APP_URL` to that external origin
 (for example, `https://hatch.example.com`).
 
+The Agent's web search and page-fetch tools use Tavily's keyless access mode by
+default. To use your Tavily account and quota, set `TAVILY_API_KEY` in `.env`
+and recreate the Agent Runner (`docker compose up -d --force-recreate agent`).
+
 ## Ideas to try
 
 - "Build a habit tracker with a streak widget I can pin to my dashboard."

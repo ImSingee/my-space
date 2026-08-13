@@ -36,6 +36,8 @@ export type AgentRunnerEnv = Readonly<{
   token: string;
   /** Stable identity used for run lease ownership. */
   runnerId: string;
+  /** Tavily API key, or null to use Tavily's keyless access mode. */
+  tavilyApiKey: string | null;
   production: boolean;
   allowUnsandboxed: boolean;
 }>;
@@ -128,6 +130,7 @@ function resolveAgentRunnerEnv(): AgentRunnerEnv {
     wsUrl: platformUrl.replace(/^http/, 'ws') + RUNNER_WS_PATH,
     token,
     runnerId: process.env.HATCH_RUNNER_ID?.trim() || `runner-${os.hostname()}`,
+    tavilyApiKey: process.env.TAVILY_API_KEY?.trim() || null,
     production,
     allowUnsandboxed: process.env.HATCH_ALLOW_UNSANDBOXED === 'true',
   });

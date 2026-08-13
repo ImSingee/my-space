@@ -98,6 +98,7 @@ function extractToolDetails(
 
 export type RunAgentTurnOptions = {
   appUrl: string;
+  tavilyApiKey?: string | null;
   priorMessages: AgentMessage[];
   sessionId: string;
   userText: string;
@@ -143,6 +144,7 @@ export async function runAgentTurn(
   const skills = await loadAgentSkills(env);
   const tools = createTools(env, {
     platform: opts.platform,
+    ...(opts.tavilyApiKey ? { tavilyApiKey: opts.tavilyApiKey } : {}),
     ...(opts.ask ? { ask: opts.ask } : {}),
     readOnlyRoots: [SKILLS_DIR],
     sessionId,

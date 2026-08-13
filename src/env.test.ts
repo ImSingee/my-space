@@ -12,6 +12,7 @@ const ENV_KEYS = [
   'HATCH_PLATFORM_URL',
   'HATCH_RUNNER_ID',
   'HATCH_ALLOW_UNSANDBOXED',
+  'TAVILY_API_KEY',
 ] as const;
 
 beforeEach(() => {
@@ -181,6 +182,7 @@ describe('getAgentRunnerEnv', () => {
       wsUrl: 'ws://127.0.0.1:3701/internal/agent/runner/ws',
       token: 'hatch-dev-runner-token',
       runnerId: `runner-${os.hostname()}`,
+      tavilyApiKey: null,
       production: false,
       allowUnsandboxed: false,
     });
@@ -193,6 +195,7 @@ describe('getAgentRunnerEnv', () => {
     vi.stubEnv('AGENT_RUNNER_TOKEN', '  runner-token  ');
     vi.stubEnv('HATCH_RUNNER_ID', '  runner-one  ');
     vi.stubEnv('HATCH_ALLOW_UNSANDBOXED', 'true');
+    vi.stubEnv('TAVILY_API_KEY', '  tvly-test-key  ');
     const { getAgentRunnerEnv } = await import('./env');
 
     expect(getAgentRunnerEnv()).toEqual({
@@ -201,10 +204,21 @@ describe('getAgentRunnerEnv', () => {
       wsUrl: 'wss://platform.example.test:4701/internal/agent/runner/ws',
       token: 'runner-token',
       runnerId: 'runner-one',
+      tavilyApiKey: 'tvly-test-key',
       production: true,
       allowUnsandboxed: true,
     });
   });
+
+  it.each(['', '   '])(
+    'uses Tavily keyless mode for a blank API key %j',
+    async (apiKey) => {
+      vi.stubEnv('TAVILY_API_KEY', apiKey);
+      const { getAgentRunnerEnv } = await import('./env');
+
+      expect(getAgentRunnerEnv().tavilyApiKey).toBeNull();
+    },
+  );
 
   it.each([undefined, '', '   '])(
     'requires APP_URL when it is %s',
@@ -247,12 +261,14 @@ describe('getAgentRunnerEnv', () => {
     vi.stubEnv('APP_URL', 'https://first.example.test/');
     vi.stubEnv('AGENT_RUNNER_TOKEN', 'first-token');
     vi.stubEnv('HATCH_RUNNER_ID', 'runner-one');
+    vi.stubEnv('TAVILY_API_KEY', 'first-tavily-key');
     const { getAgentRunnerEnv } = await import('./env');
 
     const first = getAgentRunnerEnv();
     vi.stubEnv('APP_URL', 'https://second.example.test/');
     vi.stubEnv('AGENT_RUNNER_TOKEN', 'second-token');
     vi.stubEnv('HATCH_RUNNER_ID', 'runner-two');
+    vi.stubEnv('TAVILY_API_KEY', 'second-tavily-key');
     const second = getAgentRunnerEnv();
 
     expect(Object.isFrozen(first)).toBe(true);
@@ -260,6 +276,7 @@ describe('getAgentRunnerEnv', () => {
     expect(second.appUrl).toBe('https://first.example.test');
     expect(second.token).toBe('first-token');
     expect(second.runnerId).toBe('runner-one');
+    expect(second.tavilyApiKey).toBe('first-tavily-key');
   });
 });
 

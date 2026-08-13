@@ -9,11 +9,12 @@ import {
   fauxText,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentStreamEvent } from './events';
 import type { PlatformClient } from './platform-client';
 import type { ResolvedModel } from './remote-models';
 import { MAX_EDIT_DETAILS_BYTES } from './tools/edit-diff';
+import { MAX_WEB_SEARCH_CONTENT_CHARS } from './tools/web';
 
 // runtime.ts resolves its workspace paths at module load, so point it at an
 // isolated temporary root before importing it.
@@ -22,6 +23,11 @@ const dataDir = await mkdtemp(path.join(tmpdir(), 'hatch-agent-runtime-test-'));
 process.env.HATCH_DATA_DIR = dataDir;
 const { runAgentTurn } = await import('./runtime');
 const { agentWorkDir } = await import('./paths');
+const { agentShellEnv } = await import('./shell-env');
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 afterAll(async () => {
   if (originalDataDir === undefined) delete process.env.HATCH_DATA_DIR;
@@ -189,6 +195,88 @@ describe('runAgentTurn terminal outcomes', () => {
         message.toolName === 'list_apps',
     ) as { details?: { apps?: unknown[] } } | undefined;
     expect(toolResult?.details?.apps).toHaveLength(apps.length);
+  });
+
+  it('registers web search, clips its event, and bounds each result field', async () => {
+    const sessionId = 'web-search-output';
+    const events: AgentStreamEvent[] = [];
+    const results = Array.from({ length: 5 }, (_, index) => ({
+      title: `Result ${index}`,
+      url: `https://example.com/${index}`,
+      content: 'x'.repeat(10_000),
+      score: 1 - index / 10,
+    }));
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ query: 'web query', results }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall('web_search', {
+            query: 'web query',
+            max_results: 5,
+          }),
+        ),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      (event) => events.push(event),
+    );
+
+    const toolStart = events.find(
+      (event): event is Extract<AgentStreamEvent, { type: 'tool_start' }> =>
+        event.type === 'tool_start' && event.name === 'web_search',
+    );
+    expect(toolStart).toMatchObject({
+      label: 'Web search',
+      args: { query: 'web query', max_results: 5 },
+    });
+    const toolEnd = events.find(
+      (event): event is Extract<AgentStreamEvent, { type: 'tool_end' }> =>
+        event.type === 'tool_end' && event.name === 'web_search',
+    );
+    const streamedOutput = toolEnd?.output;
+    expect(streamedOutput).toHaveLength(4_014);
+    expect(streamedOutput?.endsWith('\n… (truncated)')).toBe(true);
+
+    const toolResult = result.messages.find(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'toolResult' &&
+        message.toolName === 'web_search',
+    ) as { content?: Array<{ type?: string; text?: string }> } | undefined;
+    const fullOutput = toolResult?.content?.[0]?.text;
+    expect(fullOutput).toBeDefined();
+    const output = JSON.parse(fullOutput ?? '{}') as {
+      query?: string;
+      results?: Array<{ content?: string; content_truncated?: boolean }>;
+    };
+    expect(output.query).toBe('web query');
+    expect(output.results).toHaveLength(5);
+    expect(output.results?.[0]).toMatchObject({
+      content: 'x'.repeat(MAX_WEB_SEARCH_CONTENT_CHARS),
+      content_truncated: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(new Headers(request?.headers).get('X-Tavily-Access-Mode')).toBe(
+      'keyless',
+    );
+  });
+
+  it('keeps the Tavily key out of the model shell environment', () => {
+    const original = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = 'tvly-shell-secret';
+    try {
+      expect(agentShellEnv().TAVILY_API_KEY).toBeUndefined();
+    } finally {
+      if (original === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = original;
+    }
   });
 
   it('streams only canonical path details for a successful write', async () => {

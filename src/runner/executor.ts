@@ -42,6 +42,8 @@ export class RunnerExecutor {
     private opts: {
       /** Public Hatch origin captured from the Runner's startup environment. */
       appUrl: string;
+      /** Optional Tavily key; omission selects Tavily's keyless access mode. */
+      tavilyApiKey?: string | null;
       platform: PlatformClient;
       /** Send a message to the platform; false when offline (kept buffered). */
       send: (message: RunnerMessage) => boolean;
@@ -108,6 +110,9 @@ export class RunnerExecutor {
 
       run.done = runAgentTurn({
         appUrl: this.opts.appUrl,
+        ...(this.opts.tavilyApiKey
+          ? { tavilyApiKey: this.opts.tavilyApiKey }
+          : {}),
         priorMessages: payload.priorMessages as AgentMessage[],
         sessionId: payload.sessionId,
         userText: payload.userText,
