@@ -126,7 +126,7 @@ function resolveAgentRunnerEnv(): AgentRunnerEnv {
 
   const configuredRunnerId = process.env.HATCH_RUNNER_ID?.trim();
   if (production && !configuredRunnerId) {
-    throw new Error('HATCH_RUNNER_ID is required in production.');
+    throw new Error('HATCH_RUNNER_ID is required.');
   }
 
   return Object.freeze({

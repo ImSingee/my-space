@@ -265,9 +265,7 @@ describe('getAgentRunnerEnv', () => {
       vi.stubEnv('HATCH_RUNNER_ID', runnerId);
       const { getAgentRunnerEnv } = await import('./env');
 
-      expect(() => getAgentRunnerEnv()).toThrow(
-        'HATCH_RUNNER_ID is required in production.',
-      );
+      expect(() => getAgentRunnerEnv()).toThrow('HATCH_RUNNER_ID is required.');
     },
   );
 
@@ -276,9 +274,7 @@ describe('getAgentRunnerEnv', () => {
     vi.stubEnv('AGENT_RUNNER_TOKEN', 'runner-token');
     const { getAgentRunnerEnv } = await import('./env');
 
-    expect(() => getAgentRunnerEnv()).toThrow(
-      'HATCH_RUNNER_ID is required in production.',
-    );
+    expect(() => getAgentRunnerEnv()).toThrow('HATCH_RUNNER_ID is required.');
 
     vi.stubEnv('HATCH_RUNNER_ID', 'runner-one');
     expect(getAgentRunnerEnv().runnerId).toBe('runner-one');
