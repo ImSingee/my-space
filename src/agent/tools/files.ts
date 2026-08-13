@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
 import { isEditFileDetails } from '../edit-file-details';
+import { isWriteFileDetails } from '../write-file-details';
 import { generateEditFileDetails } from './edit-diff';
 import { MAX_FILE_CHARS, text, tool, unwrap } from './shared';
 
@@ -291,6 +292,8 @@ export function createFileTools(
     description:
       'Create or overwrite a text file (parent directories are created).',
     executionMode: 'sequential',
+    selectStreamDetails: (details) =>
+      isWriteFileDetails(details) ? { path: details.path } : undefined,
     parameters: Type.Object({
       path: Type.String({ description: 'File path to write.' }),
       content: Type.String({ description: 'Full file contents.' }),

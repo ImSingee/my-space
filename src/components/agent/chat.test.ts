@@ -9,7 +9,35 @@ import {
   type ChatMessage,
   type ToolResultMessage,
   successfullyDeployedAppIds,
+  toolInputDetails,
 } from './types';
+
+describe('toolInputDetails', () => {
+  it('returns ordered write inputs and preserves an empty file', () => {
+    expect(
+      toolInputDetails('write_file', {
+        path: 'src/app.ts',
+        content: '',
+      }),
+    ).toEqual([
+      { label: 'File path', value: 'src/app.ts' },
+      {
+        label: 'File contents',
+        value: '',
+        emptyText: '(empty file)',
+      },
+    ]);
+  });
+
+  it('keeps existing command and edit inputs as single sections', () => {
+    expect(toolInputDetails('run_command', { command: 'pnpm test' })).toEqual([
+      { label: 'Command', value: 'pnpm test' },
+    ]);
+    expect(toolInputDetails('edit_file', { path: 'src/app.ts' })).toEqual([
+      { label: 'File path', value: 'src/app.ts' },
+    ]);
+  });
+});
 
 describe('successfullyDeployedAppIds', () => {
   it('keeps successful deploys in call order and drops failed or incomplete calls', () => {

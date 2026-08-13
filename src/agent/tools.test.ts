@@ -278,6 +278,24 @@ describe('agent file tools', () => {
     );
   });
 
+  it('writes exact contents and returns only the canonical workspace path', async () => {
+    const { root, getTool } = await setup();
+    const content = '  const value = 1;\n\nexport { value };\n';
+
+    const result = await getTool('write_file').execute('write', {
+      path: './nested/file.ts',
+      content,
+    });
+
+    await expect(
+      readFile(path.join(root, 'nested/file.ts'), 'utf8'),
+    ).resolves.toBe(content);
+    expect(textOf(result)).toBe(
+      `Wrote nested/file.ts (${content.length} chars).`,
+    );
+    expect(result.details).toEqual({ path: 'nested/file.ts' });
+  });
+
   it('allows edit_file after write_file creates a file', async () => {
     const { root, getTool } = await setup();
 

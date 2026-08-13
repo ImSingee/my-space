@@ -9,12 +9,13 @@ import {
 } from '@tabler/icons-react';
 import { type ReactNode, type Ref, useEffect, useId, useRef } from 'react';
 import { isEditFileDetails } from '~agent/edit-file-details';
+import { isWriteFileDetails } from '~agent/write-file-details';
 import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
 import {
   type ToolInputDetail,
   toolDetail,
-  toolInputDetail,
+  toolInputDetails,
   toolLabel,
 } from './types';
 import classes from './chat.module.css';
@@ -31,15 +32,45 @@ function successfulEditDetails(name: string, result?: ToolResult) {
     : undefined;
 }
 
-function resolvedToolInput(
+function successfulWriteDetails(name: string, result?: ToolResult) {
+  return name === 'write_file' &&
+    result?.isError !== true &&
+    isWriteFileDetails(result?.details)
+    ? result.details
+    : undefined;
+}
+
+function resolvedToolInputs(
   name: string,
   args: Record<string, unknown> | undefined,
   result?: ToolResult,
-): ToolInputDetail | undefined {
-  const editDetails = successfulEditDetails(name, result);
-  return editDetails
-    ? { label: 'File path', value: editDetails.path }
-    : toolInputDetail(name, args);
+): ToolInputDetail[] | undefined {
+  const inputs = toolInputDetails(name, args) ?? [];
+  const canonicalPath =
+    successfulEditDetails(name, result)?.path ??
+    successfulWriteDetails(name, result)?.path;
+  if (canonicalPath === undefined) {
+    return inputs.length > 0 ? inputs : undefined;
+  }
+
+  const pathIndex = inputs.findIndex((input) => input.label === 'File path');
+  if (pathIndex === -1) {
+    return [{ label: 'File path', value: canonicalPath }, ...inputs];
+  }
+  return inputs.map((input, index) =>
+    index === pathIndex ? { ...input, value: canonicalPath } : input,
+  );
+}
+
+function hasCompleteWriteInput(
+  name: string,
+  args: Record<string, unknown> | undefined,
+): boolean {
+  return (
+    name === 'write_file' &&
+    typeof args?.path === 'string' &&
+    typeof args.content === 'string'
+  );
 }
 
 /**
@@ -122,17 +153,17 @@ function ToolBodySection({
 }
 
 function ToolStepBody({
-  input,
+  inputs,
   output,
   outputRef,
   editDiff,
 }: {
-  input?: ToolInputDetail;
+  inputs?: ToolInputDetail[];
   output?: string;
   outputRef?: Ref<HTMLDivElement>;
   editDiff?: string;
 }) {
-  const hasInput = input !== undefined;
+  const hasInputs = (inputs?.length ?? 0) > 0;
   const hasOutput = output !== undefined || editDiff !== undefined;
   const outputNode = (
     <Box ref={outputRef} className={classes.stepBodyCode}>
@@ -142,15 +173,17 @@ function ToolStepBody({
 
   return (
     <Box className={classes.stepBody}>
-      {input ? (
-        <ToolBodySection label={input.label}>
+      {inputs?.map((input) => (
+        <ToolBodySection key={input.label} label={input.label}>
           <Box className={classes.stepInputCode}>
-            {input.value || `(empty ${input.label.toLowerCase()})`}
+            {input.value === ''
+              ? (input.emptyText ?? `(empty ${input.label.toLowerCase()})`)
+              : input.value}
           </Box>
         </ToolBodySection>
-      ) : null}
+      ))}
       {editDiff ? (
-        hasInput ? (
+        hasInputs ? (
           <Box className={classes.stepBodySection}>
             <EditDiff diff={editDiff} />
           </Box>
@@ -158,7 +191,7 @@ function ToolStepBody({
           <EditDiff diff={editDiff} />
         )
       ) : hasOutput ? (
-        hasInput ? (
+        hasInputs ? (
           <ToolBodySection label="Output">{outputNode}</ToolBodySection>
         ) : (
           outputNode
@@ -194,7 +227,12 @@ export function ToolStep({
 }) {
   const isError = status === 'error' || result?.isError === true;
   const editDetails = successfulEditDetails(name, result);
-  const input = resolvedToolInput(name, args, result);
+  const inputs = resolvedToolInputs(name, args, result);
+  const hideSuccessfulWriteOutput =
+    status === 'done' &&
+    result !== undefined &&
+    !isError &&
+    hasCompleteWriteInput(name, args);
   const icon =
     status === 'running' ? (
       <Loader size={11} color="gray" />
@@ -210,10 +248,10 @@ export function ToolStep({
       detail={detail}
       error={isError}
     >
-      {input !== undefined || result ? (
+      {inputs !== undefined || result ? (
         <ToolStepBody
-          input={input}
-          output={result?.text}
+          inputs={inputs}
+          output={hideSuccessfulWriteOutput ? undefined : result?.text}
           editDiff={editDetails?.diff}
         />
       ) : null}
@@ -309,14 +347,18 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     isError: tool.isError,
   };
   const editDetails = successfulEditDetails(tool.name, result);
-  const input = resolvedToolInput(tool.name, tool.args, result);
-  const output = tool.output
-    ? tool.output
-    : tool.done && tool.name === 'run_command' && input !== undefined
-      ? ''
-      : undefined;
+  const inputs = resolvedToolInputs(tool.name, tool.args, result);
+  const hideSuccessfulWriteOutput =
+    tool.done && !isError && hasCompleteWriteInput(tool.name, tool.args);
+  const output = hideSuccessfulWriteOutput
+    ? undefined
+    : tool.output
+      ? tool.output
+      : tool.done && tool.name === 'run_command' && inputs !== undefined
+        ? ''
+        : undefined;
   const hasBody =
-    input !== undefined || output !== undefined || editDetails !== undefined;
+    inputs !== undefined || output !== undefined || editDetails !== undefined;
   const showBody = running ? hasBody : open && hasBody;
   const expandable = !running && hasBody;
 
@@ -368,7 +410,7 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       {hasBody ? (
         <Collapse id={bodyId} expanded={showBody}>
           <ToolStepBody
-            input={input}
+            inputs={inputs}
             output={output}
             outputRef={bodyRef}
             editDiff={editDetails?.diff}

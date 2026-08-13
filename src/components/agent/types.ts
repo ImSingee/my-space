@@ -154,19 +154,37 @@ export function toolDetail(
   return oneLine.length > 48 ? `${oneLine.slice(0, 48)}…` : oneLine;
 }
 
-export type ToolInputDetail = { label: string; value: string };
+export type ToolInputDetail = {
+  label: string;
+  value: string;
+  emptyText?: string;
+};
 
 /** Complete inputs that need an inspectable form beyond the compact summary. */
-export function toolInputDetail(
+export function toolInputDetails(
   name: string,
   args: Record<string, unknown> | undefined,
-): ToolInputDetail | undefined {
+): ToolInputDetail[] | undefined {
   if (!args) return undefined;
   if (name === 'run_command' && typeof args.command === 'string') {
-    return { label: 'Command', value: args.command };
+    return [{ label: 'Command', value: args.command }];
   }
   if (name === 'edit_file' && typeof args.path === 'string') {
-    return { label: 'File path', value: args.path };
+    return [{ label: 'File path', value: args.path }];
+  }
+  if (name === 'write_file') {
+    const details: ToolInputDetail[] = [];
+    if (typeof args.path === 'string') {
+      details.push({ label: 'File path', value: args.path });
+    }
+    if (typeof args.content === 'string') {
+      details.push({
+        label: 'File contents',
+        value: args.content,
+        emptyText: '(empty file)',
+      });
+    }
+    return details.length > 0 ? details : undefined;
   }
   return undefined;
 }

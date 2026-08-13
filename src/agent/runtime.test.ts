@@ -191,6 +191,55 @@ describe('runAgentTurn terminal outcomes', () => {
     expect(toolResult?.details?.apps).toHaveLength(apps.length);
   });
 
+  it('streams only canonical path details for a successful write', async () => {
+    const sessionId = 'streamed-write-details';
+    const cwd = agentWorkDir(sessionId);
+    const content = '  first line\n\nlast line\n';
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall('write_file', {
+            path: './nested/file.txt',
+            content,
+          }),
+        ),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      (event) => events.push(event),
+    );
+
+    const toolStart = events.find(
+      (event): event is Extract<AgentStreamEvent, { type: 'tool_start' }> =>
+        event.type === 'tool_start' && event.name === 'write_file',
+    );
+    expect(toolStart?.args).toEqual({
+      path: './nested/file.txt',
+      content,
+    });
+
+    const toolEnd = events.find(
+      (event): event is Extract<AgentStreamEvent, { type: 'tool_end' }> =>
+        event.type === 'tool_end' && event.name === 'write_file',
+    );
+    expect(toolEnd?.details).toEqual({ path: 'nested/file.txt' });
+
+    const toolResult = result.messages.find(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'toolResult' &&
+        message.toolName === 'write_file',
+    ) as { details?: unknown } | undefined;
+    expect(toolResult?.details).toEqual({ path: 'nested/file.txt' });
+    await expect(
+      readFile(path.join(cwd, 'nested/file.txt'), 'utf8'),
+    ).resolves.toBe(content);
+  });
+
   it('keeps large edit details bounded in stream and transcript payloads', async () => {
     const sessionId = 'bounded-edit-details';
     const cwd = agentWorkDir(sessionId);
