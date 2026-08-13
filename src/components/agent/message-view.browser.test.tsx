@@ -119,6 +119,19 @@ function runCommandCall(id: string, command: string): ToolCallBlock {
   };
 }
 
+function writeFileCall(
+  id: string,
+  path: string,
+  content: string,
+): ToolCallBlock {
+  return {
+    type: 'toolCall',
+    id,
+    name: 'write_file',
+    arguments: { path, content },
+  };
+}
+
 const longCommand = [
   "  env MODE='full command' pnpm exec tsx <<'EOF'",
   'const payload = {',
@@ -129,6 +142,22 @@ const longCommand = [
     (_, index) => `console.log(${index}, payload.token);`,
   ),
   'EOF',
+  '',
+].join('\n');
+
+const longWritePathSuffix = [
+  'apps/customer-support/src/features',
+  'notification-preferences-and-delivery-channels',
+  `${'generated-config-'.repeat(16)}settings.ts`,
+].join('/');
+const attemptedWritePath = `/workspace/${longWritePathSuffix}`;
+const canonicalWritePath = longWritePathSuffix;
+const longWriteContents = [
+  '  export const settings = {',
+  '',
+  `  token: '${'x'.repeat(240)}',`,
+  ...Array.from({ length: 28 }, (_, index) => `  option${index}: ${index},`),
+  '};',
   '',
 ].join('\n');
 
@@ -524,6 +553,240 @@ test('reveals a completed live command even when it produced no output', async (
   await expect
     .element(screen.getByRole('region', { name: 'Output' }))
     .toHaveTextContent('(no output)');
+});
+
+test('reveals a successful persisted write without overflowing a narrow message', async () => {
+  const summary = `Wrote ${canonicalWritePath} (${longWriteContents.length} chars).`;
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        writeFileCall('write-persisted', attemptedWritePath, longWriteContents),
+      ],
+    },
+    {
+      width: 320,
+      toolResults: new Map([
+        [
+          'write-persisted',
+          {
+            role: 'toolResult',
+            toolName: 'write_file',
+            content: [{ type: 'text', text: summary }],
+            details: { path: canonicalWritePath },
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /Write file/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
+
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  const contentsRegion = screen.getByRole('region', {
+    name: 'File contents',
+  });
+  await expect.element(pathRegion).toBeVisible();
+  await expect.element(contentsRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe(
+    canonicalWritePath,
+  );
+
+  const contents = contentsRegion.element().lastElementChild as HTMLElement;
+  expect(contents.textContent).toBe(longWriteContents);
+  const contentsStyle = getComputedStyle(contents);
+  expect(contentsStyle.whiteSpace).toBe('pre-wrap');
+  expect(contentsStyle.overflowWrap).toBe('anywhere');
+  expect(contents.scrollWidth).toBeLessThanOrEqual(contents.clientWidth);
+  expect(contents.scrollHeight).toBeGreaterThan(contents.clientHeight);
+  expect(contents.clientHeight).toBeLessThanOrEqual(260);
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.textContent).not.toContain(summary);
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('keeps an incomplete empty write inspectable without an output', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [writeFileCall('write-incomplete', attemptedWritePath, '')],
+  });
+
+  await screen.getByRole('button', { name: /Write file/ }).click();
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  const contentsRegion = screen.getByRole('region', {
+    name: 'File contents',
+  });
+  await expect.element(pathRegion).toBeVisible();
+  await expect.element(contentsRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe(
+    attemptedWritePath,
+  );
+  expect(contentsRegion.element().lastElementChild?.textContent).toBe(
+    '(empty file)',
+  );
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+});
+
+test('preserves a live write from its attempted inputs to canonical completion', async () => {
+  const content = '  first line\n\nlast line\n';
+  const summary = `Wrote ${canonicalWritePath} (${content.length} chars).`;
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'write-live',
+          name: 'write_file',
+          args: { path: attemptedWritePath, content },
+          done: false,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const runningPath = screen.getByRole('region', { name: 'File path' });
+  const runningContents = screen.getByRole('region', {
+    name: 'File contents',
+  });
+  await expect.element(runningPath).toBeVisible();
+  await expect.element(runningContents).toBeVisible();
+  expect(runningPath.element().lastElementChild?.textContent).toBe(
+    attemptedWritePath,
+  );
+  expect(runningContents.element().lastElementChild?.textContent).toBe(content);
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+
+  await screen.rerender(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'write-live',
+          name: 'write_file',
+          args: { path: attemptedWritePath, content },
+          done: true,
+          output: summary,
+          details: { path: canonicalWritePath },
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  const toggle = screen.getByRole('button', { name: /Write file/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+
+  const completedPath = screen.getByRole('region', { name: 'File path' });
+  const completedContents = screen.getByRole('region', {
+    name: 'File contents',
+  });
+  await expect.element(completedPath).toBeVisible();
+  await expect.element(completedContents).toBeVisible();
+  expect(completedPath.element().lastElementChild?.textContent).toBe(
+    canonicalWritePath,
+  );
+  expect(completedContents.element().lastElementChild?.textContent).toBe(
+    content,
+  );
+  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
+  expect(document.body.textContent).not.toContain(summary);
+});
+
+test('keeps attempted write inputs and the output when a write fails', async () => {
+  const content = 'new contents\n';
+  const error = 'Parent path for the file is not a directory.';
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [writeFileCall('write-failed', attemptedWritePath, content)],
+    },
+    {
+      toolResults: new Map([
+        [
+          'write-failed',
+          {
+            role: 'toolResult',
+            toolName: 'write_file',
+            content: [{ type: 'text', text: error }],
+            details: { path: canonicalWritePath },
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  await screen.getByRole('button', { name: /Write file/ }).click();
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  const contentsRegion = screen.getByRole('region', {
+    name: 'File contents',
+  });
+  const outputRegion = screen.getByRole('region', { name: 'Output' });
+  await expect.element(pathRegion).toBeVisible();
+  await expect.element(contentsRegion).toBeVisible();
+  await expect.element(outputRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe(
+    attemptedWritePath,
+  );
+  expect(contentsRegion.element().lastElementChild?.textContent).toBe(content);
+  await expect.element(outputRegion).toHaveTextContent(error);
+});
+
+test('keeps write output when historical inputs are unavailable', async () => {
+  const legacy = await renderMessage({
+    role: 'toolResult',
+    toolName: 'write_file',
+    content: [{ type: 'text', text: 'Legacy write completed.' }],
+  });
+  await legacy.getByRole('button', { name: /Write file/ }).click();
+  await expect
+    .element(legacy.getByText('Legacy write completed.'))
+    .toBeVisible();
+  await legacy.unmount();
+
+  const missingContent = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'write-missing-content',
+          name: 'write_file',
+          arguments: { path: attemptedWritePath },
+        },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'write-missing-content',
+          {
+            role: 'toolResult',
+            toolName: 'write_file',
+            content: [{ type: 'text', text: 'Historical write completed.' }],
+            details: { path: canonicalWritePath },
+          },
+        ],
+      ]),
+    },
+  );
+  await missingContent.getByRole('button', { name: /Write file/ }).click();
+  const pathRegion = missingContent.getByRole('region', { name: 'File path' });
+  const outputRegion = missingContent.getByRole('region', { name: 'Output' });
+  await expect.element(pathRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe(
+    canonicalWritePath,
+  );
+  await expect
+    .element(outputRegion.getByText('Historical write completed.'))
+    .toBeVisible();
+  expect(
+    missingContent.getByRole('region', { name: 'File contents' }).query(),
+  ).toBeNull();
 });
 
 test('renders a persisted edit result as a colored diff', async () => {
