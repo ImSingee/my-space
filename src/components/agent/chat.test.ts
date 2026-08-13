@@ -9,8 +9,31 @@ import {
   type ChatMessage,
   type ToolResultMessage,
   successfullyDeployedAppIds,
+  toolDetail,
   toolInputDetails,
+  toolLabel,
 } from './types';
+
+describe('web tool presentation', () => {
+  it('uses friendly fallback labels', () => {
+    expect(toolLabel('web_search')).toBe('Web search');
+    expect(toolLabel('web_fetch')).toBe('Fetch web page');
+  });
+
+  it('summarizes searches by query and fetches by URL', () => {
+    expect(
+      toolDetail('web_search', {
+        query: 'latest advances in battery chemistry',
+      }),
+    ).toBe('latest advances in battery chemistry');
+    expect(
+      toolDetail('web_fetch', {
+        url: 'https://example.com/research/paper',
+        query: 'ignored for the compact summary',
+      }),
+    ).toBe('https://example.com/research/paper');
+  });
+});
 
 describe('toolInputDetails', () => {
   it('returns ordered write inputs and preserves an empty file', () => {
@@ -36,6 +59,65 @@ describe('toolInputDetails', () => {
     expect(toolInputDetails('edit_file', { path: 'src/app.ts' })).toEqual([
       { label: 'File path', value: 'src/app.ts' },
     ]);
+  });
+
+  it('exposes complete web search and fetch inputs', () => {
+    const query = 'site:example.com a deliberately detailed search query';
+    const url = 'https://example.com/a/complete/article/url';
+
+    expect(
+      toolInputDetails('web_search', {
+        query,
+        max_results: 10,
+        search_depth: 'advanced',
+        topic: 'news',
+        time_range: 'week',
+        include_domains: ['example.com', 'docs.example.com'],
+        exclude_domains: ['spam.example.com'],
+      }),
+    ).toEqual([
+      { label: 'Query', value: query },
+      { label: 'Maximum results', value: '10' },
+      { label: 'Search depth', value: 'advanced' },
+      { label: 'Topic', value: 'news' },
+      { label: 'Time range', value: 'week' },
+      {
+        label: 'Include domains',
+        value: '["example.com","docs.example.com"]',
+      },
+      { label: 'Exclude domains', value: '["spam.example.com"]' },
+    ]);
+    expect(
+      toolInputDetails('web_fetch', {
+        url,
+        query,
+        extract_depth: 'advanced',
+      }),
+    ).toEqual([
+      { label: 'URL', value: url },
+      { label: 'Query', value: query },
+      { label: 'Extract depth', value: 'advanced' },
+    ]);
+  });
+
+  it('omits absent web options and preserves explicitly empty domain lists', () => {
+    expect(toolInputDetails('web_search', { query: 'required only' })).toEqual([
+      { label: 'Query', value: 'required only' },
+    ]);
+    expect(
+      toolInputDetails('web_search', {
+        query: 'empty filters',
+        include_domains: [],
+        exclude_domains: [],
+      }),
+    ).toEqual([
+      { label: 'Query', value: 'empty filters' },
+      { label: 'Include domains', value: '[]' },
+      { label: 'Exclude domains', value: '[]' },
+    ]);
+    expect(
+      toolInputDetails('web_fetch', { url: 'https://example.com' }),
+    ).toEqual([{ label: 'URL', value: 'https://example.com' }]);
   });
 });
 

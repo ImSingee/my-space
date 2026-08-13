@@ -467,6 +467,74 @@ test('shows the complete command while a live command is running', async () => {
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
 
+test('shows every web search input in a persisted call', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [
+      {
+        type: 'toolCall',
+        id: 'persisted-web-search',
+        name: 'web_search',
+        arguments: {
+          exclude_domains: ['spam.example.com'],
+          topic: 'news',
+          query: 'latest battery research',
+          include_domains: ['example.com', 'docs.example.com'],
+          time_range: 'week',
+          max_results: 10,
+          search_depth: 'advanced',
+        },
+      },
+    ],
+  });
+
+  await screen.getByRole('button', { name: /Web search/ }).click();
+  const expected = [
+    ['Query', 'latest battery research'],
+    ['Maximum results', '10'],
+    ['Search depth', 'advanced'],
+    ['Topic', 'news'],
+    ['Time range', 'week'],
+    ['Include domains', '["example.com","docs.example.com"]'],
+    ['Exclude domains', '["spam.example.com"]'],
+  ] as const;
+  for (const [label, value] of expected) {
+    const region = screen.getByRole('region', { name: label });
+    await expect.element(region).toBeVisible();
+    expect(region.element().lastElementChild?.textContent).toBe(value);
+  }
+});
+
+test('shows every web fetch input in a live call', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'live-web-fetch',
+          name: 'web_fetch',
+          args: {
+            extract_depth: 'advanced',
+            query: 'pricing details',
+            url: 'https://example.com/pricing',
+          },
+          done: false,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const expected = [
+    ['URL', 'https://example.com/pricing'],
+    ['Query', 'pricing details'],
+    ['Extract depth', 'advanced'],
+  ] as const;
+  for (const [label, value] of expected) {
+    const region = screen.getByRole('region', { name: label });
+    await expect.element(region).toBeVisible();
+    expect(region.element().lastElementChild?.textContent).toBe(value);
+  }
+});
+
 test('collapses a live command after completion and preserves its details', async () => {
   const screen = await render(
     <MantineProvider>

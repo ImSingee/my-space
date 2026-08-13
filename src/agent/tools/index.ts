@@ -11,6 +11,7 @@ import { createAskTool, type AskBridge } from './ask';
 import { createCommandTool } from './command';
 import { createFileTools } from './files';
 import type { AgentToolWithStreamDetails } from './shared';
+import { createWebTools } from './web';
 import { createWorkflowTools } from './workflows';
 
 export type { AskBridge };
@@ -20,6 +21,7 @@ export type CreateToolsOptions = {
   ask?: AskBridge;
   readOnlyRoots?: string[];
   sessionId?: string;
+  tavilyApiKey?: string | null;
 };
 
 export function createTools(
@@ -39,6 +41,9 @@ export function createTools(
     createAttachmentTool(shared),
     ...createAppTools(shared),
     ...createWorkflowTools(shared),
+    ...createWebTools(
+      options.tavilyApiKey ? { tavilyApiKey: options.tavilyApiKey } : {},
+    ),
   ];
   if (options.ask) tools.push(createAskTool(options.ask));
   return tools;

@@ -125,6 +125,8 @@ export const TOOL_LABELS: Record<string, string> = {
   create_workflow: 'Create workflow',
   deploy_workflow: 'Deploy workflow',
   rollback_workflow: 'Rollback workflow',
+  web_search: 'Web search',
+  web_fetch: 'Fetch web page',
   ask: 'Ask the user',
 };
 
@@ -149,7 +151,11 @@ export function toolDetail(
   const raw =
     name === 'run_command'
       ? pick('command')
-      : (pick('id') ?? pick('path') ?? pick('name'));
+      : name === 'web_search'
+        ? pick('query')
+        : name === 'web_fetch'
+          ? pick('url')
+          : (pick('id') ?? pick('path') ?? pick('name'));
   if (!raw) return undefined;
   const oneLine = raw.replace(/\s+/g, ' ').trim();
   return oneLine.length > 48 ? `${oneLine.slice(0, 48)}…` : oneLine;
@@ -160,6 +166,24 @@ export type ToolInputDetail = {
   value: string;
   emptyText?: string;
 };
+
+function appendSerializableInput(
+  details: ToolInputDetail[],
+  label: string,
+  value: unknown,
+): void {
+  if (typeof value === 'string') {
+    details.push({ label, value });
+    return;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    details.push({ label, value: String(value) });
+    return;
+  }
+  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+    details.push({ label, value: JSON.stringify(value) });
+  }
+}
 
 /** Complete inputs that need an inspectable form beyond the compact summary. */
 export function toolInputDetails(
@@ -172,6 +196,24 @@ export function toolInputDetails(
   }
   if (name === 'edit_file' && typeof args.path === 'string') {
     return [{ label: 'File path', value: args.path }];
+  }
+  if (name === 'web_search') {
+    const details: ToolInputDetail[] = [];
+    appendSerializableInput(details, 'Query', args.query);
+    appendSerializableInput(details, 'Maximum results', args.max_results);
+    appendSerializableInput(details, 'Search depth', args.search_depth);
+    appendSerializableInput(details, 'Topic', args.topic);
+    appendSerializableInput(details, 'Time range', args.time_range);
+    appendSerializableInput(details, 'Include domains', args.include_domains);
+    appendSerializableInput(details, 'Exclude domains', args.exclude_domains);
+    return details.length > 0 ? details : undefined;
+  }
+  if (name === 'web_fetch') {
+    const details: ToolInputDetail[] = [];
+    appendSerializableInput(details, 'URL', args.url);
+    appendSerializableInput(details, 'Query', args.query);
+    appendSerializableInput(details, 'Extract depth', args.extract_depth);
+    return details.length > 0 ? details : undefined;
   }
   if (name === 'write_file') {
     const details: ToolInputDetail[] = [];

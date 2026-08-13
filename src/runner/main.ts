@@ -12,6 +12,7 @@
  *   AGENT_RUNNER_TOKEN  shared bearer secret (required in production)
  *   HATCH_RUNNER_ID     stable runner identity (default runner-<hostname>)
  *   HATCH_DATA_DIR      runner-local data dir for worktrees (see ~agent/paths)
+ *   TAVILY_API_KEY      optional Tavily key (keyless access when unset)
  */
 import { WebSocket } from 'ws';
 import {
@@ -76,6 +77,7 @@ function send(message: RunnerMessage): boolean {
 
 const executor = new RunnerExecutor({
   appUrl: config.appUrl,
+  tavilyApiKey: config.tavilyApiKey,
   platform,
   send,
 });

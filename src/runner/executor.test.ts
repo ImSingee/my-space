@@ -12,6 +12,7 @@ const { runAgentTurn } = await import('~agent/runtime');
 const { RunnerExecutor } = await import('./executor');
 
 const APP_URL = 'https://hatch.example.test';
+const TAVILY_API_KEY = 'tvly-test-key';
 
 const stubPlatform = new Proxy({} as PlatformClient, {
   get(_target, prop) {
@@ -47,10 +48,11 @@ const payload: RunStartPayload = {
 
 type FinishedMessage = Extract<RunnerMessage, { type: 'run.finished' }>;
 
-function setupExecutor() {
+function setupExecutor(tavilyApiKey?: string) {
   const sent: RunnerMessage[] = [];
   const executor = new RunnerExecutor({
     appUrl: APP_URL,
+    ...(tavilyApiKey ? { tavilyApiKey } : {}),
     platform: stubPlatform,
     send: (message) => {
       sent.push(message);
@@ -82,13 +84,16 @@ describe('RunnerExecutor terminal outcomes', () => {
       messages,
       error: 'OpenAI API error (402): no body',
     });
-    const { executor, finished } = setupExecutor();
+    const { executor, finished } = setupExecutor(TAVILY_API_KEY);
 
     expect(executor.start(payload)).toEqual({ accepted: true });
     await vi.waitFor(() => expect(finished()).toBeDefined());
 
     expect(runAgentTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ appUrl: APP_URL }),
+      expect.objectContaining({
+        appUrl: APP_URL,
+        tavilyApiKey: TAVILY_API_KEY,
+      }),
     );
 
     expect(finished()).toEqual({
