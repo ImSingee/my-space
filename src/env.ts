@@ -124,12 +124,17 @@ function resolveAgentRunnerEnv(): AgentRunnerEnv {
     token = DEV_AGENT_RUNNER_TOKEN;
   }
 
+  const configuredRunnerId = process.env.HATCH_RUNNER_ID?.trim();
+  if (production && !configuredRunnerId) {
+    throw new Error('HATCH_RUNNER_ID is required in production.');
+  }
+
   return Object.freeze({
     appUrl,
     platformUrl,
     wsUrl: platformUrl.replace(/^http/, 'ws') + RUNNER_WS_PATH,
     token,
-    runnerId: process.env.HATCH_RUNNER_ID?.trim() || `runner-${os.hostname()}`,
+    runnerId: configuredRunnerId || `runner-${os.hostname()}`,
     tavilyApiKey: process.env.TAVILY_API_KEY?.trim() || null,
     production,
     allowUnsandboxed: process.env.HATCH_ALLOW_UNSANDBOXED === 'true',
