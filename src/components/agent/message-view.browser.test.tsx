@@ -68,7 +68,6 @@ const capabilities = (frontend: boolean) => ({
   backend: !frontend,
   cron: false,
   webhook: false,
-  storage: false,
   kv: false,
   userscripts: false,
 });

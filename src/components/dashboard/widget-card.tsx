@@ -302,7 +302,7 @@ export function WidgetCard({
           ref={frameRef}
           title={item.name}
           // allow-scripts + allow-same-origin: scripts run and the widget keeps
-          // the same-origin session its Connect/storage client needs, while the
+          // the same-origin session its Connect client needs, while the
           // omitted tokens still block top-navigation and popups. See
           // widgetFrameHtml for why this is a robustness — not hard-security —
           // boundary.

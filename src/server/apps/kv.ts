@@ -17,7 +17,7 @@ import { AppError } from '~server/errors';
 
 /** Max key length (chars). Keys travel in a URL path segment on the backend API. */
 export const KV_KEY_MAX = 512;
-/** Max value size (bytes). KV is for small tokens/config, not blobs — see storage. */
+/** Max value size (bytes). KV is for small tokens/config, not blobs. */
 export const KV_VALUE_MAX_BYTES = 64 * 1024;
 /** Soft cap on entries per app, so a runaway loop can't fill the platform DB. */
 export const KV_MAX_ENTRIES = 1000;

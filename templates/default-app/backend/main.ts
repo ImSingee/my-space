@@ -13,7 +13,7 @@
  * the bundle. Put runtime file resources in backend/assets and resolve them
  * from HATCH_ASSETS_DIR, not import.meta.url. Source, generated files, package
  * metadata, and lockfiles are not staged in the deployed artifact. Mutable
- * files belong in STORAGE_DIR when the storage capability is enabled.
+ * files belong in STORAGE_DIR.
  */
 import http from 'node:http';
 import { connectNodeAdapter } from '@connectrpc/connect-node';

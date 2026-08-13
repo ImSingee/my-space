@@ -128,7 +128,6 @@ function manifest(
         backend,
         cron: false,
         webhook: true,
-        storage: false,
       },
       backendMode: 'serverless',
       ...(backend ? { backend: { entry: 'backend/main.ts' } } : {}),

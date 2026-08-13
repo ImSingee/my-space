@@ -23,7 +23,6 @@ type AppFixture = {
     backend: boolean;
     cron: boolean;
     webhook: boolean;
-    storage: boolean;
     kv: boolean;
     userscripts: boolean;
   };
@@ -107,7 +106,6 @@ const capabilities = {
   backend: false,
   cron: false,
   webhook: false,
-  storage: false,
   kv: false,
   userscripts: false,
 };

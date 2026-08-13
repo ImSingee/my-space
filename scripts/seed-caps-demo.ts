@@ -1,6 +1,6 @@
 /**
- * Seed a persistent demo app that exercises storage + cron + webhook +
- * long-running, so the platform UI and the public webhook route have real data.
+ * Seed a persistent demo app that exercises cron + webhook + long-running, so
+ * the platform UI and the public webhook route have real data.
  *
  * Run: set -a && . ./.env.local && set +a && pnpm exec tsx scripts/seed-caps-demo.ts
  */
@@ -33,7 +33,7 @@ const MANIFEST = {
   // Overwritten with the generated app id in main(); the id is no longer the slug.
   id: SLUG,
   name: 'Capabilities Demo',
-  description: 'Storage, cron, webhook and a long-running backend.',
+  description: 'Cron, webhook and a long-running backend.',
   version: 1,
   capabilities: {
     database: false,
@@ -42,7 +42,6 @@ const MANIFEST = {
     backend: true,
     cron: true,
     webhook: true,
-    storage: true,
     kv: true,
   },
   backendMode: 'long-running',

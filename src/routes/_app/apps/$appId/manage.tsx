@@ -81,7 +81,7 @@ function AppDetailPage() {
       archiveAppFn({ data: { id: app.id, archived } }),
     onSuccess: (_result, archived) => {
       toast.success(archived ? 'App archived' : 'App restored');
-      // Archiving stops the backend/cron/storage; restoring re-enables them. The
+      // Archiving stops the backend/cron; restoring re-enables them. The
       // Operations panel reads appOpsQueryOptions, so invalidate it too or it
       // keeps showing pre-toggle running/idle state until a later refetch.
       void queryClient.invalidateQueries(appOpsQueryOptions(app.id));

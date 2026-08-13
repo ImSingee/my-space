@@ -76,5 +76,5 @@ not configure a hook path from imported files.
 
 After compatibility work and verification, commit and deploy exactly as
 `building-apps` directs. Tell the user that the import created fresh platform
-state: database, KV, Storage, secrets, Git history, and deployment history were
-not transferred.
+state: database, KV, secrets, Git history, and deployment history were not
+transferred.
