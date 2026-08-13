@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   timestamp as _timestamp,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -290,9 +291,9 @@ export const appCronRuns = pgTable(
  * by Cloudflare Workers KV / Deno KV but deliberately minimal: no TTL/caching,
  * just durable string values keyed per app.
  *
- * Values are stored as text (the app serializes its own JSON). A row may be
- * flagged `secret`, which hides its plaintext in the manage UI (overwrite-only)
- * while the app backend still reads it normally via the signed KV API.
+ * Values are stored as text (the app serializes its own JSON). Secret values
+ * use authenticated encryption when written; legacy secret rows may retain
+ * plaintext until they are overwritten.
  */
 export const appKv = pgTable(
   'app_kv',
@@ -302,8 +303,9 @@ export const appKv = pgTable(
       .notNull()
       .references(() => apps.id, { onDelete: 'cascade' }),
     key: text().notNull(),
-    value: text().notNull(),
-    /** When true, the manage UI masks the value (overwrite-only); app still reads it. */
+    value: text(),
+    valueCiphertext: text('value_ciphertext'),
+    /** When true, the manage UI masks the value (overwrite-only). */
     secret: boolean().notNull().default(false),
     createdAt,
     updatedAt,
@@ -311,6 +313,14 @@ export const appKv = pgTable(
   (table) => [
     // One value per (app, key); also the lookup path for get/set/delete.
     uniqueIndex('app_kv_app_key_idx').on(table.appId, table.key),
+    check(
+      'app_kv_value_storage_check',
+      sql`(
+        (not ${table.secret} and ${table.value} is not null and ${table.valueCiphertext} is null)
+        or
+        (${table.secret} and ((${table.value} is not null) <> (${table.valueCiphertext} is not null)))
+      )`,
+    ),
   ],
 );
 

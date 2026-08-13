@@ -14,6 +14,7 @@
 import { and, eq, gt, sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import { AppError } from '~server/errors';
+import { decryptKvSecret, encryptKvSecret } from './kv-secret';
 
 /** Max key length (chars). Keys travel in a URL path segment on the backend API. */
 export const KV_KEY_MAX = 512;
@@ -28,10 +29,10 @@ export const KV_MAX_ENTRIES = 1000;
  */
 const APP_KV_LOCK_NS = 3;
 
-/** A KV row as returned to trusted callers (full plaintext value). */
+/** A KV row, with secret plaintext included only when explicitly revealed. */
 export type KvRecord = {
   key: string;
-  value: string;
+  value: string | null;
   secret: boolean;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +59,15 @@ export function normalizeKvKey(key: string): string {
     if (code <= 0x1f || code === 0x7f) {
       throw new KvError('KV key may not contain control characters.', 400);
     }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = trimmed.charCodeAt(i + 1);
+      if (next < 0xdc00 || next > 0xdfff) {
+        throw new KvError('KV key must contain valid Unicode.', 400);
+      }
+      i++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new KvError('KV key must contain valid Unicode.', 400);
+    }
   }
   return trimmed;
 }
@@ -74,10 +84,66 @@ function validateValue(value: unknown): asserts value is string {
   }
 }
 
-function toRecord(row: typeof schema.appKv.$inferSelect): KvRecord {
+export type KvReadOptions = {
+  /** Decrypt encrypted secrets and expose legacy secret plaintext. */
+  revealSecrets?: boolean;
+};
+
+function storedValue(
+  row: typeof schema.appKv.$inferSelect,
+  revealSecrets: boolean,
+): string | null {
+  if (!row.secret) {
+    if (row.value === null || row.valueCiphertext !== null) {
+      throw new KvError('KV value has an invalid storage state.', 500);
+    }
+    return row.value;
+  }
+
+  // Mask before looking at the envelope. UI/default Agent reads therefore do
+  // not decrypt secret data and remain safe even if an envelope is corrupted.
+  if (!revealSecrets) return null;
+
+  // Legacy secret rows retain plaintext until the next explicit overwrite.
+  if (row.value !== null && row.valueCiphertext === null) return row.value;
+  if (row.value === null && row.valueCiphertext !== null) {
+    try {
+      return decryptKvSecret(
+        row.appId,
+        row.key,
+        row.valueCiphertext,
+        KV_VALUE_MAX_BYTES,
+      );
+    } catch {
+      throw new KvError(
+        'Unable to decrypt KV secret: stored ciphertext is invalid or SECRET does not match.',
+        500,
+      );
+    }
+  }
+  throw new KvError('KV secret has an invalid storage state.', 500);
+}
+
+function toRecord(
+  row: typeof schema.appKv.$inferSelect,
+  opts: KvReadOptions = {},
+): KvRecord {
   return {
     key: row.key,
-    value: row.value,
+    value: storedValue(row, opts.revealSecrets ?? true),
+    secret: row.secret,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function toWrittenRecord(
+  row: typeof schema.appKv.$inferSelect,
+  plaintext: string,
+): KvRecord {
+  return {
+    key: row.key,
+    value: plaintext,
     secret: row.secret,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -88,21 +154,25 @@ function toRecord(row: typeof schema.appKv.$inferSelect): KvRecord {
 export async function getKv(
   appId: string,
   key: string,
+  opts: KvReadOptions = {},
 ): Promise<KvRecord | null> {
   const k = normalizeKvKey(key);
   const row = await db.query.appKv.findFirst({
     where: (t, { eq: e, and: a }) => a(e(t.appId, appId), e(t.key, k)),
   });
-  return row ? toRecord(row) : null;
+  return row ? toRecord(row, opts) : null;
 }
 
-/** List every entry for an app (plaintext), sorted by key. */
-export async function listKv(appId: string): Promise<KvRecord[]> {
+/** List every entry for an app, sorted by key. */
+export async function listKv(
+  appId: string,
+  opts: KvReadOptions = {},
+): Promise<KvRecord[]> {
   const rows = await db.query.appKv.findMany({
     where: (t, { eq: e }) => e(t.appId, appId),
     orderBy: (t, { asc }) => [asc(t.key)],
   });
-  return rows.map(toRecord);
+  return rows.map((row) => toRecord(row, opts));
 }
 
 export type KvPage = {
@@ -118,7 +188,7 @@ export type KvPage = {
  */
 export async function listKvPage(
   appId: string,
-  opts: { after?: string; limit: number },
+  opts: { after?: string; limit: number; revealSecrets?: boolean },
 ): Promise<KvPage> {
   const rows = await db.query.appKv.findMany({
     where: opts.after
@@ -128,7 +198,7 @@ export async function listKvPage(
     limit: opts.limit + 1,
   });
   return {
-    items: rows.slice(0, opts.limit).map(toRecord),
+    items: rows.slice(0, opts.limit).map((row) => toRecord(row, opts)),
     hasMore: rows.length > opts.limit,
   };
 }
@@ -161,44 +231,65 @@ export async function setKv(
   // Without it, concurrent new-key writes could each pass the cap check and blow
   // past KV_MAX_ENTRIES, and racing inserts of the same key could trip the
   // unique index. The lock auto-releases on commit/rollback.
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${APP_KV_LOCK_NS}, hashtext(${appId}))`,
-    );
-
-    const existing = await tx.query.appKv.findFirst({
-      where: (t, { eq: e, and: a }) => a(e(t.appId, appId), e(t.key, k)),
-      columns: { id: true },
-    });
-
-    if (existing) {
-      const [row] = await tx
-        .update(schema.appKv)
-        .set({
-          value,
-          ...(opts.secret === undefined ? {} : { secret: opts.secret }),
-        })
-        .where(and(eq(schema.appKv.appId, appId), eq(schema.appKv.key, k)))
-        .returning();
-      return toRecord(row);
-    }
-
-    const current = await tx.query.appKv.findMany({
-      where: (t, { eq: e }) => e(t.appId, appId),
-      columns: { id: true },
-    });
-    if (current.length >= KV_MAX_ENTRIES) {
-      throw new KvError(
-        `KV entry limit reached (max ${KV_MAX_ENTRIES} keys per app).`,
-        409,
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${APP_KV_LOCK_NS}, hashtext(${appId}))`,
       );
-    }
-    const [row] = await tx
-      .insert(schema.appKv)
-      .values({ appId, key: k, value, secret: opts.secret ?? false })
-      .returning();
-    return toRecord(row);
-  });
+
+      const existing = await tx.query.appKv.findFirst({
+        where: (t, { eq: e, and: a }) => a(e(t.appId, appId), e(t.key, k)),
+        columns: { id: true, secret: true },
+      });
+
+      const secret = opts.secret ?? existing?.secret ?? false;
+      const stored = secret
+        ? {
+            secret: true,
+            value: null,
+            valueCiphertext: encryptKvSecret(
+              appId,
+              k,
+              value,
+              KV_VALUE_MAX_BYTES,
+            ),
+          }
+        : { secret: false, value, valueCiphertext: null };
+
+      if (existing) {
+        const [row] = await tx
+          .update(schema.appKv)
+          .set(stored)
+          .where(and(eq(schema.appKv.appId, appId), eq(schema.appKv.key, k)))
+          .returning();
+        // The caller supplied this plaintext in the same operation; do not
+        // decrypt the envelope merely to build the write response.
+        return toWrittenRecord(row, value);
+      }
+
+      const current = await tx.query.appKv.findMany({
+        where: (t, { eq: e }) => e(t.appId, appId),
+        columns: { id: true },
+      });
+      if (current.length >= KV_MAX_ENTRIES) {
+        throw new KvError(
+          `KV entry limit reached (max ${KV_MAX_ENTRIES} keys per app).`,
+          409,
+        );
+      }
+      const [row] = await tx
+        .insert(schema.appKv)
+        .values({ appId, key: k, ...stored })
+        .returning();
+      return toWrittenRecord(row, value);
+    });
+  } catch (error) {
+    if (error instanceof KvError) throw error;
+    // Drizzle includes bound parameters in database error messages. A secret
+    // write binds the encrypted envelope, so never propagate or attach the
+    // original error to a route, internal API, log, or server-function caller.
+    throw new KvError('Unable to store KV value.', 500);
+  }
 }
 
 /** Delete a key. Returns true when a row was removed. */

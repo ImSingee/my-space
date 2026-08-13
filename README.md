@@ -46,7 +46,8 @@ wished existed, built for an audience of one: you.
   other websites with your own logic. Install them from a private link that
   auto-updates every time you redeploy.
 - **Key-value storage and secrets.** Apps get a built-in key-value store for
-  tokens and config. Values marked secret stay masked in the UI.
+  tokens and config. Newly created or overwritten secret values are encrypted
+  at rest and stay masked in the UI.
 - **Your space, arranged your way.** Pin apps, dashboards, and workflows to
   the sidebar — even multiple shortcuts per app, each deep-linking to a
   specific screen. Rename apps and their URLs whenever you like.

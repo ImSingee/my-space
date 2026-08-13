@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const APP_ID = 'demo-app';
 const PASSWORD = '0123456789abcdef'.repeat(4);
+// Produced by the pre-refactor implementation with IV 0x07 repeated 12 times.
+const LEGACY_V1_FIXTURE =
+  'v1.BwcHBwcHBwcHBwcH.0XA3umaiGqJac5mF3bPHfCfXuC8xtcu2EcOJ2VzjHxiDFBTxJH4b_5Z4lmVOBKAQn3NOWN6E-BPhe2aQKOesOA.5sZ4BNA7IIBGOUghhQKp0Q';
 
 beforeEach(() => {
   vi.resetModules();
@@ -78,6 +81,12 @@ describe('app database passwords', () => {
     expect(first.split('.')[0]).toBe('v1');
     expect(decryptAppDbPassword(APP_ID, first)).toBe(PASSWORD);
     expect(decryptAppDbPassword(APP_ID, second)).toBe(PASSWORD);
+  });
+
+  it('decrypts a v1 ciphertext produced before the envelope refactor', async () => {
+    const { decryptAppDbPassword } = await loadPasswordModule();
+
+    expect(decryptAppDbPassword(APP_ID, LEGACY_V1_FIXTURE)).toBe(PASSWORD);
   });
 
   it('encrypts Data Table passwords in an independent authenticated domain', async () => {

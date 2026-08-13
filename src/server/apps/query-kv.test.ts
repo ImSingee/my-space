@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryAppKvRequest } from '~agent/protocol';
 
 vi.mock('~/db', async () => {
   const { createTestDb } = await import('~/db/test-db');
   return createTestDb();
 });
+
+vi.stubEnv('APP_URL', 'https://public.example.test');
+vi.stubEnv('SECRET', 'platform-secret');
 
 const { db, schema } = await import('~/db');
 const { queryAppKvRequestSchema } = await import('~agent/protocol');
@@ -45,6 +49,10 @@ beforeEach(async () => {
   await db.delete(schema.apps);
 });
 
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('queryAppKv guards', () => {
   it('requires a non-archived app with KV enabled', async () => {
     await seedApp('archived', { status: 'archived' });
@@ -74,6 +82,16 @@ describe('queryAppKv operations', () => {
       action: 'set',
       record: { key: 'api-token', value: null, secret: true },
     });
+    const stored = await db.query.appKv.findFirst({
+      where: (t, { and, eq: equals }) =>
+        and(equals(t.appId, 'secrets'), equals(t.key, 'api-token')),
+    });
+    expect(stored).toMatchObject({
+      value: null,
+      secret: true,
+    });
+    expect(stored?.valueCiphertext).toMatch(/^v1\./);
+    expect(stored?.valueCiphertext).not.toContain('plain-secret');
 
     const get = await queryAppKv('secrets', {
       action: 'get',
@@ -113,6 +131,83 @@ describe('queryAppKv operations', () => {
       action: 'list',
       items: [{ value: 'plain-secret', secret: true }],
       nextCursor: null,
+    });
+  });
+
+  it('masks a corrupted encrypted secret without decrypting it', async () => {
+    await seedApp('corrupted-secret');
+    await queryAppKv('corrupted-secret', {
+      action: 'set',
+      key: 'api-token',
+      value: 'never-leak-this',
+      secret: true,
+    });
+    const stored = await db.query.appKv.findFirst({
+      where: (t, { and, eq: equals }) =>
+        and(equals(t.appId, 'corrupted-secret'), equals(t.key, 'api-token')),
+    });
+    const envelope = stored?.valueCiphertext;
+    if (!stored || !envelope) throw new Error('Expected encrypted KV row.');
+    const last = envelope.at(-1);
+    const corrupted = `${envelope.slice(0, -1)}${last === 'A' ? 'B' : 'A'}`;
+    await db
+      .update(schema.appKv)
+      .set({ valueCiphertext: corrupted })
+      .where(eq(schema.appKv.id, stored.id));
+
+    await expect(
+      queryAppKv('corrupted-secret', {
+        action: 'get',
+        key: 'api-token',
+      }),
+    ).resolves.toMatchObject({
+      action: 'get',
+      record: { value: null, secret: true },
+    });
+    await expect(
+      queryAppKv('corrupted-secret', { action: 'list', limit: 100 }),
+    ).resolves.toMatchObject({
+      action: 'list',
+      items: [{ key: 'api-token', value: null, secret: true }],
+    });
+
+    const failedReveal = await queryAppKv('corrupted-secret', {
+      action: 'get',
+      key: 'api-token',
+      revealSecrets: true,
+    }).catch((error: unknown) => error);
+    expect(failedReveal).toMatchObject({ status: 500 });
+    expect(String((failedReveal as Error).message)).not.toContain(envelope);
+    expect(String((failedReveal as Error).message)).not.toContain(corrupted);
+    expect(String((failedReveal as Error).message)).not.toContain(
+      'never-leak-this',
+    );
+  });
+
+  it('applies the same mask and reveal contract to legacy plaintext secrets', async () => {
+    await seedApp('legacy-secret');
+    await db.insert(schema.appKv).values({
+      appId: 'legacy-secret',
+      key: 'api-token',
+      value: 'legacy-plaintext',
+      secret: true,
+    });
+
+    await expect(
+      queryAppKv('legacy-secret', { action: 'get', key: 'api-token' }),
+    ).resolves.toMatchObject({
+      action: 'get',
+      record: { value: null, secret: true },
+    });
+    await expect(
+      queryAppKv('legacy-secret', {
+        action: 'get',
+        key: 'api-token',
+        revealSecrets: true,
+      }),
+    ).resolves.toMatchObject({
+      action: 'get',
+      record: { value: 'legacy-plaintext', secret: true },
     });
   });
 

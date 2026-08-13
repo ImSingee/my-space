@@ -348,7 +348,7 @@ export const listAppKvFn = createServerFn({ method: 'GET' })
   .handler(async ({ data: id }): Promise<AppKvEntryView[]> => {
     await requireKvApp(id);
     const { listKv } = await import('./apps/kv');
-    const records = await listKv(id);
+    const records = await listKv(id, { revealSecrets: false });
     // Mask secret values: the manage UI may overwrite them but never read them.
     return records.map((r) => ({
       key: r.key,

@@ -638,6 +638,13 @@ secret values. `delete` is permanent. Omit `secret` when updating an existing
 key to preserve its current flag; a new key defaults to non-secret. The tool is
 unavailable before the first KV-capable deployment.
 
+Newly created or overwritten secret values are encrypted at rest with the
+platform's stable `SECRET`. Secret values written by a platform version that
+predates encryption remain plaintext until they are overwritten; reading them
+does not migrate them. Changing `SECRET` directly makes encrypted KV values
+unreadable. Encryption protects current database storage, not values returned to
+an authorized backend or Agent reveal, nor plaintext retained in older backups.
+
 The backend reads/writes over an injected `HATCH_KV_URL`, signing each request
 with `HATCH_SIGNING_SECRET` (HMAC over `<timestamp>.<rawBody>`, empty body for
 GET/DELETE) — the same handshake the platform uses for cron/webhooks. Requires a
@@ -664,8 +671,9 @@ async function kvGet(key: string): Promise<string | null> {
   return (await res.json()).value as string;
 }
 
-async function kvSet(key: string, value: string, secret = false) {
-  const body = JSON.stringify({ value, secret });
+async function kvSet(key: string, value: string, secret?: boolean) {
+  const payload = secret === undefined ? { value } : { value, secret };
+  const body = JSON.stringify(payload);
   const res = await fetch(`${KV}/${encodeURIComponent(key)}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', ...sign(body) },
@@ -678,8 +686,8 @@ async function kvSet(key: string, value: string, secret = false) {
 Endpoints: `GET {HATCH_KV_URL}` lists all entries (`{ items }`), `GET .../<key>`
 reads one, `PUT .../<key>` upserts `{ value, secret? }`, `DELETE .../<key>`
 removes. Mark a value `secret: true` to hide its plaintext in the manage UI
-(the owner can overwrite it there but not read it); your backend always reads the
-real value.
+(the owner can overwrite it there but not read it) and encrypt new writes at
+rest; your backend always reads the real value.
 
 ### userscripts (Tampermonkey)
 
