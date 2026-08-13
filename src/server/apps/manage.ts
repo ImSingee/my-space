@@ -182,10 +182,10 @@ async function setAppArchivedInner(
 
 /**
  * Change an app's mutable URL slug. The slug appears in the human-facing
- * `/apps/<slug>` and `/app/<slug>/` URLs, so this is a cheap rename: no rebuild
- * and no FK churn (technical APIs and storage are keyed off the immutable
- * `id`). Enforces shape and uniqueness; the unique index on `slug` is the final
- * backstop against races.
+ * `/app/<slug>` and `/app/<slug>/embed/` URLs, so this is a cheap rename: no
+ * rebuild and no FK churn (technical APIs and storage are keyed off the
+ * immutable `id`). Enforces shape and uniqueness; the unique index on `slug`
+ * is the final backstop against races.
  */
 export async function renameAppSlug(
   id: string,

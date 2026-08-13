@@ -2,7 +2,7 @@
 import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
-import { type NormalizedManifest, withPublicAppUrl } from './manifest';
+import { type NormalizedManifest, projectAppManifestUrls } from './manifest';
 
 /**
  * Resolve an internal Agent handle that may be either an app's immutable `id`
@@ -82,7 +82,7 @@ export async function normalizedManifestFor(
   });
   const manifest = (deployment?.manifestNormalized ??
     null) as NormalizedManifest | null;
-  return manifest ? withPublicAppUrl(manifest, app.slug) : null;
+  return manifest ? projectAppManifestUrls(manifest, id, app.slug) : null;
 }
 
 /**
@@ -115,6 +115,7 @@ export async function liveAppDeployment(
   const app = await db.query.apps.findFirst({
     where: (row, { eq }) => eq(row.id, id),
     columns: {
+      slug: true,
       status: true,
       currentDeploymentId: true,
       capabilities: true,
@@ -133,7 +134,12 @@ export async function liveAppDeployment(
     columns: { manifestNormalized: true },
   });
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
-  return manifest ? { deploymentId: app.currentDeploymentId, manifest } : null;
+  return manifest
+    ? {
+        deploymentId: app.currentDeploymentId,
+        manifest: projectAppManifestUrls(manifest, id, app.slug),
+      }
+    : null;
 }
 
 /**
@@ -171,7 +177,9 @@ export async function liveAppManifests(
   for (const app of servable) {
     const manifest = byDeploymentId.get(app.currentDeploymentId as string)
       ?.manifestNormalized as NormalizedManifest | null;
-    if (manifest) result.set(app.id, manifest);
+    if (manifest) {
+      result.set(app.id, projectAppManifestUrls(manifest, app.id, app.slug));
+    }
   }
   return result;
 }

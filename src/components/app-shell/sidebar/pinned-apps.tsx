@@ -136,7 +136,7 @@ export function PinnedApps() {
     appSlug: string;
     entryHash: string | null;
   }) => {
-    if (!isActive(`/apps/${pin.appSlug}`)) return false;
+    if (!isActive(`/app/${pin.appSlug}`)) return false;
     if ((pinCountByApp.get(pin.appId) ?? 0) <= 1) return true;
     return hostHash === (pin.entryHash ?? '');
   };
@@ -234,7 +234,7 @@ export function PinnedApps() {
               <NavLink
                 renderRoot={(props) => (
                   <Link
-                    to="/apps/$appSlug"
+                    to="/app/$appSlug"
                     params={{ appSlug: pin.appSlug }}
                     hash={pin.entryHash ?? undefined}
                     draggable={false}

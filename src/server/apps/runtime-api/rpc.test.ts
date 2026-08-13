@@ -1,0 +1,83 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  findApp: vi.fn<(options?: unknown) => Promise<unknown>>(),
+  getSession: vi.fn<(options: unknown) => Promise<unknown>>(),
+  proxyAppRequest:
+    vi.fn<
+      (
+        id: string,
+        request: Request,
+        stripPrefix: string,
+        forwardPrefix: string,
+        options: unknown,
+      ) => Promise<Response>
+    >(),
+}));
+
+vi.mock('~auth/server', () => ({
+  auth: { api: { getSession: mocks.getSession } },
+}));
+vi.mock('~/db', () => ({
+  db: { query: { apps: { findFirst: mocks.findApp } } },
+}));
+vi.mock('~server/apps/runtime', () => ({
+  proxyAppRequest: mocks.proxyAppRequest,
+}));
+
+import { handleRpcRequest } from './rpc';
+
+describe('public app RPC route', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mocks.findApp.mockResolvedValue({
+      status: 'deployed',
+      currentDeploymentId: 'deployment-1',
+      capabilities: { backend: true },
+      signingSecret: 'signing-secret',
+    });
+    mocks.proxyAppRequest.mockResolvedValue(new Response('proxied'));
+  });
+
+  it.each([
+    ['/api/app/app-id/rpc/todos.list', '/api/app/app-id/rpc'],
+    ['/api/apps/app-id/rpc/todos.list', '/api/apps/app-id/rpc'],
+  ])(
+    'strips the namespace used by the actual request: %s',
+    async (pathname, stripPrefix) => {
+      const request = new Request(`https://hatch.test${pathname}`, {
+        method: 'POST',
+        body: '{}',
+      });
+
+      const response = await handleRpcRequest({ request });
+
+      expect(response.status).toBe(200);
+      expect(mocks.proxyAppRequest).toHaveBeenCalledWith(
+        'app-id',
+        request,
+        stripPrefix,
+        '',
+        {
+          signWithSecret: 'signing-secret',
+          expectedDeploymentId: 'deployment-1',
+        },
+      );
+    },
+  );
+
+  it.each([
+    '/api/application/app-id/rpc',
+    '/api/appss/app-id/rpc',
+    '/api/app/app-id/rpc-method',
+  ])('rejects near-miss paths: %s', async (pathname) => {
+    const response = await handleRpcRequest({
+      request: new Request(`https://hatch.test${pathname}`),
+    });
+
+    expect(response.status).toBe(404);
+    expect(mocks.findApp).not.toHaveBeenCalled();
+    expect(mocks.proxyAppRequest).not.toHaveBeenCalled();
+  });
+});

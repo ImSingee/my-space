@@ -112,7 +112,7 @@ const aboutRoute = createRoute({
 const routeTree = rootRoute.addChildren([indexRoute, aboutRoute]);
 
 // Hash history keeps routing entirely client-side, which is required for apps
-// served from a static iframe under /app/<slug>/ with no server-side router.
+// served from a static iframe under /app/<slug>/embed/ with no server router.
 const router = createRouter({ routeTree, history: createHashHistory() });
 
 declare module '@tanstack/react-router' {

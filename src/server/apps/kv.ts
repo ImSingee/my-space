@@ -7,7 +7,7 @@
  * values keyed per app, no TTL/caching.
  *
  * Two callers share this module:
- * - the app backend, via the HMAC-signed `/api/apps/<id>/kv` route, which always
+ * - the app backend, via the HMAC-signed `/api/app/<id>/kv` route, which always
  *   sees plaintext (it's the app's own data); and
  * - the manage UI, via session-authed server fns, which masks `secret` values.
  */

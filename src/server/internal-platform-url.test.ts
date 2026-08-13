@@ -9,16 +9,16 @@ describe('internalPlatformUrl', () => {
   it('uses the platform default port', () => {
     vi.stubEnv('PORT', undefined);
 
-    expect(internalPlatformUrl('/api/apps/demo/kv')).toBe(
-      'http://localhost:3700/api/apps/demo/kv',
+    expect(internalPlatformUrl('/api/app/demo/kv')).toBe(
+      'http://localhost:3700/api/app/demo/kv',
     );
   });
 
   it('uses the configured platform port', () => {
     vi.stubEnv('PORT', '4711');
 
-    expect(internalPlatformUrl('/api/apps/demo/kv')).toBe(
-      'http://localhost:4711/api/apps/demo/kv',
+    expect(internalPlatformUrl('/api/app/demo/kv')).toBe(
+      'http://localhost:4711/api/app/demo/kv',
     );
   });
 

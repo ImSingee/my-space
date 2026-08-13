@@ -60,7 +60,7 @@ import {
 } from '~server/apps';
 import { setSidebarPin } from '~server/sidebar';
 
-export const Route = createFileRoute('/_app/apps/$appSlug/manage')({
+export const Route = createFileRoute('/_app/app/$appSlug/manage')({
   loader: async ({ params }) => {
     const app = await getAppBySlug({ data: params.appSlug });
     if (!app) {
@@ -164,7 +164,7 @@ function AppDetailPage() {
             <Button
               renderRoot={(props) => (
                 <Link
-                  to="/apps/$appSlug"
+                  to="/app/$appSlug"
                   params={{ appSlug: app.slug }}
                   {...props}
                 />
@@ -186,7 +186,7 @@ function AppDetailPage() {
               <Menu.Item
                 leftSection={<IconFileZip size={16} />}
                 component="a"
-                href={`/api/apps/${app.id}/download?mode=source`}
+                href={`/api/app/${app.id}/download?mode=source`}
                 download
                 disabled={!hasSource}
               >
@@ -195,7 +195,7 @@ function AppDetailPage() {
               <Menu.Item
                 leftSection={<IconGitBranch size={16} />}
                 component="a"
-                href={`/api/apps/${app.id}/download?mode=repo`}
+                href={`/api/app/${app.id}/download?mode=repo`}
                 download
                 disabled={!hasSource}
               >
@@ -292,9 +292,9 @@ function AppDetailPage() {
 
 /**
  * Editable URL-slug row. The slug is the only part of an app's identity that
- * users can change; it appears in the human-facing `/apps/<slug>` and
- * `/app/<slug>/` URLs. Renaming it never requires a rebuild because technical
- * APIs and storage are keyed off the immutable id.
+ * users can change; it appears in the human-facing `/app/<slug>` and
+ * `/app/<slug>/embed/` URLs. Renaming it never requires a rebuild because
+ * technical APIs and storage are keyed off the immutable id.
  */
 function SlugField({ appId, slug }: { appId: string; slug: string }) {
   const router = useRouter();
@@ -315,7 +315,7 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
       toast.success(`URL slug is now "${result.slug}"`);
       setEditing(false);
       void navigate({
-        to: '/apps/$appSlug/manage',
+        to: '/app/$appSlug/manage',
         params: { appSlug: result.slug },
         search: true,
         hash: true,
@@ -408,7 +408,7 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
               variant="subtle"
               color="gray"
               component="a"
-              href={`/app/${slug}/`}
+              href={`/app/${slug}/embed/`}
               target="_blank"
               aria-label="Open app"
             >

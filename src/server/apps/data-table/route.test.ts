@@ -30,7 +30,7 @@ vi.mock('~server/apps/data-table/realtime', () => ({
   subscribeDataChanges: mocks.subscribeDataChanges,
 }));
 
-import { handle } from '~/routes/api/apps/$appId/data/$.ts';
+import { handle } from '~/routes/api/app/$appId/data/$.ts';
 
 describe('managed Data Table runtime fence', () => {
   beforeEach(() => {
@@ -48,7 +48,7 @@ describe('managed Data Table runtime fence', () => {
 
     const response = await handle({
       request: new Request(
-        'https://hatch.test/api/apps/example/data/events?since=0',
+        'https://hatch.test/api/app/example/data/events?since=0',
       ),
     });
 
@@ -95,7 +95,7 @@ describe('managed Data Table runtime fence', () => {
     });
 
     const response = await handle({
-      request: new Request('https://hatch.test/api/apps/example/data/query', {
+      request: new Request('https://hatch.test/api/app/example/data/query', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -124,7 +124,7 @@ describe('managed Data Table runtime fence', () => {
 
     const response = await handle({
       request: new Request(
-        'https://hatch.test/api/apps/example/data/events?since=12&table=todos',
+        'https://hatch.test/api/app/example/data/events?since=12&table=todos',
         { headers: { 'x-hatch-data-deployment': 'deployment-v2' } },
       ),
     });
@@ -155,7 +155,7 @@ describe('managed Data Table runtime fence', () => {
 
       const response = await handle({
         request: new Request(
-          `https://hatch.test/api/apps/example/data/events?since=${since}`,
+          `https://hatch.test/api/app/example/data/events?since=${since}`,
           { headers: { 'x-hatch-data-deployment': 'deployment-v2' } },
         ),
       });
@@ -177,7 +177,7 @@ describe('managed Data Table runtime fence', () => {
     mocks.queryDataTable.mockRejectedValue(new Error('connection lost'));
 
     const response = await handle({
-      request: new Request('https://hatch.test/api/apps/example/data/query', {
+      request: new Request('https://hatch.test/api/app/example/data/query', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -203,7 +203,7 @@ describe('managed Data Table runtime fence', () => {
     mocks.queryDataTable.mockRejectedValue(validation.error);
 
     const response = await handle({
-      request: new Request('https://hatch.test/api/apps/example/data/query', {
+      request: new Request('https://hatch.test/api/app/example/data/query', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -235,7 +235,7 @@ describe('managed Data Table runtime fence', () => {
     );
 
     const response = await handle({
-      request: new Request('https://hatch.test/api/apps/example/data/mutate', {
+      request: new Request('https://hatch.test/api/app/example/data/mutate', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

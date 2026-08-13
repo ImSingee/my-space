@@ -7,8 +7,13 @@ vi.mock('~/db', async () => {
 });
 
 const { db, schema } = await import('~/db');
-const { appIdForSlug, normalizedManifestFor, resolveAppId } =
-  await import('./access');
+const {
+  appIdForSlug,
+  liveAppDeployment,
+  liveAppManifests,
+  normalizedManifestFor,
+  resolveAppId,
+} = await import('./access');
 
 beforeEach(async () => {
   await db.delete(schema.apps);
@@ -52,6 +57,13 @@ describe('normalizedManifestFor', () => {
       status: 'deployed',
       manifestNormalized: {
         app: { url: '/api/apps/01immutableid/app/', routes: [] },
+        widgets: [
+          {
+            id: 'summary',
+            url: '/api/apps/01immutableid/widget/summary',
+          },
+        ],
+        kv: { url: '/api/apps/01immutableid/kv' },
       },
     });
     await db
@@ -61,6 +73,60 @@ describe('normalizedManifestFor', () => {
 
     const manifest = await normalizedManifestFor('01immutableid');
 
-    expect(manifest?.app?.url).toBe('/app/human-readable-slug/');
+    expect(manifest?.app?.url).toBe('/app/human-readable-slug/embed/');
+    expect(manifest?.widgets[0]?.url).toBe(
+      '/api/app/01immutableid/widget/summary',
+    );
+    expect(manifest?.kv?.url).toBe('/api/app/01immutableid/kv');
+    const stored = await db.query.deployments.findFirst({
+      where: eq(schema.deployments.id, '01deployment'),
+    });
+    expect(stored?.manifestNormalized).toMatchObject({
+      app: { url: '/api/apps/01immutableid/app/' },
+      kv: { url: '/api/apps/01immutableid/kv' },
+    });
+  });
+
+  it('projects URLs for single and batched live serving lookups', async () => {
+    await db.insert(schema.deployments).values({
+      id: '01deployment',
+      appId: '01immutableid',
+      status: 'deployed',
+      manifestNormalized: {
+        widgets: [
+          {
+            id: 'summary',
+            url: '/api/apps/01immutableid/widget/summary',
+          },
+        ],
+      },
+    });
+    await db
+      .update(schema.apps)
+      .set({
+        status: 'deployed',
+        currentDeploymentId: '01deployment',
+        capabilities: {
+          database: false,
+          frontend: false,
+          widgets: true,
+          backend: false,
+          cron: false,
+          webhook: false,
+          kv: false,
+          userscripts: false,
+        },
+      })
+      .where(eq(schema.apps.id, '01immutableid'));
+
+    const single = await liveAppDeployment('01immutableid', 'widgets');
+    const batch = await liveAppManifests(['01immutableid'], 'widgets');
+
+    expect(single?.manifest.widgets[0]?.url).toBe(
+      '/api/app/01immutableid/widget/summary',
+    );
+    expect(batch.get('01immutableid')?.widgets[0]?.url).toBe(
+      '/api/app/01immutableid/widget/summary',
+    );
   });
 });

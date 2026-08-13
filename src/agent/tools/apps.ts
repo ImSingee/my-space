@@ -120,7 +120,7 @@ export function createAppTools(options: {
             ? detail.capabilities.join(', ')
             : 'none detected yet'
         }`,
-        m?.app ? `App URL: /app/${detail.slug}/` : null,
+        m?.app ? `App URL: ${m.app.url}` : null,
         m?.rpc ? `RPC: ${m.rpc.url} (${m.rpc.service})` : null,
         m && m.widgets.length > 0
           ? `Widgets: ${m.widgets.map((w) => `${w.id} (${w.url})`).join(', ')}`
@@ -215,9 +215,9 @@ export function createAppTools(options: {
       slug: Type.String({
         description:
           'kebab-case URL slug, e.g. "todo" or "habit-tracker". Used in the ' +
-          'human-facing /apps/<slug> and /app/<slug>/ URLs. It can be changed ' +
-          'later from the manage page, so it is not permanent; technical APIs ' +
-          'use the immutable app id.',
+          'human-facing /app/<slug> and /app/<slug>/embed/ URLs. It can be ' +
+          'changed later from the manage page, so it is not permanent; ' +
+          'technical APIs use the immutable app id.',
       }),
       name: Type.String({ description: 'Human-readable name.' }),
       description: Type.Optional(
@@ -346,7 +346,9 @@ export function createAppTools(options: {
           });
           const lines = [
             `Deployed "${detail.id}" (v${res.version}).`,
-            res.normalized.app ? `App (iframe): /app/${res.slug}/` : null,
+            res.normalized.app
+              ? `App (iframe): ${res.normalized.app.url}`
+              : null,
             res.normalized.widgets.length > 0
               ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
               : null,

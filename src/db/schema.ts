@@ -126,18 +126,18 @@ export type AgentRunStatus =
  *
  * `id` is an immutable internal key (a ULID for apps created after the
  * id/slug split; legacy apps keep their original kebab id). It keys the Git
- * repo, build artifacts, every `/api/apps/<id>/...` runtime URL, and all FKs,
+ * repo, build artifacts, every `/api/app/<id>/...` runtime URL, and all FKs,
  * so it never changes once an app exists.
  *
  * `slug` is the mutable, unique, human-facing URL segment used in both
- * `/apps/<slug>` and `/app/<slug>/`. Renaming it is cheap (no rebuild) because
- * nothing technical is keyed off it.
+ * `/app/<slug>` and `/app/<slug>/embed/`. Renaming it is cheap (no rebuild)
+ * because nothing technical is keyed off it.
  */
 export const apps = pgTable(
   'apps',
   {
     id: text().primaryKey(),
-    /** Mutable, unique URL slug for `/apps/<slug>` and `/app/<slug>/`. */
+    /** Mutable, unique URL slug for `/app/<slug>` and its `/embed/` content. */
     slug: text().notNull(),
     name: text().notNull(),
     description: text(),

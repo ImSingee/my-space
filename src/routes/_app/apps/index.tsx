@@ -97,7 +97,7 @@ function AppsPage() {
                     truncate
                     renderRoot={(props) => (
                       <Link
-                        to="/apps/$appSlug"
+                        to="/app/$appSlug"
                         params={{ appSlug: app.slug }}
                         {...props}
                         className={[props.className, classes.primaryLink]
@@ -122,7 +122,7 @@ function AppsPage() {
                   <Button
                     renderRoot={(props) => (
                       <Link
-                        to="/apps/$appSlug/manage"
+                        to="/app/$appSlug/manage"
                         params={{ appSlug: app.slug }}
                         {...props}
                       />

@@ -24,6 +24,7 @@ import {
   readBuildDeploymentMarker,
 } from './build-identity';
 import { appDatabaseRuntimeEnv } from './runtime-database';
+import { dataTableUrl, kvUrl } from './manifest';
 import {
   type BackendRuntimeSnapshot,
   getBackendSnapshot,
@@ -743,11 +744,11 @@ async function startBackend(
   // URL, signing each request with HATCH_SIGNING_SECRET. Inject the endpoint so
   // the app doesn't hardcode the platform origin. Relative URLs have no host
   // inside the subprocess, so use the platform's loopback HTTP endpoint.
-  const kvUrl = appRow.capabilities?.kv
-    ? internalPlatformUrl(`/api/apps/${id}/kv`)
+  const kvBaseUrl = appRow.capabilities?.kv
+    ? internalPlatformUrl(kvUrl(id))
     : null;
-  const dataUrl = appRow.capabilities?.dataTable
-    ? internalPlatformUrl(`/api/apps/${id}/data`)
+  const dataBaseUrl = appRow.capabilities?.dataTable
+    ? internalPlatformUrl(dataTableUrl(id))
     : null;
 
   // Bundles may read only their fixed asset directory and, when enabled, the
@@ -789,8 +790,8 @@ async function startBackend(
       ...backendArtifactEnv(buildDir, backendArtifact),
       ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
-      ...(kvUrl ? { HATCH_KV_URL: kvUrl } : {}),
-      ...(dataUrl ? { HATCH_DATA_URL: dataUrl } : {}),
+      ...(kvBaseUrl ? { HATCH_KV_URL: kvBaseUrl } : {}),
+      ...(dataBaseUrl ? { HATCH_DATA_URL: dataBaseUrl } : {}),
       HATCH_DEPLOYMENT_ID: backendDeploymentId,
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1098,7 +1099,7 @@ const MAX_SIGNED_BODY_BYTES = 1024 * 1024;
 /**
  * Reverse-proxy a platform request to the app's Deno backend.
  * `stripPrefix` is removed from the pathname before forwarding (e.g. the
- * `/api/apps/<id>/rpc` Connect base path).
+ * `/api/app/<id>/rpc` Connect base path).
  *
  * When `signWithSecret` is set the body is buffered and signed with the per-app
  * key (HMAC over `<timestamp>.<body>`), forwarding `x-hatch-timestamp` +

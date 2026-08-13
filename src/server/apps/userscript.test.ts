@@ -9,14 +9,14 @@ import {
 const ctx: UserscriptRenderContext = {
   version: 7,
   namespace: 'hatch/app/demo/watch',
-  downloadUrl: 'https://host/api/apps/demo/userscripts/watch.user.js?token=abc',
-  updateUrl: 'https://host/api/apps/demo/userscripts/watch.user.js?token=abc',
+  downloadUrl: 'https://host/api/app/demo/userscripts/watch.user.js?token=abc',
+  updateUrl: 'https://host/api/app/demo/userscripts/watch.user.js?token=abc',
 };
 
 const baseScript: NormalizedUserscript = {
   id: 'watch',
   name: 'Watch',
-  url: '/api/apps/demo/userscripts/watch.user.js',
+  url: '/api/app/demo/userscripts/watch.user.js',
   matches: ['https://example.com/*'],
   grants: [],
   connects: [],

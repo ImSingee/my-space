@@ -10,7 +10,7 @@
  *        pnpm exec tsx scripts/verify-f12.ts
  */
 import { db } from '../src/db';
-import { handle } from '../src/routes/api/apps/$appId/kv/$';
+import { handle } from '../src/routes/api/app/$appId/kv/$';
 import {
   countKv,
   deleteKv,
@@ -156,7 +156,7 @@ async function main() {
   );
 
   // --- signed backend route ---
-  const base = `http://localhost/api/apps/${appId}/kv`;
+  const base = `http://localhost/api/app/${appId}/kv`;
   const signedReq = (method: string, key: string, body?: string): Request => {
     const ts = String(Date.now());
     const headers: Record<string, string> = {
@@ -266,7 +266,7 @@ async function main() {
   }
   {
     const ts = String(Date.now());
-    const req = new Request(`http://localhost/api/apps/does-not-exist/kv/x`, {
+    const req = new Request(`http://localhost/api/app/does-not-exist/kv/x`, {
       method: 'GET',
       headers: {
         [HATCH_TIMESTAMP_HEADER]: ts,

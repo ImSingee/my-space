@@ -34,7 +34,7 @@ import { useAppDeploymentUpdate } from '~components/apps/use-app-deployment-upda
 import { getAppBySlug, getAppDeploymentRevision } from '~server/apps';
 import classes from './app-view.module.css';
 
-export const Route = createFileRoute('/_app/apps/$appSlug/')({
+export const Route = createFileRoute('/_app/app/$appSlug/')({
   loader: async ({ params }) => {
     const app = await getAppBySlug({ data: params.appSlug });
     if (!app) throw notFound();
@@ -58,7 +58,7 @@ export function AppView() {
   const [reloading, setReloading] = useState(false);
   // Both human-facing routes use the same mutable slug. Immutable ids stay in
   // technical API paths and never appear in these links.
-  const src = `/app/${app.slug}/`;
+  const src = `/app/${app.slug}/embed/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
   const { canOpen, hasLiveDeployment } = getAppViewState({
     status: app.status,
@@ -288,7 +288,7 @@ export function AppView() {
                 leftSection={<IconSettings size={15} stroke={1.7} />}
                 renderRoot={(props) => (
                   <Link
-                    to="/apps/$appSlug/manage"
+                    to="/app/$appSlug/manage"
                     params={{ appSlug: app.slug }}
                     {...props}
                   />
@@ -344,7 +344,7 @@ export function AppView() {
               leftSection={<IconSettings size={16} stroke={1.7} />}
               renderRoot={(props) => (
                 <Link
-                  to="/apps/$appSlug/manage"
+                  to="/app/$appSlug/manage"
                   params={{ appSlug: app.slug }}
                   {...props}
                 />

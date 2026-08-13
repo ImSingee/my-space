@@ -397,8 +397,9 @@ export const APP_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * Canonical app-slug shape: kebab-case, must start with a letter. Used in the
- * mutable, human-facing `/apps/<slug>` and `/app/<slug>/` URLs. Stricter than
- * `APP_ID_RE` so slugs stay readable and never collide with a bare numeric id.
+ * mutable, human-facing `/app/<slug>` and `/app/<slug>/embed/` URLs. Stricter
+ * than `APP_ID_RE` so slugs stay readable and never collide with a bare
+ * numeric id.
  */
 export const APP_SLUG_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -649,9 +650,9 @@ export type NormalizedManifest = {
   api?: AppApi;
 };
 
-/** Root path the platform serves an app's runtime assets + RPC under. */
+/** Root path the platform serves an app's runtime APIs and assets under. */
 export function appBasePath(id: string): string {
-  return `/api/apps/${id}`;
+  return `/api/app/${id}`;
 }
 
 /** Stable id-based asset URL persisted in deployment manifests. */
@@ -660,19 +661,42 @@ export function appAssetUrl(id: string): string {
 }
 
 /**
- * Replace the persisted build-time app URL with the app's current public slug.
- * Deployment manifests are immutable and keyed by id, while slugs may change
- * without a rebuild, so every outward-facing manifest view must project this
- * field at read time instead of trusting the stored URL.
+ * Project every app-owned URL from authoritative app identity at read time.
+ * Deployment manifests are immutable, may contain legacy `/api/apps/...`
+ * values, and are keyed by id while slugs may change without a rebuild. Every
+ * outward-facing manifest view therefore derives fresh canonical URLs rather
+ * than trusting or rewriting the stored JSONB artifact.
  */
-export function withPublicAppUrl(
+export function projectAppManifestUrls(
   manifest: NormalizedManifest,
+  appId: string,
   slug: string,
 ): NormalizedManifest {
-  if (!manifest.app) return manifest;
-  const url = `/app/${slug}/`;
-  if (manifest.app.url === url) return manifest;
-  return { ...manifest, app: { ...manifest.app, url } };
+  return {
+    ...manifest,
+    ...(manifest.app
+      ? { app: { ...manifest.app, url: `/app/${slug}/embed/` } }
+      : {}),
+    ...(manifest.widgets
+      ? {
+          widgets: manifest.widgets.map((widget) => ({
+            ...widget,
+            url: widgetUrl(appId, widget.id),
+          })),
+        }
+      : {}),
+    ...(manifest.userscripts
+      ? {
+          userscripts: manifest.userscripts.map((script) => ({
+            ...script,
+            url: userscriptDownloadPath(appId, script.id),
+          })),
+        }
+      : {}),
+    ...(manifest.rpc ? { rpc: { ...manifest.rpc, url: rpcUrl(appId) } } : {}),
+    ...(manifest.kv ? { kv: { url: kvUrl(appId) } } : {}),
+    ...(manifest.dataTable ? { dataTable: { url: dataTableUrl(appId) } } : {}),
+  };
 }
 
 export function widgetUrl(id: string, widgetId: string): string {
