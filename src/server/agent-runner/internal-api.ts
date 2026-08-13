@@ -11,6 +11,8 @@
  *   POST /internal/api/apps/:handle/rollback    → { version }
  *   POST /internal/api/apps/:handle/query-db    → { text, rowCount }
  *   POST /internal/api/apps/:handle/query-kv    → QueryAppKvResponse
+ *   POST /internal/api/apps/:handle/query-data-table
+ *                                                → QueryAppDataTableResponse
  *   GET  /internal/api/workflows                → WorkflowSummaryForAgent[]
  *   GET  /internal/api/workflows/:id            → WorkflowDetailForAgent (404)
  *   POST /internal/api/workflows                → CreateWorkflowResult
@@ -23,6 +25,7 @@ import {
   createAppRequestSchema,
   createWorkflowRequestSchema,
   deploySourceRequestSchema,
+  queryAppDataTableRequestSchema,
   queryAppDbRequestSchema,
   queryAppKvRequestSchema,
   rollbackRequestSchema,
@@ -43,27 +46,55 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
-    req.on('data', (chunk: Buffer) => {
+    let settled = false;
+    const cleanup = () => {
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('aborted', onAborted);
+      req.off('error', onError);
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const succeed = (value: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const onData = (chunk: Buffer) => {
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
         req.destroy();
-        reject(new AppError('Payload too large.', 413));
+        fail(new AppError('Payload too large.', 413));
         return;
       }
       chunks.push(chunk);
-    });
-    req.on('end', () => {
+    };
+    const onEnd = () => {
       if (chunks.length === 0) {
-        resolve(undefined);
+        succeed(undefined);
         return;
       }
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        succeed(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch {
-        reject(new AppError('Invalid JSON body.', 400));
+        fail(new AppError('Invalid JSON body.', 400));
       }
-    });
-    req.on('error', reject);
+    };
+    const onAborted = () => {
+      fail(new AppError('Request body was aborted.', 400));
+    };
+    const onError = (error: Error) => fail(error);
+
+    req.on('data', onData);
+    req.once('end', onEnd);
+    req.once('aborted', onAborted);
+    req.once('error', onError);
+    if (req.destroyed && !req.complete) onAborted();
   });
 }
 
@@ -296,6 +327,36 @@ async function handleApps(
     const body = queryAppKvRequestSchema.parse(await readJsonBody(req));
     const { queryAppKv } = await import('~server/apps/query-kv');
     json(res, 200, await queryAppKv(id, body));
+    return;
+  }
+
+  if (action === 'query-data-table' && method === 'POST') {
+    // Register before any await so a runner disconnect cannot be missed while
+    // resolving the App, reading the body, or loading the service module.
+    const abort = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) abort.abort();
+    };
+    res.once('close', onClose);
+    const bodyPromise = readJsonBody(req);
+    const [id, rawBody, { queryAppDataTable }] = await Promise.all([
+      resolveApp(handle),
+      bodyPromise,
+      import('~server/apps/query-data-table'),
+    ]);
+    const body = queryAppDataTableRequestSchema.parse(rawBody);
+    if (body.action !== 'raw_sql') {
+      res.off('close', onClose);
+    }
+    json(
+      res,
+      200,
+      await queryAppDataTable(
+        id,
+        body,
+        body.action === 'raw_sql' ? abort.signal : undefined,
+      ),
+    );
     return;
   }
 

@@ -14,7 +14,7 @@ import type { AgentAttachmentRef } from './attachments';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -394,6 +394,198 @@ export type QueryAppKvResponse =
   | { action: 'get'; record: QueryAppKvRecord | null }
   | { action: 'set'; record: QueryAppKvRecord }
   | { action: 'delete'; ok: boolean };
+
+export type QueryAppDataTableJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | QueryAppDataTableJsonValue[]
+  | { [key: string]: QueryAppDataTableJsonValue };
+
+export const QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH = 60_000;
+
+const queryAppDataTableJsonValueSchema: z.ZodType<QueryAppDataTableJsonValue> =
+  z.lazy(() =>
+    z.union([
+      z.string(),
+      z.number().finite(),
+      z.boolean(),
+      z.null(),
+      z.array(queryAppDataTableJsonValueSchema),
+      z.record(z.string(), queryAppDataTableJsonValueSchema),
+    ]),
+  );
+
+const queryAppDataTableWhereSchema = z
+  .object({
+    field: z.string().min(1),
+    op: z.enum(['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in']),
+    value: queryAppDataTableJsonValueSchema,
+  })
+  .strict();
+
+const queryAppDataTableInspectRequestSchema = z
+  .object({
+    action: z.literal('inspect'),
+    table: z.string().min(1).optional(),
+  })
+  .strict();
+
+const queryAppDataTableQueryRequestSchema = z
+  .object({
+    action: z.literal('query'),
+    table: z.string().min(1),
+    where: z.array(queryAppDataTableWhereSchema).max(16).default([]),
+    orderBy: z
+      .object({
+        field: z.string().min(1),
+        direction: z.enum(['asc', 'desc']).default('asc'),
+      })
+      .strict()
+      .optional(),
+    cursor: z
+      .string()
+      .min(1)
+      .max(QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH)
+      .optional(),
+    limit: z.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+
+const queryAppDataTableMutationSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('insert'),
+      table: z.string().min(1),
+      value: z.record(z.string(), queryAppDataTableJsonValueSchema),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('patch'),
+      table: z.string().min(1),
+      id: z.string().min(1),
+      value: z.record(z.string(), queryAppDataTableJsonValueSchema),
+      unset: z.array(z.string().min(1)).default([]),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('increment'),
+      table: z.string().min(1),
+      id: z.string().min(1),
+      field: z.string().min(1),
+      amount: z.number().finite(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('delete'),
+      table: z.string().min(1),
+      id: z.string().min(1),
+    })
+    .strict(),
+]);
+
+const queryAppDataTableMutateRequestSchema = z
+  .object({
+    action: z.literal('mutate'),
+    operations: z.array(queryAppDataTableMutationSchema).min(1).max(100),
+  })
+  .strict();
+
+const queryAppDataTableRawSqlRequestSchema = z
+  .object({
+    action: z.literal('raw_sql'),
+    sql: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim().length > 0, 'SQL must not be blank.'),
+    timeoutMs: z.number().int().min(1_000).max(1_800_000).default(30_000),
+  })
+  .strict();
+
+export const queryAppDataTableRequestSchema = z.discriminatedUnion('action', [
+  queryAppDataTableInspectRequestSchema,
+  queryAppDataTableQueryRequestSchema,
+  queryAppDataTableMutateRequestSchema,
+  queryAppDataTableRawSqlRequestSchema,
+]);
+/** Request accepted from the runner; fields with defaults remain optional. */
+export type QueryAppDataTableRequest = z.input<
+  typeof queryAppDataTableRequestSchema
+>;
+/** Strictly parsed request used by the platform implementation. */
+export type ParsedQueryAppDataTableRequest = z.output<
+  typeof queryAppDataTableRequestSchema
+>;
+
+export type QueryAppDataTableSchema = {
+  version: 1;
+  tables: Record<
+    string,
+    {
+      fields: Record<
+        string,
+        {
+          kind:
+            | 'string'
+            | 'integer'
+            | 'number'
+            | 'boolean'
+            | 'datetime'
+            | 'json'
+            | 'enum'
+            | 'reference';
+          optional: boolean;
+          default?: QueryAppDataTableJsonValue;
+          enumValues?: string[];
+          referenceTable?: string;
+          renamedFrom?: string;
+        }
+      >;
+      indexes: Array<{
+        name: string;
+        fields: string[];
+        unique: boolean;
+      }>;
+      renamedFrom?: string;
+    }
+  >;
+};
+
+export type QueryAppDataTableResponse =
+  | {
+      action: 'inspect';
+      data: {
+        schema: QueryAppDataTableSchema;
+        schemaHash: string;
+        tables: Array<{ name: string; rowCount: number }>;
+        truncated?: boolean;
+      } | null;
+    }
+  | {
+      action: 'query';
+      items: Array<Record<string, QueryAppDataTableJsonValue>>;
+      cursor: string | null;
+      revision: number;
+      truncated: boolean;
+    }
+  | {
+      action: 'mutate';
+      results: Array<Record<string, QueryAppDataTableJsonValue> | null>;
+      revision: number;
+    }
+  | {
+      action: 'raw_sql';
+      results: Array<{
+        command: string;
+        count: number | null;
+        rows: Array<Record<string, unknown>>;
+      }>;
+      truncated: boolean;
+    };
 
 /** Response of GET .../source: the canonical repo master as a git bundle. */
 export type SourceBundleResponse = {

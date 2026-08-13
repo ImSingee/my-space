@@ -87,9 +87,10 @@ apps/<id>/
   \`connectNodeAdapter\`. Keep handlers small and serverless-style. When the
   manifest enables the database capability, the platform injects
   \`DATABASE_URL\` for persistence.
-- **Database**: when the app needs persistence it gets its OWN Postgres
-  database. Use \`query_app_db\` to create tables and inspect data (it
-  provisions the database on first use).
+- **Database**: an app with the full \`database\` capability gets its OWN
+  Postgres database. Use \`query_app_db\` to create tables and inspect data (it
+  provisions that database on first use). This is separate from managed Data
+  Tables.
 - **Widgets**: standalone ES modules shown on the platform dashboard. Each
   widget file must \`export function mount(element, context)\` that renders into
   the given element and returns an unmount function. \`context\` carries the
@@ -137,6 +138,16 @@ apps/<id>/
     approval before retrying with
     \`allow_destructive_data_migration: true\` and the returned
     \`data_migration_approval_token\`. Never reuse a token for a changed preview.
+    After a Data Table-capable deployment, manage live data with
+    \`query_app_data_table\`: inspect the schema when unknown, then prefer its
+    structured \`query\` and \`mutate\` actions. Its \`raw_sql\` action is a
+    dangerous last resort only when structured operations cannot express the
+    required joins, aggregates, or complex data repair. raw_sql may query or
+    modify existing rows only using SELECT, INSERT, UPDATE, DELETE, MERGE, CTEs,
+    joins, aggregates, or upserts; never use it for DDL, TRUNCATE, maintenance,
+    transaction control, permissions, roles, databases, or \`_hatch\` objects.
+    The platform does not enforce that SQL rule, so you must obey it. Schema
+    changes always go through \`data/schema.ts\` and \`deploy_app\`.
   - \`userscripts\`: publish Tampermonkey userscripts. Declare a top-level
     \`userscripts\` array (each \`{ id, name, entry, matches, ... }\`); the build
     bundles each \`entry\` to a browser script and the platform serves a
@@ -214,9 +225,12 @@ apps/<id>/
    call checkout again with the same source path, then fetch and rebase onto
    \`origin/master\`, resolve conflicts, and retry.
 6. For simple structured application data, prefer the managed \`dataTable\`
-   capability and define \`data/schema.ts\`; use the full Postgres database and
-   \`query_app_db\` only for arbitrary SQL, joins, aggregates, or ORM control.
-   Database-backed apps should still create their own tables on startup.
+   capability and define \`data/schema.ts\`. Use \`query_app_data_table\`
+   \`inspect\`, \`query\`, and \`mutate\` for its live data. Use its \`raw_sql\`
+   action only as a last resort for data work the structured actions cannot
+   express, and never for DDL or \`_hatch\`. Use the separate full Postgres
+   database and \`query_app_db\` only when the app needs arbitrary SQL or ORM
+   control; database-backed apps should still create their own tables on startup.
 7. Call \`deploy_app\` with that exact \`source_path\` to publish the current
    clean commit, tag it as a
    deployment, build an artifact, and start it. Always pass a concise

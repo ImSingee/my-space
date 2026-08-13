@@ -465,6 +465,39 @@ the source schema, target schema, and generated SQL; use a new token whenever
 the preview changes. Rollback restores code only and warns when the live Data
 Table schema differs; it never runs a down migration.
 
+After the app has been deployed with `dataTable` enabled, use
+`query_app_data_table` to inspect and manage its live data:
+
+- `inspect` returns the live schema, fields, defaults, indexes, schema hash,
+  and estimated row counts. Use it first whenever the live schema is unknown.
+- `query` supports up to 16 AND-combined filters, ordering, and cursor
+  pagination. It returns at most 200 rows; continue with the returned cursor.
+- `mutate` atomically applies up to 100 insert, patch, increment, or exact-ID
+  delete operations. If one operation fails, the entire batch rolls back.
+- `raw_sql` is dangerous and is only a last resort when the structured query
+  and mutation actions cannot express required joins, aggregates, or complex
+  data repair.
+
+raw SQL may only query or modify rows in existing `data` tables. Allowed data
+operations include `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, CTEs, joins,
+aggregates, and upserts. Never use it for DDL, `TRUNCATE`,
+maintenance commands, transaction control, permissions, roles, databases, or
+anything in `_hatch`. This is an Agent instruction, not a SQL parser or
+database permission boundary; the platform sends the SQL through unchanged, so
+you must follow it even though the database could technically execute forbidden
+statements. Schema changes always go through `data/schema.ts` and `deploy_app`.
+
+Raw SQL may contain multiple statements. Set `timeout_ms` only when the
+30-second default is insufficient; it accepts 1000 through 1800000 milliseconds
+and applies to the Raw SQL database operation, including statement execution.
+It does not cover App resolution or capability preflight. Raw SQL resolves
+unqualified table names against `data` and then `public`, uses physical column
+names such as `created_at` and `updated_at`, and bypasses logical field mapping,
+generated IDs, value validation, managed `updatedAt` behavior, and row-size
+checks. Inspect the schema first and preserve those contracts yourself.
+If output is truncated, rerun with narrower columns, `LIMIT`, keyset conditions,
+or SQL substring functions.
+
 Frontend example:
 
 ```ts
