@@ -117,6 +117,7 @@ export const TOOL_LABELS: Record<string, string> = {
   deploy_app: 'Deploy app',
   rollback_app: 'Rollback app',
   query_app_db: 'Query app DB',
+  query_app_data_table: 'Query app Data Table',
   query_app_kv: 'Query app KV',
   list_workflows: 'List workflows',
   get_workflow: 'Get workflow',

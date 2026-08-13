@@ -6,13 +6,15 @@ import {
   parseHubMessage,
   parseRunnerMessage,
   PROTOCOL_VERSION,
+  QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH,
+  queryAppDataTableRequestSchema,
   queryAppKvRequestSchema,
   scaffoldFileSchema,
 } from './protocol';
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v4 for the query_app_kv REST contract', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it('uses protocol v5 for the Data Table REST contract', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 
   it('parses runner.hello', () => {
@@ -296,6 +298,155 @@ describe('query app KV requests', () => {
       { action: 'unknown' },
     ]) {
       expect(queryAppKvRequestSchema.safeParse(input).success).toBe(false);
+    }
+  });
+});
+
+describe('query app Data Table requests', () => {
+  it('parses inspect and defaults structured query fields', () => {
+    expect(queryAppDataTableRequestSchema.parse({ action: 'inspect' })).toEqual(
+      { action: 'inspect' },
+    );
+    expect(
+      queryAppDataTableRequestSchema.parse({
+        action: 'inspect',
+        table: 'todos',
+      }),
+    ).toEqual({ action: 'inspect', table: 'todos' });
+    expect(
+      queryAppDataTableRequestSchema.parse({
+        action: 'query',
+        table: 'todos',
+      }),
+    ).toEqual({
+      action: 'query',
+      table: 'todos',
+      where: [],
+      limit: 50,
+    });
+    expect(
+      queryAppDataTableRequestSchema.parse({
+        action: 'query',
+        table: 'todos',
+        where: [{ field: 'done', op: 'eq', value: false }],
+        orderBy: { field: 'createdAt' },
+        cursor: 'next-page',
+        limit: 200,
+      }),
+    ).toEqual({
+      action: 'query',
+      table: 'todos',
+      where: [{ field: 'done', op: 'eq', value: false }],
+      orderBy: { field: 'createdAt', direction: 'asc' },
+      cursor: 'next-page',
+      limit: 200,
+    });
+  });
+
+  it('parses every mutation and defaults patch unset', () => {
+    expect(
+      queryAppDataTableRequestSchema.parse({
+        action: 'mutate',
+        operations: [
+          { type: 'insert', table: 'todos', value: { title: 'Ship' } },
+          {
+            type: 'patch',
+            table: 'todos',
+            id: 'todo-1',
+            value: { done: true },
+          },
+          {
+            type: 'increment',
+            table: 'stats',
+            id: 'stats-1',
+            field: 'count',
+            amount: 1,
+          },
+          { type: 'delete', table: 'todos', id: 'todo-2' },
+        ],
+      }),
+    ).toEqual({
+      action: 'mutate',
+      operations: [
+        { type: 'insert', table: 'todos', value: { title: 'Ship' } },
+        {
+          type: 'patch',
+          table: 'todos',
+          id: 'todo-1',
+          value: { done: true },
+          unset: [],
+        },
+        {
+          type: 'increment',
+          table: 'stats',
+          id: 'stats-1',
+          field: 'count',
+          amount: 1,
+        },
+        { type: 'delete', table: 'todos', id: 'todo-2' },
+      ],
+    });
+  });
+
+  it('defaults and bounds raw SQL timeout without limiting statements', () => {
+    expect(
+      queryAppDataTableRequestSchema.parse({
+        action: 'raw_sql',
+        sql: 'select 1; select 2',
+      }),
+    ).toEqual({
+      action: 'raw_sql',
+      sql: 'select 1; select 2',
+      timeoutMs: 30_000,
+    });
+    expect(
+      queryAppDataTableRequestSchema.parse({
+        action: 'raw_sql',
+        sql: 'select pg_sleep(1)',
+        timeoutMs: 1_800_000,
+      }),
+    ).toMatchObject({ timeoutMs: 1_800_000 });
+  });
+
+  it('rejects invalid bounds and action-inappropriate or nested fields', () => {
+    const tooManyFilters = Array.from({ length: 17 }, () => ({
+      field: 'done',
+      op: 'eq',
+      value: false,
+    }));
+    for (const input of [
+      { action: 'inspect', limit: 1 },
+      { action: 'query' },
+      { action: 'query', table: 'todos', limit: 0 },
+      { action: 'query', table: 'todos', limit: 201 },
+      { action: 'query', table: 'todos', where: tooManyFilters },
+      {
+        action: 'query',
+        table: 'todos',
+        cursor: 'x'.repeat(QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH + 1),
+      },
+      {
+        action: 'query',
+        table: 'todos',
+        orderBy: { field: 'createdAt', extra: true },
+      },
+      { action: 'mutate', operations: [] },
+      {
+        action: 'mutate',
+        operations: [
+          { type: 'delete', table: 'todos', id: 'todo-1', extra: true },
+        ],
+      },
+      { action: 'raw_sql', sql: '   ' },
+      { action: 'raw_sql', sql: 'select 1', timeoutMs: 999 },
+      { action: 'raw_sql', sql: 'select 1', timeoutMs: 1_800_001 },
+      { action: 'raw_sql', sql: 'select 1', timeoutMs: 1_000.5 },
+      { action: 'raw_sql', sql: 'select 1', table: 'todos' },
+      { action: 'unknown' },
+    ]) {
+      expect(queryAppDataTableRequestSchema.safeParse(input).success).toBe(
+        false,
+      );
     }
   });
 });

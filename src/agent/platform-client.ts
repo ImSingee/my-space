@@ -15,6 +15,8 @@ import type {
   WorkflowSummaryForAgent,
 } from '~server/workflows/inspect';
 import type {
+  QueryAppDataTableRequest,
+  QueryAppDataTableResponse,
   QueryAppKvRequest,
   QueryAppKvResponse,
   ScaffoldFile,
@@ -107,6 +109,11 @@ export type PlatformClient = {
     input: QueryAppKvRequest,
     signal?: AbortSignal,
   ): Promise<QueryAppKvResponse>;
+  queryAppDataTable(
+    handle: string,
+    input: QueryAppDataTableRequest,
+    signal?: AbortSignal,
+  ): Promise<QueryAppDataTableResponse>;
 
   listWorkflows(): Promise<WorkflowSummaryForAgent[]>;
   getWorkflow(id: string): Promise<WorkflowDetailForAgent | null>;

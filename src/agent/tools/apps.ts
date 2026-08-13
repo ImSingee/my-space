@@ -17,7 +17,11 @@ import {
   withSourceWorkspaceLock,
 } from '../local-sources';
 import type { PlatformClient } from '../platform-client';
-import { queryAppKvRequestSchema } from '../protocol';
+import {
+  QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH,
+  queryAppDataTableRequestSchema,
+  queryAppKvRequestSchema,
+} from '../protocol';
 import { writeScaffoldFiles } from '../scaffold-files';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
@@ -512,6 +516,227 @@ export function createAppTools(options: {
     },
   });
 
+  const queryAppDataTable = tool({
+    name: 'query_app_data_table',
+    label: 'Query app Data Table',
+    description:
+      "Inspect, query, or mutate a deployed app's managed Data Tables. " +
+      'Always prefer the structured inspect, query, and mutate actions. ' +
+      'raw_sql is a dangerous last resort only when the structured actions ' +
+      'cannot express the required joins, aggregates, or complex data repair. ' +
+      'raw_sql may only query or modify rows with SELECT, INSERT, UPDATE, ' +
+      'DELETE, MERGE, CTEs, joins, aggregates, or upserts. Never use raw_sql ' +
+      'for DDL, TRUNCATE, maintenance, transaction control, permissions, ' +
+      'roles, databases, or any _hatch object. This is an instruction, not a ' +
+      'runtime SQL restriction. Raw SQL bypasses managed validation and may ' +
+      'contain multiple statements; unqualified tables resolve in data then ' +
+      'public. timeout_ms controls the Raw SQL database operation only; it ' +
+      'does not cover App resolution or capability preflight and defaults to ' +
+      '30000.',
+    // Keep the root object-shaped: the Anthropic adapter forwards root
+    // properties/required fields and would discard a root anyOf schema.
+    parameters: Type.Object({
+      id: Type.String({ description: 'App id or slug.' }),
+      action: Type.Union([
+        Type.Literal('inspect'),
+        Type.Literal('query'),
+        Type.Literal('mutate'),
+        Type.Literal('raw_sql'),
+      ]),
+      table: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'Inspect: optional table to inspect. Query: required table name.',
+        }),
+      ),
+      where: Type.Optional(
+        Type.Array(
+          Type.Object({
+            field: Type.String({ minLength: 1 }),
+            op: Type.Union([
+              Type.Literal('eq'),
+              Type.Literal('ne'),
+              Type.Literal('gt'),
+              Type.Literal('gte'),
+              Type.Literal('lt'),
+              Type.Literal('lte'),
+              Type.Literal('in'),
+            ]),
+            value: Type.Any({
+              description:
+                'JSON value to compare; use an array with the in operator.',
+            }),
+          }),
+          {
+            maxItems: 16,
+            description: 'Query only: AND-combined filters.',
+          },
+        ),
+      ),
+      order_by: Type.Optional(
+        Type.Object(
+          {
+            field: Type.String({ minLength: 1 }),
+            direction: Type.Optional(
+              Type.Union([Type.Literal('asc'), Type.Literal('desc')]),
+            ),
+          },
+          { description: 'Query only: sort field and direction.' },
+        ),
+      ),
+      cursor: Type.Optional(
+        Type.String({
+          maxLength: QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH,
+          description: 'Query only: cursor returned by the previous call.',
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 200,
+          description: 'Query only: maximum rows. Defaults to 50.',
+        }),
+      ),
+      operations: Type.Optional(
+        Type.Array(
+          Type.Object({
+            type: Type.Union([
+              Type.Literal('insert'),
+              Type.Literal('patch'),
+              Type.Literal('increment'),
+              Type.Literal('delete'),
+            ]),
+            table: Type.String({ minLength: 1 }),
+            id: Type.Optional(Type.String({ minLength: 1 })),
+            value: Type.Optional(
+              Type.Record(Type.String(), Type.Any(), {
+                description: 'Insert or patch field values.',
+              }),
+            ),
+            unset: Type.Optional(
+              Type.Array(Type.String({ minLength: 1 }), {
+                description: 'Patch only: optional fields to clear.',
+              }),
+            ),
+            field: Type.Optional(
+              Type.String({
+                minLength: 1,
+                description: 'Increment only: numeric field name.',
+              }),
+            ),
+            amount: Type.Optional(
+              Type.Number({
+                description: 'Increment only: finite amount to add.',
+              }),
+            ),
+          }),
+          {
+            minItems: 1,
+            maxItems: 100,
+            description:
+              'Mutate only: atomic operations; any failure rolls back all.',
+          },
+        ),
+      ),
+      sql: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description:
+            'raw_sql only: SQL for querying or modifying existing rows. ' +
+            'Never use DDL, TRUNCATE, maintenance, transaction control, or ' +
+            '_hatch objects. Physical system columns use created_at and ' +
+            'updated_at.',
+        }),
+      ),
+      timeout_ms: Type.Optional(
+        Type.Integer({
+          minimum: 1_000,
+          maximum: 1_800_000,
+          description:
+            'raw_sql only: timeout for the Raw SQL database operation, ' +
+            'including statement execution, in milliseconds. It does not ' +
+            'cover App resolution or capability preflight. Defaults to 30000.',
+        }),
+      ),
+    }),
+    execute: async (_id, params, signal) => {
+      requireIdSlug(params.id);
+      const {
+        id,
+        order_by: orderBy,
+        timeout_ms: timeoutMs,
+        ...rawInput
+      } = params;
+      // The provider-facing schema must stay object-rooted. Apply the strict
+      // action-specific contract after translating its snake_case fields.
+      const input = queryAppDataTableRequestSchema.parse({
+        ...rawInput,
+        ...(orderBy === undefined ? {} : { orderBy }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
+      const res = await platform.queryAppDataTable(id, input, signal);
+      switch (res.action) {
+        case 'inspect':
+          if (!res.data) {
+            return text(`App "${id}" has no live Data Table schema.`, res);
+          }
+          return text(
+            JSON.stringify(res.data, null, 2) +
+              (res.data.truncated
+                ? '\nThe full schema exceeded the output budget. Inspect ' +
+                  'individual tables by passing a table name from ' +
+                  'data/schema.ts.'
+                : ''),
+            res,
+          );
+        case 'query': {
+          if (res.items.length === 0) {
+            return text(
+              input.action === 'query' && input.cursor
+                ? `No Data Table rows found after the provided cursor. Revision: ${res.revision}.`
+                : `The Data Table query returned no rows. Revision: ${res.revision}.`,
+              res,
+            );
+          }
+          const continuation = res.cursor
+            ? `\nContinue with cursor: ${JSON.stringify(res.cursor)}`
+            : '';
+          const truncation = res.truncated
+            ? '\nOutput was truncated. Continue with the returned cursor.'
+            : '';
+          return text(
+            `${JSON.stringify(res.items, null, 2)}\nRevision: ${res.revision}.` +
+              `${continuation}${truncation}`,
+            res,
+          );
+        }
+        case 'mutate': {
+          const missing = res.results.flatMap((result, index) =>
+            result === null ? [index + 1] : [],
+          );
+          return text(
+            `${JSON.stringify(res.results, null, 2)}\nRevision: ${res.revision}.` +
+              (missing.length > 0
+                ? `\nNo row was found for operation(s): ${missing.join(', ')}.`
+                : ''),
+            res,
+          );
+        }
+        case 'raw_sql':
+          return text(
+            JSON.stringify(res.results, null, 2) +
+              (res.truncated
+                ? '\nOutput was truncated. Rerun raw_sql with narrower ' +
+                  'columns, LIMIT, keyset conditions, or SQL substring ' +
+                  'functions.'
+                : ''),
+            res,
+          );
+      }
+    },
+  });
+
   return [
     listAppsTool,
     getAppTool,
@@ -521,5 +746,6 @@ export function createAppTools(options: {
     rollbackAppTool,
     queryAppDb,
     queryAppKv,
+    queryAppDataTable,
   ];
 }

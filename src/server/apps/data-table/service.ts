@@ -1,5 +1,6 @@
 /** Query, mutation, inspection, and validation for managed Data Tables. */
 import { createHash } from 'node:crypto';
+import pg, { type Client as PgClient, type ResultBuilder } from 'pg';
 import postgres, { type TransactionSql } from 'postgres';
 import { ulid } from 'ulid';
 import { z } from 'zod';
@@ -21,10 +22,22 @@ const QUERY_LIMIT_DEFAULT = 50;
 const QUERY_LIMIT_MAX = 200;
 const MUTATION_LIMIT_MAX = 100;
 const DATA_STATEMENT_TIMEOUT_MS = 10_000;
+export const DATA_AGENT_RESULT_MAX_CHARS = 60_000;
+export const DATA_RAW_SQL_TIMEOUT_MIN_MS = 1_000;
+export const DATA_RAW_SQL_TIMEOUT_MAX_MS = 1_800_000;
 export const DATA_REQUEST_MAX_BYTES = 1_000_000;
 const DATA_ROW_MAX_BYTES = 256 * 1024;
 const CHANGE_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const CURSOR_NULL_ALIAS = '__hatch_cursor_order_is_null';
+const RAW_SQL_CONFLICT_STATES = new Set(['23503', '23505', '23P01']);
+const RAW_SQL_CLIENT_ERROR_CLASSES = new Set([
+  '0A',
+  '21',
+  '22',
+  '23',
+  '42',
+  '44',
+]);
 
 type DataServiceGlobal = typeof globalThis & {
   __hatchDataLastPrune?: Map<string, number>;
@@ -105,10 +118,39 @@ export type DataTableAccessOptions = {
   expectedDeploymentId?: string;
 };
 
+export type DataQueryOptions = DataTableAccessOptions & {
+  /** Approximate serialized item budget for Agent-facing pagination. */
+  resultMaxChars?: number;
+};
+
+export type DataMutationOptions = DataTableAccessOptions & {
+  /** Serialized result budget checked before the mutation commits. */
+  resultMaxChars?: number;
+};
+
 export type DataQueryResult = {
   items: Record<string, JsonValue>[];
   cursor: string | null;
   revision: number;
+  /** Present only when an explicit result budget omitted otherwise valid rows. */
+  truncated?: boolean;
+};
+
+export type DataRawSqlResultSet = {
+  command: string;
+  count: number | null;
+  rows: Array<Record<string, unknown>>;
+};
+
+export type DataRawSqlResult = {
+  results: DataRawSqlResultSet[];
+  truncated: boolean;
+};
+
+type DriverRawSqlResult = {
+  command: string | null;
+  rowCount: number | null;
+  rows: Array<Record<string, unknown>>;
 };
 
 const dataCursorSchema = z
@@ -341,11 +383,23 @@ function encodeCursor(
   return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
 }
 
-async function acquireReadLock(tx: TransactionSql): Promise<void> {
-  const [row] = await tx<{ ok: boolean }[]>`
-    select pg_try_advisory_xact_lock_shared(${DATA_MIGRATION_LOCK_KEY}) as ok
-  `;
-  if (!row?.ok) {
+type DataReadGuardClient = TransactionSql | Pick<PgClient, 'query'>;
+
+async function acquireReadLock(tx: DataReadGuardClient): Promise<void> {
+  const ok =
+    typeof tx === 'function'
+      ? (
+          await tx<{ ok: boolean }[]>`
+            select pg_try_advisory_xact_lock_shared(${DATA_MIGRATION_LOCK_KEY}) as ok
+          `
+        )[0]?.ok
+      : (
+          await tx.query<{ ok: boolean }>(
+            'select pg_try_advisory_xact_lock_shared($1) as ok',
+            [DATA_MIGRATION_LOCK_KEY],
+          )
+        ).rows[0]?.ok;
+  if (!ok) {
     throw new AppError(
       'Data Table migration is in progress. Retry shortly.',
       503,
@@ -410,7 +464,7 @@ export async function assertDataTableAccess(
  * shared migration lock for its full lifetime.
  */
 export async function acquireDataReadGuard(
-  tx: TransactionSql,
+  tx: DataReadGuardClient,
   id: string,
   options: DataTableAccessOptions,
 ): Promise<void> {
@@ -561,7 +615,7 @@ function compileQuery(
 export async function queryDataTable(
   id: string,
   input: unknown,
-  options: DataTableAccessOptions = {},
+  options: DataQueryOptions = {},
 ): Promise<DataQueryResult> {
   const query = dataQueryRequestSchema.parse(input);
   const queryFingerprint = dataQueryFingerprint(id, query);
@@ -579,12 +633,76 @@ export async function queryDataTable(
         statement,
         params,
       );
-      const more = rows.length > query.limit;
       const page = rows.slice(0, query.limit);
-      const items = page.map((row) => {
+      const databaseHasMore = rows.length > query.limit;
+      let includedRows = page;
+      let items = page.map((row) => {
         const { [CURSOR_NULL_ALIAS]: _cursorNull, ...stored } = row;
         return serializeStoredRow(stored);
       });
+      let budgetTruncated = false;
+      if (options.resultMaxChars !== undefined) {
+        const resultSize = (
+          candidateItems: Record<string, JsonValue>[],
+          candidateRows: Record<string, unknown>[],
+          more: boolean,
+        ) =>
+          JSON.stringify(
+            {
+              items: candidateItems,
+              cursor: more
+                ? encodeCursor(
+                    candidateRows.at(-1)!,
+                    queryFingerprint,
+                    orderField,
+                    orderDirection,
+                  )
+                : null,
+              revision: Number.MAX_SAFE_INTEGER,
+              truncated: more && !databaseHasMore,
+            },
+            null,
+            2,
+          ).length;
+
+        if (
+          resultSize(items, includedRows, databaseHasMore) >
+          options.resultMaxChars
+        ) {
+          let best = 0;
+          for (let count = 1; count <= page.length; count++) {
+            const candidateItems = items.slice(0, count);
+            const candidateRows = page.slice(0, count);
+            // Item bytes only grow with the prefix. Once they cannot fit even
+            // without a cursor, no longer prefix can fit either. Cursor size
+            // itself is not monotonic because each row's sort value differs.
+            if (
+              resultSize(candidateItems, candidateRows, false) >
+              options.resultMaxChars
+            ) {
+              break;
+            }
+            if (
+              resultSize(candidateItems, candidateRows, true) <=
+              options.resultMaxChars
+            ) {
+              best = count;
+            }
+          }
+          if (best === 0) {
+            throw new AppError(
+              'A complete Data Table record and its pagination cursor exceed ' +
+                'the Agent output budget. Use raw_sql to select narrower ' +
+                'columns or substring large values.',
+              413,
+            );
+          }
+          includedRows = page.slice(0, best);
+          items = items.slice(0, best);
+          budgetTruncated = best < page.length;
+        }
+      }
+      const more = databaseHasMore || budgetTruncated;
       const [revisionRow] = await tx<{ revision: string }[]>`
         select coalesce(max(seq), 0)::text as revision from _hatch.changes
       `;
@@ -592,17 +710,560 @@ export async function queryDataTable(
         items,
         cursor: more
           ? encodeCursor(
-              page.at(-1)!,
+              includedRows.at(-1)!,
               queryFingerprint,
               orderField,
               orderDirection,
             )
           : null,
         revision: parseDataRevision(revisionRow?.revision ?? '0'),
+        ...(options.resultMaxChars === undefined
+          ? {}
+          : { truncated: budgetTruncated }),
       };
     });
   } finally {
     await sql.end({ timeout: 5 });
+  }
+}
+
+const RAW_SQL_ROW_LIMIT = 100;
+const RAW_SQL_PREVIEW_FIELD = '__hatch_preview';
+const RAW_SQL_PREVIEW_NOTICE_FIELD = '__hatch_preview_notice';
+const RAW_SQL_PREVIEW_NOTICE =
+  'This row exceeded the raw SQL output budget. The preview is incomplete; ' +
+  'rerun with narrower columns, LIMIT, keyset conditions, or SQL substring functions.';
+
+function normalizeRawSqlValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value === null) return null;
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : String(value);
+  }
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
+  }
+  if (value instanceof Uint8Array) {
+    return `\\x${Buffer.from(value).toString('hex')}`;
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+    const normalized = value.map((child) => normalizeRawSqlValue(child, seen));
+    seen.delete(value);
+    return normalized;
+  }
+  if (typeof value === 'object') {
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+    const normalized = Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        normalizeRawSqlValue(child, seen),
+      ]),
+    );
+    seen.delete(value);
+    return normalized;
+  }
+  return value === undefined ? null : String(value);
+}
+
+function normalizeRawSqlRow(row: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [
+      key,
+      normalizeRawSqlValue(value, new WeakSet()),
+    ]),
+  );
+}
+
+function splitDriverResults(
+  value: DriverRawSqlResult | DriverRawSqlResult[],
+): DriverRawSqlResult[] {
+  return Array.isArray(value) ? value : [value];
+}
+
+function fitsRawSqlBudget(
+  results: DataRawSqlResultSet[],
+  maxChars: number,
+): boolean {
+  return JSON.stringify(results, null, 2).length <= maxChars;
+}
+
+function addRawSqlRowPreview(
+  results: DataRawSqlResultSet[],
+  target: DataRawSqlResultSet,
+  row: Record<string, unknown>,
+  maxChars: number,
+): void {
+  const encoded = JSON.stringify(row);
+  let low = 0;
+  let high = Math.min(encoded.length, maxChars);
+  let best: Record<string, unknown> | null = null;
+
+  while (low <= high) {
+    const length = Math.floor((low + high) / 2);
+    const candidate = {
+      [RAW_SQL_PREVIEW_FIELD]: `${encoded.slice(0, length)}${
+        length < encoded.length ? '…' : ''
+      }`,
+      [RAW_SQL_PREVIEW_NOTICE_FIELD]: RAW_SQL_PREVIEW_NOTICE,
+    };
+    target.rows.push(candidate);
+    const fits = fitsRawSqlBudget(results, maxChars);
+    target.rows.pop();
+    if (fits) {
+      best = candidate;
+      low = length + 1;
+    } else {
+      high = length - 1;
+    }
+  }
+  if (best) target.rows.push(best);
+}
+
+function addExistingRawSqlRowPreview(
+  results: DataRawSqlResultSet[],
+  target: DataRawSqlResultSet,
+  row: Record<string, unknown>,
+  maxChars: number,
+): boolean {
+  const preview = row[RAW_SQL_PREVIEW_FIELD];
+  if (
+    typeof preview !== 'string' ||
+    row[RAW_SQL_PREVIEW_NOTICE_FIELD] !== RAW_SQL_PREVIEW_NOTICE
+  ) {
+    return false;
+  }
+
+  let low = 0;
+  let high = preview.length;
+  let best: Record<string, unknown> | null = null;
+  while (low <= high) {
+    const length = Math.floor((low + high) / 2);
+    const candidate = {
+      [RAW_SQL_PREVIEW_FIELD]: `${preview.slice(0, length)}${
+        length < preview.length ? '…' : ''
+      }`,
+      [RAW_SQL_PREVIEW_NOTICE_FIELD]: RAW_SQL_PREVIEW_NOTICE,
+    };
+    target.rows.push(candidate);
+    const fits = fitsRawSqlBudget(results, maxChars);
+    target.rows.pop();
+    if (fits) {
+      best = candidate;
+      low = length + 1;
+    } else {
+      high = length - 1;
+    }
+  }
+  if (best) target.rows.push(best);
+  return true;
+}
+
+function presentRawSqlResults(
+  raw: DriverRawSqlResult | DriverRawSqlResult[],
+  maxChars = DATA_AGENT_RESULT_MAX_CHARS,
+): DataRawSqlResult {
+  const source = splitDriverResults(raw);
+  const results: DataRawSqlResultSet[] = [];
+  let emittedRows = 0;
+  let truncated = false;
+  let outputBudgetReached = false;
+
+  for (let resultIndex = 0; resultIndex < source.length; resultIndex++) {
+    const driverResult = source[resultIndex];
+    const result: DataRawSqlResultSet = {
+      command: driverResult.command ?? '',
+      count: driverResult.rowCount,
+      rows: [],
+    };
+    results.push(result);
+    if (!fitsRawSqlBudget(results, maxChars)) {
+      results.pop();
+      truncated = true;
+      break;
+    }
+
+    if (outputBudgetReached) {
+      if (driverResult.rows.length > 0) truncated = true;
+      continue;
+    }
+
+    for (let rowIndex = 0; rowIndex < driverResult.rows.length; rowIndex++) {
+      if (emittedRows >= RAW_SQL_ROW_LIMIT) {
+        truncated = true;
+        break;
+      }
+      const row = normalizeRawSqlRow(driverResult.rows[rowIndex]);
+      result.rows.push(row);
+      if (!fitsRawSqlBudget(results, maxChars)) {
+        result.rows.pop();
+        truncated = true;
+        if (emittedRows === 0) {
+          if (!addExistingRawSqlRowPreview(results, result, row, maxChars)) {
+            addRawSqlRowPreview(results, result, row, maxChars);
+          }
+        }
+        outputBudgetReached = true;
+        break;
+      }
+      emittedRows++;
+    }
+  }
+
+  return { results, truncated };
+}
+
+function executeBoundedRawSql(
+  client: PgClient,
+  statement: string,
+): Promise<DataRawSqlResult> {
+  return new Promise((resolve, reject) => {
+    const query = new pg.Query<Record<string, unknown>>(statement);
+    const sourceRows = new Map<
+      ResultBuilder<Record<string, unknown>>,
+      Record<string, unknown>[]
+    >();
+    let emittedRows = 0;
+    let outputBudgetReached = false;
+    let rowLimitReached = false;
+    let rowProcessingFailed = false;
+    let rowProcessingError: unknown;
+
+    query.on('row', (row, result) => {
+      if (!result || outputBudgetReached || rowProcessingFailed) {
+        return;
+      }
+      try {
+        if (emittedRows >= RAW_SQL_ROW_LIMIT) {
+          rowLimitReached = true;
+          return;
+        }
+        const normalized = normalizeRawSqlRow(row);
+        const existing = sourceRows.get(result) ?? [];
+        const projected = [...sourceRows.entries()].map(([candidate, rows]) =>
+          candidate === result ? [...existing, normalized] : rows,
+        );
+        if (!sourceRows.has(result)) projected.push([normalized]);
+        const projectedSets = projected.map((rows) => ({
+          command: '',
+          count: null,
+          rows,
+        }));
+        if (fitsRawSqlBudget(projectedSets, DATA_AGENT_RESULT_MAX_CHARS)) {
+          existing.push(normalized);
+          sourceRows.set(result, existing);
+          emittedRows++;
+        } else if (emittedRows === 0) {
+          const previewTarget: DataRawSqlResultSet = {
+            command: '',
+            count: null,
+            rows: [],
+          };
+          addRawSqlRowPreview(
+            [previewTarget],
+            previewTarget,
+            normalized,
+            DATA_AGENT_RESULT_MAX_CHARS,
+          );
+          sourceRows.set(result, previewTarget.rows);
+          emittedRows++;
+          outputBudgetReached = true;
+        } else {
+          outputBudgetReached = true;
+        }
+      } catch (error) {
+        // A row event runs inside node-postgres' socket event stack. Never let
+        // normalization or budget failures escape that callback: consume the
+        // protocol, then reject so the surrounding transaction can roll back.
+        rowProcessingFailed = true;
+        rowProcessingError = error;
+      }
+    });
+    query.once('error', reject);
+    query.once('end', (raw) => {
+      if (rowProcessingFailed) {
+        reject(rowProcessingError);
+        return;
+      }
+      try {
+        const source = (Array.isArray(raw) ? raw : [raw]).map((result) => ({
+          command: result.command || null,
+          rowCount: result.rowCount,
+          rows: sourceRows.get(result) ?? [],
+        }));
+        const presented = presentRawSqlResults(source);
+        resolve({
+          ...presented,
+          truncated:
+            presented.truncated || outputBudgetReached || rowLimitReached,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+    client.query(query);
+  });
+}
+
+function rawSqlConnectionString(
+  url: string,
+  options: { disableSsl?: boolean } = {},
+): string {
+  const parsed = new URL(url);
+  if (options.disableSsl) {
+    parsed.searchParams.set('sslmode', 'disable');
+    parsed.searchParams.delete('uselibpqcompat');
+    return parsed.toString();
+  }
+  if (parsed.searchParams.get('sslrootcert') === 'system') {
+    // postgres.js treats this libpq sentinel as the host trust store. pg's
+    // connection-string parser instead interprets it as a filename, so omit
+    // the sentinel and retain certificate + hostname verification explicitly.
+    parsed.searchParams.delete('sslrootcert');
+    parsed.searchParams.set('sslmode', 'verify-full');
+    parsed.searchParams.delete('uselibpqcompat');
+    return parsed.toString();
+  }
+  const sslMode = parsed.searchParams.get('sslmode');
+  if (sslMode && ['allow', 'prefer', 'require'].includes(sslMode)) {
+    // postgres.js enables TLS without certificate verification for these
+    // modes. pg's no-verify spelling preserves that behavior even when the
+    // URL also carries a root certificate. sslmode=prefer gets an explicit
+    // plaintext retry below when the server reports no TLS support.
+    parsed.searchParams.set('sslmode', 'no-verify');
+    parsed.searchParams.delete('uselibpqcompat');
+  }
+  return parsed.toString();
+}
+
+function rawSqlTlsPreference(url: string): 'prefer' | 'fixed' {
+  const params = new URL(url).searchParams;
+  return params.get('sslrootcert') !== 'system' &&
+    params.get('sslmode') === 'prefer'
+    ? 'prefer'
+    : 'fixed';
+}
+
+function rawSqlServerHasNoTls(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message === 'The server does not support SSL connections'
+  );
+}
+
+function rawSqlAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function rawSqlTimeoutError(timeoutMs: number): AppError {
+  return new AppError(
+    `Raw Data Table SQL timed out after ${timeoutMs} milliseconds.`,
+    504,
+  );
+}
+
+function rawSqlOutcomeUnknownError(cause: unknown): AppError {
+  const error = new AppError(
+    'Raw SQL transaction outcome is unknown. PostgreSQL may have committed ' +
+      'the changes before the connection was lost. Do not retry this SQL ' +
+      'automatically; inspect the affected data first.',
+    409,
+  );
+  error.cause = cause;
+  return error;
+}
+
+function boundedRawSqlError(error: unknown): Error {
+  if (error instanceof AppError || error instanceof DOMException) return error;
+  if (!(error instanceof Error)) {
+    return new AppError('Raw Data Table SQL failed.', 500);
+  }
+  const code = (error as { code?: unknown }).code;
+  const sqlState =
+    typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? code : null;
+  const prefix = sqlState ? `PostgreSQL ${sqlState}: ` : '';
+  const maxMessageChars = 4_000;
+  const available = Math.max(0, maxMessageChars - prefix.length);
+  const message =
+    error.message.length <= available
+      ? error.message
+      : `${error.message.slice(0, Math.max(0, available - 1))}…`;
+  const status = sqlState
+    ? RAW_SQL_CONFLICT_STATES.has(sqlState)
+      ? 409
+      : RAW_SQL_CLIENT_ERROR_CLASSES.has(sqlState.slice(0, 2))
+        ? 400
+        : 500
+    : 500;
+  const bounded = new AppError(`${prefix}${message}`, status);
+  bounded.cause = error;
+  return bounded;
+}
+
+/**
+ * Run Agent-issued SQL against the managed Data DB. Agent instructions limit
+ * this escape hatch to querying or changing existing row data; deliberately do
+ * not parse or reject SQL here, so the statement is forwarded verbatim and may
+ * use PostgreSQL's simple-protocol multi-statement support.
+ */
+export async function executeDataTableRawSql(
+  id: string,
+  statement: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<DataRawSqlResult> {
+  if (statement.trim().length === 0) {
+    throw new AppError('Raw Data Table SQL must not be blank.', 400);
+  }
+  if (
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs < DATA_RAW_SQL_TIMEOUT_MIN_MS ||
+    timeoutMs > DATA_RAW_SQL_TIMEOUT_MAX_MS
+  ) {
+    throw new AppError(
+      `Raw Data Table SQL timeout must be between ${DATA_RAW_SQL_TIMEOUT_MIN_MS} and ${DATA_RAW_SQL_TIMEOUT_MAX_MS} milliseconds.`,
+      400,
+    );
+  }
+  if (signal?.aborted) throw rawSqlAbortError(signal);
+
+  const deadline = Date.now() + timeoutMs;
+  let client: PgClient | undefined;
+  let clientEndPromise: Promise<void> | undefined;
+  let commitPhase: 'before_commit' | 'commit_in_flight' | 'commit_confirmed' =
+    'before_commit';
+  let stopError: Error | null = null;
+  let rejectStop!: (error: Error) => void;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    rejectStop = reject;
+  });
+  const endClient = (): Promise<void> => {
+    if (!client) return Promise.resolve();
+    clientEndPromise ??= client.end().catch(() => {});
+    return clientEndPromise;
+  };
+  const stop = (error: Error) => {
+    if (stopError || commitPhase === 'commit_confirmed') return;
+    stopError =
+      commitPhase === 'commit_in_flight'
+        ? rawSqlOutcomeUnknownError(error)
+        : error;
+    void endClient();
+    rejectStop(stopError);
+  };
+  const timer = setTimeout(() => {
+    stop(rawSqlTimeoutError(timeoutMs));
+  }, timeoutMs);
+  timer.unref?.();
+  const onAbort = () => stop(rawSqlAbortError(signal!));
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  const execute = async () => {
+    const databaseUrl = await resolveAppDataDatabaseUrl(id);
+    const connect = async (disableSsl = false): Promise<PgClient> => {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw rawSqlTimeoutError(timeoutMs);
+      const candidate = new pg.Client({
+        connectionString: rawSqlConnectionString(databaseUrl, { disableSsl }),
+        connectionTimeoutMillis: remainingMs,
+        statement_timeout: timeoutMs,
+      });
+      // node-postgres emits connection-level failures on Client even when no
+      // query is active. Always consume that event and route it through the
+      // same timeout/commit-outcome state machine instead of letting an
+      // unhandled EventEmitter error terminate the process.
+      candidate.on('error', (error) => {
+        if (client === candidate) stop(error);
+      });
+      client = candidate;
+      clientEndPromise = undefined;
+      if (stopError) {
+        void endClient();
+        throw stopError;
+      }
+      try {
+        await candidate.connect();
+      } catch (error) {
+        void endClient();
+        throw error;
+      }
+      if (stopError) {
+        void endClient();
+        throw stopError;
+      }
+      return candidate;
+    };
+
+    let dataClient: PgClient;
+    try {
+      dataClient = await connect();
+    } catch (error) {
+      if (
+        rawSqlTlsPreference(databaseUrl) !== 'prefer' ||
+        !rawSqlServerHasNoTls(error) ||
+        stopError
+      ) {
+        throw error;
+      }
+      // Match postgres.js/libpq sslmode=prefer: only retry without TLS when
+      // the server explicitly reports that it has no SSL support.
+      dataClient = await connect(true);
+    }
+    let transactionOpen = false;
+    try {
+      await dataClient.query('begin');
+      transactionOpen = true;
+      await acquireDataReadGuard(dataClient, id, {});
+      await dataClient.query(`set local statement_timeout = ${timeoutMs}`);
+      await dataClient.query('set local search_path = data, public');
+      const presented = await executeBoundedRawSql(dataClient, statement);
+      if (stopError) throw stopError;
+      if (signal?.aborted) {
+        stop(rawSqlAbortError(signal));
+        throw stopError!;
+      }
+      if (Date.now() >= deadline) {
+        stop(rawSqlTimeoutError(timeoutMs));
+        throw stopError!;
+      }
+      commitPhase = 'commit_in_flight';
+      try {
+        await dataClient.query('commit');
+      } catch (error) {
+        throw stopError ?? rawSqlOutcomeUnknownError(error);
+      }
+      commitPhase = 'commit_confirmed';
+      transactionOpen = false;
+      return presented;
+    } catch (error) {
+      if (transactionOpen && commitPhase === 'before_commit' && !stopError) {
+        await dataClient.query('rollback').catch(() => {});
+        transactionOpen = false;
+      }
+      if ((error as { code?: unknown }).code === '57014') {
+        throw rawSqlTimeoutError(timeoutMs);
+      }
+      throw boundedRawSqlError(error);
+    }
+  };
+
+  try {
+    const result = await Promise.race([execute(), stopped]);
+    scheduleDataChangesPrune(id);
+    return result;
+  } catch (error) {
+    throw boundedRawSqlError(error);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    // Initiate cleanup without making the public timeout depend on a socket
+    // close acknowledgement that may never arrive after a network failure.
+    void endClient();
   }
 }
 
@@ -731,7 +1392,7 @@ async function incrementRow(
 export async function mutateDataTable(
   id: string,
   input: unknown,
-  options: DataTableAccessOptions = {},
+  options: DataMutationOptions = {},
 ): Promise<{
   results: Array<Record<string, JsonValue> | null>;
   revision: number;
@@ -745,38 +1406,50 @@ export async function mutateDataTable(
       const results: Array<Record<string, JsonValue> | null> = [];
       for (const operation of request.operations) {
         const table = tableFromSchema(schema, operation.table);
+        let operationResult: Record<string, JsonValue> | null;
         if (operation.type === 'insert') {
-          results.push(
-            await insertRow(tx, operation.table, table, operation.value),
+          operationResult = await insertRow(
+            tx,
+            operation.table,
+            table,
+            operation.value,
           );
         } else if (operation.type === 'patch') {
-          results.push(
-            await patchRow(
-              tx,
-              operation.table,
-              table,
-              operation.id,
-              operation.value,
-              operation.unset,
-            ),
+          operationResult = await patchRow(
+            tx,
+            operation.table,
+            table,
+            operation.id,
+            operation.value,
+            operation.unset,
           );
         } else if (operation.type === 'increment') {
-          results.push(
-            await incrementRow(
-              tx,
-              operation.table,
-              table,
-              operation.id,
-              operation.field,
-              operation.amount,
-            ),
+          operationResult = await incrementRow(
+            tx,
+            operation.table,
+            table,
+            operation.id,
+            operation.field,
+            operation.amount,
           );
         } else {
           const [row] = await tx.unsafe<Record<string, unknown>[]>(
             `delete from ${tableSql(operation.table)} where id = $1 returning *`,
             [operation.id],
           );
-          results.push(row ? serializeStoredRow(row) : null);
+          operationResult = row ? serializeStoredRow(row) : null;
+        }
+        results.push(operationResult);
+        if (
+          options.resultMaxChars !== undefined &&
+          JSON.stringify(results, null, 2).length > options.resultMaxChars
+        ) {
+          throw new AppError(
+            'Data Table mutation result exceeds the Agent output budget. ' +
+              'The entire batch was rolled back. Split it into smaller ' +
+              'batches or use raw_sql with a narrow RETURNING clause.',
+            413,
+          );
         }
       }
       const [revisionRow] = await tx<{ revision: string }[]>`
@@ -787,13 +1460,17 @@ export async function mutateDataTable(
         revision: parseDataRevision(revisionRow?.revision ?? '0'),
       };
     });
-    // Retention is detached best-effort work. App deletion can race with
-    // opening its Data database after the mutation has already committed.
-    void pruneDataChanges(id).catch(() => {});
+    scheduleDataChangesPrune(id);
     return result;
   } finally {
     await sql.end({ timeout: 5 });
   }
+}
+
+function scheduleDataChangesPrune(id: string): void {
+  // Retention is detached best-effort work. App deletion can race with
+  // opening its Data database after the request has already committed.
+  void pruneDataChanges(id).catch(() => {});
 }
 
 async function pruneDataChanges(id: string): Promise<void> {
