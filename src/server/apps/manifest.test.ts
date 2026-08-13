@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type NormalizedManifest,
   normalizeManifest,
   parseSourceManifest,
   snapToSupportedSize,
@@ -41,21 +40,13 @@ describe('backend manifest', () => {
     );
   });
 
-  it('supports bundle-v1 while legacy normalized manifests omit format', () => {
-    const legacy: NormalizedManifest = normalizeManifest(
-      parseSourceManifest(source({})),
+  it('normalizes source entries to bundle-v1 artifact metadata', () => {
+    const normalized = normalizeManifest(
+      parseSourceManifest(source({ entry: 'backend/workers/server.mts' })),
     );
-    const bundled: NormalizedManifest = {
-      ...legacy,
-      backend: {
-        entry: 'backend/main.bundle.js',
-        format: 'bundle-v1',
-      },
-    };
 
-    expect(legacy.backend).toEqual({ entry: 'backend/main.ts' });
-    expect(bundled.backend).toEqual({
-      entry: 'backend/main.bundle.js',
+    expect(normalized.backend).toEqual({
+      entry: 'backend/workers/server.bundle.js',
       format: 'bundle-v1',
     });
   });

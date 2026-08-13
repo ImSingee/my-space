@@ -31,6 +31,18 @@ const sourceRelativePath = z
       'must be a relative path inside the app source (no absolute or ".." paths)',
   });
 
+/** Map a source backend entry to its deployable bundle artifact path. */
+export function backendBundleEntry(sourceEntry: string): string {
+  const normalized = sourceEntry.replaceAll('\\', '/');
+  const filenameStart = normalized.lastIndexOf('/') + 1;
+  const extensionStart = normalized.lastIndexOf('.');
+  const stem =
+    extensionStart > filenameStart
+      ? normalized.slice(0, extensionStart)
+      : normalized;
+  return `${stem}.bundle.js`;
+}
+
 /**
  * The backend entry must live under the fixed `backend/` source tree. The build
  * uses that tree as the boundary for backend code and emits its runtime entry
@@ -591,8 +603,7 @@ export type NormalizedManifest = {
   /** Backend artifact entry the platform runs, when a backend is present. */
   backend?: {
     entry: string;
-    /** Absent on legacy source artifacts; set by the bundle build path. */
-    format?: 'bundle-v1';
+    format: 'bundle-v1';
   };
   /** Iframe URL and discoverable routes for the full app, when present. */
   app?: {
@@ -766,7 +777,10 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     cron: src.capabilities.cron ? src.cron : [],
   };
   if (src.capabilities.backend && src.backend) {
-    out.backend = { entry: src.backend.entry };
+    out.backend = {
+      entry: backendBundleEntry(src.backend.entry),
+      format: 'bundle-v1',
+    };
   }
   if (src.capabilities.frontend && src.app) {
     out.app = { url: appUrl(src.id), routes: src.app.routes };
