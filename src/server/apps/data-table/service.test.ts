@@ -182,16 +182,14 @@ describe('managed Data Table service', () => {
   });
 
   it('queries an explicit JSON null separately from SQL NULL', async () => {
-    const schema = schemaWithFields(
-      { payload: { kind: 'json', optional: true } },
-      [{ name: 'by_payload', fields: ['payload'], unique: false }],
-    );
+    const schema = schemaWithFields({
+      payload: { kind: 'json', optional: true },
+    });
     const { unsafe } = createHarness(schema);
     mocks.findApp.mockResolvedValue(liveApp());
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_payload',
       where: [{ field: 'payload', op: 'eq', value: null }],
       orderBy: { field: 'payload', direction: 'asc' },
     });
@@ -204,17 +202,15 @@ describe('managed Data Table service', () => {
     );
   });
 
-  it('uses indexed equality for JSON null in a required field', async () => {
-    const schema = schemaWithFields(
-      { payload: { kind: 'json', optional: false } },
-      [{ name: 'by_payload', fields: ['payload'], unique: false }],
-    );
+  it('uses JSON equality for null in a required field', async () => {
+    const schema = schemaWithFields({
+      payload: { kind: 'json', optional: false },
+    });
     const { unsafe } = createHarness(schema);
     mocks.findApp.mockResolvedValue(liveApp());
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_payload',
       where: [{ field: 'payload', op: 'eq', value: null }],
       orderBy: { field: 'payload', direction: 'asc' },
     });
@@ -226,10 +222,9 @@ describe('managed Data Table service', () => {
   });
 
   it('uses a stable sort-value and id keyset cursor', async () => {
-    const schema = schemaWithFields(
-      { score: { kind: 'integer', optional: false } },
-      [{ name: 'by_score', fields: ['score'], unique: false }],
-    );
+    const schema = schemaWithFields({
+      score: { kind: 'integer', optional: false },
+    });
     const { unsafe } = createHarness(schema);
     unsafe
       .mockResolvedValueOnce([
@@ -260,7 +255,6 @@ describe('managed Data Table service', () => {
 
     const first = await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_score',
       orderBy: { field: 'score', direction: 'asc' },
       limit: 2,
     });
@@ -284,7 +278,6 @@ describe('managed Data Table service', () => {
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_score',
       orderBy: { field: 'score', direction: 'asc' },
       cursor: first.cursor!,
       limit: 2,
@@ -298,24 +291,13 @@ describe('managed Data Table service', () => {
     expect(params).toEqual([10, 'row-b', 3]);
   });
 
-  it('binds a cursor to its table, index, and filters but not its limit', async () => {
+  it('binds a cursor to its table and filters but not its limit', async () => {
     const table = {
       fields: {
         tenant: { kind: 'string' as const, optional: false },
         score: { kind: 'integer' as const, optional: false },
       },
-      indexes: [
-        {
-          name: 'by_tenant_score',
-          fields: ['tenant', 'score'],
-          unique: false,
-        },
-        {
-          name: 'by_tenant_score_copy',
-          fields: ['tenant', 'score'],
-          unique: false,
-        },
-      ],
+      indexes: [],
     } satisfies DataSchemaDescriptor['tables'][string];
     const schema: DataSchemaDescriptor = {
       version: 1,
@@ -345,7 +327,6 @@ describe('managed Data Table service', () => {
     mocks.findApp.mockResolvedValue(liveApp());
     const baseQuery = {
       table: 'items',
-      index: 'by_tenant_score',
       where: [{ field: 'tenant', op: 'eq', value: 'acme' }],
       orderBy: { field: 'score', direction: 'asc' },
     };
@@ -361,7 +342,6 @@ describe('managed Data Table service', () => {
 
     for (const changedQuery of [
       { ...baseQuery, table: 'archivedItems' },
-      { ...baseQuery, index: 'by_tenant_score_copy' },
       {
         ...baseQuery,
         where: [{ field: 'tenant', op: 'eq', value: 'other' }],
@@ -381,11 +361,53 @@ describe('managed Data Table service', () => {
     expect(unsafe).toHaveBeenCalledTimes(2);
   });
 
+  it('ignores a legacy query index without changing cursor identity', async () => {
+    const schema = schemaWithFields({
+      score: { kind: 'integer', optional: false },
+    });
+    const { unsafe } = createHarness(schema);
+    unsafe
+      .mockResolvedValueOnce([
+        {
+          id: 'row-a',
+          score: 10,
+          created_at: NOW,
+          updated_at: NOW,
+          __hatch_cursor_order_is_null: false,
+        },
+        {
+          id: 'row-b',
+          score: 11,
+          created_at: NOW,
+          updated_at: NOW,
+          __hatch_cursor_order_is_null: false,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    mocks.findApp.mockResolvedValue(liveApp());
+
+    const first = await queryDataTable(APP_ID, {
+      table: 'items',
+      index: 'not-declared',
+      orderBy: { field: 'score', direction: 'asc' },
+      limit: 1,
+    });
+
+    await expect(
+      queryDataTable(APP_ID, {
+        table: 'items',
+        orderBy: { field: 'score', direction: 'asc' },
+        cursor: first.cursor!,
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({ items: [] });
+    expect(unsafe).toHaveBeenCalledTimes(2);
+  });
+
   it('continues descending pagination after a SQL NULL cursor', async () => {
-    const schema = schemaWithFields(
-      { score: { kind: 'integer', optional: true } },
-      [{ name: 'by_score', fields: ['score'], unique: false }],
-    );
+    const schema = schemaWithFields({
+      score: { kind: 'integer', optional: true },
+    });
     const { unsafe } = createHarness(schema);
     unsafe
       .mockResolvedValueOnce([
@@ -409,13 +431,11 @@ describe('managed Data Table service', () => {
 
     const first = await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_score',
       orderBy: { field: 'score', direction: 'desc' },
       limit: 1,
     });
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_score',
       orderBy: { field: 'score', direction: 'desc' },
       cursor: first.cursor!,
       limit: 1,
@@ -428,7 +448,26 @@ describe('managed Data Table service', () => {
     expect(params).toEqual(['row-b', 2]);
   });
 
-  it('requires a usable B-tree left prefix and ordering shape', async () => {
+  it('orders by createdAt without a matching declared index', async () => {
+    const schema = schemaWithFields(
+      { frequency: { kind: 'string', optional: false } },
+      [{ name: 'by_frequency', fields: ['frequency'], unique: false }],
+    );
+    const { unsafe } = createHarness(schema);
+    mocks.findApp.mockResolvedValue(liveApp());
+
+    await queryDataTable(APP_ID, {
+      table: 'items',
+      orderBy: { field: 'createdAt', direction: 'desc' },
+    });
+
+    expect(unsafe).toHaveBeenCalledWith(
+      expect.stringContaining('order by "created_at" desc, "id" desc limit $1'),
+      [51],
+    );
+  });
+
+  it('allows filters and ordering that do not match an index shape', async () => {
     const schema = schemaWithFields(
       {
         tenant: { kind: 'string', optional: false },
@@ -447,41 +486,34 @@ describe('managed Data Table service', () => {
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_tenant_score',
-      where: [
-        { field: 'tenant', op: 'eq', value: 'acme' },
-        { field: 'score', op: 'gte', value: 10 },
-      ],
+      where: [{ field: 'score', op: 'eq', value: 10 }],
+      orderBy: { field: 'score', direction: 'asc' },
+    });
+
+    await queryDataTable(APP_ID, {
+      table: 'items',
+      where: [{ field: 'tenant', op: 'gte', value: 'acme' }],
       orderBy: { field: 'score', direction: 'desc' },
     });
-    expect(unsafe).toHaveBeenCalledOnce();
 
-    for (const query of [
-      {
-        table: 'items',
-        index: 'by_tenant_score',
-        where: [{ field: 'score', op: 'eq', value: 10 }],
-        orderBy: { field: 'score', direction: 'asc' },
-      },
-      {
-        table: 'items',
-        index: 'by_tenant_score',
-        where: [{ field: 'tenant', op: 'eq', value: 'acme' }],
-      },
-      {
-        table: 'items',
-        index: 'by_tenant_score',
-        where: [{ field: 'tenant', op: 'gte', value: 'acme' }],
-      },
-    ]) {
-      await expect(queryDataTable(APP_ID, query)).rejects.toMatchObject({
-        status: 400,
-      });
-    }
-    expect(unsafe).toHaveBeenCalledOnce();
+    await queryDataTable(APP_ID, {
+      table: 'items',
+      where: [{ field: 'tenant', op: 'eq', value: 'acme' }],
+    });
+
+    expect(unsafe).toHaveBeenCalledTimes(3);
+    expect(unsafe.mock.calls[0]?.[0]).toContain(
+      'where "score" = $1 order by "score" asc, "id" asc',
+    );
+    expect(unsafe.mock.calls[1]?.[0]).toContain(
+      'where "tenant" >= $1 order by "score" desc, "id" desc',
+    );
+    expect(unsafe.mock.calls[2]?.[0]).toContain(
+      'where "tenant" = $1 order by "id" asc',
+    );
   });
 
-  it('preserves single-field index queries with default id ordering', async () => {
+  it('filters an indexed field without naming its index', async () => {
     const schema = schemaWithFields(
       { tenant: { kind: 'string', optional: false } },
       [{ name: 'by_tenant', fields: ['tenant'], unique: false }],
@@ -491,14 +523,13 @@ describe('managed Data Table service', () => {
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_tenant',
       where: [{ field: 'tenant', op: 'eq', value: 'acme' }],
     });
 
     expect(unsafe.mock.calls[0]?.[0]).toContain('order by "id" asc');
   });
 
-  it('accepts equality over a complete non-unique physical index key', async () => {
+  it('combines schema-field and id filters without naming an index', async () => {
     const schema = schemaWithFields(
       { tenant: { kind: 'string', optional: false } },
       [{ name: 'by_tenant', fields: ['tenant'], unique: false }],
@@ -508,7 +539,6 @@ describe('managed Data Table service', () => {
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_tenant',
       where: [
         { field: 'tenant', op: 'eq', value: 'acme' },
         { field: 'id', op: 'eq', value: 'row-1' },
@@ -527,7 +557,7 @@ describe('managed Data Table service', () => {
     ).resolves.toMatchObject({ revision: 2_147_483_648 });
   });
 
-  it('accepts a full non-null unique lookup without an id suffix', async () => {
+  it('queries a unique-indexed field without naming its index', async () => {
     const schema = schemaWithFields(
       { email: { kind: 'string', optional: false } },
       [{ name: 'by_email', fields: ['email'], unique: true }],
@@ -537,14 +567,13 @@ describe('managed Data Table service', () => {
 
     await queryDataTable(APP_ID, {
       table: 'items',
-      index: 'by_email',
       where: [{ field: 'email', op: 'eq', value: 'person@example.com' }],
     });
 
     expect(unsafe).toHaveBeenCalledOnce();
   });
 
-  it('rejects a nullable unique lookup that can return multiple SQL NULLs', async () => {
+  it('allows null filtering on a nullable unique-indexed field', async () => {
     const schema = schemaWithFields(
       { email: { kind: 'string', optional: true } },
       [{ name: 'by_email', fields: ['email'], unique: true }],
@@ -552,14 +581,15 @@ describe('managed Data Table service', () => {
     const { unsafe } = createHarness(schema);
     mocks.findApp.mockResolvedValue(liveApp());
 
-    await expect(
-      queryDataTable(APP_ID, {
-        table: 'items',
-        index: 'by_email',
-        where: [{ field: 'email', op: 'eq', value: null }],
-      }),
-    ).rejects.toMatchObject({ status: 400 });
-    expect(unsafe).not.toHaveBeenCalled();
+    await queryDataTable(APP_ID, {
+      table: 'items',
+      where: [{ field: 'email', op: 'eq', value: null }],
+    });
+
+    expect(unsafe).toHaveBeenCalledWith(
+      expect.stringContaining('where "email" is null order by "id" asc'),
+      [51],
+    );
   });
 
   it('configures a bounded statement timeout for Data DB connections', async () => {
