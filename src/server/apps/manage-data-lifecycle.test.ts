@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   stopApp: vi.fn<(id: string) => void>(),
   reloadScheduler: vi.fn<() => Promise<void>>(),
   moveMasterToDeploymentTag: vi.fn<() => Promise<string>>(),
+  publishPlatformEvent: vi.fn<(event: unknown) => void>(),
   broadcastCleanup:
     vi.fn<
       (scope: 'app' | 'workflow', id: string, generation: string) => void
@@ -147,6 +148,9 @@ vi.mock('./runtime', () => ({
   stopApp: mocks.stopApp,
 }));
 vi.mock('./scheduler', () => ({ reloadScheduler: mocks.reloadScheduler }));
+vi.mock('~server/platform-events', () => ({
+  publishPlatformEvent: mocks.publishPlatformEvent,
+}));
 vi.mock('../agent-runner/hub', () => ({
   broadcastEntityWorkspaceCleanup: mocks.broadcastCleanup,
 }));
@@ -181,7 +185,10 @@ describe('App Data lifecycle recovery', () => {
     }));
     mocks.deleteReturning.mockResolvedValue([]);
     mocks.transaction.mockImplementation(async (callback) =>
-      callback({ update: mocks.update }),
+      callback({
+        query: { apps: { findFirst: mocks.findApp } },
+        update: mocks.update,
+      }),
     );
     mocks.acquireDeployLock.mockResolvedValue();
     mocks.waitForDataMigrationBarrier.mockImplementation(async () => {
@@ -300,6 +307,12 @@ describe('App Data lifecycle recovery', () => {
       `/workspace/build/${APP_ID}.bak-pending-deployment`,
       expect.anything(),
     );
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledOnce();
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledWith({
+      type: 'app.deployment.activated',
+      appId: APP_ID,
+      deploymentRevision: TARGET_DEPLOYMENT_ID,
+    });
   });
 
   it('removes a pending backup before clearing a resolved activation fence', async () => {
@@ -446,6 +459,42 @@ describe('App Data lifecycle recovery', () => {
     );
     expect(mocks.fsRm).not.toHaveBeenCalled();
     expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not publish when rollback keeps the same deployment revision', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: TARGET_DEPLOYMENT_ID,
+      capabilities: { dataTable: false, backend: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: 'Example',
+        capabilities: { dataTable: false, backend: false },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: null,
+    });
+
+    await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).resolves.toEqual({
+      version: 1,
+      dataSchemaMismatch: false,
+    });
+
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
   });
 
   it('serializes archive behind deploy and Data cutover locks', async () => {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   deployments: new Map<string, Row>(),
   deploymentReadFailures: new Set<string>(),
   appUpdateFailure: undefined as Error | undefined,
+  releaseCommitAckFailure: undefined as Error | undefined,
   events: [] as string[],
   heldAppLocks: new Set<string>(),
   heldCutoverLocks: new Set<string>(),
@@ -32,6 +33,15 @@ const mocks = vi.hoisted(() => ({
     vi.fn<(id: string, deploymentId: string) => Promise<number>>(),
   setKeepAlive: vi.fn<(id: string, keepAlive: boolean) => void>(),
   reloadScheduler: vi.fn<() => Promise<void>>(),
+  publishPlatformEvent: vi.fn<(event: unknown) => void>(),
+  assertDeployableWorktree:
+    vi.fn<(id: string, sourceDir: string) => Promise<void>>(),
+  deleteDeploymentTag: vi.fn<(id: string, tag: string) => Promise<void>>(),
+  prepareDeployCheckout: vi.fn<(id: string) => Promise<string>>(),
+  publishDeploymentSource:
+    vi.fn<
+      (id: string, sourceDir: string, version: number) => Promise<unknown>
+    >(),
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -95,6 +105,7 @@ vi.mock('~/db', () => {
     deployments: {
       id: 'id',
       appId: 'appId',
+      version: 'version',
       sourceTag: 'sourceTag',
     },
   };
@@ -149,34 +160,56 @@ vi.mock('~/db', () => {
     },
     deployments: { findFirst: deploymentFindFirst },
   };
-  const tx = { query };
-
+  const update = () => ({
+    set: (values: Row) => ({
+      where: (predicate: Predicate) => {
+        const matched = [...mocks.apps.values()].filter((app) =>
+          matches(app, predicate),
+        );
+        mocks.updates.push({ values, predicate });
+        const failure = mocks.appUpdateFailure;
+        if (!failure) {
+          for (const app of matched) Object.assign(app, values);
+        }
+        const result = Promise.resolve(undefined);
+        return Object.assign(result, {
+          returning: async () => {
+            if (failure) throw failure;
+            return matched.map((app) => ({ id: app.id }));
+          },
+        });
+      },
+    }),
+  });
   return {
     db: {
       query,
-      transaction: async <T>(run: (transaction: typeof tx) => Promise<T>) =>
-        run(tx),
-      update: () => ({
-        set: (values: Row) => ({
-          where: (predicate: Predicate) => {
-            const matched = [...mocks.apps.values()].filter((app) =>
-              matches(app, predicate),
-            );
-            mocks.updates.push({ values, predicate });
-            const failure = mocks.appUpdateFailure;
-            if (!failure) {
-              for (const app of matched) Object.assign(app, values);
-            }
-            const result = Promise.resolve(undefined);
-            return Object.assign(result, {
-              returning: async () => {
-                if (failure) throw failure;
-                return matched.map((app) => ({ id: app.id }));
-              },
-            });
-          },
-        }),
-      }),
+      transaction: async <T>(
+        run: (transaction: {
+          query: typeof query;
+          update: typeof update;
+          insert: () => { values: (row: Row) => Promise<void> };
+        }) => Promise<T>,
+      ) => {
+        let inserted = false;
+        const result = await run({
+          query,
+          update,
+          insert: () => ({
+            values: async (row: Row) => {
+              inserted = true;
+              mocks.deployments.set(row.id as string, row);
+            },
+          }),
+        });
+        if (inserted && mocks.releaseCommitAckFailure) {
+          const failure = mocks.releaseCommitAckFailure;
+          mocks.releaseCommitAckFailure = undefined;
+          throw failure;
+        }
+        return result;
+      },
+      update,
     },
     schema,
   };
@@ -188,14 +221,10 @@ vi.mock('./build-identity', () => ({
   liveBuildMatchesDeployment: mocks.liveBuildMatchesDeployment,
 }));
 vi.mock('./git', () => ({
-  assertDeployableWorktree:
-    vi.fn<(id: string, sourceDir: string) => Promise<void>>(),
-  deleteDeploymentTag: vi.fn<(id: string, tag: string) => Promise<void>>(),
-  prepareDeployCheckout: vi.fn<(id: string) => Promise<string>>(),
-  publishDeploymentSource:
-    vi.fn<
-      (id: string, sourceDir: string, version: number) => Promise<unknown>
-    >(),
+  assertDeployableWorktree: mocks.assertDeployableWorktree,
+  deleteDeploymentTag: mocks.deleteDeploymentTag,
+  prepareDeployCheckout: mocks.prepareDeployCheckout,
+  publishDeploymentSource: mocks.publishDeploymentSource,
 }));
 vi.mock('./provision', () => ({
   appDbName: (id: string) => `app_${id}`,
@@ -207,6 +236,9 @@ vi.mock('./runtime', () => ({
   stopApp: mocks.stopApp,
 }));
 vi.mock('./scheduler', () => ({ reloadScheduler: mocks.reloadScheduler }));
+vi.mock('~server/platform-events', () => ({
+  publishPlatformEvent: mocks.publishPlatformEvent,
+}));
 vi.mock('./data-table/migrate', () => ({
   applyDataMigration: mocks.applyDataMigration,
   DataMigrationOutcomeUnknown: class DataMigrationOutcomeUnknown extends Error {},
@@ -303,6 +335,40 @@ async function stageDataTableBuild(
   };
 }
 
+async function stageFrontendBuild(
+  _id: string,
+  rawOptions: unknown,
+): Promise<unknown> {
+  const { deploymentId, outputDir } = rawOptions as {
+    deploymentId: string;
+    outputDir: string;
+  };
+  await writeBuild(outputDir, deploymentId, 'deployed frontend');
+  return {
+    source: {
+      name: 'Deployed app',
+      description: '',
+      capabilities: {
+        database: false,
+        frontend: true,
+        widgets: false,
+        backend: false,
+        cron: false,
+        webhook: false,
+        kv: false,
+        dataTable: false,
+        userscripts: false,
+      },
+      backendMode: 'serverless',
+      workflows: [],
+      userscripts: [],
+    },
+    normalized: { workflows: [], cron: [] },
+    dataSchema: null,
+    log: 'build complete',
+  };
+}
+
 async function arrangeSupersededPendingArtifact(id: string): Promise<{
   app: Row;
   pendingArtifact: string;
@@ -344,6 +410,7 @@ describe('App deployment activation recovery', () => {
     mocks.deployments.clear();
     mocks.deploymentReadFailures.clear();
     mocks.appUpdateFailure = undefined;
+    mocks.releaseCommitAckFailure = undefined;
     mocks.events.length = 0;
     mocks.heldAppLocks.clear();
     mocks.heldCutoverLocks.clear();
@@ -354,6 +421,13 @@ describe('App deployment activation recovery', () => {
     mocks.recoverCurrentDataSchema.mockResolvedValue(null);
     mocks.ensureAppRunning.mockResolvedValue(1234);
     mocks.reloadScheduler.mockResolvedValue();
+    mocks.assertDeployableWorktree.mockResolvedValue();
+    mocks.prepareDeployCheckout.mockResolvedValue('/source');
+    mocks.publishDeploymentSource.mockResolvedValue({
+      tag: 'deploy/v1',
+      commit: 'source-commit',
+      repoPath: 'apps/example',
+    });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await fs.rm(mocks.root, { recursive: true, force: true });
   });
@@ -361,6 +435,87 @@ describe('App deployment activation recovery', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await fs.rm(mocks.root, { recursive: true, force: true });
+  });
+
+  it('publishes one activation event after a normal successful deployment', async () => {
+    const id = 'normal-deploy';
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+
+    const result = await deployApp(id, {
+      message: 'First deployment',
+      sourceDir: '/source',
+    });
+
+    expect(app).toMatchObject({
+      status: 'deployed',
+      currentDeploymentId: result.deploymentId,
+      dataActivationId: null,
+    });
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledOnce();
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledWith({
+      type: 'app.deployment.activated',
+      appId: id,
+      deploymentRevision: result.deploymentId,
+    });
+  });
+
+  it('does not publish an activation event when a normal build fails', async () => {
+    const id = 'normal-build-failure';
+    const failure = new Error('build failed');
+    mocks.apps.set(
+      id,
+      appState(id, {
+        status: 'draft',
+        currentDeploymentId: null,
+        capabilities: null,
+        backendMode: null,
+        dataActivationId: null,
+      }),
+    );
+    mocks.buildApp.mockRejectedValueOnce(failure);
+
+    await expect(
+      deployApp(id, { message: 'Broken deployment', sourceDir: '/source' }),
+    ).rejects.toBe(failure);
+
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+  });
+
+  it('publishes once when a committed deployment loses its COMMIT acknowledgement', async () => {
+    const id = 'commit-ack-lost';
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+    mocks.releaseCommitAckFailure = new Error('connection lost after COMMIT');
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+
+    const result = await deployApp(id, {
+      message: 'Committed deployment',
+      sourceDir: '/source',
+    });
+
+    expect(app.currentDeploymentId).toBe(result.deploymentId);
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledOnce();
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledWith({
+      type: 'app.deployment.activated',
+      appId: id,
+      deploymentRevision: result.deploymentId,
+    });
   });
 
   it('clears a committed release fence with an exact deployment CAS', async () => {
@@ -377,6 +532,12 @@ describe('App deployment activation recovery', () => {
 
     expect(app.dataActivationId).toBeNull();
     expect(mocks.stopApp).toHaveBeenCalledWith('committed');
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledOnce();
+    expect(mocks.publishPlatformEvent).toHaveBeenCalledWith({
+      type: 'app.deployment.activated',
+      appId: 'committed',
+      deploymentRevision: 'deployment-pending',
+    });
     expect(mocks.updates).toContainEqual({
       values: { dataActivationId: null },
       predicate: {
@@ -417,6 +578,7 @@ describe('App deployment activation recovery', () => {
 
     expect(app.dataActivationId).toBe(pendingId);
     expect(mocks.stopApp).not.toHaveBeenCalled();
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
     expect(mocks.updates).not.toContainEqual(
       expect.objectContaining({ values: { dataActivationId: null } }),
     );
@@ -641,6 +803,7 @@ describe('App deployment activation recovery', () => {
     expect(mocks.setKeepAlive).toHaveBeenCalledWith(id, true);
     expect(mocks.ensureAppRunning).toHaveBeenCalledWith(id, currentId);
     expect(mocks.stopApp).toHaveBeenCalledOnce();
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
   });
 
   it('removes a superseded pending artifact before a retry claims the fence', async () => {

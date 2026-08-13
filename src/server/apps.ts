@@ -72,6 +72,7 @@ export type AppDetail = {
   description: string | null;
   status: AppStatus;
   capabilities: AppCapabilities | null;
+  deploymentRevision: string | null;
   currentSourceCommit: string | null;
   dbName: string | null;
   createdAt: string;
@@ -83,8 +84,9 @@ export const getApp = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: idOrSlug }): Promise<AppDetail | null> => {
     // Project to a display view: the raw row carries secrets/internal columns
-    // (webhookSecret, repoPath, raw manifest, currentDeploymentId) the app
-    // detail/manage pages never need and must not ship to the browser.
+    // (webhookSecret, repoPath, raw manifest) the app detail/manage pages never
+    // need and must not ship to the browser. The live deployment id is exposed
+    // only under the safe `deploymentRevision` view-model name.
     //
     // Accept either the immutable id or the mutable slug (id first) so the
     // /apps/<x> management routes work even when a link carries the slug (e.g.
@@ -96,6 +98,7 @@ export const getApp = createServerFn({ method: 'GET' })
       description: true,
       status: true,
       capabilities: true,
+      currentDeploymentId: true,
       currentSourceCommit: true,
       dbName: true,
       createdAt: true,
@@ -111,11 +114,25 @@ export const getApp = createServerFn({ method: 'GET' })
         columns,
       }));
     if (!row) return null;
+    const { currentDeploymentId, ...detail } = row;
     return {
-      ...row,
+      ...detail,
+      deploymentRevision: currentDeploymentId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
+  });
+
+/** Read the authoritative live revision without reloading the full App view. */
+export const getAppDeploymentRevision = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .validator((id: string) => idSchema.parse(id))
+  .handler(async ({ data: id }): Promise<string | null> => {
+    const app = await db.query.apps.findFirst({
+      where: (row, { eq }) => eq(row.id, id),
+      columns: { currentDeploymentId: true },
+    });
+    return app?.currentDeploymentId ?? null;
   });
 
 export type AppRow = NonNullable<Awaited<ReturnType<typeof getApp>>>;
