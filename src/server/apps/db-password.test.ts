@@ -68,14 +68,6 @@ describe('app database passwords', () => {
     expect(second).not.toBe(first);
   });
 
-  it('preserves the legacy HMAC password derivation', async () => {
-    const { legacyAppDbPassword } = await loadPasswordModule();
-
-    expect(legacyAppDbPassword('app_demo_app')).toBe(
-      'b17c3d570aa35bad7791d0f103b212d562693ceb1271dc94687573fb4ff213a2',
-    );
-  });
-
   it('round-trips a password and uses a fresh nonce each time', async () => {
     const { decryptAppDbPassword, encryptAppDbPassword } =
       await loadPasswordModule();

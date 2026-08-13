@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const LEGACY_PASSWORD =
-  'b17c3d570aa35bad7791d0f103b212d562693ceb1271dc94687573fb4ff213a2';
+const INITIAL_ROLE_PASSWORD = 'f'.repeat(64);
 const STORED_PASSWORD = '0123456789abcdef'.repeat(4);
 
 const state = vi.hoisted(() => ({
@@ -9,11 +8,9 @@ const state = vi.hoisted(() => ({
   storedCiphertext: null as string | null,
   roleExists: true,
   databaseExists: true,
-  rolePassword:
-    'b17c3d570aa35bad7791d0f103b212d562693ceb1271dc94687573fb4ff213a2',
+  rolePassword: 'f'.repeat(64),
   statements: [] as string[],
   failUnsafeContaining: null as string | null,
-  failAfterCommit: false,
   passwordWrites: 0,
   lockCalls: 0,
   transactionTail: Promise.resolve(),
@@ -70,19 +67,10 @@ vi.mock('~/db', async () => {
         await previous;
 
         const previousCiphertext = state.storedCiphertext;
-        let callbackCompleted = false;
         try {
-          const result = await callback(tx);
-          callbackCompleted = true;
-          if (state.failAfterCommit) {
-            state.failAfterCommit = false;
-            throw new Error('Injected ambiguous commit failure');
-          }
-          return result;
+          return await callback(tx);
         } catch (error) {
-          if (!callbackCompleted) {
-            state.storedCiphertext = previousCiphertext;
-          }
+          state.storedCiphertext = previousCiphertext;
           throw error;
         } finally {
           release();
@@ -155,10 +143,9 @@ beforeEach(() => {
   state.storedCiphertext = null;
   state.roleExists = true;
   state.databaseExists = true;
-  state.rolePassword = LEGACY_PASSWORD;
+  state.rolePassword = INITIAL_ROLE_PASSWORD;
   state.statements = [];
   state.failUnsafeContaining = null;
-  state.failAfterCommit = false;
   state.passwordWrites = 0;
   state.lockCalls = 0;
   state.transactionTail = Promise.resolve();
@@ -180,13 +167,12 @@ describe('appDatabaseUrl', () => {
 });
 
 describe('ensureAppDatabase', () => {
-  it('upgrades a legacy NULL credential to one encrypted random password', async () => {
-    const result = await ensureAppDatabase('demo-app');
-    const password = new URL(result.url).password;
+  it('initializes a NULL credential with one encrypted random password', async () => {
+    const url = await ensureAppDatabase('demo-app');
+    const password = new URL(url).password;
 
-    expect(result.passwordMigrated).toBe(true);
     expect(password).toMatch(/^[0-9a-f]{64}$/);
-    expect(password).not.toBe(LEGACY_PASSWORD);
+    expect(password).not.toBe(INITIAL_ROLE_PASSWORD);
     expect(state.rolePassword).toBe(password);
     expect(state.storedCiphertext).not.toBeNull();
     expect(state.storedCiphertext).not.toContain(password);
@@ -202,11 +188,9 @@ describe('ensureAppDatabase', () => {
     state.databaseExists = false;
     state.rolePassword = '';
 
-    const result = await ensureAppDatabase('demo-app');
-    const password = new URL(result.url).password;
+    const url = await ensureAppDatabase('demo-app');
+    const password = new URL(url).password;
 
-    expect(result.passwordMigrated).toBe(true);
-    expect(password).not.toBe(LEGACY_PASSWORD);
     expect(state.rolePassword).toBe(password);
     expect(state.roleExists).toBe(true);
     expect(state.databaseExists).toBe(true);
@@ -222,16 +206,15 @@ describe('ensureAppDatabase', () => {
     state.storedCiphertext = encryptAppDbPassword('demo-app', STORED_PASSWORD);
     const originalCiphertext = state.storedCiphertext;
 
-    const result = await ensureAppDatabase('demo-app');
+    const url = await ensureAppDatabase('demo-app');
 
-    expect(result.passwordMigrated).toBe(false);
-    expect(new URL(result.url).password).toBe(STORED_PASSWORD);
+    expect(new URL(url).password).toBe(STORED_PASSWORD);
     expect(state.rolePassword).toBe(STORED_PASSWORD);
     expect(state.storedCiphertext).toBe(originalCiphertext);
     expect(state.passwordWrites).toBe(0);
   });
 
-  it('does not treat a malformed non-NULL ciphertext as legacy', async () => {
+  it('rejects a malformed stored ciphertext', async () => {
     state.storedCiphertext = '';
 
     await expect(ensureAppDatabase('demo-app')).rejects.toThrow(
@@ -239,7 +222,7 @@ describe('ensureAppDatabase', () => {
     );
 
     expect(state.storedCiphertext).toBe('');
-    expect(state.rolePassword).toBe(LEGACY_PASSWORD);
+    expect(state.rolePassword).toBe(INITIAL_ROLE_PASSWORD);
     expect(state.passwordWrites).toBe(0);
   });
 
@@ -249,58 +232,9 @@ describe('ensureAppDatabase', () => {
       ensureAppDatabase('demo-app'),
     ]);
 
-    expect(new URL(first.url).password).toBe(new URL(second.url).password);
-    expect([first.passwordMigrated, second.passwordMigrated].sort()).toEqual([
-      false,
-      true,
-    ]);
+    expect(new URL(first).password).toBe(new URL(second).password);
     expect(state.passwordWrites).toBe(1);
     expect(state.lockCalls).toBe(2);
-  });
-
-  it('returns a migrated result when COMMIT succeeded ambiguously', async () => {
-    state.failAfterCommit = true;
-
-    const result = await ensureAppDatabase('demo-app');
-    const password = new URL(result.url).password;
-
-    expect(result.passwordMigrated).toBe(true);
-    expect(
-      decryptAppDbPassword('demo-app', state.storedCiphertext as string),
-    ).toBe(password);
-    expect(state.rolePassword).toBe(password);
-    expect(state.lockCalls).toBe(2);
-  });
-
-  it('does not let failed compensation overwrite a concurrent retry', async () => {
-    state.failUnsafeContaining = 'grant all on schema public';
-
-    const results = await Promise.allSettled([
-      ensureAppDatabase('demo-app'),
-      ensureAppDatabase('demo-app'),
-    ]);
-
-    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
-    expect(state.storedCiphertext).not.toBeNull();
-    expect(
-      decryptAppDbPassword('demo-app', state.storedCiphertext as string),
-    ).toBe(state.rolePassword);
-    expect(state.rolePassword).not.toBe(LEGACY_PASSWORD);
-    expect(state.lockCalls).toBe(3);
-  });
-
-  it('restores the HMAC credential and NULL row after a failed upgrade', async () => {
-    state.failUnsafeContaining = 'grant all on schema public';
-
-    await expect(ensureAppDatabase('demo-app')).rejects.toThrow(
-      'Injected SQL failure',
-    );
-
-    expect(state.storedCiphertext).toBeNull();
-    expect(state.rolePassword).toBe(LEGACY_PASSWORD);
-    expect(state.statements.at(-1)).toContain(
-      `login password '${LEGACY_PASSWORD}'`,
-    );
   });
 
   it('recovers on retry after an interrupted first-time provision', async () => {
@@ -314,10 +248,9 @@ describe('ensureAppDatabase', () => {
     expect(state.storedCiphertext).toBeNull();
 
     state.failUnsafeContaining = null;
-    const result = await ensureAppDatabase('demo-app');
+    const url = await ensureAppDatabase('demo-app');
 
-    expect(result.passwordMigrated).toBe(true);
-    expect(state.rolePassword).toBe(new URL(result.url).password);
+    expect(state.rolePassword).toBe(new URL(url).password);
     expect(state.storedCiphertext).not.toBeNull();
   });
 

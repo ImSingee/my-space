@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  ensureAppDatabase:
-    vi.fn<
-      (id: string) => Promise<{ url: string; passwordMigrated: boolean }>
-    >(),
+  ensureAppDatabase: vi.fn<(id: string) => Promise<string>>(),
 }));
 
 vi.mock('./provision', () => ({
@@ -26,10 +23,9 @@ describe('App backend database capability', () => {
   });
 
   it('provisions and exposes the App database when enabled', async () => {
-    mocks.ensureAppDatabase.mockResolvedValue({
-      url: 'postgres://app:secret@localhost/app',
-      passwordMigrated: false,
-    });
+    mocks.ensureAppDatabase.mockResolvedValue(
+      'postgres://app:secret@localhost/app',
+    );
 
     await expect(appDatabaseRuntimeEnv('sql-app', true)).resolves.toEqual({
       DATABASE_URL: 'postgres://app:secret@localhost/app',

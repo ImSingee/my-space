@@ -1,7 +1,6 @@
 import {
   createCipheriv,
   createDecipheriv,
-  createHmac,
   hkdfSync,
   randomBytes,
 } from 'node:crypto';
@@ -107,14 +106,6 @@ export function generateAppDataDbPassword(): string {
   return generateDbPassword();
 }
 
-/** Preserve the password derivation used before encrypted storage existed. */
-export function legacyAppDbPassword(dbName: string): string {
-  const { secret } = getPlatformEnv();
-  return createHmac('sha256', secret)
-    .update(`app-db-password:${dbName}`)
-    .digest('hex');
-}
-
 function encryptDbPassword(
   context: PasswordContext,
   appId: string,
@@ -209,10 +200,7 @@ function decryptDbPassword(
   return password;
 }
 
-/**
- * Decrypt a stored password. Authentication failures are terminal: callers
- * must never treat them as a signal to fall back to the legacy derivation.
- */
+/** Decrypt a stored password, rejecting any malformed or unauthentic value. */
 export function decryptAppDbPassword(appId: string, envelope: string): string {
   return decryptDbPassword(APP_DB_PASSWORD_CONTEXT, appId, envelope);
 }

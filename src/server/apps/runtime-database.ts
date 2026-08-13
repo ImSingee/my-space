@@ -5,6 +5,6 @@ export async function appDatabaseRuntimeEnv(
   enabled: boolean,
 ): Promise<Record<string, string>> {
   if (!enabled) return {};
-  const { url } = await ensureAppDatabase(id);
+  const url = await ensureAppDatabase(id);
   return { DATABASE_URL: url };
 }

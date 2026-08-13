@@ -26,12 +26,7 @@ import {
 } from './git';
 import type { NormalizedManifest } from './manifest';
 import { ensureAppDatabase, appDbName } from './provision';
-import {
-  ensureAppRunning,
-  refreshAppBackendDatabaseCredentials,
-  setKeepAlive,
-  stopApp,
-} from './runtime';
+import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
 import {
   applyDataMigration,
@@ -635,10 +630,7 @@ async function deployAppInner(
 
     let dbName = app.dbName ?? null;
     if (build.source.capabilities.database) {
-      const { passwordMigrated } = await ensureAppDatabase(id);
-      if (passwordMigrated) {
-        await refreshAppBackendDatabaseCredentials(id);
-      }
+      await ensureAppDatabase(id);
       dbName = appDbName(id);
     }
     let dataDbName = app.dataDbName ?? null;
