@@ -397,9 +397,8 @@ export const APP_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * Canonical app-slug shape: kebab-case, must start with a letter. Used in the
- * mutable, human-facing `/app/<slug>` and `/app/<slug>/embed/` URLs. Stricter
- * than `APP_ID_RE` so slugs stay readable and never collide with a bare
- * numeric id.
+ * mutable, human-facing `/app/<slug>` URL. Stricter than `APP_ID_RE` so slugs
+ * stay readable and never collide with a bare numeric id.
  */
 export const APP_SLUG_RE = /^[a-z][a-z0-9-]*$/;
 

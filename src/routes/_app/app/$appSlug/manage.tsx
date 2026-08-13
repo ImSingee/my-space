@@ -292,9 +292,9 @@ function AppDetailPage() {
 
 /**
  * Editable URL-slug row. The slug is the only part of an app's identity that
- * users can change; it appears in the human-facing `/app/<slug>` and
- * `/app/<slug>/embed/` URLs. Renaming it never requires a rebuild because
- * technical APIs and storage are keyed off the immutable id.
+ * users can change; it appears in the human-facing `/app/<slug>` URL. Renaming
+ * it never requires a rebuild because technical APIs and storage are keyed off
+ * the immutable id.
  */
 function SlugField({ appId, slug }: { appId: string; slug: string }) {
   const router = useRouter();
