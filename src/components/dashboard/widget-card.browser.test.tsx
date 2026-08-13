@@ -172,7 +172,7 @@ async function renderDashboard(
   });
   const appRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/apps/$appSlug',
+    path: '/app/$appSlug',
     component: () => null,
   });
   const router = createRouter({
@@ -204,7 +204,7 @@ test('open app link uses the current slug instead of the app id', async () => {
 
   await expect
     .element(screen.getByRole('link', { name: 'Open app' }))
-    .toHaveAttribute('href', '/apps/slug-open-link');
+    .toHaveAttribute('href', '/app/slug-open-link');
 });
 
 test('widget without onRefresh hides refresh and global refresh does not reload it', async () => {

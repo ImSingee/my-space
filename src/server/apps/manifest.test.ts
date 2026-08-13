@@ -3,9 +3,9 @@ import {
   type NormalizedManifest,
   normalizeManifest,
   parseSourceManifest,
+  projectAppManifestUrls,
   snapToSupportedSize,
   sourceManifestSchema,
-  withPublicAppUrl,
 } from './manifest';
 
 describe('backend manifest', () => {
@@ -152,8 +152,8 @@ describe('app route manifest', () => {
     expect(parseRoutes()).toEqual([]);
   });
 
-  it('projects the current slug into the public app URL without mutation', () => {
-    const stored = normalizeManifest(
+  it('projects every legacy URL from current identity without mutation', () => {
+    const normalized = normalizeManifest(
       parseSourceManifest({
         id: '01internalid',
         name: 'Demo',
@@ -161,11 +161,58 @@ describe('app route manifest', () => {
         app: { entry: 'app/main.tsx' },
       }),
     );
+    const stored: NormalizedManifest = {
+      ...normalized,
+      app: { url: '/api/apps/legacy-id/app/', routes: [] },
+      widgets: [
+        {
+          id: 'summary',
+          name: 'Summary',
+          url: '/api/apps/legacy-id/widget/summary',
+          defaultSize: { w: 4, h: 3 },
+          supportedSizes: [],
+        },
+      ],
+      userscripts: [
+        {
+          id: 'watch',
+          name: 'Watch',
+          url: '/api/apps/legacy-id/userscripts/watch.user.js',
+          matches: ['https://example.com/*'],
+          grants: [],
+          connects: [],
+          noframes: false,
+          extraMetadata: {},
+        },
+      ],
+      rpc: {
+        url: '/api/apps/legacy-id/rpc',
+        service: 'demo.v1.DemoService',
+      },
+      kv: { url: '/api/apps/legacy-id/kv' },
+      dataTable: { url: '/api/apps/legacy-id/data' },
+      webhook: { url: '/api/hooks/01internalid', auth: 'platform' },
+    };
+    const before = structuredClone(stored);
 
-    const projected = withPublicAppUrl(stored, 'friendly-demo');
+    const projected = projectAppManifestUrls(
+      stored,
+      '01authoritativeid',
+      'friendly-demo',
+    );
 
-    expect(projected.app?.url).toBe('/app/friendly-demo/');
-    expect(stored.app?.url).toBe('/api/apps/01internalid/app/');
+    expect(projected.app?.url).toBe('/app/friendly-demo/embed/');
+    expect(projected.widgets[0]?.url).toBe(
+      '/api/app/01authoritativeid/widget/summary',
+    );
+    expect(projected.userscripts?.[0]?.url).toBe(
+      '/api/app/01authoritativeid/userscripts/watch.user.js',
+    );
+    expect(projected.rpc?.url).toBe('/api/app/01authoritativeid/rpc');
+    expect(projected.kv?.url).toBe('/api/app/01authoritativeid/kv');
+    expect(projected.dataTable?.url).toBe('/api/app/01authoritativeid/data');
+    expect(projected.webhook).toEqual(stored.webhook);
+    expect(stored).toEqual(before);
   });
 
   it('rejects duplicate route paths', () => {
@@ -309,7 +356,7 @@ describe('userscripts manifest', () => {
       {
         id: 'watch',
         name: 'Watch',
-        url: '/api/apps/demo/userscripts/watch.user.js',
+        url: '/api/app/demo/userscripts/watch.user.js',
         matches: ['https://example.com/*'],
         description: 'Watches',
         grants: ['GM_setValue', 'GM_getValue'],

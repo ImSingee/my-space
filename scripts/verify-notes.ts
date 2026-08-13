@@ -11,8 +11,8 @@ import {
 } from '../src/server/apps/runtime';
 
 const ID = 'notes';
-const base = `http://platform/api/apps/${ID}/rpc`;
-const strip = `/api/apps/${ID}/rpc`;
+const base = `http://platform/api/app/${ID}/rpc`;
+const strip = `/api/app/${ID}/rpc`;
 
 async function rpc(method: string, body: unknown) {
   const res = await proxyAppRequest(

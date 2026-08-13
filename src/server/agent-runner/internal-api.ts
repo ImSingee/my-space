@@ -288,7 +288,7 @@ async function handleApps(
         dataMigrationApprovalToken: body.dataMigrationApprovalToken,
       });
       const { appSlug } = await import('~server/apps/access');
-      const { withPublicAppUrl } = await import('~server/apps/manifest');
+      const { projectAppManifestUrls } = await import('~server/apps/manifest');
       const slug = await appSlug(id);
       if (!slug) {
         throw new AppError(`App "${id}" not found after deployment.`, 500);
@@ -297,7 +297,7 @@ async function handleApps(
         deploymentId: result.deploymentId,
         version: result.version,
         slug,
-        normalized: withPublicAppUrl(result.normalized, slug),
+        normalized: projectAppManifestUrls(result.normalized, id, slug),
       });
     } finally {
       await staged.cleanup();

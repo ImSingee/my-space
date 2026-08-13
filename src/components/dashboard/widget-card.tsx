@@ -271,7 +271,7 @@ export function WidgetCard({
               aria-label="Open app"
               renderRoot={(props) => (
                 <Link
-                  to="/apps/$appSlug"
+                  to="/app/$appSlug"
                   params={{ appSlug: item.appSlug }}
                   {...props}
                 />

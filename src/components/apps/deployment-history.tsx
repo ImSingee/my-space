@@ -95,7 +95,7 @@ export function DeploymentHistory({ appId }: { appId: string }) {
           <Tooltip label="Download artifact (.tar.gz)" withArrow position="top">
             <UnstyledButton
               component="a"
-              href={`/api/apps/${appId}/download?mode=artifact&deployment=${deployment.id}`}
+              href={`/api/app/${appId}/download?mode=artifact&deployment=${deployment.id}`}
               download
               className={metaItemClass}
             >

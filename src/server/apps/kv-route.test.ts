@@ -12,7 +12,7 @@ vi.stubEnv('SECRET', 'platform-secret');
 const { db, schema } = await import('~/db');
 const { hatchSignature, HATCH_SIGNATURE_HEADER, HATCH_TIMESTAMP_HEADER } =
   await import('~server/secrets');
-const { handle } = await import('~/routes/api/apps/$appId/kv/$.ts');
+const { handle } = await import('~/routes/api/app/$appId/kv/$.ts');
 
 const APP_ID = 'signed-kv';
 const SIGNING_SECRET = 'app-signing-secret';
@@ -78,7 +78,7 @@ describe('signed app KV route secret storage', () => {
     const body = JSON.stringify({ value: plaintext, secret: true });
 
     const put = await handle({
-      request: signedRequest(`/api/apps/${APP_ID}/kv/api-token`, {
+      request: signedRequest(`/api/app/${APP_ID}/kv/api-token`, {
         method: 'PUT',
         body,
       }),
@@ -97,7 +97,7 @@ describe('signed app KV route secret storage', () => {
     expect(raw.valueCiphertext).toMatch(/^v1\./);
 
     const get = await handle({
-      request: signedRequest(`/api/apps/${APP_ID}/kv/api-token`),
+      request: signedRequest(`/api/app/${APP_ID}/kv/api-token`),
     });
     expect(get.status).toBe(200);
     const getText = await get.text();
@@ -110,7 +110,7 @@ describe('signed app KV route secret storage', () => {
     expect(getText).not.toContain('valueCiphertext');
 
     const list = await handle({
-      request: signedRequest(`/api/apps/${APP_ID}/kv`),
+      request: signedRequest(`/api/app/${APP_ID}/kv`),
     });
     expect(list.status).toBe(200);
     const listText = await list.text();
@@ -141,7 +141,7 @@ describe('signed app KV route secret storage', () => {
     const plaintext = 'never-leak-this';
     const body = JSON.stringify({ value: plaintext, secret: true });
     const put = await handle({
-      request: signedRequest(`/api/apps/${APP_ID}/kv/broken`, {
+      request: signedRequest(`/api/app/${APP_ID}/kv/broken`, {
         method: 'PUT',
         body,
       }),
@@ -159,7 +159,7 @@ describe('signed app KV route secret storage', () => {
       .where(eq(schema.appKv.id, raw.id));
 
     const get = await handle({
-      request: signedRequest(`/api/apps/${APP_ID}/kv/broken`),
+      request: signedRequest(`/api/app/${APP_ID}/kv/broken`),
     });
     expect(get.status).toBe(500);
     const response = await get.text();

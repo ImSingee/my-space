@@ -70,9 +70,9 @@ use native git locally:
      Never bundle them into one question or invent a slug without asking.
    - Both the name and the slug can be changed later (the slug from the manage
      page), so reassure the user not to overthink it. The slug is the
-     human-facing segment in both `/apps/<slug>` and `/app/<slug>/`; the
-     platform generates a separate immutable id that keys the repo, database
-     relations, and technical `/api/apps/<id>/...` URLs. Only after they agree
+     human-facing segment in `/app/<slug>`; the platform generates a separate
+     immutable id that keys the repo, database
+     relations, and technical `/api/app/<id>/...` URLs. Only after they agree
      to both, call `create_app` (it takes the chosen `slug`).
      Pass `pin: true` when the app will have a user-facing frontend (the default)
      so it's pinned to the sidebar, or `pin: false` for backend-only /
@@ -628,7 +628,7 @@ Legacy: a job may instead declare a raw `path`
 signed, same headers). Prefer `method`.
 
 **All platform-forwarded RPC calls are signed too.** Regular user RPC requests
-(proxied through `/api/apps/<id>/rpc`) carry `x-hatch-timestamp` +
+(proxied through `/api/app/<id>/rpc`) carry `x-hatch-timestamp` +
 `x-hatch-signature`, where the HMAC is over `<timestamp>.<rawBodyBytes>` (like
 webhooks, not like cron). Backends listen on localhost, so another app's
 backend could reach your port directly — but it cannot forge this signature.

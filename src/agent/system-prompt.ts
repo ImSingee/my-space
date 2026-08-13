@@ -188,9 +188,10 @@ apps/<id>/
       slug without asking.
    d. Reassure them that both the name AND the slug can be changed later (the
       slug is editable from the app's manage page), so they should not overthink
-      it. The slug is the human-facing segment in both \`/apps/<slug>\` and
-      \`/app/<slug>/\`; the platform generates a separate immutable id that keys
-      the repo, database relations, and technical \`/api/apps/<id>/...\` URLs.
+      it. The slug is the human-facing segment in \`/app/<slug>\`; the platform
+      generates a separate immutable id that keys the repo, database relations,
+      and technical
+      \`/api/app/<id>/...\` URLs.
    Only after the user confirms both, call \`create_app\` with that \`slug\` and
    name (slug must be kebab-case, e.g. "todo" or "habit-tracker"). Pass
    \`pin: true\` when the app will have a user-facing frontend (the default) so

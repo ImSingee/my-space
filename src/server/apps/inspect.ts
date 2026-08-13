@@ -6,7 +6,7 @@ import { listDeployments } from './manage';
 import {
   type NormalizedManifest,
   type WebhookAuth,
-  withPublicAppUrl,
+  projectAppManifestUrls,
 } from './manifest';
 
 /** Capability flags in the same order the management UI lists them. */
@@ -161,7 +161,7 @@ export async function getAppDetailForAgent(
   const storedManifest = (currentDeployment?.manifestNormalized ??
     null) as NormalizedManifest | null;
   const manifest = storedManifest
-    ? withPublicAppUrl(storedManifest, app.slug)
+    ? projectAppManifestUrls(storedManifest, app.id, app.slug)
     : null;
 
   const caps = app.capabilities;

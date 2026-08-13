@@ -50,7 +50,7 @@ vi.mock('sonner', () => ({
   toast: { error: mocks.toastError },
 }));
 
-import { AppView } from '~/routes/_app/apps/$appSlug';
+import { AppView } from '~/routes/_app/app/$appSlug';
 
 const frontendCapabilities = {
   database: false,
@@ -104,6 +104,10 @@ test('marks an update and remounts the iframe only after reload', async () => {
   const screen = await renderAppView();
   const originalFrame = screen.container.querySelector('iframe');
   expect(originalFrame).toBeTruthy();
+  expect(originalFrame).toHaveAttribute('src', '/app/app-one/embed/');
+  await expect
+    .element(screen.getByRole('link', { name: 'Open in new tab' }))
+    .toHaveAttribute('href', '/app/app-one/embed/');
 
   const reload = screen.getByRole('button', {
     name: 'Update available — reload app',

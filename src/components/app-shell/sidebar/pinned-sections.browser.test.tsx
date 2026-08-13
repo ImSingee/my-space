@@ -188,7 +188,7 @@ async function renderSections(initialEntry = '/') {
   });
   const appRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/apps/$appSlug',
+    path: '/app/$appSlug',
     component: () => null,
   });
   const workflowsRoute = createRoute({
@@ -276,12 +276,12 @@ test('uses the app slug for links and hash-aware active state', async () => {
     pin('pin-settings', '01k-app', 'todo', 'settings', 'Todo settings'),
   ];
 
-  const { screen } = await renderSections('/apps/todo#settings');
+  const { screen } = await renderSections('/app/todo#settings');
 
   const home = screen.getByRole('link', { name: 'Todo home' });
   const settings = screen.getByRole('link', { name: 'Todo settings' });
-  await expect.element(home).toHaveAttribute('href', '/apps/todo');
-  await expect.element(settings).toHaveAttribute('href', '/apps/todo#settings');
+  await expect.element(home).toHaveAttribute('href', '/app/todo');
+  await expect.element(settings).toHaveAttribute('href', '/app/todo#settings');
   expect(home.element()).not.toHaveAttribute('data-active');
   expect(settings.element()).toHaveAttribute('data-active', 'true');
 });

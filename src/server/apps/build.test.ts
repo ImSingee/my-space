@@ -432,7 +432,7 @@ describe('buildApp userscripts', () => {
       {
         id: 'watch',
         name: 'Watch',
-        url: '/api/apps/demo/userscripts/watch.user.js',
+        url: '/api/app/demo/userscripts/watch.user.js',
         matches: ['https://example.com/*'],
         grants: ['GM_setValue'],
         connects: [],
@@ -577,7 +577,7 @@ describe('buildApp managed Data Tables', () => {
       indexes: [{ name: 'by_completed', fields: ['completed'], unique: false }],
     });
     expect(result.normalized.dataTable).toEqual({
-      url: '/api/apps/demo/data',
+      url: '/api/app/demo/data',
     });
     await expect(
       fs.readFile(path.join(outputDir, 'app', 'index.html'), 'utf8'),

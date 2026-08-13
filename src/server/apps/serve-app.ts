@@ -18,10 +18,9 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
- * Serve a static file from an app's built `app/` directory. Shared by the
- * human-facing `/app/:slug/*` route and the id-based technical
- * `/api/apps/:id/app/*` route. Guards against path traversal outside the app
- * directory.
+ * Serve a static file from an app's built `app/` directory for the human-facing
+ * `/app/<slug>` page and the id-based technical `/api/app/:id/app/*` route.
+ * Guards against path traversal outside the app directory.
  */
 export async function serveAppAppFile(
   id: string,
