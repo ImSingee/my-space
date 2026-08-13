@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AskQuestion } from '~agent/events';
-import { reduceStreamState, type StreamState } from './use-agent-stream';
+import {
+  reduceStreamState,
+  sameStreamSeed,
+  type StreamState,
+} from './use-agent-stream';
 
 const question: AskQuestion = {
   id: 'question_1',
@@ -20,6 +24,85 @@ function baseState(): StreamState {
 }
 
 describe('reduceStreamState', () => {
+  it('shows an env request and replaces an existing ask', () => {
+    const state = reduceStreamState(
+      {
+        ...baseState(),
+        pendingAsk: { askId: 'ask_1', questions: [question] },
+      },
+      {
+        type: 'env_request',
+        requestId: 'env_1',
+        reason: 'Connect to GitHub',
+        variables: [
+          {
+            key: 'GITHUB_TOKEN',
+            description: 'Repository access token',
+            secret: true,
+          },
+        ],
+      },
+    );
+
+    expect(state.pendingAsk).toBeUndefined();
+    expect(state.pendingEnvRequest).toEqual({
+      requestId: 'env_1',
+      reason: 'Connect to GitHub',
+      variables: [
+        {
+          key: 'GITHUB_TOKEN',
+          description: 'Repository access token',
+          secret: true,
+        },
+      ],
+    });
+  });
+
+  it('clears only the matching env request', () => {
+    const pendingEnvRequest = {
+      requestId: 'env_2',
+      reason: 'Connect to GitHub',
+      variables: [
+        { key: 'GITHUB_TOKEN', description: 'Access token', secret: true },
+      ],
+    };
+    const withOldConfirmation = reduceStreamState(
+      { ...baseState(), pendingEnvRequest },
+      {
+        type: 'env_stored',
+        requestId: 'env_1',
+        variables: [{ key: 'GITHUB_TOKEN', secret: true }],
+      },
+    );
+    expect(withOldConfirmation.pendingEnvRequest).toBe(pendingEnvRequest);
+
+    const stored = reduceStreamState(withOldConfirmation, {
+      type: 'env_stored',
+      requestId: 'env_2',
+      variables: [{ key: 'GITHUB_TOKEN', secret: true }],
+    });
+    expect(stored.pendingEnvRequest).toBeUndefined();
+  });
+
+  it('replaces a pending env request with a newer ask', () => {
+    const state = reduceStreamState(
+      {
+        ...baseState(),
+        pendingEnvRequest: {
+          requestId: 'env_1',
+          reason: 'Connect to GitHub',
+          variables: [
+            { key: 'GITHUB_TOKEN', description: 'Access token', secret: true },
+          ],
+        },
+      },
+      { type: 'ask', askId: 'ask_1', questions: [question] },
+    );
+
+    expect(state.pendingEnvRequest).toBeUndefined();
+    expect(state.pendingAsk?.askId).toBe('ask_1');
+  });
+
   it('clears an ask when the matching answered event is replayed', () => {
     let state = reduceStreamState(baseState(), {
       type: 'ask',
@@ -184,12 +267,19 @@ describe('reduceStreamState', () => {
     expect(failed.blocks).toEqual([{ kind: 'text', text: 'Partial reply' }]);
   });
 
-  it('closes in-flight thinking and pending asks on a terminal error', () => {
+  it('closes in-flight thinking and pending prompts on a terminal error', () => {
     const failed = reduceStreamState(
       {
         ...baseState(),
         thinkingActive: true,
         pendingAsk: { askId: 'ask_1', questions: [question] },
+        pendingEnvRequest: {
+          requestId: 'env_1',
+          reason: 'Connect to GitHub',
+          variables: [
+            { key: 'GITHUB_TOKEN', description: 'Access token', secret: true },
+          ],
+        },
       },
       { type: 'error', message: 'Provider unavailable' },
     );
@@ -197,6 +287,33 @@ describe('reduceStreamState', () => {
     expect(failed.active).toBe(false);
     expect(failed.thinkingActive).toBe(false);
     expect(failed.pendingAsk).toBeUndefined();
+    expect(failed.pendingEnvRequest).toBeUndefined();
     expect(failed.terminalError).toBe('Provider unavailable');
+  });
+});
+
+describe('sameStreamSeed', () => {
+  it('treats refetched safe prompt metadata as the same seed', () => {
+    const left = {
+      pendingAsk: null,
+      pendingEnvRequest: {
+        requestId: 'env_1',
+        reason: 'Connect to GitHub',
+        variables: [
+          { key: 'GITHUB_TOKEN', description: 'Access token', secret: true },
+        ],
+      },
+    };
+
+    expect(sameStreamSeed(left, structuredClone(left))).toBe(true);
+    expect(
+      sameStreamSeed(left, {
+        ...left,
+        pendingEnvRequest: {
+          ...left.pendingEnvRequest,
+          requestId: 'env_2',
+        },
+      }),
+    ).toBe(false);
   });
 });

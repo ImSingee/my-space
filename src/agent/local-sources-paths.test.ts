@@ -25,6 +25,9 @@ const NEW_GENERATION = '2026-07-12T01:00:00.000Z';
 const root = await realpath(
   await mkdtemp(path.join(tmpdir(), 'hatch-source-paths-')),
 );
+// Per-session Linux UIDs need to traverse the fixture root to reach their
+// private runner-data worktrees. Keep it non-listable and non-writable.
+await chmod(root, 0o711);
 process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 
 const {
@@ -39,12 +42,19 @@ const {
 const {
   AGENTS_DIR,
   agentAppWorkDir,
+  agentHomeDir,
   agentSessionDir,
   agentWorkflowWorkDir,
   agentWorkspaceIndexPath,
   agentWorkDir,
 } = await import('./paths');
 const { listIndexedWorkspaces } = await import('./workspace-index');
+const {
+  prepareAgentSessionSandbox,
+  sandboxSpawn,
+  setAgentOwned,
+  wrapShellCommand,
+} = await import('./shell-sandbox');
 const { createAppTools } = await import('./tools/apps');
 const { createWorkflowTools } = await import('./tools/workflows');
 const {
@@ -71,7 +81,28 @@ function appSdkImportMap(worktree: string): string {
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const result = await run('git', args, { cwd });
+  const relative = path.relative(AGENTS_DIR, cwd);
+  const sessionId =
+    relative !== '' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    relative !== '..' &&
+    !path.isAbsolute(relative)
+      ? relative.split(path.sep)[0]
+      : undefined;
+  const wrapped = sessionId
+    ? sandboxSpawn(['git', ...args], sessionId)
+    : { command: 'git', args };
+  const result = await run(wrapped.command, wrapped.args, {
+    cwd,
+    env: sessionId
+      ? {
+          PATH: process.env.PATH,
+          HOME: agentHomeDir(sessionId),
+          LANG: process.env.LANG,
+          GIT_TERMINAL_PROMPT: '0',
+        }
+      : undefined,
+  });
   return result.stdout.trim();
 }
 
@@ -97,6 +128,123 @@ afterAll(async () => {
 });
 
 describe('runner source paths', () => {
+  it.runIf(process.platform === 'linux' && process.getuid?.() === 0)(
+    'keeps root-created scaffold and materialized files writable by the session',
+    async () => {
+      const sourceSession = 'linux-owner-source';
+      const source = await initNewWorktree(
+        sourceSession,
+        'app',
+        'linux-owner-source',
+        GENERATION,
+        async (worktree) => {
+          await mkdir(path.join(worktree, 'scaffold', 'nested'), {
+            recursive: true,
+          });
+          await writeFile(
+            path.join(worktree, 'scaffold', 'nested', 'source.txt'),
+            'root-created\n',
+          );
+        },
+      );
+      prepareAgentSessionSandbox(sourceSession);
+      await run(
+        '/bin/sh',
+        [
+          '-c',
+          wrapShellCommand(
+            'printf changed > scaffold/nested/source.txt && printf new > scaffold/nested/new.txt',
+            sourceSession,
+          ),
+        ],
+        { cwd: source.absolutePath },
+      );
+      await run(
+        '/bin/sh',
+        [
+          '-c',
+          wrapShellCommand(
+            'git add -A && git commit -m scaffold >/dev/null',
+            sourceSession,
+          ),
+        ],
+        { cwd: source.absolutePath },
+      );
+      const { stdout: headOutput } = await run(
+        '/bin/sh',
+        ['-c', wrapShellCommand('git rev-parse HEAD', sourceSession)],
+        { cwd: source.absolutePath },
+      );
+      const head = headOutput.trim();
+      const bundle = await bundleWorktreeForDeploy(
+        sourceSession,
+        'app',
+        'linux-owner-source',
+        GENERATION,
+        source.absolutePath,
+      );
+
+      const targetSession = 'linux-owner-target';
+      const checkout = await checkoutFromBundle(
+        targetSession,
+        'app',
+        {
+          id: 'linux-owner-target',
+          generation: GENERATION,
+          masterCommit: head,
+          bundleBase64: bundle.bundleBase64,
+        },
+        {
+          materializer: {
+            async materialize(worktree) {
+              await mkdir(path.join(worktree, 'generated', 'nested'), {
+                recursive: true,
+              });
+              await writeFile(
+                path.join(worktree, 'generated', 'nested', 'root.txt'),
+                'root-created\n',
+              );
+            },
+          },
+        },
+      );
+      prepareAgentSessionSandbox(targetSession);
+      const storedBundle = await lstat(
+        path.join(
+          agentSessionDir(targetSession),
+          'bundles',
+          'app-linux-owner-target.bundle',
+        ),
+      );
+      expect(storedBundle.uid).toBe(0);
+      expect(storedBundle.gid).toBe(0);
+      expect(storedBundle.mode & 0o777).toBe(0o444);
+      await run(
+        '/bin/sh',
+        [
+          '-c',
+          wrapShellCommand(
+            'printf changed > generated/nested/root.txt && printf new > generated/nested/new.txt',
+            targetSession,
+          ),
+        ],
+        { cwd: checkout.absolutePath },
+      );
+      await expect(
+        readFile(
+          path.join(checkout.absolutePath, 'generated', 'nested', 'root.txt'),
+          'utf8',
+        ),
+      ).resolves.toBe('changed');
+      await expect(
+        readFile(
+          path.join(checkout.absolutePath, 'generated', 'nested', 'new.txt'),
+          'utf8',
+        ),
+      ).resolves.toBe('new');
+    },
+  );
+
   it('uses separate defaults and supports relative and absolute custom paths', async () => {
     const sessionId = 'path-layout';
     const app = await initNewWorktree(
@@ -848,6 +996,7 @@ describe('runner source paths', () => {
 
     const foreign = path.join(agentWorkDir(sessionId), 'foreign');
     await mkdir(foreign, { recursive: true });
+    setAgentOwned([foreign], sessionId);
     await git(foreign, 'init', '--initial-branch', 'master');
     await git(foreign, 'config', 'user.name', 'Test');
     await git(foreign, 'config', 'user.email', 'test@example.test');
@@ -1256,6 +1405,7 @@ describe('runner workspace cleanup', () => {
     const staleSession = 'stale-session';
     const activeSession = 'active-session';
     await mkdir(agentWorkDir(staleSession), { recursive: true });
+    await mkdir(agentHomeDir(staleSession), { recursive: true });
     const staleApp = await initNewWorktree(
       activeSession,
       'app',
@@ -1284,10 +1434,12 @@ describe('runner workspace cleanup', () => {
     });
 
     await expect(exists(agentSessionDir(staleSession))).resolves.toBe(false);
+    await expect(exists(agentHomeDir(staleSession))).resolves.toBe(false);
     await expect(exists(staleApp.absolutePath)).resolves.toBe(false);
     await expect(exists(currentWorkflow.absolutePath)).resolves.toBe(true);
     await removeSessionWorkspace(activeSession);
     await expect(exists(agentSessionDir(activeSession))).resolves.toBe(false);
+    await expect(exists(agentHomeDir(activeSession))).resolves.toBe(false);
   });
 
   it('ignores non-entity grouping directories in the hello snapshot', async () => {

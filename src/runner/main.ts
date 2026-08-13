@@ -39,9 +39,9 @@ import {
 } from './workspace-cleanup';
 
 const config = getAgentRunnerEnv();
-// Before any run executes: on Linux, demote agent subprocesses to the
-// unprivileged sandbox user so they cannot read this process's environment
-// (AGENT_RUNNER_TOKEN) via /proc. Throws in production when unavailable.
+// Before any run executes: on Linux, prepare the per-session numeric UID/GID
+// sandbox so agent subprocesses cannot read this process's environment
+// (AGENT_RUNNER_TOKEN) or another session's files. Throws when unavailable.
 initializeAgentSandbox();
 const platform = createPlatformRestClient({
   baseUrl: config.platformUrl,
@@ -70,6 +70,12 @@ function send(message: RunnerMessage): boolean {
     ws.send(JSON.stringify(message));
     return true;
   } catch (error) {
+    if (message.type === 'run.env_result') {
+      // Keep this fixed even though results are value-free: a WebSocket
+      // implementation may attach its recently received env frame to errors.
+      console.error('[runner] environment result send failed.');
+      return false;
+    }
     console.error('[runner] send failed:', error);
     return false;
   }
@@ -198,6 +204,15 @@ function handleHubMessage(message: HubMessage): void {
       executor.answer(message.runId, message.askId, message.answers);
       return;
     }
+    case 'run.env': {
+      executor.env(
+        message.runId,
+        message.requestId,
+        message.deliveryId,
+        message.entries,
+      );
+      return;
+    }
     case 'run.event_ack': {
       executor.ackEvents(message.runId, message.runnerSeq);
       return;
@@ -273,8 +288,10 @@ function connect(): void {
           JSON.parse(typeof data === 'string' ? data : data.toString('utf8')),
         ),
       );
-    } catch (error) {
-      console.error('[runner] invalid hub message:', error);
+    } catch {
+      // A JSON/Zod exception may embed the rejected frame (including transient
+      // environment values), so never attach it or the raw input to a log.
+      console.error('[runner] invalid hub message.');
     }
   });
 

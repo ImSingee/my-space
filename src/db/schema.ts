@@ -119,6 +119,8 @@ export type AgentRunStatus =
   | 'cancelled'
   | 'interrupted';
 
+export type AgentWorkspaceAffinityState = 'uninitialized' | 'claimed';
+
 /** ================== apps ================== */
 
 /**
@@ -500,18 +502,42 @@ export const agentModels = pgTable('agent_models', {
 
 /** ================== agent sessions ================== */
 
-export const agentSessions = pgTable('agent_sessions', {
-  id: ulid().$defaultFn(genUlid).primaryKey(),
-  title: text().notNull().default('New chat'),
-  /** Optional app this conversation is scoped to. */
-  appId: text().references(() => apps.id, { onDelete: 'set null' }),
-  providerId: ulid(),
-  modelId: text(),
-  /** Persisted pi `AgentMessage[]` (stored as JSON). */
-  messages: jsonb().$type<JsonValue[]>().notNull().default([]),
-  createdAt,
-  updatedAt,
-});
+export const agentSessions = pgTable(
+  'agent_sessions',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    title: text().notNull().default('New chat'),
+    /** Optional app this conversation is scoped to. */
+    appId: text().references(() => apps.id, { onDelete: 'set null' }),
+    providerId: ulid(),
+    modelId: text(),
+    /** Persisted pi `AgentMessage[]` (stored as JSON). */
+    messages: jsonb().$type<JsonValue[]>().notNull().default([]),
+    /** Runner whose local volume owns this session workspace and its `.env`. */
+    workspaceRunnerId: text('workspace_runner_id'),
+    /**
+     * New sessions start `uninitialized`; an exact run.accepted or a hello
+     * claim makes them `claimed` together with workspaceRunnerId. Migration
+     * backfills the latest recorded Runner before any new dispatch can race.
+     */
+    workspaceAffinityState: text('workspace_affinity_state')
+      .$type<AgentWorkspaceAffinityState>()
+      .notNull()
+      .default('uninitialized'),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    check(
+      'agent_sessions_workspace_affinity_check',
+      sql`(
+        (${table.workspaceAffinityState} = 'claimed' and ${table.workspaceRunnerId} is not null)
+        or
+        (${table.workspaceAffinityState} = 'uninitialized' and ${table.workspaceRunnerId} is null)
+      )`,
+    ),
+  ],
+);
 
 export const agentAttachments = pgTable(
   'agent_attachments',
@@ -549,6 +575,11 @@ export const agentRuns = pgTable(
      * hub delivers it when the runner reconnects and reclaims the run.
      */
     pendingAnswer: jsonb('pending_answer').$type<JsonObject>(),
+    /**
+     * Safe metadata for a pending environment request. Values are forwarded
+     * directly to the Runner and are never stored in the platform database.
+     */
+    pendingEnvRequest: jsonb('pending_env_request').$type<JsonObject>(),
     /** Agent Runner executing this run (null before a runner accepted it). */
     runnerId: text('runner_id'),
     /**

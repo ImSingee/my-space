@@ -13,8 +13,8 @@ import {
 } from './protocol';
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v5 for the Data Table REST contract', () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+  it('uses protocol v6 for Data Table and environment delivery', () => {
+    expect(PROTOCOL_VERSION).toBe(6);
   });
 
   it('parses runner.hello', () => {
@@ -85,6 +85,145 @@ describe('runner -> platform messages', () => {
     expect(failed.error).toBe('boom');
   });
 
+  it('strictly validates safe environment events', () => {
+    expect(
+      parseRunnerMessage({
+        type: 'run.event',
+        runId: 'r1',
+        runnerSeq: 1,
+        event: {
+          type: 'env_request',
+          requestId: 'env-1',
+          reason: 'Deploy to the service',
+          variables: [
+            {
+              key: 'SERVICE_TOKEN',
+              description: 'Service API token',
+              secret: true,
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      event: { type: 'env_request', requestId: 'env-1' },
+    });
+    expect(
+      parseRunnerMessage({
+        type: 'run.event',
+        runId: 'r1',
+        runnerSeq: 2,
+        event: {
+          type: 'env_stored',
+          requestId: 'env-1',
+          variables: [{ key: 'SERVICE_TOKEN', secret: true }],
+        },
+      }),
+    ).toMatchObject({
+      event: {
+        type: 'env_stored',
+        variables: [{ key: 'SERVICE_TOKEN', secret: true }],
+      },
+    });
+
+    for (const event of [
+      {
+        type: 'env_request',
+        requestId: 'env-1',
+        reason: 'Need it',
+        variables: [
+          {
+            key: 'TOKEN',
+            description: 'Token',
+            secret: true,
+            value: 'plaintext',
+          },
+        ],
+      },
+      {
+        type: 'env_request',
+        requestId: 'env-1',
+        reason: 'Need it',
+        variables: [],
+      },
+      {
+        type: 'env_stored',
+        requestId: 'env-1',
+        variables: [{ key: 'TOKEN', secret: true }],
+        value: 'plaintext',
+      },
+    ]) {
+      expect(() =>
+        parseRunnerMessage({
+          type: 'run.event',
+          runId: 'r1',
+          runnerSeq: 3,
+          event,
+        }),
+      ).toThrow(ZodError);
+    }
+  });
+
+  it('rejects unknown stream events and extra fields before persistence', () => {
+    const canary = 'plaintext-canary-must-not-persist';
+    for (const event of [
+      { type: 'text', delta: 'safe', value: canary },
+      {
+        type: 'run.env',
+        entries: [{ key: 'TOKEN', value: canary, secret: true }],
+      },
+    ]) {
+      expect(() =>
+        parseRunnerMessage({
+          type: 'run.event',
+          runId: 'r1',
+          runnerSeq: 3,
+          event,
+        }),
+      ).toThrow(ZodError);
+    }
+  });
+
+  it('requires a safe run.env_result shape', () => {
+    expect(
+      parseRunnerMessage({
+        type: 'run.env_result',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-1',
+        ok: true,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      parseRunnerMessage({
+        type: 'run.env_result',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-2',
+        ok: false,
+        errorCode: 'write_failed',
+      }),
+    ).toMatchObject({ ok: false, errorCode: 'write_failed' });
+    expect(() =>
+      parseRunnerMessage({
+        type: 'run.env_result',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-3',
+        ok: false,
+      }),
+    ).toThrow(ZodError);
+    expect(() =>
+      parseRunnerMessage({
+        type: 'run.env_result',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-4',
+        ok: true,
+        errorCode: 'plaintext',
+      }),
+    ).toThrow(ZodError);
+  });
+
   it('rejects unknown message types and bad payloads', () => {
     expect(() => parseRunnerMessage({ type: 'nope' })).toThrow(ZodError);
     expect(() =>
@@ -147,6 +286,116 @@ describe('platform -> runner messages', () => {
     if (message.type !== 'run.answer') throw new Error('wrong type');
     expect(message.answers[0].selectedOptionIds).toEqual([]);
     expect(message.answers[0].customText).toBe('free text');
+  });
+
+  it('strictly validates transient run.env entries and classifications', () => {
+    const message = parseHubMessage({
+      type: 'run.env',
+      runId: 'r1',
+      requestId: 'secret-1',
+      deliveryId: 'delivery-1',
+      entries: [{ key: 'SERVICE_TOKEN', value: 'token-value', secret: true }],
+    });
+    if (message.type !== 'run.env') throw new Error('wrong type');
+    expect(message.entries).toEqual([
+      { key: 'SERVICE_TOKEN', value: 'token-value', secret: true },
+    ]);
+
+    for (const entries of [
+      [{ key: 'SERVICE-TOKEN', value: 'token-value', secret: true }],
+      [{ key: 'SERVICE_TOKEN', value: 'line one\nline two', secret: true }],
+      [
+        { key: 'SERVICE_TOKEN', value: 'first', secret: true },
+        { key: 'SERVICE_TOKEN', value: 'second', secret: false },
+      ],
+      [{ key: 'SERVICE_TOKEN', value: '😀'.repeat(4097), secret: true }],
+      [{ key: 'SERVICE_TOKEN', value: 'malformed\ud800value', secret: true }],
+      [{ key: 'SERVICE_TOKEN', value: 'token-value', secret: 'yes' }],
+      [
+        {
+          key: 'SERVICE_TOKEN',
+          value: 'token-value',
+          secret: true,
+          extra: 'nope',
+        },
+      ],
+    ]) {
+      expect(() =>
+        parseHubMessage({
+          type: 'run.env',
+          runId: 'r1',
+          requestId: 'secret-1',
+          deliveryId: 'delivery-invalid',
+          entries,
+        }),
+      ).toThrow(ZodError);
+    }
+    expect(() =>
+      parseHubMessage({
+        type: 'run.env',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-extra',
+        entries: [{ key: 'SERVICE_TOKEN', value: 'ok', secret: true }],
+        plaintext: 'nope',
+      }),
+    ).toThrow(ZodError);
+    expect(() =>
+      parseHubMessage({
+        type: 'run.env',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-emoji',
+        entries: [
+          { key: 'SERVICE_TOKEN', value: '😀'.repeat(4096), secret: false },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      parseHubMessage({
+        type: 'run.env',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-empty-and-unquoted',
+        entries: [
+          { key: 'EMPTY', value: '', secret: true },
+          { key: 'ALL_QUOTES', value: 'a\'"`b', secret: false },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      parseHubMessage({
+        type: 'run.env',
+        runId: 'r1',
+        requestId: 'secret-1',
+        entries: [{ key: 'SERVICE_TOKEN', value: 'ok', secret: true }],
+      }),
+    ).toThrow(ZodError);
+    expect(() =>
+      parseHubMessage({
+        type: 'run.env',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-reserved',
+        entries: [{ key: 'HOME', value: 'ok', secret: true }],
+      }),
+    ).toThrow(ZodError);
+
+    const canary = 'plaintext-canary\ud800';
+    let parseError: unknown;
+    try {
+      parseHubMessage({
+        type: 'run.env',
+        runId: 'r1',
+        requestId: 'secret-1',
+        deliveryId: 'delivery-malformed',
+        entries: [{ key: 'SERVICE_TOKEN', value: canary, secret: true }],
+      });
+    } catch (error) {
+      parseError = error;
+    }
+    expect(parseError).toBeInstanceOf(ZodError);
+    expect(JSON.stringify(parseError)).not.toContain('plaintext-canary');
   });
 
   it('rejects a runner message on the hub channel', () => {

@@ -33,7 +33,11 @@ import { ModelPicker } from './model-picker';
 import { resolveEffectiveModel, splitModelValue } from './model-value';
 import { StreamingBubble } from './streaming-bubble';
 import { type ChatMessage, pairToolResults } from './types';
-import { useAgentStream } from './use-agent-stream';
+import {
+  sameStreamSeed,
+  type StreamSeed,
+  useAgentStream,
+} from './use-agent-stream';
 import classes from './chat.module.css';
 
 export function Chat({ sessionId }: { sessionId: string }) {
@@ -81,11 +85,12 @@ export function Chat({ sessionId }: { sessionId: string }) {
   }, [clearReconnectTimer]);
 
   const onStreamConnected = useCallback(() => {
+    clearReconnectTimer();
     if (reconnectAttemptsRef.current > 0) {
       reconnectAttemptsRef.current = 0;
       toast.dismiss(RECONNECT_TOAST_ID);
     }
-  }, []);
+  }, [clearReconnectTimer]);
 
   const revalidateSession = useCallback(() => {
     void qc.invalidateQueries({
@@ -144,11 +149,30 @@ export function Chat({ sessionId }: { sessionId: string }) {
     send: sendRun,
     retry: retryRun,
     connect,
+    syncSeed,
+    reset: resetStream,
     stop: stopRun,
     answer,
+    submitEnv,
+    envAnnouncement,
   } = stream;
 
   const session = sessionQuery.data;
+  const activeRunId = session?.activeRun?.id ?? null;
+  const activeRunSeedRef = useRef<StreamSeed | undefined>(undefined);
+  const nextActiveRunSeed = session?.activeRun
+    ? {
+        pendingEnvRequest: session.activeRun.pendingEnvRequest,
+        pendingAsk: session.activeRun.pendingEnvRequest
+          ? null
+          : session.activeRun.pendingAsk,
+      }
+    : undefined;
+  if (!sameStreamSeed(activeRunSeedRef.current, nextActiveRunSeed)) {
+    activeRunSeedRef.current = nextActiveRunSeed;
+  }
+  const activeRunSeed = activeRunSeedRef.current;
+  const activeRunSeedRevision = sessionQuery.dataUpdatedAt || undefined;
   const sessionModel =
     session?.providerId && session?.modelId
       ? `${session.providerId}:${session.modelId}`
@@ -248,6 +272,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 id: runId,
                 status: 'running' as const,
                 pendingAsk: null,
+                pendingEnvRequest: null,
               },
             }
           : old,
@@ -313,6 +338,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 id: runId,
                 status: 'running' as const,
                 pendingAsk: null,
+                pendingEnvRequest: null,
               },
             }
           : old,
@@ -406,11 +432,31 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // in the same effect, React's passive-effect teardown/re-run cycle (Suspense
   // hide/show, remounts) re-establishes the stream instead of leaving it
   // canceled — which previously left the chat stuck on "Thinking…".
+  //
+  // Persisted prompt metadata is synchronized separately. In particular, a
+  // successful session refetch must not tear down this connection and bypass
+  // the reconnect timer's exponential backoff.
   useEffect(() => {
-    const activeRunId = session?.activeRun?.id ?? null;
     if (!activeRunId) return;
+    syncSeed(activeRunId, activeRunSeed, activeRunSeedRevision);
+  }, [activeRunId, activeRunSeed, activeRunSeedRevision, syncSeed]);
+
+  useEffect(() => {
+    if (!activeRunId) {
+      // Keep a terminal error visible until its canonical transcript lands,
+      // but clear a non-terminal live state when the session says no run owns it.
+      if (!streamState.terminalError) resetStream();
+      return;
+    }
     return connect(activeRunId);
-  }, [connect, reconnectToken, session?.activeRun?.id]);
+  }, [
+    activeRunId,
+    connect,
+    reconnectToken,
+    resetStream,
+    sessionId,
+    streamState.terminalError,
+  ]);
 
   useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
 
@@ -447,6 +493,15 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   return (
     <Box className={classes.chat}>
+      <Text
+        component="span"
+        className={classes.visuallyHidden}
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="env-announcement"
+      >
+        {envAnnouncement}
+      </Text>
       <Box className={classes.chatHead}>
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           <ThemeIcon variant="light" color="ember" radius="md" size="md">
@@ -481,7 +536,11 @@ export function Chat({ sessionId }: { sessionId: string }) {
             <>
               {renderedTurns}
               {streamState.active || streamState.terminalError ? (
-                <StreamingBubble state={streamState} onAnswer={answer} />
+                <StreamingBubble
+                  state={streamState}
+                  onAnswer={answer}
+                  onSubmitEnv={submitEnv}
+                />
               ) : null}
             </>
           )}

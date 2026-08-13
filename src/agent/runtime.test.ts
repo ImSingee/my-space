@@ -8,11 +8,13 @@ import {
   fauxProvider,
   fauxText,
   fauxToolCall,
+  type FauxResponseStep,
 } from '@earendil-works/pi-ai/providers/faux';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentStreamEvent } from './events';
 import type { PlatformClient } from './platform-client';
 import type { ResolvedModel } from './remote-models';
+import type { EnvBridge } from './tools';
 import { MAX_EDIT_DETAILS_BYTES } from './tools/edit-diff';
 import { MAX_WEB_SEARCH_CONTENT_CHARS } from './tools/web';
 
@@ -24,6 +26,7 @@ process.env.HATCH_DATA_DIR = dataDir;
 const { runAgentTurn } = await import('./runtime');
 const { agentWorkDir } = await import('./paths');
 const { agentShellEnv } = await import('./shell-env');
+const { writeEnvFile } = await import('./env-file');
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -51,10 +54,11 @@ async function runWithResponse(
 }
 
 async function runWithResponses(
-  responses: ReturnType<typeof fauxAssistantMessage>[],
+  responses: FauxResponseStep[],
   sessionId: string,
   emit: (event: AgentStreamEvent) => void = () => {},
   platform: PlatformClient = stubPlatform,
+  requestEnv?: EnvBridge,
 ) {
   const providerId = `runtime-test-${sessionId}`;
   const faux = fauxProvider({ provider: providerId });
@@ -77,11 +81,80 @@ async function runWithResponses(
     picked,
     platform,
     signal: new AbortController().signal,
+    ...(requestEnv ? { requestEnv } : {}),
     emit,
   });
 }
 
 describe('runAgentTurn terminal outcomes', () => {
+  it('reveals only browser-classified non-secret values to the model', async () => {
+    const sessionId = 'secret-canary';
+    const canary = 'canary-secret-93b7f7c8-never-in-context';
+    const visible = 'account-123';
+    const events: AgentStreamEvent[] = [];
+    const requestEnv: EnvBridge = async (_reason, variables) => {
+      expect(variables).toEqual([
+        {
+          key: 'SERVICE_TOKEN',
+          description: 'Read-only service token.',
+          secret: true,
+        },
+        {
+          key: 'ACCOUNT_ID',
+          description: 'Public account identifier.',
+          secret: true,
+        },
+      ]);
+      await writeEnvFile(agentWorkDir(sessionId), [
+        { key: variables[0].key, value: canary, secret: true },
+        { key: variables[1].key, value: visible, secret: false },
+      ]);
+      return [
+        { key: 'SERVICE_TOKEN', secret: true },
+        { key: 'ACCOUNT_ID', value: visible, secret: false },
+      ];
+    };
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall('request_env', {
+            reason: 'Verify the private service.',
+            variables: [
+              {
+                key: 'SERVICE_TOKEN',
+                description: 'Read-only service token.',
+                secret: true,
+              },
+              {
+                key: 'ACCOUNT_ID',
+                description: 'Public account identifier.',
+                secret: true,
+              },
+            ],
+          }),
+        ),
+        (context) => {
+          expect(JSON.stringify(context)).not.toContain(canary);
+          expect(JSON.stringify(context)).toContain(visible);
+          return fauxAssistantMessage('Credentials are ready.');
+        },
+      ],
+      sessionId,
+      (event) => events.push(event),
+      stubPlatform,
+      requestEnv,
+    );
+
+    await expect(
+      readFile(path.join(agentWorkDir(sessionId), '.env'), 'utf8'),
+    ).resolves.toContain(canary);
+    expect(JSON.stringify(events)).not.toContain(canary);
+    expect(JSON.stringify(result.messages)).not.toContain(canary);
+    expect(JSON.stringify(result.messages)).toContain(visible);
+    expect(result.error).toBeUndefined();
+  });
+
   it('propagates a resolved provider error with its transcript', async () => {
     const result = await runWithResponse(
       fauxAssistantMessage([], {
@@ -272,7 +345,7 @@ describe('runAgentTurn terminal outcomes', () => {
     const original = process.env.TAVILY_API_KEY;
     process.env.TAVILY_API_KEY = 'tvly-shell-secret';
     try {
-      expect(agentShellEnv().TAVILY_API_KEY).toBeUndefined();
+      expect(agentShellEnv('tavily-shell-env').TAVILY_API_KEY).toBeUndefined();
     } finally {
       if (original === undefined) delete process.env.TAVILY_API_KEY;
       else process.env.TAVILY_API_KEY = original;

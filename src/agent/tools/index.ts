@@ -10,15 +10,17 @@ import { createAttachmentTool } from './attachments';
 import { createAskTool, type AskBridge } from './ask';
 import { createCommandTool } from './command';
 import { createFileTools } from './files';
+import { createRequestEnvTool, type EnvBridge } from './request-env';
 import type { AgentToolWithStreamDetails } from './shared';
 import { createWebTools } from './web';
 import { createWorkflowTools } from './workflows';
 
-export type { AskBridge };
+export type { AskBridge, EnvBridge };
 
 export type CreateToolsOptions = {
   platform: PlatformClient;
   ask?: AskBridge;
+  requestEnv?: EnvBridge;
   readOnlyRoots?: string[];
   sessionId?: string;
   tavilyApiKey?: string | null;
@@ -37,7 +39,7 @@ export function createTools(
       env,
       options.readOnlyRoots ? { readOnlyRoots: options.readOnlyRoots } : {},
     ),
-    createCommandTool(env),
+    createCommandTool(env, options.sessionId),
     createAttachmentTool(shared),
     ...createAppTools(shared),
     ...createWorkflowTools(shared),
@@ -46,5 +48,8 @@ export function createTools(
     ),
   ];
   if (options.ask) tools.push(createAskTool(options.ask));
+  if (options.requestEnv) {
+    tools.push(createRequestEnvTool(options.requestEnv));
+  }
   return tools;
 }

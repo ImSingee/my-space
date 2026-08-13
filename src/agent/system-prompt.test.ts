@@ -12,6 +12,17 @@ const visibleSkill: Skill = {
 };
 
 describe('Agent system prompt skills', () => {
+  it('keeps third-party credentials out of ask and command text', () => {
+    const prompt = buildSystemPrompt(appUrl);
+
+    expect(prompt).toContain('use `request_env`');
+    expect(prompt).toContain('never request credentials with `ask`');
+    expect(prompt).toContain('`run_command.env_keys`');
+    expect(prompt).toContain('source `.env`');
+    expect(prompt).toContain('reference them as `"$KEY"`');
+    expect(prompt).toContain('not deployed');
+  });
+
   it('requires frontend route metadata to stay synchronized', () => {
     const prompt = buildSystemPrompt(appUrl);
 

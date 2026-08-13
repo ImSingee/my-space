@@ -4,24 +4,24 @@
  * PlatformClient, never through direct server imports.
  */
 import { Buffer } from 'node:buffer';
-import { mkdirSync } from 'node:fs';
 import {
   AgentHarness,
   InMemorySessionRepo,
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import type { Models } from '@earendil-works/pi-ai';
 import type { JsonValue } from '~/db/schema';
 import { formatAttachmentPrompt, type AgentAttachmentRef } from './attachments';
 import type { AgentStreamEvent } from './events';
-import { agentWorkDir, SKILLS_DIR } from './paths';
+import { SKILLS_DIR } from './paths';
 import type { PlatformClient } from './platform-client';
 import type { ResolvedModel } from './remote-models';
 import { agentShellEnv } from './shell-env';
+import { SessionExecutionEnv } from './sandboxed-file-io';
+import { prepareAgentSessionSandbox } from './shell-sandbox';
 import { loadAgentSkills } from './skills';
 import { buildSystemPrompt } from './system-prompt';
-import { createTools, type AskBridge } from './tools';
+import { createTools, type AskBridge, type EnvBridge } from './tools';
 import type { StreamDetailsSelector } from './tools/shared';
 
 /** Keep streamed tool output small; the full result is persisted on `done`. */
@@ -109,6 +109,7 @@ export type RunAgentTurnOptions = {
   platform: PlatformClient;
   signal: AbortSignal;
   ask?: AskBridge;
+  requestEnv?: EnvBridge;
   emit: (event: AgentStreamEvent) => void;
 };
 
@@ -123,16 +124,16 @@ export async function runAgentTurn(
   const { priorMessages, sessionId, userText, signal, emit, models, picked } =
     opts;
 
-  const cwd = agentWorkDir(sessionId);
-  mkdirSync(cwd, { recursive: true });
+  prepareAgentSessionSandbox(sessionId);
 
   // Never hand the model's shell the raw server env: with run_command it could
   // otherwise read host secrets (DATABASE_URL, auth keys, provider keys, …),
   // including via prompt-injected project files. agentShellEnv() strips
   // everything outside a small dev allowlist.
-  const env = new NodeExecutionEnv({
-    cwd,
-    shellEnv: agentShellEnv(),
+  const env = new SessionExecutionEnv({
+    sessionId,
+    shellEnv: agentShellEnv(sessionId),
+    readOnlyRoots: [SKILLS_DIR],
   });
 
   const repo = new InMemorySessionRepo();
@@ -146,6 +147,7 @@ export async function runAgentTurn(
     platform: opts.platform,
     ...(opts.tavilyApiKey ? { tavilyApiKey: opts.tavilyApiKey } : {}),
     ...(opts.ask ? { ask: opts.ask } : {}),
+    ...(opts.requestEnv ? { requestEnv: opts.requestEnv } : {}),
     readOnlyRoots: [SKILLS_DIR],
     sessionId,
   });

@@ -10,7 +10,7 @@
  *   startAgentRun → dispatch to runner (lease assigned)
  *   → runner streams `run.event`s (ask/tool/text/…; each renews the lease)
  *   → runner reports `run.finished` (messages persisted, terminal event)
- *   Cancel/answer flow platform → runner over the same control channel.
+ *   Cancel/answer/environment flow platform → runner over the same channel.
  *   A sweeper interrupts active runs whose lease expired (runner died).
  */
 import { and, eq, inArray, isNull, gt, sql } from 'drizzle-orm';
@@ -22,6 +22,7 @@ import type {
   AgentStreamEvent,
   AskAnswer,
   AskQuestion,
+  EnvVariableField,
 } from '~agent/events';
 import {
   formatAttachmentPrompt,
@@ -30,6 +31,8 @@ import {
 import {
   LEASE_SWEEP_INTERVAL_MS,
   RUN_LEASE_TTL_MS,
+  envEntriesSchema,
+  type EnvEntry,
   type RunModelConfig,
   type SendImage,
 } from '~agent/protocol';
@@ -64,10 +67,17 @@ type PendingAnswerPayload = {
   answers: AskAnswer[];
 };
 
+export type PendingEnvRequestPayload = {
+  requestId: string;
+  reason: string;
+  variables: EnvVariableField[];
+};
+
 export type ActiveAgentRun = {
   id: string;
   status: AgentRunStatus;
   pendingAsk: PendingAskPayload | null;
+  pendingEnvRequest: PendingEnvRequestPayload | null;
 };
 
 type Subscriber = (event: AgentRunStreamEvent) => void;
@@ -158,6 +168,13 @@ function asPendingAnswer(
   return value as unknown as PendingAnswerPayload;
 }
 
+function asPendingEnvRequest(
+  value: JsonObject | null,
+): PendingEnvRequestPayload | null {
+  if (!value) return null;
+  return value as unknown as PendingEnvRequestPayload;
+}
+
 function publish(runId: string, event: AgentRunStreamEvent): void {
   const set = subscriberMap().get(runId);
   if (!set) return;
@@ -238,6 +255,7 @@ async function finishRun(
       error: error ?? null,
       pendingAsk: null,
       pendingAnswer: null,
+      pendingEnvRequest: null,
       completedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -275,6 +293,7 @@ export async function getActiveAgentRun(
     id: row.id,
     status: row.status,
     pendingAsk: asPendingAsk(row.pendingAsk ?? null),
+    pendingEnvRequest: asPendingEnvRequest(row.pendingEnvRequest ?? null),
   };
 }
 
@@ -602,15 +621,136 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
 
 /** ================== hub callbacks (runner lifecycle) ================== */
 
-/** Record which runner owns a run and start its lease (called on dispatch). */
+export type SessionWorkspaceAffinity =
+  | { state: 'uninitialized'; runnerId: null }
+  | { state: 'claimed'; runnerId: string };
+
+/** Persistent ownership state for one session's Runner-local workspace. */
+export async function getSessionWorkspaceAffinity(
+  sessionId: string,
+): Promise<SessionWorkspaceAffinity> {
+  const session = await db.query.agentSessions.findFirst({
+    where: (row, { eq: equals }) => equals(row.id, sessionId),
+    columns: { workspaceAffinityState: true, workspaceRunnerId: true },
+  });
+  if (!session) throw new Error('Agent session no longer exists.');
+  if (
+    session.workspaceAffinityState === 'claimed' &&
+    session.workspaceRunnerId != null
+  ) {
+    return { state: 'claimed', runnerId: session.workspaceRunnerId };
+  }
+  if (
+    session.workspaceAffinityState === 'uninitialized' &&
+    session.workspaceRunnerId == null
+  ) {
+    return { state: 'uninitialized', runnerId: null };
+  }
+  throw new Error('Agent session workspace affinity is inconsistent.');
+}
+
+/**
+ * Provisionally assign an active run to a Runner. Session affinity is not
+ * changed here: only an exact `run.accepted` (or a valid event that raced it)
+ * proves that the selected connection created or opened the workspace.
+ */
 export async function assignRunToRunner(
   runId: string,
+  sessionId: string,
   runnerId: string,
 ): Promise<void> {
-  await db
-    .update(schema.agentRuns)
-    .set({ runnerId, leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
-    .where(eq(schema.agentRuns.id, runId));
+  await db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({
+        workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
+        workspaceRunnerId: schema.agentSessions.workspaceRunnerId,
+      })
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.id, sessionId))
+      .for('update');
+    if (!session) throw new Error('Agent session no longer exists.');
+    if (
+      session.workspaceAffinityState === 'claimed' &&
+      session.workspaceRunnerId !== runnerId
+    ) {
+      throw new Error('Agent session workspace belongs to another Runner.');
+    }
+    if (
+      (session.workspaceAffinityState === 'claimed') !==
+      (session.workspaceRunnerId != null)
+    ) {
+      throw new Error('Agent session workspace affinity is inconsistent.');
+    }
+
+    const assigned = await tx
+      .update(schema.agentRuns)
+      .set({ runnerId, leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.agentRuns.id, runId),
+          eq(schema.agentRuns.sessionId, sessionId),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        ),
+      )
+      .returning({ id: schema.agentRuns.id });
+    if (assigned.length === 0) {
+      throw new Error('Agent run is no longer active.');
+    }
+  });
+}
+
+/**
+ * Commit workspace affinity after the assigned Runner proves it accepted the
+ * run. Idempotent for later events from the same owner; rejects stale peers.
+ */
+export async function finalizeRunWorkspaceAffinity(
+  runId: string,
+  runnerId: string,
+  expectedSessionId?: string,
+): Promise<string> {
+  return db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({
+        sessionId: schema.agentRuns.sessionId,
+        runnerId: schema.agentRuns.runnerId,
+      })
+      .from(schema.agentRuns)
+      .where(eq(schema.agentRuns.id, runId))
+      .for('update');
+    if (
+      !run ||
+      run.runnerId !== runnerId ||
+      (expectedSessionId != null && run.sessionId !== expectedSessionId)
+    ) {
+      throw new Error('Agent run is no longer assigned to this Runner.');
+    }
+
+    const [session] = await tx
+      .select({
+        workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
+        workspaceRunnerId: schema.agentSessions.workspaceRunnerId,
+      })
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.id, run.sessionId))
+      .for('update');
+    if (!session) throw new Error('Agent session no longer exists.');
+
+    if (session.workspaceAffinityState === 'claimed') {
+      if (session.workspaceRunnerId !== runnerId) {
+        throw new Error('Agent session workspace belongs to another Runner.');
+      }
+      return run.sessionId;
+    }
+    if (session.workspaceRunnerId != null) {
+      throw new Error('Agent session workspace affinity is inconsistent.');
+    }
+
+    await tx
+      .update(schema.agentSessions)
+      .set({ workspaceAffinityState: 'claimed', workspaceRunnerId: runnerId })
+      .where(eq(schema.agentSessions.id, run.sessionId));
+    return run.sessionId;
+  });
 }
 
 /** Heartbeat: extend the lease of every active run owned by this runner. */
@@ -727,13 +867,15 @@ export async function reconcileRunnerRuns(
   return { resumed, stale, pendingAnswers };
 }
 
-export type IngestResult = 'ok' | 'stale';
+export type IngestResult =
+  | { status: 'ok'; sessionId: string }
+  | { status: 'stale' };
 
 /**
  * Persist one runner stream event (deduped on runnerSeq), apply its status
- * side effects (ask → blocked, ask_answered → running), renew the lease, and
- * fan it out to SSE subscribers. Returns 'stale' when the run no longer
- * belongs to this runner so the hub can tell it to abort.
+ * side effects (ask/env_request → blocked, acknowledgements → running),
+ * renew the lease, and fan it out to SSE subscribers. Returns 'stale' when the
+ * run no longer belongs to this runner so the hub can tell it to abort.
  */
 export async function ingestRunnerEvent(
   runnerId: string,
@@ -741,8 +883,18 @@ export async function ingestRunnerEvent(
 ): Promise<IngestResult> {
   return enqueueRunTask(message.runId, async () => {
     const run = await getAgentRun(message.runId);
-    if (!run || run.runnerId !== runnerId) return 'stale';
-    if (isTerminalAgentRunStatus(run.status)) return 'stale';
+    if (!run || run.runnerId !== runnerId) return { status: 'stale' };
+    if (isTerminalAgentRunStatus(run.status)) return { status: 'stale' };
+
+    // `run.accepted` and the first event are separate WebSocket frames whose
+    // async handlers may race. Either is sufficient proof that this exact
+    // assigned Runner opened the workspace, so finalize affinity idempotently
+    // before persisting the event.
+    const sessionId = await finalizeRunWorkspaceAffinity(
+      message.runId,
+      runnerId,
+      run.sessionId,
+    );
 
     // Persist first, publish last: subscribers must not see an `ask` before
     // the run row records it as pending (a fast answer would 409 otherwise).
@@ -760,13 +912,13 @@ export async function ingestRunnerEvent(
     await applyRunnerEventSideEffects(message.runId, message.event);
 
     // Duplicate resend — already persisted and published once.
-    if (!stored) return 'ok';
+    if (!stored) return { status: 'ok', sessionId };
     publish(message.runId, stored);
-    return 'ok';
+    return { status: 'ok', sessionId };
   });
 }
 
-/** Run-row updates driven by a runner stream event (ask/answer/lease). */
+/** Run-row updates driven by a runner stream event (ask/environment/lease). */
 async function applyRunnerEventSideEffects(
   runId: string,
   event: AgentStreamEvent,
@@ -788,6 +940,7 @@ async function applyRunnerEventSideEffects(
           then ${schema.agentRuns.pendingAnswer}
           else null
         end`,
+        pendingEnvRequest: null,
         leaseExpiresAt: leaseDeadline(),
         updatedAt: new Date(),
       })
@@ -813,6 +966,55 @@ async function applyRunnerEventSideEffects(
           inArray(schema.agentRuns.status, ACTIVE_STATUSES),
         ),
       );
+  } else if (event.type === 'env_request') {
+    await db
+      .update(schema.agentRuns)
+      .set({
+        status: 'blocked',
+        pendingAsk: null,
+        pendingAnswer: null,
+        pendingEnvRequest: {
+          requestId: event.requestId,
+          reason: event.reason,
+          variables: event.variables,
+        } as unknown as JsonObject,
+        leaseExpiresAt: leaseDeadline(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.agentRuns.id, runId),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        ),
+      );
+  } else if (event.type === 'env_stored') {
+    const updated = await db
+      .update(schema.agentRuns)
+      .set({
+        status: 'running',
+        pendingEnvRequest: null,
+        leaseExpiresAt: leaseDeadline(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.agentRuns.id, runId),
+          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+          sql`${schema.agentRuns.pendingEnvRequest}->>'requestId' = ${event.requestId}`,
+        ),
+      )
+      .returning({ id: schema.agentRuns.id });
+    if (updated.length === 0) {
+      await db
+        .update(schema.agentRuns)
+        .set({ leaseExpiresAt: leaseDeadline(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.agentRuns.id, runId),
+            inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+          ),
+        );
+    }
   } else {
     await db
       .update(schema.agentRuns)
@@ -840,10 +1042,16 @@ export async function completeRunFromRunner(
     error?: string;
     messages: unknown[];
   },
-): Promise<void> {
-  await enqueueRunTask(message.runId, async () => {
+): Promise<string | null> {
+  return enqueueRunTask(message.runId, async () => {
     const run = await getAgentRun(message.runId);
-    if (!run || run.runnerId !== runnerId) return;
+    if (!run || run.runnerId !== runnerId) return null;
+
+    // A very short run can send run.finished while the asynchronous
+    // run.accepted handler is still committing affinity, or after cancellation
+    // already made the run terminal. The final report is equally strong proof
+    // that this assigned Runner opened the workspace.
+    await finalizeRunWorkspaceAffinity(message.runId, runnerId, run.sessionId);
 
     // Persist whatever the turn produced — including a reply that was only
     // partially streamed before the user stopped the run (or before it
@@ -871,7 +1079,7 @@ export async function completeRunFromRunner(
       // and appendEvent leaves the run terminal without a terminal event, so
       // SSE clients would treat the closed stream as a disconnect — repair it.
       await ensureTerminalEvent(message.runId, run.status, run.error);
-      return;
+      return run.sessionId;
     }
 
     const finished = await finishRun(
@@ -881,12 +1089,13 @@ export async function completeRunFromRunner(
         ? (message.error ?? 'Agent run failed.')
         : undefined,
     );
-    if (!finished) return;
+    if (!finished) return null;
 
     await appendEvent(
       message.runId,
       terminalEventForStatus(message.status, message.error),
     );
+    return run.sessionId;
   });
 }
 
@@ -1018,6 +1227,82 @@ export async function answerAgentRun(
 
   const hub = await import('./agent-runner/hub');
   hub.sendRunAnswer(run.runnerId, runId, askId, answers);
+}
+
+/** ================== environment request / delivery ================== */
+
+function validateEnvEntries(
+  pending: PendingEnvRequestPayload,
+  entries: EnvEntry[],
+): EnvEntry[] {
+  const parsed = envEntriesSchema.safeParse(entries);
+  if (!parsed.success) {
+    throw new AppError('Invalid environment values.', 400);
+  }
+
+  const expectedKeys = new Set(
+    pending.variables.map((variable) => variable.key),
+  );
+  const submittedKeys = new Set(parsed.data.map((entry) => entry.key));
+  if (
+    submittedKeys.size !== parsed.data.length ||
+    submittedKeys.size !== expectedKeys.size ||
+    [...expectedKeys].some((key) => !submittedKeys.has(key))
+  ) {
+    throw new AppError(
+      'Environment keys do not match the pending request.',
+      409,
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Validate a submission against safe pending metadata, forward values only
+ * through the in-memory Runner channel, and wait for a value-free result.
+ * Values are never written to the run row or event log. The browser-selected
+ * `secret` booleans are authoritative; model-supplied values are only UI
+ * defaults and deliberately are not compared here.
+ */
+export async function submitAgentEnv(
+  runId: string,
+  requestId: string,
+  entries: EnvEntry[],
+): Promise<void> {
+  const pendingDelivery = await enqueueRunTask(runId, async () => {
+    const run = await getAgentRun(runId);
+    if (!run || isTerminalAgentRunStatus(run.status)) {
+      throw new AppError('Agent run is no longer waiting.', 409);
+    }
+    const pending = asPendingEnvRequest(run.pendingEnvRequest ?? null);
+    if (!pending || pending.requestId !== requestId) {
+      throw new AppError('Environment request is no longer waiting.', 409);
+    }
+    const validatedEntries = validateEnvEntries(pending, entries);
+
+    const hub = await import('./agent-runner/hub');
+    return {
+      result: hub.sendRunEnvAndWait(
+        run.runnerId,
+        runId,
+        requestId,
+        validatedEntries,
+      ),
+    };
+  });
+
+  const result = await pendingDelivery.result;
+  if (result.ok) return;
+  if (result.errorCode === 'runner_unavailable') {
+    throw new AppError('Agent Runner is unavailable.', 503);
+  }
+  if (result.errorCode === 'runner_timeout') {
+    throw new AppError(
+      'Agent Runner did not confirm environment storage.',
+      504,
+    );
+  }
+  throw new AppError('Agent Runner could not store the environment.', 502);
 }
 
 /** ================== cancel / interrupt / sweep ================== */

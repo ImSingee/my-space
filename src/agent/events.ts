@@ -21,12 +21,42 @@ export type AskAnswer = {
   customText?: string;
 };
 
+/** One environment value the Agent needs; `secret` is only the UI default. */
+export type EnvVariableField = {
+  key: string;
+  description: string;
+  secret: boolean;
+};
+
+/** Safe metadata for an environment request. Values never enter this event. */
+export type EnvRequestEvent = {
+  type: 'env_request';
+  requestId: string;
+  reason: string;
+  variables: EnvVariableField[];
+};
+
+/** Final browser-selected visibility for one stored environment value. */
+export type EnvStoredVariable = {
+  key: string;
+  secret: boolean;
+};
+
+/** Value-free acknowledgement after requested values were stored. */
+export type EnvStoredEvent = {
+  type: 'env_stored';
+  requestId: string;
+  variables: EnvStoredVariable[];
+};
+
 export type AgentStreamEvent =
   | { type: 'assistant_start' }
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
   | { type: 'ask'; askId: string; questions: AskQuestion[] }
   | { type: 'ask_answered'; askId: string }
+  | EnvRequestEvent
+  | EnvStoredEvent
   | {
       type: 'tool_start';
       id: string;

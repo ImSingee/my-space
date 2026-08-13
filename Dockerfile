@@ -51,13 +51,15 @@ RUN apt-get update \
     python3-pip \
     rsync \
     unzip \
+    util-linux \
     wget \
   && rm -rf /var/lib/apt/lists/*
 
-# Unprivileged user the Agent Runner demotes agent subprocesses to (shell +
-# worktree git, via setpriv). Keeps AGENT_RUNNER_TOKEN — present only in the
-# runner process's environment — unreadable from /proc for model-controlled
-# commands. The runner itself stays root so it can setpriv/chown.
+# Compatibility user used only to probe/fallback-test setpriv. Actual Agent
+# shells and worktree git run under a stable numeric UID/GID unique to their
+# session. This keeps AGENT_RUNNER_TOKEN — present only in the root Runner's
+# environment — unreadable from /proc and isolates sessions from one another.
+# The Runner itself stays root so it can allocate identities and setpriv/chown.
 RUN useradd --system --user-group --no-create-home hatch-sandbox
 
 # Deno runs the app backends the platform spawns.

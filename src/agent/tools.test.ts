@@ -15,6 +15,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EditFileDetails } from './edit-file-details';
 import type { PlatformClient } from './platform-client';
+import { writeEnvFile } from './env-file';
 import {
   DIFF_TRUNCATION_LINE,
   MAX_EDIT_DETAILS_BYTES,
@@ -566,6 +567,54 @@ describe('run_command sandbox', () => {
     });
     expect(textOf(result)).toContain('sandbox-ok');
     expect(textOf(result)).toContain('exit code: 0');
+  });
+
+  it('injects only explicitly selected saved environment keys', async () => {
+    const { root, getTool } = await setup();
+    await writeEnvFile(root, [
+      { key: 'FIRST_TOKEN', value: 'first-value' },
+      { key: 'SECOND_TOKEN', value: 'second-value' },
+    ]);
+    const result = await getTool('run_command').execute('cmd', {
+      command:
+        'test "$FIRST_TOKEN" = "first-value" && ' +
+        'test -z "${SECOND_TOKEN+x}" && echo selected-only',
+      env_keys: ['FIRST_TOKEN'],
+    });
+
+    expect(textOf(result)).toContain('selected-only');
+    expect(textOf(result)).not.toContain('first-value');
+    expect(textOf(result)).not.toContain('second-value');
+  });
+
+  it('reports missing environment names without exposing stored values', async () => {
+    const { root, getTool } = await setup();
+    await writeEnvFile(root, [
+      { key: 'PRESENT_TOKEN', value: 'never-expose-this-value' },
+    ]);
+
+    await expect(
+      getTool('run_command').execute('cmd', {
+        command: 'true',
+        env_keys: ['MISSING_TOKEN'],
+      }),
+    ).rejects.toThrow(/Missing environment keys: MISSING_TOKEN/);
+  });
+
+  it('rejects reserved and duplicate env_keys', async () => {
+    const { getTool } = await setup();
+    await expect(
+      getTool('run_command').execute('cmd', {
+        command: 'true',
+        env_keys: ['PATH'],
+      }),
+    ).rejects.toThrow(/reserved/);
+    await expect(
+      getTool('run_command').execute('cmd', {
+        command: 'true',
+        env_keys: ['TOKEN', 'TOKEN'],
+      }),
+    ).rejects.toThrow(/unique/);
   });
 
   it('denies reading platform env files when the seatbelt is active', async () => {

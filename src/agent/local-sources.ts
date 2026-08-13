@@ -32,15 +32,20 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import {
-  AGENT_HOME_DIR,
   agentAppWorkDir,
+  agentHomeDir,
   agentSessionDir,
   agentWorkDir,
   agentWorkflowWorkDir,
   isSafeEntityId,
 } from './paths';
 import type { SourceBundleResponse } from './protocol';
-import { sandboxSpawn } from './shell-sandbox';
+import {
+  prepareAgentSessionSandbox,
+  sandboxSpawn,
+  setAgentOwned,
+  setRunnerOwned,
+} from './shell-sandbox';
 import {
   isWorkspacePathInside,
   listIndexedWorkspaces,
@@ -222,6 +227,7 @@ export async function withSourceWorkspaceLock<T>(
 type CommandResult = { exitCode: number; stdout: string; stderr: string };
 
 function git(
+  sessionId: string,
   args: string[],
   opts: { cwd?: string } = {},
 ): Promise<CommandResult> {
@@ -229,12 +235,12 @@ function git(
     // Worktree `.git/config` is agent-writable (core.fsmonitor, filters,
     // hooks can execute code), so run git demoted to the sandbox user where
     // available and never hand it the runner's env (AGENT_RUNNER_TOKEN…).
-    const wrapped = sandboxSpawn(['git', ...args]);
+    const wrapped = sandboxSpawn(['git', ...args], sessionId);
     const child = spawn(wrapped.command, wrapped.args, {
       cwd: opts.cwd,
       env: {
         PATH: process.env.PATH,
-        HOME: AGENT_HOME_DIR,
+        HOME: agentHomeDir(sessionId),
         LANG: process.env.LANG,
         // Bundles/worktrees are local files; block config-smuggled remote
         // helpers from prompting and keep output deterministic.
@@ -254,10 +260,11 @@ function git(
 }
 
 async function runGit(
+  sessionId: string,
   args: string[],
   opts: { cwd?: string; allowFailure?: boolean } = {},
 ): Promise<CommandResult> {
-  const result = await git(args, opts);
+  const result = await git(sessionId, args, opts);
   if (!opts.allowFailure && result.exitCode !== 0) {
     const message = (result.stderr || result.stdout).trim();
     throw new Error(`git ${args.join(' ')} failed: ${message}`);
@@ -285,15 +292,23 @@ async function pathEntryExists(p: string): Promise<boolean> {
   }
 }
 
-async function setLocalGitIdentity(worktree: string): Promise<void> {
-  await runGit(['config', 'user.name', 'Hatch Agent'], { cwd: worktree });
-  await runGit(['config', 'user.email', 'agent@hatch.local'], {
+async function setLocalGitIdentity(
+  sessionId: string,
+  worktree: string,
+): Promise<void> {
+  await runGit(sessionId, ['config', 'user.name', 'Hatch Agent'], {
+    cwd: worktree,
+  });
+  await runGit(sessionId, ['config', 'user.email', 'agent@hatch.local'], {
     cwd: worktree,
   });
 }
 
-async function worktreeHead(worktree: string): Promise<string | null> {
-  const result = await runGit(['rev-parse', '--verify', 'HEAD'], {
+async function worktreeHead(
+  sessionId: string,
+  worktree: string,
+): Promise<string | null> {
+  const result = await runGit(sessionId, ['rev-parse', '--verify', 'HEAD'], {
     cwd: worktree,
     allowFailure: true,
   });
@@ -301,22 +316,34 @@ async function worktreeHead(worktree: string): Promise<string | null> {
   return result.stdout.trim();
 }
 
-async function worktreeBranch(worktree: string): Promise<string | null> {
-  const result = await runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], {
-    cwd: worktree,
-    allowFailure: true,
-  });
+async function worktreeBranch(
+  sessionId: string,
+  worktree: string,
+): Promise<string | null> {
+  const result = await runGit(
+    sessionId,
+    ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+    { cwd: worktree, allowFailure: true },
+  );
   if (result.exitCode !== 0) return null;
   return result.stdout.trim() || null;
 }
 
-async function worktreeStatus(worktree: string): Promise<string> {
-  const result = await runGit(['status', '--short'], { cwd: worktree });
+async function worktreeStatus(
+  sessionId: string,
+  worktree: string,
+): Promise<string> {
+  const result = await runGit(sessionId, ['status', '--short'], {
+    cwd: worktree,
+  });
   return result.stdout.trim();
 }
 
-async function worktreeOrigin(worktree: string): Promise<string | null> {
-  const result = await runGit(['remote', 'get-url', 'origin'], {
+async function worktreeOrigin(
+  sessionId: string,
+  worktree: string,
+): Promise<string | null> {
+  const result = await runGit(sessionId, ['remote', 'get-url', 'origin'], {
     cwd: worktree,
     allowFailure: true,
   });
@@ -332,6 +359,21 @@ function bundleFile(sessionId: string, kind: SourceKind, id: string): string {
     throw new Error(`${kind} bundle path escapes its data root.`);
   }
   return target;
+}
+
+async function ensureBundleDirectory(
+  sessionId: string,
+  bundle: string,
+): Promise<void> {
+  prepareAgentSessionSandbox(sessionId);
+  const directory = path.dirname(bundle);
+  await mkdir(directory, { recursive: true, mode: 0o755 });
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error('Agent bundle path must be a real directory.');
+  }
+  await chmod(directory, 0o755);
+  setRunnerOwned([directory]);
 }
 
 /** Remove one stale app/workflow incarnation from this session. */
@@ -404,7 +446,7 @@ async function removeSourceWorkspacesUnlocked(
       continue;
     }
     if (!(await pathExists(path.join(resolved.absolutePath, '.git')))) continue;
-    const origin = await worktreeOrigin(resolved.absolutePath);
+    const origin = await worktreeOrigin(sessionId, resolved.absolutePath);
     if (!origin || path.resolve(origin) !== path.resolve(bundle)) continue;
     const protectedPaths = remainingIndexed.map((entry) =>
       path.resolve(entry.absolutePath),
@@ -543,8 +585,8 @@ async function describeCheckout(
   synchronizedExisting = false,
 ): Promise<LocalCheckout> {
   const [status, headCommit] = await Promise.all([
-    worktreeStatus(worktree),
-    worktreeHead(worktree),
+    worktreeStatus(sessionId, worktree),
+    worktreeHead(sessionId, worktree),
   ]);
   return {
     id,
@@ -565,6 +607,7 @@ async function describeCheckout(
  * entities with different ids, and arbitrary Git repositories at custom paths.
  */
 async function assertOwnedWorktree(
+  sessionId: string,
   worktree: string,
   bundle: string,
   id: string,
@@ -575,7 +618,7 @@ async function assertOwnedWorktree(
       `Agent worktree exists but is not a Git checkout: ${worktree}`,
     );
   }
-  const origin = await worktreeOrigin(worktree);
+  const origin = await worktreeOrigin(sessionId, worktree);
   if (!origin || path.resolve(origin) !== path.resolve(bundle)) {
     throw new Error(
       `Workspace path is not a checkout of ${kind} "${id}" ` +
@@ -634,19 +677,25 @@ await makeTreeRemovable(root);
 await rm(root, { recursive: true, force: true });
 `;
 
-function removePreparedCheckoutRootAsAgent(root: string): Promise<void> {
+function removePreparedCheckoutRootAsAgent(
+  sessionId: string,
+  root: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const wrapped = sandboxSpawn([
-      process.execPath,
-      '--input-type=module',
-      '--eval',
-      CHECKOUT_CLEANUP_SCRIPT,
-      root,
-    ]);
+    const wrapped = sandboxSpawn(
+      [
+        process.execPath,
+        '--input-type=module',
+        '--eval',
+        CHECKOUT_CLEANUP_SCRIPT,
+        root,
+      ],
+      sessionId,
+    );
     const child = spawn(wrapped.command, wrapped.args, {
       env: {
         PATH: process.env.PATH,
-        HOME: AGENT_HOME_DIR,
+        HOME: agentHomeDir(sessionId),
         LANG: process.env.LANG,
       },
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -671,13 +720,19 @@ function removePreparedCheckoutRootAsAgent(root: string): Promise<void> {
   });
 }
 
-async function removePreparedCheckoutRoot(root: string): Promise<void> {
-  await removePreparedCheckoutRootAsAgent(root);
+async function removePreparedCheckoutRoot(
+  sessionId: string,
+  root: string,
+): Promise<void> {
+  await removePreparedCheckoutRootAsAgent(sessionId, root);
 }
 
-async function cleanupPreparedCheckoutRoot(root: string): Promise<void> {
+async function cleanupPreparedCheckoutRoot(
+  sessionId: string,
+  root: string,
+): Promise<void> {
   try {
-    await removePreparedCheckoutRoot(root);
+    await removePreparedCheckoutRoot(sessionId, root);
   } catch (error) {
     console.warn(`Could not remove checkout staging directory ${root}:`, error);
   }
@@ -692,29 +747,35 @@ async function prepareCheckout(
     throw new Error('Platform source bundle and master commit do not match.');
   }
 
-  await mkdir(agentSessionDir(sessionId), { recursive: true });
-  const root = await mkdtemp(
-    path.join(agentSessionDir(sessionId), '.checkout-'),
-  );
-  await chmod(root, 0o777);
+  prepareAgentSessionSandbox(sessionId);
+  const root = await mkdtemp(path.join(agentWorkDir(sessionId), '.checkout-'));
+  await chmod(root, 0o700);
+  setAgentOwned([root], sessionId);
   const worktree = path.join(root, 'worktree');
   const bundle = source.bundleBase64 ? path.join(root, 'source.bundle') : null;
   try {
     if (bundle) {
       await writeFile(bundle, Buffer.from(source.bundleBase64!, 'base64'));
-      await runGit(['clone', bundle, worktree]);
-      await runGit(['remote', 'set-url', 'origin', finalBundle], {
+      await runGit(sessionId, ['clone', bundle, worktree]);
+      await runGit(sessionId, ['remote', 'set-url', 'origin', finalBundle], {
         cwd: worktree,
       });
     } else {
-      await runGit(['init', '--initial-branch', SOURCE_BRANCH, worktree]);
-      await runGit(['remote', 'add', 'origin', finalBundle], { cwd: worktree });
+      await runGit(sessionId, [
+        'init',
+        '--initial-branch',
+        SOURCE_BRANCH,
+        worktree,
+      ]);
+      await runGit(sessionId, ['remote', 'add', 'origin', finalBundle], {
+        cwd: worktree,
+      });
     }
-    await setLocalGitIdentity(worktree);
+    await setLocalGitIdentity(sessionId, worktree);
 
     const [head, status] = await Promise.all([
-      worktreeHead(worktree),
-      worktreeStatus(worktree),
+      worktreeHead(sessionId, worktree),
+      worktreeStatus(sessionId, worktree),
     ]);
     if (head !== source.masterCommit) {
       throw new Error(
@@ -727,7 +788,7 @@ async function prepareCheckout(
     }
     return { root, worktree, bundle };
   } catch (error) {
-    await cleanupPreparedCheckoutRoot(root);
+    await cleanupPreparedCheckoutRoot(sessionId, root);
     throw error;
   }
 }
@@ -743,6 +804,8 @@ async function installPreparedBundle(
     if (hadBundle) await rename(finalBundle, backup);
     if (prepared.bundle) {
       await rename(prepared.bundle, finalBundle);
+      await chmod(finalBundle, 0o444);
+      setRunnerOwned([finalBundle]);
       installed = true;
     }
   } catch (error) {
@@ -762,7 +825,7 @@ async function isCurrentOwnedWorktree(
   kind: SourceKind,
 ): Promise<boolean> {
   try {
-    await assertOwnedWorktree(worktree, bundle, source.id, kind);
+    await assertOwnedWorktree(sessionId, worktree, bundle, source.id, kind);
     await assertWorkspaceGeneration(
       sessionId,
       worktree,
@@ -790,7 +853,7 @@ async function hasOtherOwnedDefaultCheckout(
   }
   if (path.resolve(defaultPath) === path.resolve(excludedPath)) return false;
   if (!(await pathExists(path.join(defaultPath, '.git')))) return false;
-  const origin = await worktreeOrigin(defaultPath);
+  const origin = await worktreeOrigin(sessionId, defaultPath);
   return (
     origin !== null &&
     path.resolve(origin) ===
@@ -856,15 +919,19 @@ async function synchronizeExistingCheckout(
   const worktree = resolved.absolutePath;
   await prepareWorktreeMaterialization(worktree, materializer);
   const [branchBeforeFetch, statusBeforeFetch] = await Promise.all([
-    worktreeBranch(worktree),
-    worktreeStatus(worktree),
+    worktreeBranch(sessionId, worktree),
+    worktreeStatus(sessionId, worktree),
   ]);
   if (branchBeforeFetch !== SOURCE_BRANCH || statusBeforeFetch) return null;
 
-  await runGit(['fetch', 'origin', SOURCE_BRANCH], { cwd: worktree });
+  await runGit(sessionId, ['fetch', 'origin', SOURCE_BRANCH], {
+    cwd: worktree,
+  });
   const remoteRef = `origin/${SOURCE_BRANCH}`;
   const remoteHead = (
-    await runGit(['rev-parse', '--verify', remoteRef], { cwd: worktree })
+    await runGit(sessionId, ['rev-parse', '--verify', remoteRef], {
+      cwd: worktree,
+    })
   ).stdout.trim();
   if (remoteHead !== source.masterCommit) {
     throw new Error(
@@ -876,14 +943,15 @@ async function synchronizeExistingCheckout(
   // Re-check after fetch so edits or branch switches made while it was running
   // are rejected before attempting the in-place fast-forward.
   const [branch, status, head] = await Promise.all([
-    worktreeBranch(worktree),
-    worktreeStatus(worktree),
-    worktreeHead(worktree),
+    worktreeBranch(sessionId, worktree),
+    worktreeStatus(sessionId, worktree),
+    worktreeHead(sessionId, worktree),
   ]);
   if (branch !== SOURCE_BRANCH || status) return null;
 
   if (head) {
     const ancestor = await runGit(
+      sessionId,
       ['merge-base', '--is-ancestor', head, remoteRef],
       { cwd: worktree, allowFailure: true },
     );
@@ -900,12 +968,14 @@ async function synchronizeExistingCheckout(
 
   // A fast-forward merge reaches the validated remote commit while refusing
   // to discard a concurrent commit or edit.
-  await runGit(['merge', '--ff-only', remoteRef], { cwd: worktree });
+  await runGit(sessionId, ['merge', '--ff-only', remoteRef], {
+    cwd: worktree,
+  });
   const [branchAfterMerge, statusAfterMerge, headAfterMerge] =
     await Promise.all([
-      worktreeBranch(worktree),
-      worktreeStatus(worktree),
-      worktreeHead(worktree),
+      worktreeBranch(sessionId, worktree),
+      worktreeStatus(sessionId, worktree),
+      worktreeHead(sessionId, worktree),
     ]);
   if (
     branchAfterMerge !== SOURCE_BRANCH ||
@@ -920,8 +990,9 @@ async function synchronizeExistingCheckout(
   }
 
   await materializeWorktree(worktree, materializer);
+  setAgentOwned([worktree], sessionId);
   const [branchAfterMaterialize, checkout] = await Promise.all([
-    worktreeBranch(worktree),
+    worktreeBranch(sessionId, worktree),
     describeCheckout(
       sessionId,
       kind,
@@ -990,12 +1061,12 @@ export async function checkoutFromBundle(
       kind,
     );
     if (owned) {
-      await mkdir(path.dirname(bundle), { recursive: true });
+      await ensureBundleDirectory(sessionId, bundle);
       const prepared = await prepareCheckout(sessionId, source, bundle);
       try {
         await installPreparedBundle(prepared, bundle);
       } finally {
-        await cleanupPreparedCheckoutRoot(prepared.root);
+        await cleanupPreparedCheckoutRoot(sessionId, prepared.root);
       }
       const synchronized = await synchronizeExistingCheckout(
         sessionId,
@@ -1009,9 +1080,10 @@ export async function checkoutFromBundle(
     throw new Error(checkoutConflictMessage(kind, resolved, source, owned));
   }
 
-  await mkdir(path.dirname(bundle), { recursive: true });
+  await ensureBundleDirectory(sessionId, bundle);
   const prepared = await prepareCheckout(sessionId, source, bundle);
   await mkdir(path.dirname(worktree), { recursive: true });
+  setAgentOwned([agentWorkDir(sessionId)], sessionId);
   const worktreeBackup = path.join(prepared.root, 'previous-worktree');
   const bundleBackup = path.join(prepared.root, 'previous.bundle');
   const previousOwnerBundleBackup = path.join(
@@ -1062,11 +1134,14 @@ export async function checkoutFromBundle(
     }
     if (prepared.bundle) {
       await rename(prepared.bundle, bundle);
+      await chmod(bundle, 0o444);
+      setRunnerOwned([bundle]);
       installedBundle = true;
     }
     await rename(prepared.worktree, worktree);
     installedWorktree = true;
     await materializeWorktree(worktree, options.materializer);
+    setAgentOwned([worktree], sessionId);
     const checkout = await describeCheckout(
       sessionId,
       kind,
@@ -1128,7 +1203,7 @@ export async function checkoutFromBundle(
     throw error;
   } finally {
     if (!preservePreparedRoot) {
-      await cleanupPreparedCheckoutRoot(prepared.root);
+      await cleanupPreparedCheckoutRoot(sessionId, prepared.root);
     }
   }
 }
@@ -1198,19 +1273,29 @@ export async function initNewWorktree(
   );
   const worktree = resolved.absolutePath;
   const bundle = bundleFile(sessionId, kind, id);
-  await mkdir(path.dirname(bundle), { recursive: true });
+  prepareAgentSessionSandbox(sessionId);
+  await ensureBundleDirectory(sessionId, bundle);
   // A newly created entity has an empty canonical repo. Its reused id must not
   // expose a bundle left by an older incarnation through the new origin URL.
   await rm(bundle, { force: true });
 
   await mkdir(path.dirname(worktree), { recursive: true });
+  setAgentOwned([agentWorkDir(sessionId)], sessionId);
   // Let (possibly UID-demoted) git create the worktree dir itself so the
   // repo's owner matches the uid git runs as (git's safe.directory check).
-  await runGit(['init', '--initial-branch', SOURCE_BRANCH, worktree]);
-  await runGit(['remote', 'add', 'origin', bundle], { cwd: worktree });
-  await setLocalGitIdentity(worktree);
+  await runGit(sessionId, [
+    'init',
+    '--initial-branch',
+    SOURCE_BRANCH,
+    worktree,
+  ]);
+  await runGit(sessionId, ['remote', 'add', 'origin', bundle], {
+    cwd: worktree,
+  });
+  await setLocalGitIdentity(sessionId, worktree);
   await writeFiles(worktree);
   await materializeWorktree(worktree, materializer);
+  setAgentOwned([worktree], sessionId);
   await registerWorkspace(sessionId, {
     kind,
     id,
@@ -1243,10 +1328,10 @@ export async function bundleWorktreeForDeploy(
       `${kind} "${id}" is not checked out in this chat. Run checkout first.`,
     );
   }
-  await assertOwnedWorktree(worktree, bundle, id, kind);
+  await assertOwnedWorktree(sessionId, worktree, bundle, id, kind);
   await assertWorkspaceGeneration(sessionId, worktree, kind, id, generation);
 
-  const status = await worktreeStatus(worktree);
+  const status = await worktreeStatus(sessionId, worktree);
   if (status) {
     throw new Error(
       `Cannot deploy ${kind} "${id}" because the worktree is dirty.\n` +
@@ -1254,7 +1339,7 @@ export async function bundleWorktreeForDeploy(
         status,
     );
   }
-  const headCommit = await worktreeHead(worktree);
+  const headCommit = await worktreeHead(sessionId, worktree);
   if (!headCommit) {
     throw new Error(
       `Cannot deploy ${kind} "${id}" because the worktree has no ` +
@@ -1265,12 +1350,13 @@ export async function bundleWorktreeForDeploy(
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'hatch-runner-bundle-'));
   // mkdtemp creates 0700 dirs owned by the runner; the (possibly UID-demoted)
   // git below must be able to write the bundle into it.
-  await chmod(tmp, 0o777);
+  await chmod(tmp, 0o700);
+  setAgentOwned([tmp], sessionId);
   const out = path.join(tmp, 'deploy.bundle');
   try {
     // --all + HEAD: self-contained bundle carrying every local ref, so the
     // platform can clone it and fast-forward its canonical master from HEAD.
-    await runGit(['bundle', 'create', out, '--all', 'HEAD'], {
+    await runGit(sessionId, ['bundle', 'create', out, '--all', 'HEAD'], {
       cwd: worktree,
     });
     const data = await readFile(out);

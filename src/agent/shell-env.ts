@@ -13,15 +13,15 @@
  * provider API keys, …) out of every command the model runs — including ones
  * injected via a malicious project file telling the agent to run `env`.
  *
- * The env allowlist does NOT stop a command from reading secret files by path
+ * The env allowlist does NOT stop a command from reading private files by path
  * (e.g. `cat <repo>/.env.local`); shell-sandbox.ts closes that gap on macOS
- * with a seatbelt deny-list, and containerized deployments rely on the
- * container boundary.
+ * with a seatbelt deny-list while still allowing this session's work-root
+ * `.env`, and containerized deployments rely on the container boundary.
  */
 
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { AGENT_HOME_DIR } from './paths';
+import { agentHomeDir } from './paths';
 
 /**
  * Variables a dev shell legitimately needs (git / pnpm / deno / node / tools).
@@ -75,13 +75,13 @@ const ALLOWLIST_LOWER: ReadonlySet<string> = new Set(
  *
  * Allowlisted keys keep their original casing (left untouched in process.env).
  */
-export function agentShellEnv(): NodeJS.ProcessEnv {
+export function agentShellEnv(sessionId: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of Object.keys(process.env)) {
     if (!ALLOWLIST_LOWER.has(key.toLowerCase())) env[key] = undefined;
   }
 
-  const home = AGENT_HOME_DIR;
+  const home = agentHomeDir(sessionId);
   mkdirSync(home, { recursive: true });
   // Point home + caches at the sandbox (these override the host values that
   // were just neutralized). Tools create the subdirs lazily on first use.

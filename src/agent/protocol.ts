@@ -11,10 +11,11 @@
 import { z } from 'zod';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
+import { isReservedEnvKey } from './env-keys';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -33,12 +34,12 @@ export const RUNNER_OFFLINE_ABORT_MS = 120_000;
 
 /** ================== shared payload schemas ================== */
 
-export const askOptionSchema = z.object({
+export const askOptionSchema = z.strictObject({
   id: z.string(),
   label: z.string(),
 });
 
-export const askQuestionSchema = z.object({
+export const askQuestionSchema = z.strictObject({
   id: z.string(),
   prompt: z.string(),
   options: z.array(askOptionSchema),
@@ -51,6 +52,54 @@ export const askAnswerSchema = z.object({
   customText: z.string().optional(),
 });
 export type AskAnswerPayload = z.infer<typeof askAnswerSchema>;
+
+export const envKeySchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
+  .refine((key) => !isReservedEnvKey(key), 'Environment key is reserved.');
+
+export const envRequestIdSchema = z.string().min(1).max(128);
+export const envDeliveryIdSchema = z.string().min(1).max(128);
+
+export const envVariableFieldSchema = z.strictObject({
+  key: envKeySchema,
+  description: z.string().min(1).max(1_000),
+  secret: z.boolean(),
+});
+
+function hasUniqueEnvKeys(fields: { key: string }[]): boolean {
+  return new Set(fields.map((field) => field.key)).size === fields.length;
+}
+
+export const envRequestEventSchema = z
+  .strictObject({
+    type: z.literal('env_request'),
+    requestId: envRequestIdSchema,
+    reason: z.string().min(1).max(2_000),
+    variables: z.array(envVariableFieldSchema).min(1).max(10),
+  })
+  .refine((event) => hasUniqueEnvKeys(event.variables), {
+    message: 'Environment variable keys must be unique.',
+    path: ['variables'],
+  });
+
+export const envStoredVariableSchema = z.strictObject({
+  key: envKeySchema,
+  secret: z.boolean(),
+});
+
+export const envStoredEventSchema = z
+  .strictObject({
+    type: z.literal('env_stored'),
+    requestId: envRequestIdSchema,
+    variables: z.array(envStoredVariableSchema).min(1).max(10),
+  })
+  .refine((event) => hasUniqueEnvKeys(event.variables), {
+    message: 'Stored environment variable keys must be unique.',
+    path: ['variables'],
+  });
 
 export const sendImageSchema = z.object({
   data: z.string().min(1),
@@ -67,13 +116,51 @@ export const agentAttachmentRefSchema: z.ZodType<AgentAttachmentRef> = z.object(
   },
 );
 
-/**
- * Stream events are produced and consumed by our own code on both ends; the
- * envelope only shape-checks the discriminator and passes the payload through.
- */
+/** Every persisted/browser-visible event has an exact allowlisted shape. */
 export const agentStreamEventSchema = z
-  .looseObject({ type: z.string().min(1) })
-  .transform((v) => v as unknown as AgentStreamEvent);
+  .union([
+    z.strictObject({ type: z.literal('assistant_start') }),
+    z.strictObject({ type: z.literal('text'), delta: z.string() }),
+    z.strictObject({ type: z.literal('thinking'), delta: z.string() }),
+    z.strictObject({
+      type: z.literal('ask'),
+      askId: z.string().min(1),
+      questions: z.array(askQuestionSchema).min(1),
+    }),
+    z.strictObject({
+      type: z.literal('ask_answered'),
+      askId: z.string().min(1),
+    }),
+    envRequestEventSchema,
+    envStoredEventSchema,
+    z.strictObject({
+      type: z.literal('tool_start'),
+      id: z.string().min(1),
+      name: z.string().min(1),
+      label: z.string().optional(),
+      args: z.json(),
+    }),
+    z.strictObject({
+      type: z.literal('tool_update'),
+      id: z.string().min(1),
+      name: z.string().min(1),
+      output: z.string(),
+    }),
+    z.strictObject({
+      type: z.literal('tool_end'),
+      id: z.string().min(1),
+      name: z.string().min(1),
+      isError: z.boolean(),
+      output: z.string().optional(),
+      details: z.json().optional(),
+      summary: z.string().optional(),
+    }),
+    z.strictObject({ type: z.literal('turn_end') }),
+    z.strictObject({ type: z.literal('cancelled') }),
+    z.strictObject({ type: z.literal('done') }),
+    z.strictObject({ type: z.literal('error'), message: z.string() }),
+  ])
+  .transform((value) => value as unknown as AgentStreamEvent);
 
 /** ================== run model config ================== */
 
@@ -167,6 +254,30 @@ export const runFinishedMessageSchema = z.object({
   messages: z.array(z.unknown()),
 });
 
+export const runEnvResultSchema = z
+  .strictObject({
+    type: z.literal('run.env_result'),
+    runId: z.string().min(1),
+    requestId: envRequestIdSchema,
+    deliveryId: envDeliveryIdSchema,
+    ok: z.boolean(),
+    errorCode: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9_]+$/)
+      .optional(),
+  })
+  .refine(
+    (message) =>
+      message.ok ? message.errorCode == null : message.errorCode != null,
+    {
+      message: 'errorCode is required exactly when ok is false.',
+      path: ['errorCode'],
+    },
+  );
+export type RunEnvResultMessage = z.infer<typeof runEnvResultSchema>;
+
 export const runnerMessageSchema = z.discriminatedUnion('type', [
   runnerHelloSchema,
   runnerReadySchema,
@@ -175,6 +286,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
   runRejectedSchema,
   runEventMessageSchema,
   runFinishedMessageSchema,
+  runEnvResultSchema,
 ]);
 export type RunnerMessage = z.infer<typeof runnerMessageSchema>;
 
@@ -229,6 +341,59 @@ export const runAnswerSchema = z.object({
   answers: z.array(askAnswerSchema),
 });
 
+const envValueEncoder = new TextEncoder();
+
+function hasSafeDotenvEncoding(value: string): boolean {
+  const first = value[0];
+  return (
+    !value.includes("'") ||
+    !value.includes('`') ||
+    (!value.includes('"') &&
+      !value.includes('\\n') &&
+      !value.includes('\\r')) ||
+    (value.length > 0 &&
+      !/[\s#]/u.test(value) &&
+      (!["'", '"', '`'].includes(first) || value.at(-1) !== first))
+  );
+}
+
+export const envEntrySchema = z.strictObject({
+  key: envKeySchema,
+  value: z.string().refine(
+    (value) =>
+      (
+        value as string & {
+          isWellFormed(): boolean;
+        }
+      ).isWellFormed() &&
+      envValueEncoder.encode(value).byteLength <= 16 * 1024 &&
+      !value.includes('\r') &&
+      !value.includes('\n') &&
+      !value.includes('\0') &&
+      hasSafeDotenvEncoding(value),
+    'Environment value is invalid.',
+  ),
+  secret: z.boolean(),
+});
+export type EnvEntry = z.infer<typeof envEntrySchema>;
+
+export const envEntriesSchema = z
+  .array(envEntrySchema)
+  .min(1)
+  .max(10)
+  .refine((entries) => hasUniqueEnvKeys(entries), {
+    message: 'Environment entry keys must be unique.',
+  });
+
+export const runEnvSchema = z.strictObject({
+  type: z.literal('run.env'),
+  runId: z.string().min(1),
+  requestId: envRequestIdSchema,
+  deliveryId: envDeliveryIdSchema,
+  entries: envEntriesSchema,
+});
+export type RunEnvMessage = z.infer<typeof runEnvSchema>;
+
 /** Cumulative ack: the runner may drop buffered events up to `runnerSeq`. */
 export const runEventAckSchema = z.object({
   type: z.literal('run.event_ack'),
@@ -268,6 +433,7 @@ export const hubMessageSchema = z.union([
   runStartSchema,
   runCancelSchema,
   runAnswerSchema,
+  runEnvSchema,
   runEventAckSchema,
   runFinishAckSchema,
   workspaceCleanupSchema,
