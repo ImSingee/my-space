@@ -16,6 +16,7 @@ import {
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
+import { publishPlatformEvent } from '~server/platform-events';
 import { buildMatchesDeployment } from './build-identity';
 import { appDeployLock } from './deploy';
 import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
@@ -299,8 +300,15 @@ async function rollbackAppInner(
   // Mutate the live build dir, Git master, and the app row under the same
   // advisory lock deploy holds for its version→tag→record step, so a concurrent
   // deploy on another process blocks until we finish (and vice versa).
+  let previousDeploymentId = app.currentDeploymentId ?? null;
   await db.transaction(async (tx) => {
     await appDeployLock.acquire(tx, id);
+    const current = await tx.query.apps.findFirst({
+      where: (row, { eq: equal }) => equal(row.id, id),
+      columns: { currentDeploymentId: true },
+    });
+    if (!current) throw new Error(`App "${id}" not found.`);
+    previousDeploymentId = current.currentDeploymentId ?? null;
     const live = appBuildDir(id);
     await fs.rm(live, { recursive: true, force: true });
     await fs.mkdir(live, { recursive: true });
@@ -350,6 +358,14 @@ async function rollbackAppInner(
       })
       .where(eq(schema.apps.id, id));
   });
+
+  if (previousDeploymentId !== deployment.id) {
+    publishPlatformEvent({
+      type: 'app.deployment.activated',
+      appId: id,
+      deploymentRevision: deployment.id,
+    });
+  }
 
   // Force the backend to restart from the restored build, then re-apply the
   // keep-alive contract for the *restored* manifest: rolling back to/from a

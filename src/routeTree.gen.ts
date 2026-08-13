@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiEventsRouteImport } from './routes/api/events'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
@@ -70,6 +71,11 @@ const R404Route = R404RouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiEventsRoute = ApiEventsRouteImport.update({
+  id: '/api/events',
+  path: '/api/events',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
@@ -286,6 +292,7 @@ export interface FileRoutesByFullPath {
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/settings': typeof AppSettingsRouteWithChildren
+  '/api/events': typeof ApiEventsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
@@ -328,6 +335,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
+  '/api/events': typeof ApiEventsRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
@@ -374,6 +382,7 @@ export interface FileRoutesById {
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/executions': typeof AppExecutionsRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
+  '/api/events': typeof ApiEventsRoute
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/_app/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
@@ -420,6 +429,7 @@ export interface FileRouteTypes {
     | '/dashboards'
     | '/executions'
     | '/settings'
+    | '/api/events'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/settings/agent-runner'
@@ -462,6 +472,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/dashboards'
     | '/executions'
+    | '/api/events'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/settings/agent-runner'
@@ -507,6 +518,7 @@ export interface FileRouteTypes {
     | '/_app/dashboards'
     | '/_app/executions'
     | '/_app/settings'
+    | '/api/events'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
     | '/_app/settings/agent-runner'
@@ -549,6 +561,7 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiEventsRoute: typeof ApiEventsRoute
   ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   AppAppIdSplatRoute: typeof AppAppIdSplatRoute
@@ -594,6 +607,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/events': {
+      id: '/api/events'
+      path: '/api/events'
+      fullPath: '/api/events'
+      preLoaderRoute: typeof ApiEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/settings': {
@@ -965,6 +985,7 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiEventsRoute: ApiEventsRoute,
   ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   AppAppIdSplatRoute: AppAppIdSplatRoute,

@@ -9,6 +9,7 @@ import {
 import { useEffect } from 'react';
 import { Brand } from '~components/app-shell/brand';
 import { Sidebar } from '~components/app-shell/sidebar';
+import { PlatformEventsProvider } from '~components/system/platform-events';
 import { fetchSession } from '~server/auth';
 import classes from './_app.module.css';
 
@@ -40,33 +41,35 @@ function AppLayout() {
   }, [pathname, close]);
 
   return (
-    <AppShell
-      className={classes.shell}
-      padding={0}
-      navbar={{
-        width: 272,
-        breakpoint: 'sm',
-        collapsed: { mobile: !opened, desktop: false },
-      }}
-      header={{ height: 56 }}
-    >
-      <AppShell.Header withBorder className={classes.header}>
-        <Group h="100%" px="sm" gap="sm" wrap="nowrap">
-          <Burger
-            opened={opened}
-            onClick={toggle}
-            size="sm"
-            aria-label="Toggle navigation"
-          />
-          <Brand />
-        </Group>
-      </AppShell.Header>
-      <AppShell.Navbar withBorder>
-        <Sidebar />
-      </AppShell.Navbar>
-      <AppShell.Main style={{ height: '100dvh', overflow: 'hidden' }}>
-        <Outlet />
-      </AppShell.Main>
-    </AppShell>
+    <PlatformEventsProvider>
+      <AppShell
+        className={classes.shell}
+        padding={0}
+        navbar={{
+          width: 272,
+          breakpoint: 'sm',
+          collapsed: { mobile: !opened, desktop: false },
+        }}
+        header={{ height: 56 }}
+      >
+        <AppShell.Header withBorder className={classes.header}>
+          <Group h="100%" px="sm" gap="sm" wrap="nowrap">
+            <Burger
+              opened={opened}
+              onClick={toggle}
+              size="sm"
+              aria-label="Toggle navigation"
+            />
+            <Brand />
+          </Group>
+        </AppShell.Header>
+        <AppShell.Navbar withBorder>
+          <Sidebar />
+        </AppShell.Navbar>
+        <AppShell.Main style={{ height: '100dvh', overflow: 'hidden' }}>
+          <Outlet />
+        </AppShell.Main>
+      </AppShell>
+    </PlatformEventsProvider>
   );
 }

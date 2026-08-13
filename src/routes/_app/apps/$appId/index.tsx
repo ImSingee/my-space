@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Group,
+  Indicator,
   Loader,
   Menu,
   Stack,
@@ -14,6 +15,7 @@ import {
   Link,
   createFileRoute,
   notFound,
+  useRouter,
   useRouterState,
 } from '@tanstack/react-router';
 import {
@@ -25,8 +27,11 @@ import {
   IconSettings,
 } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { getApp } from '~server/apps';
+import { getAppViewState } from '~components/apps/app-view-policy';
+import { useAppDeploymentUpdate } from '~components/apps/use-app-deployment-update';
+import { getApp, getAppDeploymentRevision } from '~server/apps';
 import classes from './app-view.module.css';
 
 export const Route = createFileRoute('/_app/apps/$appId/')({
@@ -38,7 +43,10 @@ export const Route = createFileRoute('/_app/apps/$appId/')({
   component: AppView,
 });
 
-function AppView() {
+const readDeploymentRevision = (appId: string) =>
+  getAppDeploymentRevision({ data: appId });
+
+export function AppView() {
   const app = Route.useLoaderData();
   const frameRef = useRef<HTMLIFrameElement>(null);
   // The live iframe window, tracked so a hash change on the host (e.g. clicking
@@ -46,11 +54,22 @@ function AppView() {
   // be pushed into the already-loaded app without reloading it.
   const winRef = useRef<Window | null>(null);
   const [loading, setLoading] = useState(true);
+  const [frameKey, setFrameKey] = useState(0);
+  const [reloading, setReloading] = useState(false);
   // The shareable app URL uses the mutable slug; the route still resolves the
   // immutable id too, so old `/app/<id>/` links keep working.
   const src = `/app/${app.slug}/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
-  const canOpen = app.status === 'deployed' && hasFrontend;
+  const { canOpen, hasLiveDeployment } = getAppViewState({
+    status: app.status,
+    deploymentRevision: app.deploymentRevision,
+    hasFrontend,
+  });
+  const { updateAvailable } = useAppDeploymentUpdate({
+    appId: app.id,
+    deploymentRevision: app.deploymentRevision,
+    revisionReader: readDeploymentRevision,
+  });
   // Router hash is the fragment without '#' (e.g. '/settings'); '' = root.
   const hostHash = useRouterState({ select: (s) => s.location.hash });
 
@@ -64,6 +83,7 @@ function AppView() {
     const frame = frameRef.current;
     if (!frame || !canOpen) return;
 
+    setLoading(true);
     const hostTitle = document.title;
     let win: Window | null = null;
     let titleObserver: MutationObserver | null = null;
@@ -163,7 +183,7 @@ function AppView() {
       detach();
       document.title = hostTitle;
     };
-  }, [canOpen, src]);
+  }, [canOpen, frameKey, src]);
 
   // Push host hash changes into the already-loaded app. The seed-on-load above
   // covers fresh loads (and app switches, which reload the iframe via `src`);
@@ -182,11 +202,27 @@ function AppView() {
     }
   }, [hostHash, canOpen]);
 
-  const reload = () => {
-    if (!frameRef.current) return;
+  const router = useRouter();
+  const reload = async () => {
+    if (reloading) return;
+    setReloading(true);
     setLoading(true);
-    frameRef.current.src = src;
+    try {
+      await router.invalidate({ sync: true });
+      setFrameKey((current) => current + 1);
+    } catch (error) {
+      setLoading(false);
+      toast.error(
+        error instanceof Error ? error.message : 'Could not reload the app.',
+      );
+    } finally {
+      setReloading(false);
+    }
   };
+
+  const reloadLabel = updateAvailable
+    ? 'Update available — reload app'
+    : 'Reload app';
 
   return (
     <Box className={classes.root}>
@@ -198,31 +234,43 @@ function AppView() {
           </Text>
         </Group>
         <Group gap={4} wrap="nowrap">
-          {canOpen ? (
+          {canOpen || updateAvailable ? (
             <>
-              <Tooltip label="Reload" withArrow>
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  aria-label="Reload app"
-                  onClick={reload}
+              <Tooltip label={reloadLabel} withArrow>
+                <Indicator
+                  color="ember"
+                  size={8}
+                  offset={5}
+                  withBorder
+                  inline
+                  disabled={!updateAvailable}
                 >
-                  <IconRefresh size={18} stroke={1.7} />
-                </ActionIcon>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    aria-label={reloadLabel}
+                    loading={reloading}
+                    onClick={reload}
+                  >
+                    <IconRefresh size={18} stroke={1.7} />
+                  </ActionIcon>
+                </Indicator>
               </Tooltip>
-              <Tooltip label="Open in new tab" withArrow>
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  component="a"
-                  href={src}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Open in new tab"
-                >
-                  <IconExternalLink size={18} stroke={1.7} />
-                </ActionIcon>
-              </Tooltip>
+              {canOpen ? (
+                <Tooltip label="Open in new tab" withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    component="a"
+                    href={src}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Open in new tab"
+                  >
+                    <IconExternalLink size={18} stroke={1.7} />
+                  </ActionIcon>
+                </Tooltip>
+              ) : null}
             </>
           ) : null}
           <Menu position="bottom-end" withArrow shadow="md" width={180}>
@@ -255,6 +303,7 @@ function AppView() {
       {canOpen ? (
         <Box className={classes.frameWrap}>
           <iframe
+            key={frameKey}
             ref={frameRef}
             src={src}
             title={app.name}
@@ -273,21 +322,19 @@ function AppView() {
               size={52}
               radius="xl"
               variant="light"
-              color={app.status === 'deployed' ? 'gray' : 'ember'}
+              color={hasLiveDeployment ? 'gray' : 'ember'}
             >
-              {app.status === 'deployed' ? (
+              {hasLiveDeployment ? (
                 <IconServerBolt size={26} stroke={1.5} />
               ) : (
                 <IconRocket size={26} stroke={1.5} />
               )}
             </ThemeIcon>
             <Text fw={600} mt="xs">
-              {app.status === 'deployed'
-                ? 'Backend-only app'
-                : 'Not deployed yet'}
+              {hasLiveDeployment ? 'Backend-only app' : 'Not deployed yet'}
             </Text>
             <Text size="sm" c="dimmed" ta="center">
-              {app.status === 'deployed'
+              {hasLiveDeployment
                 ? 'This app has no frontend — it runs a backend (cron or webhook). Open Manage to inspect its capabilities.'
                 : 'Deploy this app to use it here. You can build and deploy it from the Manage page.'}
             </Text>

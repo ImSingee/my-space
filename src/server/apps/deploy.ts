@@ -13,6 +13,7 @@ import {
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
 import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
+import { publishPlatformEvent } from '~server/platform-events';
 import { buildApp, type BuildResult } from './build';
 import {
   buildMatchesDeployment,
@@ -120,6 +121,12 @@ async function finishCommittedRelease(
   await warmCommittedBackend(id, deploymentId, longRunning);
 
   await reloadScheduler().catch(() => {});
+
+  publishPlatformEvent({
+    type: 'app.deployment.activated',
+    appId: id,
+    deploymentRevision: deploymentId,
+  });
 }
 
 async function pathExists(p: string): Promise<boolean> {
