@@ -10,7 +10,7 @@
  * Environment:
  *   HATCH_PLATFORM_URL  platform internal base URL (default http://127.0.0.1:3701)
  *   AGENT_RUNNER_TOKEN  shared bearer secret (required in production)
- *   HATCH_RUNNER_ID     stable runner identity (default runner-<hostname>)
+ *   HATCH_RUNNER_ID     stable runner identity (required)
  *   HATCH_DATA_DIR      runner-local data dir for worktrees (see ~agent/paths)
  *   TAVILY_API_KEY      optional Tavily key (keyless access when unset)
  */

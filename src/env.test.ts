@@ -257,6 +257,29 @@ describe('getAgentRunnerEnv', () => {
     },
   );
 
+  it.each([undefined, '', '   '])(
+    'requires HATCH_RUNNER_ID in production when it is %s',
+    async (runnerId) => {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('AGENT_RUNNER_TOKEN', 'runner-token');
+      vi.stubEnv('HATCH_RUNNER_ID', runnerId);
+      const { getAgentRunnerEnv } = await import('./env');
+
+      expect(() => getAgentRunnerEnv()).toThrow('HATCH_RUNNER_ID is required.');
+    },
+  );
+
+  it('does not cache a failed production runner resolution', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('AGENT_RUNNER_TOKEN', 'runner-token');
+    const { getAgentRunnerEnv } = await import('./env');
+
+    expect(() => getAgentRunnerEnv()).toThrow('HATCH_RUNNER_ID is required.');
+
+    vi.stubEnv('HATCH_RUNNER_ID', 'runner-one');
+    expect(getAgentRunnerEnv().runnerId).toBe('runner-one');
+  });
+
   it('returns one frozen snapshot and ignores later environment changes', async () => {
     vi.stubEnv('APP_URL', 'https://first.example.test/');
     vi.stubEnv('AGENT_RUNNER_TOKEN', 'first-token');
