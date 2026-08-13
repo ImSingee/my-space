@@ -51,6 +51,7 @@ async function listKvForAgent(
     const batch = await listKvPage(id, {
       after,
       limit: Math.min(KV_QUERY_BATCH_SIZE, limit - items.length),
+      revealSecrets,
     });
     hasMore = batch.hasMore;
 
@@ -95,7 +96,9 @@ export async function queryAppKv(
       };
     }
     case 'get': {
-      const record = await getKv(id, input.key);
+      const record = await getKv(id, input.key, {
+        revealSecrets: input.revealSecrets,
+      });
       return {
         action: 'get',
         record: record ? presentKvRecord(record, input.revealSecrets) : null,

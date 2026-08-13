@@ -51,8 +51,8 @@ services:
       # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?set AGENT_RUNNER_TOKEN in .env (e.g. openssl rand -hex 32)}
       # REQUIRED: stable platform root secret used to encrypt and decrypt app
-      # database credentials. Direct rotation makes existing encrypted
-      # credentials unreadable. Also signs auth sessions unless
+      # database credentials and newly written KV secrets. Direct rotation makes
+      # existing encrypted values unreadable. Also signs auth sessions unless
       # BETTER_AUTH_SECRET overrides it.
       # Generate one with e.g. `openssl rand -hex 32` and put it in `.env`.
       SECRET: ${SECRET:?set SECRET in .env (e.g. openssl rand -hex 32)}

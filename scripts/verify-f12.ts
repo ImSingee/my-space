@@ -88,6 +88,22 @@ async function main() {
   console.log('\n— secret flag —');
   const sec = await setKv(appId, 'vf12-secret', 'sekret', { secret: true });
   check('setKv secret=true', sec.secret === true, sec);
+  const encrypted = await db.query.appKv.findFirst({
+    where: (row, { and, eq }) =>
+      and(eq(row.appId, appId), eq(row.key, 'vf12-secret')),
+  });
+  check(
+    'new secret stores ciphertext without plaintext',
+    encrypted?.value === null &&
+      encrypted.valueCiphertext?.startsWith('v1.') === true &&
+      !encrypted.valueCiphertext.includes('sekret'),
+    encrypted
+      ? {
+          valueIsNull: encrypted.value === null,
+          hasCiphertext: encrypted.valueCiphertext !== null,
+        }
+      : null,
+  );
   const sec2 = await setKv(appId, 'vf12-secret', 'sekret2');
   check(
     'overwrite without secret opt preserves secret=true',
@@ -96,6 +112,14 @@ async function main() {
   );
   const sec3 = await setKv(appId, 'vf12-secret', 'sekret3', { secret: false });
   check('explicit secret=false unsets the flag', sec3.secret === false, sec3);
+  const visible = await db.query.appKv.findFirst({
+    where: (row, { and, eq }) =>
+      and(eq(row.appId, appId), eq(row.key, 'vf12-secret')),
+  });
+  check(
+    'secret=false clears ciphertext',
+    visible?.value === 'sekret3' && visible.valueCiphertext === null,
+  );
 
   console.log('\n— validation —');
   await expectKvError(

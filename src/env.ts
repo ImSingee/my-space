@@ -11,8 +11,9 @@ export type PlatformEnv = Readonly<{
   /** Public application origin without a trailing slash. */
   appUrl: string;
   /**
-   * Stable root key used to encrypt and decrypt per-app database credentials.
-   * Direct rotation makes credentials encrypted with the previous key unreadable.
+   * Stable root key used to encrypt and decrypt per-app database credentials and
+   * newly written KV secrets. Direct rotation makes values encrypted with the
+   * previous key unreadable.
    */
   secret: string;
   /** Better Auth key, falling back to `secret` when not configured separately. */

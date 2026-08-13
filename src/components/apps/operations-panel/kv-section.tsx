@@ -77,7 +77,7 @@ function KvForm({ appId, entry }: { appId: string; entry?: AppKvEntryView }) {
         data-autofocus={editing}
       />
       <Checkbox
-        label="Secret — hide the value here (overwrite-only)"
+        label="Secret — encrypt and hide the value here (overwrite-only)"
         checked={secret}
         onChange={(e) => setSecret(e.currentTarget.checked)}
       />
@@ -166,8 +166,8 @@ export function KvSection({ appId }: { appId: string }) {
       </Group>
       <Text size="xs" c="dimmed">
         Small per-app values (tokens, config). Your backend reads/writes them
-        via the signed KV API; values marked secret are hidden here
-        (overwrite-only).
+        via the signed KV API. New or overwritten secret values are encrypted at
+        rest and hidden here (overwrite-only).
       </Text>
       {query.isLoading ? (
         <Center py="sm">

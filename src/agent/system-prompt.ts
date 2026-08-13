@@ -121,8 +121,9 @@ apps/<id>/
   - \`kv\`: a simple per-app key/value store (small tokens/config, not blobs) in
     the platform DB. The backend reads/writes via injected \`HATCH_KV_URL\`,
     signing each call with \`HATCH_SIGNING_SECRET\` (HMAC over \`<ts>.<rawBody>\`).
-    The manage UI shows entries; values marked \`secret\` are masked there
-    (overwrite-only). After deploying with this capability, use
+    The manage UI shows entries; newly written values marked \`secret\` are
+    encrypted at rest and masked there (overwrite-only). After deploying with
+    this capability, use
     \`query_app_kv\` to inspect or initialize entries; secret values are masked
     unless you explicitly pass \`reveal_secrets: true\` to a list or get action.
     Requires a backend. See the building-apps skill.
