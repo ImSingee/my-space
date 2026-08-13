@@ -74,25 +74,47 @@ describe('app capabilities manifest', () => {
     expect(parsed.capabilities).toMatchObject({
       backend: true,
       frontend: false,
+      storage: false,
       kv: false,
     });
   });
 
-  it('accepts and strips the retired storage: false field', () => {
+  it('accepts and preserves storage: false', () => {
     const parsed = parseSourceManifest(
       manifest({ backend: true, storage: false }),
     );
     const normalized = normalizeManifest(parsed);
 
-    expect(parsed.capabilities).not.toHaveProperty('storage');
-    expect(normalized.capabilities).not.toHaveProperty('storage');
+    expect(parsed.capabilities.storage).toBe(false);
+    expect(normalized.capabilities.storage).toBe(false);
     expect(normalized).not.toHaveProperty('storage');
   });
 
-  it('rejects storage: true and other unknown fields', () => {
+  it('accepts storage for a declared backend', () => {
+    const parsed = parseSourceManifest({
+      ...manifest({ backend: true, storage: true }),
+      backend: { entry: 'backend/main.ts' },
+    });
+    const normalized = normalizeManifest(parsed);
+
+    expect(parsed.capabilities.storage).toBe(true);
+    expect(normalized.capabilities.storage).toBe(true);
+    expect(normalized).not.toHaveProperty('storage');
+  });
+
+  it('requires both the backend capability and backend entry for storage', () => {
+    expect(() =>
+      parseSourceManifest({
+        ...manifest({ storage: true }),
+        backend: { entry: 'backend/main.ts' },
+      }),
+    ).toThrow(/storage requires capabilities\.backend and backend\.entry/);
     expect(() =>
       parseSourceManifest(manifest({ backend: true, storage: true })),
-    ).toThrow(/storage/);
+    ).toThrow(/storage requires capabilities\.backend and backend\.entry/);
+  });
+
+  it('rejects unknown capability fields', () => {
     expect(() =>
       parseSourceManifest(manifest({ backend: true, madeUp: true })),
     ).toThrow(/madeUp/);

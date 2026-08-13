@@ -533,5 +533,9 @@ describe('App Data lifecycle recovery', () => {
     expect(mocks.waitForDataMigrationBarrier).not.toHaveBeenCalled();
     expect(mocks.dropAppDataDatabase).not.toHaveBeenCalled();
     expect(mocks.deleteRow).toHaveBeenCalled();
+    expect(mocks.fsRm).toHaveBeenCalledWith(`/workspace/storage/${APP_ID}`, {
+      recursive: true,
+      force: true,
+    });
   });
 });

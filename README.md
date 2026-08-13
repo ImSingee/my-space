@@ -48,6 +48,11 @@ wished existed, built for an audience of one: you.
 - **Key-value storage and secrets.** Apps get a built-in key-value store for
   tokens and config. Newly created or overwritten secret values are encrypted
   at rest and stay masked in the UI.
+- **Persistent backend files.** Apps can opt in to a private, platform-managed
+  directory exposed only to their backend through `STORAGE_DIR` — there is no
+  Storage HTTP API or direct browser access. Files survive backend restarts,
+  deployments, and rollbacks. Disabling storage retains the files but revokes
+  access; deleting the app deletes them.
 - **Your space, arranged your way.** Pin apps, dashboards, and workflows to
   the sidebar — even multiple shortcuts per app, each deep-linking to a
   specific screen. Rename apps and their URLs whenever you like.

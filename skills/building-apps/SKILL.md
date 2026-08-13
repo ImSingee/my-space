@@ -122,6 +122,7 @@ Keep `manifest.json` consistent with the files. Example:
     "frontend": true,
     "widgets": true,
     "backend": true,
+    "storage": false,
     "cron": false,
     "webhook": false,
     "kv": false,
@@ -169,13 +170,30 @@ const template = await Deno.readTextFile(
 ```
 
 Do not locate runtime files relative to a source module's `import.meta.url`:
-after bundling, every module sees the bundle URL instead. Store mutable files in
-`STORAGE_DIR`, never in `HATCH_ASSETS_DIR`. Computed dynamic imports, separate
-Worker entrypoints,
+after bundling, every module sees the bundle URL instead. Computed dynamic
+imports, separate Worker entrypoints,
 native addons, FFI libraries, runtime sidecars, runtime-generated package files,
 and packages that depend on their own relative runtime resources are not
 supported by the `bundle-v1` runtime. The platform deliberately does not copy
 the backend source tree into the artifact.
+
+For mutable files, enable `capabilities.storage` together with the backend
+capability. The platform creates one fixed, private persistent directory for the
+app and injects its absolute path into the backend as `STORAGE_DIR`. Read and
+write only within that directory; never write to `HATCH_ASSETS_DIR`.
+
+```ts
+import path from 'node:path';
+
+const storageDir = Deno.env.get('STORAGE_DIR')!;
+await Deno.writeTextFile(path.join(storageDir, 'state.json'), '{}');
+```
+
+Persistent storage is backend-only. There is no Storage HTTP API, and frontend
+or widget browser code cannot access the directory directly. Its contents
+survive backend restarts, deployments, and rollbacks. Turning the capability
+off revokes backend access but keeps existing files; turning it back on exposes
+the same contents. Deleting the app permanently deletes the directory.
 
 Keep `app.routes` synchronized with every user-navigable frontend route so the
 platform can autocomplete app entry points. Each path starts with `/` and has a
@@ -213,9 +231,10 @@ Method names become camelCase in generated code (`list`, `add`).
 ## Backend (Deno + Connect)
 
 The platform always injects `PORT`. It injects `DATABASE_URL` only when
-`capabilities.database` is enabled; create tables on startup so an App using that
-capability works on a fresh database. Import generated stubs with an explicit
-`.ts`.
+`capabilities.database` is enabled and `STORAGE_DIR` only when
+`capabilities.storage` is enabled. Create tables on startup so an App using the
+database capability works on a fresh database. Import generated stubs with an
+explicit `.ts`.
 
 ```ts
 import http from 'node:http';

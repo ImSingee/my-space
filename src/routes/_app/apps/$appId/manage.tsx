@@ -122,8 +122,8 @@ function AppDetailPage() {
       title: `Delete ${app.name}?`,
       children: (
         <Text size="sm">
-          This permanently removes the app, its database, all deployments, and
-          dashboard widgets. This cannot be undone.
+          This permanently removes the app, its database, persistent storage
+          files, all deployments, and dashboard widgets. This cannot be undone.
         </Text>
       ),
       labels: { confirm: 'Delete app', cancel: 'Cancel' },

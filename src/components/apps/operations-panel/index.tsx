@@ -1,6 +1,6 @@
 import { Box, Center, Group, Loader, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { IconDatabase, IconServerBolt } from '@tabler/icons-react';
+import { IconDatabase, IconFolder, IconServerBolt } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import {
   BackendControls,
@@ -133,6 +133,27 @@ function DatabaseSection({ dbName }: { dbName?: string | null }) {
   );
 }
 
+function PersistentStorageSection() {
+  return (
+    <Stack gap={6}>
+      <SectionHeader
+        icon={<IconFolder size={16} stroke={1.8} />}
+        title="Persistent storage"
+        meta={
+          <Text size="xs" c="dimmed">
+            enabled
+          </Text>
+        }
+      />
+      <Text size="xs" c="dimmed">
+        A private backend directory available through STORAGE_DIR. Files survive
+        restarts, deployments, and rollbacks, and are deleted with the app.
+        Disabling storage keeps the files but revokes access.
+      </Text>
+    </Stack>
+  );
+}
+
 export function OperationsPanel({
   appId,
   dbName,
@@ -165,6 +186,7 @@ export function OperationsPanel({
   const anyEnabled =
     ops.backend.capable ||
     Boolean(dbEnabled) ||
+    ops.storage.enabled ||
     ops.cron.enabled ||
     ops.webhook.enabled ||
     ops.kv.enabled ||
@@ -178,8 +200,8 @@ export function OperationsPanel({
 
       {!anyEnabled ? (
         <Text size="sm" c="dimmed">
-          No database, Data Tables, backend, scheduled jobs, webhook, or KV to
-          manage for this app.
+          No database, Data Tables, persistent storage, backend, scheduled jobs,
+          webhook, or KV to manage for this app.
         </Text>
       ) : (
         <Stack gap="lg">
@@ -187,6 +209,7 @@ export function OperationsPanel({
             <BackendSection appId={appId} backend={ops.backend} />
           ) : null}
           {dbEnabled ? <DatabaseSection dbName={dbName} /> : null}
+          {ops.storage.enabled ? <PersistentStorageSection /> : null}
           {ops.dataTable.enabled ? <DataTableSection appId={appId} /> : null}
           {ops.cron.enabled ? (
             <CronSection appId={appId} cron={ops.cron} />

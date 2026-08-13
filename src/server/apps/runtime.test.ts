@@ -14,8 +14,12 @@ vi.mock('./provision', () => ({
   ensureAppDatabase: vi.fn<() => Promise<string>>(),
 }));
 
-const { backendArtifactEnv, buildBackendDenoArgs, resolveBackendArtifact } =
-  await import('./runtime');
+const {
+  backendArtifactEnv,
+  backendStorageEnv,
+  buildBackendDenoArgs,
+  resolveBackendArtifact,
+} = await import('./runtime');
 
 const tempDirs: string[] = [];
 
@@ -206,6 +210,43 @@ describe('app backend runtime artifacts', () => {
       '--frozen',
       '/build/backend/main.ts',
     ]);
+  });
+
+  it('withholds storage environment and filesystem permissions when disabled', () => {
+    const legacyArgs = buildBackendDenoArgs({
+      artifact: { entryPath: '/build/backend/main.ts' },
+      buildDir: '/build',
+      storageDir: null,
+      cacheDir: '/deno-cache',
+      certPaths: ['/tls/ca.pem'],
+      hasLock: true,
+    });
+    const bundledArgs = buildBackendDenoArgs({
+      artifact: {
+        entryPath: '/build/backend/main.bundle.js',
+        format: 'bundle-v1',
+      },
+      buildDir: '/build',
+      storageDir: null,
+      cacheDir: '/deno-cache',
+      certPaths: ['/tls/ca.pem'],
+      hasLock: true,
+    });
+
+    expect(legacyArgs).toContain('--allow-read=/build,/deno-cache,/tls/ca.pem');
+    expect(bundledArgs).toContain(
+      '--allow-read=/build/backend/assets,/tls/ca.pem',
+    );
+    expect(legacyArgs.some((arg) => arg.startsWith('--allow-write='))).toBe(
+      false,
+    );
+    expect(bundledArgs.some((arg) => arg.startsWith('--allow-write='))).toBe(
+      false,
+    );
+    expect(backendStorageEnv(null)).toEqual({});
+    expect(backendStorageEnv('/storage')).toEqual({
+      STORAGE_DIR: '/storage',
+    });
   });
 
   it('injects the fixed assets directory only for bundle-v1', () => {
