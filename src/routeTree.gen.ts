@@ -9,66 +9,62 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as AppRouteImport } from './routes/_app'
-import { Route as R404RouteImport } from './routes/404'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiEventsRouteImport } from './routes/api/events'
-import { Route as AppSettingsRouteImport } from './routes/_app/settings'
-import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
-import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
+import { Route as R404RouteImport } from './routes/404'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
-import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
-import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
-import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
-import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
+import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
+import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as ApiEventsRouteImport } from './routes/api/events'
 import { Route as AppAgentIndexRouteImport } from './routes/_app/agent/index'
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
-import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
-import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings/providers'
-import { Route as AppSettingsBackendsRouteImport } from './routes/_app/settings/backends'
-import { Route as AppSettingsAgentRunnerRouteImport } from './routes/_app/settings/agent-runner'
-import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
 import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
-import { Route as AppWorkflowsWorkflowIdIndexRouteImport } from './routes/_app/workflows/$workflowId/index'
+import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
+import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
+import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsAgentRunnerRouteImport } from './routes/_app/settings/agent-runner'
+import { Route as AppSettingsBackendsRouteImport } from './routes/_app/settings/backends'
+import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings/providers'
+import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
+import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
+import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppAppAppSlugIndexRouteImport } from './routes/_app/app/$appSlug/index'
-import { Route as AppAppSlugEmbedSplatRouteImport } from './routes/app/$appSlug/embed/$'
-import { Route as ApiWorkflowsWorkflowIdDownloadRouteImport } from './routes/api/workflows/$workflowId/download'
-import { Route as ApiWorkflowHooksWorkflowIdSplatRouteImport } from './routes/api/workflow-hooks/$workflowId/$'
-import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
-import { Route as ApiAppsAppIdDownloadRouteImport } from './routes/api/apps/$appId/download'
-import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
-import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
-import { Route as AppWorkflowsWorkflowIdManageRouteImport } from './routes/_app/workflows/$workflowId/manage'
 import { Route as AppAppAppSlugManageRouteImport } from './routes/_app/app/$appSlug/manage'
+import { Route as AppWorkflowsWorkflowIdIndexRouteImport } from './routes/_app/workflows/$workflowId/index'
+import { Route as AppWorkflowsWorkflowIdManageRouteImport } from './routes/_app/workflows/$workflowId/manage'
+import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
+import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
+import { Route as ApiAppsAppIdDownloadRouteImport } from './routes/api/apps/$appId/download'
+import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
+import { Route as ApiWorkflowHooksWorkflowIdSplatRouteImport } from './routes/api/workflow-hooks/$workflowId/$'
+import { Route as ApiWorkflowsWorkflowIdDownloadRouteImport } from './routes/api/workflows/$workflowId/download'
+import { Route as AppAppSlugEmbedSplatRouteImport } from './routes/app/$appSlug/embed/$'
 import { Route as AppWorkflowsWorkflowIdExecutionsIndexRouteImport } from './routes/_app/workflows/$workflowId/executions/index'
-import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
-import { Route as ApiAppsAppIdUserscriptsScriptIdRouteImport } from './routes/api/apps/$appId/userscripts/$scriptId'
-import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
-import { Route as ApiAppsAppIdKvSplatRouteImport } from './routes/api/apps/$appId/kv/$'
-import { Route as ApiAppsAppIdDataSplatRouteImport } from './routes/api/apps/$appId/data/$'
-import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$appId/app/$'
-import { Route as ApiAppAppIdWidgetWidgetIdRouteImport } from './routes/api/app/$appId/widget/$widgetId'
-import { Route as ApiAppAppIdUserscriptsScriptIdRouteImport } from './routes/api/app/$appId/userscripts/$scriptId'
-import { Route as ApiAppAppIdRpcSplatRouteImport } from './routes/api/app/$appId/rpc/$'
-import { Route as ApiAppAppIdKvSplatRouteImport } from './routes/api/app/$appId/kv/$'
-import { Route as ApiAppAppIdDataSplatRouteImport } from './routes/api/app/$appId/data/$'
-import { Route as ApiAppAppIdAppSplatRouteImport } from './routes/api/app/$appId/app/$'
-import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
-import { Route as ApiAgentRunsRunIdEnvRouteImport } from './routes/api/agent/runs/$runId/env'
-import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
-import { Route as ApiAgentRunsRunIdAnswerRouteImport } from './routes/api/agent/runs/$runId/answer'
 import { Route as AppWorkflowsWorkflowIdExecutionsRunIdRouteImport } from './routes/_app/workflows/$workflowId/executions/$runId'
+import { Route as ApiAgentRunsRunIdAnswerRouteImport } from './routes/api/agent/runs/$runId/answer'
+import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
+import { Route as ApiAgentRunsRunIdEnvRouteImport } from './routes/api/agent/runs/$runId/env'
+import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
+import { Route as ApiAppAppIdAppSplatRouteImport } from './routes/api/app/$appId/app/$'
+import { Route as ApiAppAppIdDataSplatRouteImport } from './routes/api/app/$appId/data/$'
+import { Route as ApiAppAppIdKvSplatRouteImport } from './routes/api/app/$appId/kv/$'
+import { Route as ApiAppAppIdRpcSplatRouteImport } from './routes/api/app/$appId/rpc/$'
+import { Route as ApiAppAppIdUserscriptsScriptIdRouteImport } from './routes/api/app/$appId/userscripts/$scriptId'
+import { Route as ApiAppAppIdWidgetWidgetIdRouteImport } from './routes/api/app/$appId/widget/$widgetId'
+import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$appId/app/$'
+import { Route as ApiAppsAppIdDataSplatRouteImport } from './routes/api/apps/$appId/data/$'
+import { Route as ApiAppsAppIdKvSplatRouteImport } from './routes/api/apps/$appId/kv/$'
+import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
+import { Route as ApiAppsAppIdUserscriptsScriptIdRouteImport } from './routes/api/apps/$appId/userscripts/$scriptId'
+import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
 import { Route as ApiAgentSessionsSessionIdAttachmentsAttachmentIdRouteImport } from './routes/api/agent/sessions/$sessionId/attachments/$attachmentId'
 
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const R404Route = R404RouteImport.update({
@@ -76,24 +72,18 @@ const R404Route = R404RouteImport.update({
   path: '/404',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiEventsRoute = ApiEventsRouteImport.update({
-  id: '/api/events',
-  path: '/api/events',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppExecutionsRoute = AppExecutionsRouteImport.update({
-  id: '/executions',
-  path: '/executions',
+const AppAgentRoute = AppAgentRouteImport.update({
+  id: '/agent',
+  path: '/agent',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDashboardsRoute = AppDashboardsRouteImport.update({
@@ -101,14 +91,44 @@ const AppDashboardsRoute = AppDashboardsRouteImport.update({
   path: '/dashboards',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAgentRoute = AppAgentRouteImport.update({
-  id: '/agent',
-  path: '/agent',
+const AppExecutionsRoute = AppExecutionsRouteImport.update({
+  id: '/executions',
+  path: '/executions',
   getParentRoute: () => AppRoute,
 } as any)
-const AppWorkflowsIndexRoute = AppWorkflowsIndexRouteImport.update({
-  id: '/workflows/',
-  path: '/workflows/',
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const ApiEventsRoute = ApiEventsRouteImport.update({
+  id: '/api/events',
+  path: '/api/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAgentIndexRoute = AppAgentIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppAgentRoute,
+} as any)
+const AppAgentThreadIdRoute = AppAgentThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => AppAgentRoute,
+} as any)
+const AppAppsIndexRoute = AppAppsIndexRouteImport.update({
+  id: '/apps/',
+  path: '/apps/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
+  id: '/dashboard/',
+  path: '/dashboard/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
+  id: '/dashboard/$dashboardId',
+  path: '/dashboard/$dashboardId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
@@ -116,39 +136,9 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
-const AppDashboardIndexRoute = AppDashboardIndexRouteImport.update({
-  id: '/dashboard/',
-  path: '/dashboard/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAppsIndexRoute = AppAppsIndexRouteImport.update({
-  id: '/apps/',
-  path: '/apps/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAgentIndexRoute = AppAgentIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppAgentRoute,
-} as any)
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAgentRunsRoute = ApiAgentRunsRouteImport.update({
-  id: '/api/agent/runs',
-  path: '/api/agent/runs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppSettingsUsersRoute = AppSettingsUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppSettingsProvidersRoute = AppSettingsProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
+const AppSettingsAgentRunnerRoute = AppSettingsAgentRunnerRouteImport.update({
+  id: '/agent-runner',
+  path: '/agent-runner',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsBackendsRoute = AppSettingsBackendsRouteImport.update({
@@ -156,20 +146,40 @@ const AppSettingsBackendsRoute = AppSettingsBackendsRouteImport.update({
   path: '/backends',
   getParentRoute: () => AppSettingsRoute,
 } as any)
-const AppSettingsAgentRunnerRoute = AppSettingsAgentRunnerRouteImport.update({
-  id: '/agent-runner',
-  path: '/agent-runner',
+const AppSettingsProvidersRoute = AppSettingsProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
   getParentRoute: () => AppSettingsRoute,
 } as any)
-const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
-  id: '/dashboard/$dashboardId',
-  path: '/dashboard/$dashboardId',
+const AppSettingsUsersRoute = AppSettingsUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppWorkflowsIndexRoute = AppWorkflowsIndexRouteImport.update({
+  id: '/workflows/',
+  path: '/workflows/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAgentThreadIdRoute = AppAgentThreadIdRouteImport.update({
-  id: '/$threadId',
-  path: '/$threadId',
-  getParentRoute: () => AppAgentRoute,
+const ApiAgentRunsRoute = ApiAgentRunsRouteImport.update({
+  id: '/api/agent/runs',
+  path: '/api/agent/runs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAppAppSlugIndexRoute = AppAppAppSlugIndexRouteImport.update({
+  id: '/app/$appSlug/',
+  path: '/app/$appSlug/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAppAppSlugManageRoute = AppAppAppSlugManageRouteImport.update({
+  id: '/app/$appSlug/manage',
+  path: '/app/$appSlug/manage',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppWorkflowsWorkflowIdIndexRoute =
   AppWorkflowsWorkflowIdIndexRouteImport.update({
@@ -177,31 +187,21 @@ const AppWorkflowsWorkflowIdIndexRoute =
     path: '/workflows/$workflowId/',
     getParentRoute: () => AppRoute,
   } as any)
-const AppAppAppSlugIndexRoute = AppAppAppSlugIndexRouteImport.update({
-  id: '/app/$appSlug/',
-  path: '/app/$appSlug/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAppSlugEmbedSplatRoute = AppAppSlugEmbedSplatRouteImport.update({
-  id: '/app/$appSlug/embed/$',
-  path: '/app/$appSlug/embed/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiWorkflowsWorkflowIdDownloadRoute =
-  ApiWorkflowsWorkflowIdDownloadRouteImport.update({
-    id: '/api/workflows/$workflowId/download',
-    path: '/api/workflows/$workflowId/download',
+const AppWorkflowsWorkflowIdManageRoute =
+  AppWorkflowsWorkflowIdManageRouteImport.update({
+    id: '/workflows/$workflowId/manage',
+    path: '/workflows/$workflowId/manage',
+    getParentRoute: () => AppRoute,
+  } as any)
+const ApiAgentAttachmentsAttachmentIdRoute =
+  ApiAgentAttachmentsAttachmentIdRouteImport.update({
+    id: '/api/agent/attachments/$attachmentId',
+    path: '/api/agent/attachments/$attachmentId',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiWorkflowHooksWorkflowIdSplatRoute =
-  ApiWorkflowHooksWorkflowIdSplatRouteImport.update({
-    id: '/api/workflow-hooks/$workflowId/$',
-    path: '/api/workflow-hooks/$workflowId/$',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiHooksAppIdSplatRoute = ApiHooksAppIdSplatRouteImport.update({
-  id: '/api/hooks/$appId/$',
-  path: '/api/hooks/$appId/$',
+const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
+  id: '/api/app/$appId/download',
+  path: '/api/app/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAppsAppIdDownloadRoute = ApiAppsAppIdDownloadRouteImport.update({
@@ -209,27 +209,27 @@ const ApiAppsAppIdDownloadRoute = ApiAppsAppIdDownloadRouteImport.update({
   path: '/api/apps/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
-  id: '/api/app/$appId/download',
-  path: '/api/app/$appId/download',
+const ApiHooksAppIdSplatRoute = ApiHooksAppIdSplatRouteImport.update({
+  id: '/api/hooks/$appId/$',
+  path: '/api/hooks/$appId/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAgentAttachmentsAttachmentIdRoute =
-  ApiAgentAttachmentsAttachmentIdRouteImport.update({
-    id: '/api/agent/attachments/$attachmentId',
-    path: '/api/agent/attachments/$attachmentId',
+const ApiWorkflowHooksWorkflowIdSplatRoute =
+  ApiWorkflowHooksWorkflowIdSplatRouteImport.update({
+    id: '/api/workflow-hooks/$workflowId/$',
+    path: '/api/workflow-hooks/$workflowId/$',
     getParentRoute: () => rootRouteImport,
   } as any)
-const AppWorkflowsWorkflowIdManageRoute =
-  AppWorkflowsWorkflowIdManageRouteImport.update({
-    id: '/workflows/$workflowId/manage',
-    path: '/workflows/$workflowId/manage',
-    getParentRoute: () => AppRoute,
+const ApiWorkflowsWorkflowIdDownloadRoute =
+  ApiWorkflowsWorkflowIdDownloadRouteImport.update({
+    id: '/api/workflows/$workflowId/download',
+    path: '/api/workflows/$workflowId/download',
+    getParentRoute: () => rootRouteImport,
   } as any)
-const AppAppAppSlugManageRoute = AppAppAppSlugManageRouteImport.update({
-  id: '/app/$appSlug/manage',
-  path: '/app/$appSlug/manage',
-  getParentRoute: () => AppRoute,
+const AppAppSlugEmbedSplatRoute = AppAppSlugEmbedSplatRouteImport.update({
+  id: '/app/$appSlug/embed/$',
+  path: '/app/$appSlug/embed/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppWorkflowsWorkflowIdExecutionsIndexRoute =
   AppWorkflowsWorkflowIdExecutionsIndexRouteImport.update({
@@ -237,78 +237,15 @@ const AppWorkflowsWorkflowIdExecutionsIndexRoute =
     path: '/workflows/$workflowId/executions/',
     getParentRoute: () => AppRoute,
   } as any)
-const ApiAppsAppIdWidgetWidgetIdRoute =
-  ApiAppsAppIdWidgetWidgetIdRouteImport.update({
-    id: '/api/apps/$appId/widget/$widgetId',
-    path: '/api/apps/$appId/widget/$widgetId',
-    getParentRoute: () => rootRouteImport,
+const AppWorkflowsWorkflowIdExecutionsRunIdRoute =
+  AppWorkflowsWorkflowIdExecutionsRunIdRouteImport.update({
+    id: '/workflows/$workflowId/executions/$runId',
+    path: '/workflows/$workflowId/executions/$runId',
+    getParentRoute: () => AppRoute,
   } as any)
-const ApiAppsAppIdUserscriptsScriptIdRoute =
-  ApiAppsAppIdUserscriptsScriptIdRouteImport.update({
-    id: '/api/apps/$appId/userscripts/$scriptId',
-    path: '/api/apps/$appId/userscripts/$scriptId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiAppsAppIdRpcSplatRoute = ApiAppsAppIdRpcSplatRouteImport.update({
-  id: '/api/apps/$appId/rpc/$',
-  path: '/api/apps/$appId/rpc/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdKvSplatRoute = ApiAppsAppIdKvSplatRouteImport.update({
-  id: '/api/apps/$appId/kv/$',
-  path: '/api/apps/$appId/kv/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdDataSplatRoute = ApiAppsAppIdDataSplatRouteImport.update({
-  id: '/api/apps/$appId/data/$',
-  path: '/api/apps/$appId/data/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdAppSplatRoute = ApiAppsAppIdAppSplatRouteImport.update({
-  id: '/api/apps/$appId/app/$',
-  path: '/api/apps/$appId/app/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppAppIdWidgetWidgetIdRoute =
-  ApiAppAppIdWidgetWidgetIdRouteImport.update({
-    id: '/api/app/$appId/widget/$widgetId',
-    path: '/api/app/$appId/widget/$widgetId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiAppAppIdUserscriptsScriptIdRoute =
-  ApiAppAppIdUserscriptsScriptIdRouteImport.update({
-    id: '/api/app/$appId/userscripts/$scriptId',
-    path: '/api/app/$appId/userscripts/$scriptId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiAppAppIdRpcSplatRoute = ApiAppAppIdRpcSplatRouteImport.update({
-  id: '/api/app/$appId/rpc/$',
-  path: '/api/app/$appId/rpc/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppAppIdKvSplatRoute = ApiAppAppIdKvSplatRouteImport.update({
-  id: '/api/app/$appId/kv/$',
-  path: '/api/app/$appId/kv/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppAppIdDataSplatRoute = ApiAppAppIdDataSplatRouteImport.update({
-  id: '/api/app/$appId/data/$',
-  path: '/api/app/$appId/data/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppAppIdAppSplatRoute = ApiAppAppIdAppSplatRouteImport.update({
-  id: '/api/app/$appId/app/$',
-  path: '/api/app/$appId/app/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAgentRunsRunIdEventsRoute = ApiAgentRunsRunIdEventsRouteImport.update({
-  id: '/$runId/events',
-  path: '/$runId/events',
-  getParentRoute: () => ApiAgentRunsRoute,
-} as any)
-const ApiAgentRunsRunIdEnvRoute = ApiAgentRunsRunIdEnvRouteImport.update({
-  id: '/$runId/env',
-  path: '/$runId/env',
+const ApiAgentRunsRunIdAnswerRoute = ApiAgentRunsRunIdAnswerRouteImport.update({
+  id: '/$runId/answer',
+  path: '/$runId/answer',
   getParentRoute: () => ApiAgentRunsRoute,
 } as any)
 const ApiAgentRunsRunIdCancelRoute = ApiAgentRunsRunIdCancelRouteImport.update({
@@ -316,16 +253,79 @@ const ApiAgentRunsRunIdCancelRoute = ApiAgentRunsRunIdCancelRouteImport.update({
   path: '/$runId/cancel',
   getParentRoute: () => ApiAgentRunsRoute,
 } as any)
-const ApiAgentRunsRunIdAnswerRoute = ApiAgentRunsRunIdAnswerRouteImport.update({
-  id: '/$runId/answer',
-  path: '/$runId/answer',
+const ApiAgentRunsRunIdEnvRoute = ApiAgentRunsRunIdEnvRouteImport.update({
+  id: '/$runId/env',
+  path: '/$runId/env',
   getParentRoute: () => ApiAgentRunsRoute,
 } as any)
-const AppWorkflowsWorkflowIdExecutionsRunIdRoute =
-  AppWorkflowsWorkflowIdExecutionsRunIdRouteImport.update({
-    id: '/workflows/$workflowId/executions/$runId',
-    path: '/workflows/$workflowId/executions/$runId',
-    getParentRoute: () => AppRoute,
+const ApiAgentRunsRunIdEventsRoute = ApiAgentRunsRunIdEventsRouteImport.update({
+  id: '/$runId/events',
+  path: '/$runId/events',
+  getParentRoute: () => ApiAgentRunsRoute,
+} as any)
+const ApiAppAppIdAppSplatRoute = ApiAppAppIdAppSplatRouteImport.update({
+  id: '/api/app/$appId/app/$',
+  path: '/api/app/$appId/app/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppAppIdDataSplatRoute = ApiAppAppIdDataSplatRouteImport.update({
+  id: '/api/app/$appId/data/$',
+  path: '/api/app/$appId/data/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppAppIdKvSplatRoute = ApiAppAppIdKvSplatRouteImport.update({
+  id: '/api/app/$appId/kv/$',
+  path: '/api/app/$appId/kv/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppAppIdRpcSplatRoute = ApiAppAppIdRpcSplatRouteImport.update({
+  id: '/api/app/$appId/rpc/$',
+  path: '/api/app/$appId/rpc/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppAppIdUserscriptsScriptIdRoute =
+  ApiAppAppIdUserscriptsScriptIdRouteImport.update({
+    id: '/api/app/$appId/userscripts/$scriptId',
+    path: '/api/app/$appId/userscripts/$scriptId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAppAppIdWidgetWidgetIdRoute =
+  ApiAppAppIdWidgetWidgetIdRouteImport.update({
+    id: '/api/app/$appId/widget/$widgetId',
+    path: '/api/app/$appId/widget/$widgetId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAppsAppIdAppSplatRoute = ApiAppsAppIdAppSplatRouteImport.update({
+  id: '/api/apps/$appId/app/$',
+  path: '/api/apps/$appId/app/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppsAppIdDataSplatRoute = ApiAppsAppIdDataSplatRouteImport.update({
+  id: '/api/apps/$appId/data/$',
+  path: '/api/apps/$appId/data/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppsAppIdKvSplatRoute = ApiAppsAppIdKvSplatRouteImport.update({
+  id: '/api/apps/$appId/kv/$',
+  path: '/api/apps/$appId/kv/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppsAppIdRpcSplatRoute = ApiAppsAppIdRpcSplatRouteImport.update({
+  id: '/api/apps/$appId/rpc/$',
+  path: '/api/apps/$appId/rpc/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAppsAppIdUserscriptsScriptIdRoute =
+  ApiAppsAppIdUserscriptsScriptIdRouteImport.update({
+    id: '/api/apps/$appId/userscripts/$scriptId',
+    path: '/api/apps/$appId/userscripts/$scriptId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAppsAppIdWidgetWidgetIdRoute =
+  ApiAppsAppIdWidgetWidgetIdRouteImport.update({
+    id: '/api/apps/$appId/widget/$widgetId',
+    path: '/api/apps/$appId/widget/$widgetId',
+    getParentRoute: () => rootRouteImport,
   } as any)
 const ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute =
   ApiAgentSessionsSessionIdAttachmentsAttachmentIdRouteImport.update({
@@ -686,18 +686,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app': {
-      id: '/_app'
-      path: ''
+    '/': {
+      id: '/'
+      path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof AppRouteImport
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/404': {
@@ -707,32 +700,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof R404RouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/events': {
-      id: '/api/events'
-      path: '/api/events'
-      fullPath: '/api/events'
-      preLoaderRoute: typeof ApiEventsRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/settings': {
-      id: '/_app/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/executions': {
-      id: '/_app/executions'
-      path: '/executions'
-      fullPath: '/executions'
-      preLoaderRoute: typeof AppExecutionsRouteImport
+    '/_app/agent': {
+      id: '/_app/agent'
+      path: '/agent'
+      fullPath: '/agent'
+      preLoaderRoute: typeof AppAgentRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/dashboards': {
@@ -742,18 +728,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/agent': {
-      id: '/_app/agent'
-      path: '/agent'
-      fullPath: '/agent'
-      preLoaderRoute: typeof AppAgentRouteImport
+    '/_app/executions': {
+      id: '/_app/executions'
+      path: '/executions'
+      fullPath: '/executions'
+      preLoaderRoute: typeof AppExecutionsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/workflows/': {
-      id: '/_app/workflows/'
-      path: '/workflows'
-      fullPath: '/workflows/'
-      preLoaderRoute: typeof AppWorkflowsIndexRouteImport
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/events': {
+      id: '/api/events'
+      path: '/api/events'
+      fullPath: '/api/events'
+      preLoaderRoute: typeof ApiEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/agent/': {
+      id: '/_app/agent/'
+      path: '/'
+      fullPath: '/agent/'
+      preLoaderRoute: typeof AppAgentIndexRouteImport
+      parentRoute: typeof AppAgentRoute
+    }
+    '/_app/agent/$threadId': {
+      id: '/_app/agent/$threadId'
+      path: '/$threadId'
+      fullPath: '/agent/$threadId'
+      preLoaderRoute: typeof AppAgentThreadIdRouteImport
+      parentRoute: typeof AppAgentRoute
+    }
+    '/_app/apps/': {
+      id: '/_app/apps/'
+      path: '/apps'
+      fullPath: '/apps/'
+      preLoaderRoute: typeof AppAppsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard/': {
+      id: '/_app/dashboard/'
+      path: '/dashboard'
+      fullPath: '/dashboard/'
+      preLoaderRoute: typeof AppDashboardIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard/$dashboardId': {
+      id: '/_app/dashboard/$dashboardId'
+      path: '/dashboard/$dashboardId'
+      fullPath: '/dashboard/$dashboardId'
+      preLoaderRoute: typeof AppDashboardDashboardIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
@@ -763,53 +791,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/dashboard/': {
-      id: '/_app/dashboard/'
-      path: '/dashboard'
-      fullPath: '/dashboard/'
-      preLoaderRoute: typeof AppDashboardIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/apps/': {
-      id: '/_app/apps/'
-      path: '/apps'
-      fullPath: '/apps/'
-      preLoaderRoute: typeof AppAppsIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/agent/': {
-      id: '/_app/agent/'
-      path: '/'
-      fullPath: '/agent/'
-      preLoaderRoute: typeof AppAgentIndexRouteImport
-      parentRoute: typeof AppAgentRoute
-    }
-    '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/agent/runs': {
-      id: '/api/agent/runs'
-      path: '/api/agent/runs'
-      fullPath: '/api/agent/runs'
-      preLoaderRoute: typeof ApiAgentRunsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app/settings/users': {
-      id: '/_app/settings/users'
-      path: '/users'
-      fullPath: '/settings/users'
-      preLoaderRoute: typeof AppSettingsUsersRouteImport
-      parentRoute: typeof AppSettingsRoute
-    }
-    '/_app/settings/providers': {
-      id: '/_app/settings/providers'
-      path: '/providers'
-      fullPath: '/settings/providers'
-      preLoaderRoute: typeof AppSettingsProvidersRouteImport
+    '/_app/settings/agent-runner': {
+      id: '/_app/settings/agent-runner'
+      path: '/agent-runner'
+      fullPath: '/settings/agent-runner'
+      preLoaderRoute: typeof AppSettingsAgentRunnerRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/backends': {
@@ -819,95 +805,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsBackendsRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/settings/agent-runner': {
-      id: '/_app/settings/agent-runner'
-      path: '/agent-runner'
-      fullPath: '/settings/agent-runner'
-      preLoaderRoute: typeof AppSettingsAgentRunnerRouteImport
+    '/_app/settings/providers': {
+      id: '/_app/settings/providers'
+      path: '/providers'
+      fullPath: '/settings/providers'
+      preLoaderRoute: typeof AppSettingsProvidersRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/dashboard/$dashboardId': {
-      id: '/_app/dashboard/$dashboardId'
-      path: '/dashboard/$dashboardId'
-      fullPath: '/dashboard/$dashboardId'
-      preLoaderRoute: typeof AppDashboardDashboardIdRouteImport
+    '/_app/settings/users': {
+      id: '/_app/settings/users'
+      path: '/users'
+      fullPath: '/settings/users'
+      preLoaderRoute: typeof AppSettingsUsersRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/workflows/': {
+      id: '/_app/workflows/'
+      path: '/workflows'
+      fullPath: '/workflows/'
+      preLoaderRoute: typeof AppWorkflowsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/agent/$threadId': {
-      id: '/_app/agent/$threadId'
-      path: '/$threadId'
-      fullPath: '/agent/$threadId'
-      preLoaderRoute: typeof AppAgentThreadIdRouteImport
-      parentRoute: typeof AppAgentRoute
+    '/api/agent/runs': {
+      id: '/api/agent/runs'
+      path: '/api/agent/runs'
+      fullPath: '/api/agent/runs'
+      preLoaderRoute: typeof ApiAgentRunsRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_app/workflows/$workflowId/': {
-      id: '/_app/workflows/$workflowId/'
-      path: '/workflows/$workflowId'
-      fullPath: '/workflows/$workflowId/'
-      preLoaderRoute: typeof AppWorkflowsWorkflowIdIndexRouteImport
-      parentRoute: typeof AppRoute
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_app/app/$appSlug/': {
       id: '/_app/app/$appSlug/'
       path: '/app/$appSlug'
       fullPath: '/app/$appSlug/'
       preLoaderRoute: typeof AppAppAppSlugIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/$appSlug/embed/$': {
-      id: '/app/$appSlug/embed/$'
-      path: '/app/$appSlug/embed/$'
-      fullPath: '/app/$appSlug/embed/$'
-      preLoaderRoute: typeof AppAppSlugEmbedSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/workflows/$workflowId/download': {
-      id: '/api/workflows/$workflowId/download'
-      path: '/api/workflows/$workflowId/download'
-      fullPath: '/api/workflows/$workflowId/download'
-      preLoaderRoute: typeof ApiWorkflowsWorkflowIdDownloadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/workflow-hooks/$workflowId/$': {
-      id: '/api/workflow-hooks/$workflowId/$'
-      path: '/api/workflow-hooks/$workflowId/$'
-      fullPath: '/api/workflow-hooks/$workflowId/$'
-      preLoaderRoute: typeof ApiWorkflowHooksWorkflowIdSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/hooks/$appId/$': {
-      id: '/api/hooks/$appId/$'
-      path: '/api/hooks/$appId/$'
-      fullPath: '/api/hooks/$appId/$'
-      preLoaderRoute: typeof ApiHooksAppIdSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/download': {
-      id: '/api/apps/$appId/download'
-      path: '/api/apps/$appId/download'
-      fullPath: '/api/apps/$appId/download'
-      preLoaderRoute: typeof ApiAppsAppIdDownloadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/download': {
-      id: '/api/app/$appId/download'
-      path: '/api/app/$appId/download'
-      fullPath: '/api/app/$appId/download'
-      preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/agent/attachments/$attachmentId': {
-      id: '/api/agent/attachments/$attachmentId'
-      path: '/api/agent/attachments/$attachmentId'
-      fullPath: '/api/agent/attachments/$attachmentId'
-      preLoaderRoute: typeof ApiAgentAttachmentsAttachmentIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app/workflows/$workflowId/manage': {
-      id: '/_app/workflows/$workflowId/manage'
-      path: '/workflows/$workflowId/manage'
-      fullPath: '/workflows/$workflowId/manage'
-      preLoaderRoute: typeof AppWorkflowsWorkflowIdManageRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/app/$appSlug/manage': {
@@ -917,6 +854,69 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAppAppSlugManageRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/workflows/$workflowId/': {
+      id: '/_app/workflows/$workflowId/'
+      path: '/workflows/$workflowId'
+      fullPath: '/workflows/$workflowId/'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/workflows/$workflowId/manage': {
+      id: '/_app/workflows/$workflowId/manage'
+      path: '/workflows/$workflowId/manage'
+      fullPath: '/workflows/$workflowId/manage'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdManageRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/agent/attachments/$attachmentId': {
+      id: '/api/agent/attachments/$attachmentId'
+      path: '/api/agent/attachments/$attachmentId'
+      fullPath: '/api/agent/attachments/$attachmentId'
+      preLoaderRoute: typeof ApiAgentAttachmentsAttachmentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app/$appId/download': {
+      id: '/api/app/$appId/download'
+      path: '/api/app/$appId/download'
+      fullPath: '/api/app/$appId/download'
+      preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/download': {
+      id: '/api/apps/$appId/download'
+      path: '/api/apps/$appId/download'
+      fullPath: '/api/apps/$appId/download'
+      preLoaderRoute: typeof ApiAppsAppIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/hooks/$appId/$': {
+      id: '/api/hooks/$appId/$'
+      path: '/api/hooks/$appId/$'
+      fullPath: '/api/hooks/$appId/$'
+      preLoaderRoute: typeof ApiHooksAppIdSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workflow-hooks/$workflowId/$': {
+      id: '/api/workflow-hooks/$workflowId/$'
+      path: '/api/workflow-hooks/$workflowId/$'
+      fullPath: '/api/workflow-hooks/$workflowId/$'
+      preLoaderRoute: typeof ApiWorkflowHooksWorkflowIdSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workflows/$workflowId/download': {
+      id: '/api/workflows/$workflowId/download'
+      path: '/api/workflows/$workflowId/download'
+      fullPath: '/api/workflows/$workflowId/download'
+      preLoaderRoute: typeof ApiWorkflowsWorkflowIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/$appSlug/embed/$': {
+      id: '/app/$appSlug/embed/$'
+      path: '/app/$appSlug/embed/$'
+      fullPath: '/app/$appSlug/embed/$'
+      preLoaderRoute: typeof AppAppSlugEmbedSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/workflows/$workflowId/executions/': {
       id: '/_app/workflows/$workflowId/executions/'
       path: '/workflows/$workflowId/executions'
@@ -924,102 +924,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkflowsWorkflowIdExecutionsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/api/apps/$appId/widget/$widgetId': {
-      id: '/api/apps/$appId/widget/$widgetId'
-      path: '/api/apps/$appId/widget/$widgetId'
-      fullPath: '/api/apps/$appId/widget/$widgetId'
-      preLoaderRoute: typeof ApiAppsAppIdWidgetWidgetIdRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_app/workflows/$workflowId/executions/$runId': {
+      id: '/_app/workflows/$workflowId/executions/$runId'
+      path: '/workflows/$workflowId/executions/$runId'
+      fullPath: '/workflows/$workflowId/executions/$runId'
+      preLoaderRoute: typeof AppWorkflowsWorkflowIdExecutionsRunIdRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/api/apps/$appId/userscripts/$scriptId': {
-      id: '/api/apps/$appId/userscripts/$scriptId'
-      path: '/api/apps/$appId/userscripts/$scriptId'
-      fullPath: '/api/apps/$appId/userscripts/$scriptId'
-      preLoaderRoute: typeof ApiAppsAppIdUserscriptsScriptIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/rpc/$': {
-      id: '/api/apps/$appId/rpc/$'
-      path: '/api/apps/$appId/rpc/$'
-      fullPath: '/api/apps/$appId/rpc/$'
-      preLoaderRoute: typeof ApiAppsAppIdRpcSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/kv/$': {
-      id: '/api/apps/$appId/kv/$'
-      path: '/api/apps/$appId/kv/$'
-      fullPath: '/api/apps/$appId/kv/$'
-      preLoaderRoute: typeof ApiAppsAppIdKvSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/data/$': {
-      id: '/api/apps/$appId/data/$'
-      path: '/api/apps/$appId/data/$'
-      fullPath: '/api/apps/$appId/data/$'
-      preLoaderRoute: typeof ApiAppsAppIdDataSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/app/$': {
-      id: '/api/apps/$appId/app/$'
-      path: '/api/apps/$appId/app/$'
-      fullPath: '/api/apps/$appId/app/$'
-      preLoaderRoute: typeof ApiAppsAppIdAppSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/widget/$widgetId': {
-      id: '/api/app/$appId/widget/$widgetId'
-      path: '/api/app/$appId/widget/$widgetId'
-      fullPath: '/api/app/$appId/widget/$widgetId'
-      preLoaderRoute: typeof ApiAppAppIdWidgetWidgetIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/userscripts/$scriptId': {
-      id: '/api/app/$appId/userscripts/$scriptId'
-      path: '/api/app/$appId/userscripts/$scriptId'
-      fullPath: '/api/app/$appId/userscripts/$scriptId'
-      preLoaderRoute: typeof ApiAppAppIdUserscriptsScriptIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/rpc/$': {
-      id: '/api/app/$appId/rpc/$'
-      path: '/api/app/$appId/rpc/$'
-      fullPath: '/api/app/$appId/rpc/$'
-      preLoaderRoute: typeof ApiAppAppIdRpcSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/kv/$': {
-      id: '/api/app/$appId/kv/$'
-      path: '/api/app/$appId/kv/$'
-      fullPath: '/api/app/$appId/kv/$'
-      preLoaderRoute: typeof ApiAppAppIdKvSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/data/$': {
-      id: '/api/app/$appId/data/$'
-      path: '/api/app/$appId/data/$'
-      fullPath: '/api/app/$appId/data/$'
-      preLoaderRoute: typeof ApiAppAppIdDataSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/app/$appId/app/$': {
-      id: '/api/app/$appId/app/$'
-      path: '/api/app/$appId/app/$'
-      fullPath: '/api/app/$appId/app/$'
-      preLoaderRoute: typeof ApiAppAppIdAppSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/agent/runs/$runId/events': {
-      id: '/api/agent/runs/$runId/events'
-      path: '/$runId/events'
-      fullPath: '/api/agent/runs/$runId/events'
-      preLoaderRoute: typeof ApiAgentRunsRunIdEventsRouteImport
-      parentRoute: typeof ApiAgentRunsRoute
-    }
-    '/api/agent/runs/$runId/env': {
-      id: '/api/agent/runs/$runId/env'
-      path: '/$runId/env'
-      fullPath: '/api/agent/runs/$runId/env'
-      preLoaderRoute: typeof ApiAgentRunsRunIdEnvRouteImport
+    '/api/agent/runs/$runId/answer': {
+      id: '/api/agent/runs/$runId/answer'
+      path: '/$runId/answer'
+      fullPath: '/api/agent/runs/$runId/answer'
+      preLoaderRoute: typeof ApiAgentRunsRunIdAnswerRouteImport
       parentRoute: typeof ApiAgentRunsRoute
     }
     '/api/agent/runs/$runId/cancel': {
@@ -1029,19 +945,103 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAgentRunsRunIdCancelRouteImport
       parentRoute: typeof ApiAgentRunsRoute
     }
-    '/api/agent/runs/$runId/answer': {
-      id: '/api/agent/runs/$runId/answer'
-      path: '/$runId/answer'
-      fullPath: '/api/agent/runs/$runId/answer'
-      preLoaderRoute: typeof ApiAgentRunsRunIdAnswerRouteImport
+    '/api/agent/runs/$runId/env': {
+      id: '/api/agent/runs/$runId/env'
+      path: '/$runId/env'
+      fullPath: '/api/agent/runs/$runId/env'
+      preLoaderRoute: typeof ApiAgentRunsRunIdEnvRouteImport
       parentRoute: typeof ApiAgentRunsRoute
     }
-    '/_app/workflows/$workflowId/executions/$runId': {
-      id: '/_app/workflows/$workflowId/executions/$runId'
-      path: '/workflows/$workflowId/executions/$runId'
-      fullPath: '/workflows/$workflowId/executions/$runId'
-      preLoaderRoute: typeof AppWorkflowsWorkflowIdExecutionsRunIdRouteImport
-      parentRoute: typeof AppRoute
+    '/api/agent/runs/$runId/events': {
+      id: '/api/agent/runs/$runId/events'
+      path: '/$runId/events'
+      fullPath: '/api/agent/runs/$runId/events'
+      preLoaderRoute: typeof ApiAgentRunsRunIdEventsRouteImport
+      parentRoute: typeof ApiAgentRunsRoute
+    }
+    '/api/app/$appId/app/$': {
+      id: '/api/app/$appId/app/$'
+      path: '/api/app/$appId/app/$'
+      fullPath: '/api/app/$appId/app/$'
+      preLoaderRoute: typeof ApiAppAppIdAppSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app/$appId/data/$': {
+      id: '/api/app/$appId/data/$'
+      path: '/api/app/$appId/data/$'
+      fullPath: '/api/app/$appId/data/$'
+      preLoaderRoute: typeof ApiAppAppIdDataSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app/$appId/kv/$': {
+      id: '/api/app/$appId/kv/$'
+      path: '/api/app/$appId/kv/$'
+      fullPath: '/api/app/$appId/kv/$'
+      preLoaderRoute: typeof ApiAppAppIdKvSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app/$appId/rpc/$': {
+      id: '/api/app/$appId/rpc/$'
+      path: '/api/app/$appId/rpc/$'
+      fullPath: '/api/app/$appId/rpc/$'
+      preLoaderRoute: typeof ApiAppAppIdRpcSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app/$appId/userscripts/$scriptId': {
+      id: '/api/app/$appId/userscripts/$scriptId'
+      path: '/api/app/$appId/userscripts/$scriptId'
+      fullPath: '/api/app/$appId/userscripts/$scriptId'
+      preLoaderRoute: typeof ApiAppAppIdUserscriptsScriptIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app/$appId/widget/$widgetId': {
+      id: '/api/app/$appId/widget/$widgetId'
+      path: '/api/app/$appId/widget/$widgetId'
+      fullPath: '/api/app/$appId/widget/$widgetId'
+      preLoaderRoute: typeof ApiAppAppIdWidgetWidgetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/app/$': {
+      id: '/api/apps/$appId/app/$'
+      path: '/api/apps/$appId/app/$'
+      fullPath: '/api/apps/$appId/app/$'
+      preLoaderRoute: typeof ApiAppsAppIdAppSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/data/$': {
+      id: '/api/apps/$appId/data/$'
+      path: '/api/apps/$appId/data/$'
+      fullPath: '/api/apps/$appId/data/$'
+      preLoaderRoute: typeof ApiAppsAppIdDataSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/kv/$': {
+      id: '/api/apps/$appId/kv/$'
+      path: '/api/apps/$appId/kv/$'
+      fullPath: '/api/apps/$appId/kv/$'
+      preLoaderRoute: typeof ApiAppsAppIdKvSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/rpc/$': {
+      id: '/api/apps/$appId/rpc/$'
+      path: '/api/apps/$appId/rpc/$'
+      fullPath: '/api/apps/$appId/rpc/$'
+      preLoaderRoute: typeof ApiAppsAppIdRpcSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/userscripts/$scriptId': {
+      id: '/api/apps/$appId/userscripts/$scriptId'
+      path: '/api/apps/$appId/userscripts/$scriptId'
+      fullPath: '/api/apps/$appId/userscripts/$scriptId'
+      preLoaderRoute: typeof ApiAppsAppIdUserscriptsScriptIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/apps/$appId/widget/$widgetId': {
+      id: '/api/apps/$appId/widget/$widgetId'
+      path: '/api/apps/$appId/widget/$widgetId'
+      fullPath: '/api/apps/$appId/widget/$widgetId'
+      preLoaderRoute: typeof ApiAppsAppIdWidgetWidgetIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/agent/sessions/$sessionId/attachments/$attachmentId': {
       id: '/api/agent/sessions/$sessionId/attachments/$attachmentId'
