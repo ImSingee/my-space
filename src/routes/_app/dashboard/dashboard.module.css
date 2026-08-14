@@ -19,9 +19,7 @@
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
-  padding: var(--mantine-spacing-lg);
-  border-radius: var(--mantine-radius-md);
-  background: var(--surface-sunken);
+  padding: var(--mantine-spacing-xs);
 }
 
 .previewViewport {
@@ -38,9 +36,10 @@
 .previewCanvas {
   min-width: 0;
   padding: var(--mantine-spacing-md);
-  border: 1px solid var(--mantine-color-default-border);
+  border: 1px solid var(--mantine-color-ember-3);
   border-radius: var(--mantine-radius-sm);
-  background: var(--surface-raised);
+  background: transparent;
+  box-shadow: var(--mantine-shadow-sm);
   transform-origin: top left;
 }
 
@@ -49,10 +48,6 @@
 }
 
 @media (max-width: 47.99em) {
-  .previewStage {
-    padding: var(--mantine-spacing-xs);
-  }
-
   .previewCanvas {
     padding: var(--mantine-spacing-xs);
   }

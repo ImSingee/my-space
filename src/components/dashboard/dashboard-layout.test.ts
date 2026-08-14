@@ -24,7 +24,7 @@ describe('buildWidgetLayout', () => {
     expect(item.isResizable).toBeUndefined();
   });
 
-  it('clamps widgets to the active breakpoint footprints', () => {
+  it('leaves multi-footprint resizing to the grid mode', () => {
     const sizes = [
       { w: 3, h: 2 },
       { w: 6, h: 4 },
@@ -35,7 +35,7 @@ describe('buildWidgetLayout', () => {
     expect(item.maxW).toBe(6);
     expect(item.minH).toBe(2);
     expect(item.maxH).toBe(4);
-    expect(item.isResizable).toBe(true);
+    expect(item.isResizable).toBeUndefined();
   });
 
   it('adapts footprints that are wider than the mobile grid', () => {
@@ -53,7 +53,7 @@ describe('buildWidgetLayout', () => {
     expect(item.maxW).toBe(4);
     expect(item.minH).toBe(3);
     expect(item.maxH).toBe(6);
-    expect(item.isResizable).toBe(true);
+    expect(item.isResizable).toBeUndefined();
   });
 
   it('locks a single-footprint widget against resizing', () => {

@@ -42,7 +42,13 @@ const widgets: DashboardItem[] = ['a', 'b'].map((id, sortOrder) => ({
   url: `/widgets/${id}.js`,
   sortOrder,
   defaultSize: { w: 4, h: 3 },
-  supportedSizes: [],
+  supportedSizes:
+    id === 'b'
+      ? [
+          { w: 4, h: 2 },
+          { w: 6, h: 3 },
+        ]
+      : [],
 }));
 
 const layouts: DashboardLayouts = {
@@ -120,6 +126,28 @@ test('view mode selects the desktop layout from measured width', async () => {
     expect(items).toHaveLength(2);
     expect(items[0].y).toBe(items[1].y);
     expect(items[0].x).not.toBe(items[1].x);
+    const multiSizeWidget = container
+      .querySelector('[data-widget-id="b"]')
+      ?.closest('.react-grid-item');
+    const resizeHandle = multiSizeWidget?.querySelector(
+      '.react-resizable-handle',
+    );
+    expect(resizeHandle).toBeTruthy();
+    expect(window.getComputedStyle(resizeHandle!).display).toBe('none');
+  });
+});
+
+test('edit mode exposes the multi-footprint resize handle', async () => {
+  const { container } = await render(<Harness width={1100} editing />);
+  await vi.waitFor(() => {
+    const multiSizeWidget = container
+      .querySelector('[data-widget-id="b"]')
+      ?.closest('.react-grid-item');
+    const resizeHandle = multiSizeWidget?.querySelector(
+      '.react-resizable-handle',
+    );
+    expect(resizeHandle).toBeTruthy();
+    expect(window.getComputedStyle(resizeHandle!).display).not.toBe('none');
   });
 });
 

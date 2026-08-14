@@ -255,10 +255,62 @@ test('edit mode shields the iframe and exposes only the remove action', async ()
   await vi.waitFor(() =>
     expect(iframeText(iframe!)).toBe('unsupported-content'),
   );
+  const dragHandle = screen.container.querySelector<HTMLElement>(
+    '.widget-drag-handle',
+  );
+  const remove = screen.container.querySelector<HTMLElement>(
+    '[aria-label="Remove widget"]',
+  );
+  const card = screen.container.querySelector<HTMLElement>(
+    '[data-editing="true"]',
+  );
+  expect(dragHandle).toBeTruthy();
+  expect(remove).toBeTruthy();
+  expect(card).toBeTruthy();
+  const grip = dragHandle!.querySelector<SVGElement>('svg');
+  const glyph = dragHandle!.querySelector<HTMLElement>('[aria-hidden="true"]');
+  const title = dragHandle!.querySelector<HTMLElement>('p');
+  expect(grip).toBeTruthy();
+  expect(glyph).toBeTruthy();
+  expect(title).toBeTruthy();
+  expect(window.getComputedStyle(dragHandle!).cursor).toBe('grab');
+  expect(window.getComputedStyle(grip!).cursor).toBe('grab');
+  expect(window.getComputedStyle(glyph!).cursor).toBe('grab');
+  expect(window.getComputedStyle(title!).cursor).toBe('grab');
+  expect(window.getComputedStyle(remove!).cursor).toBe('pointer');
+  expect(window.getComputedStyle(iframe!.parentElement!).cursor).toBe('auto');
+
+  const headerRect = dragHandle!.getBoundingClientRect();
+  const titleRect = title!.getBoundingClientRect();
+  const headerHitPoints = [
+    { x: titleRect.left, y: headerRect.top + 3 },
+    { x: headerRect.left + 3, y: titleRect.top + titleRect.height / 2 },
+    { x: titleRect.left, y: headerRect.bottom - 3 },
+  ];
+  for (const point of headerHitPoints) {
+    const target = document.elementFromPoint(point.x, point.y);
+    expect(target?.closest('.widget-drag-handle')).toBe(dragHandle);
+    expect(window.getComputedStyle(target!).cursor).toBe('grab');
+  }
+
+  const gridItem = card!.parentElement!;
+  gridItem.classList.add('react-draggable-dragging');
+  expect(window.getComputedStyle(dragHandle!).cursor).toBe('grabbing');
+  expect(window.getComputedStyle(grip!).cursor).toBe('grabbing');
+  expect(window.getComputedStyle(glyph!).cursor).toBe('grabbing');
+  expect(window.getComputedStyle(title!).cursor).toBe('grabbing');
+  expect(window.getComputedStyle(remove!).cursor).toBe('pointer');
+  gridItem.classList.remove('react-draggable-dragging');
+
+  const cardStyle = window.getComputedStyle(card!);
+  const defaultBorderProbe = document.createElement('span');
+  defaultBorderProbe.style.color = 'var(--mantine-color-default-border)';
+  card!.append(defaultBorderProbe);
+  expect(cardStyle.borderTopColor).toBe(
+    window.getComputedStyle(defaultBorderProbe).color,
+  );
+  defaultBorderProbe.remove();
   expect(window.getComputedStyle(iframe!).pointerEvents).toBe('none');
-  expect(
-    screen.container.querySelector('[aria-label="Remove widget"]'),
-  ).toBeTruthy();
   expect(screen.container.querySelector('[aria-label="Open app"]')).toBeNull();
   expect(
     screen.container.querySelector('[aria-label="Refresh widget"]'),

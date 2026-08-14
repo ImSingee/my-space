@@ -243,7 +243,7 @@ export function WidgetCard({
     >
       <Group
         justify="space-between"
-        mb={6}
+        mb={editing ? 0 : 6}
         wrap="nowrap"
         className={editing ? `widget-drag-handle ${classes.dragHeader}` : ''}
       >

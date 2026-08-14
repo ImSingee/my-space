@@ -25,6 +25,7 @@ export type WidgetLayoutDefinition = {
  * Build one breakpoint's RGL layout, deriving each widget's resize
  * constraints from its declared footprints: clamp the handle to the footprints'
  * bounding box, and lock resizing entirely when only one footprint is supported.
+ * Multi-footprint and free-form widgets inherit the grid-level edit-mode flag.
  */
 export function buildWidgetLayout(
   widgets: WidgetLayoutDefinition[],
@@ -53,7 +54,7 @@ export function buildWidgetLayout(
       base.maxW = Math.max(...sizes.map((s) => s.w));
       base.minH = Math.min(...sizes.map((s) => s.h));
       base.maxH = Math.max(...sizes.map((s) => s.h));
-      base.isResizable = sizes.length > 1;
+      if (sizes.length === 1) base.isResizable = false;
     } else {
       base.minW = Math.min(FREEFORM_MIN_WIDTH, columns);
       base.maxW = columns;

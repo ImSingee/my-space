@@ -8,23 +8,30 @@
     background-color var(--transition-fast);
 }
 
-.card[data-editing] {
-  border-color: color-mix(
-    in srgb,
-    var(--mantine-color-ember-filled) 44%,
-    var(--mantine-color-default-border)
-  );
+.dragHeader,
+.dragHeader * {
+  cursor: grab;
+}
+
+.dragHeader:active,
+.dragHeader:active *,
+:global(.react-draggable-dragging) .dragHeader,
+:global(.react-draggable-dragging) .dragHeader * {
+  cursor: grabbing;
+}
+
+.dragHeader .actions,
+.dragHeader .actions * {
+  cursor: pointer;
 }
 
 .dragHeader {
-  cursor: grab;
+  margin-top: calc(-1 * var(--mantine-spacing-sm));
+  margin-inline: calc(-1 * var(--mantine-spacing-sm));
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-sm) 6px;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-}
-
-.dragHeader:active {
-  cursor: grabbing;
 }
 
 .grip {
