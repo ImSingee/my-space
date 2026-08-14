@@ -1,7 +1,10 @@
 import {
   ActionIcon,
+  Box,
   Button,
   Center,
+  Divider,
+  Group,
   Loader,
   Menu,
   Text,
@@ -13,26 +16,38 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
 import {
+  createFileRoute,
+  redirect,
+  useBlocker,
+  useNavigate,
+} from '@tanstack/react-router';
+import {
+  IconAlertCircle,
   IconCheck,
   IconChevronDown,
-  IconDots,
-  IconFileText,
-  IconPencil,
-  IconPlus,
   IconRefresh,
-  IconTrash,
 } from '@tabler/icons-react';
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
+import { AddWidgetPicker } from '~components/dashboard/add-widget-picker';
 import { DashboardGrid } from '~components/dashboard/dashboard-grid';
-import { DashboardEmptyState } from '~components/dashboard/empty-state';
+import { DashboardGridStage } from '~components/dashboard/dashboard-grid-stage';
+import { DashboardLayoutPreview } from '~components/dashboard/dashboard-layout-preview';
+import { DashboardOptionsMenu } from '~components/dashboard/dashboard-options-menu';
+import {
+  DashboardEmptyState,
+  type DashboardEmptyStateKind,
+} from '~components/dashboard/empty-state';
 import {
   REFRESH_PRESETS,
   formatInterval,
 } from '~components/dashboard/refresh-presets';
+import {
+  type DashboardDraftStatus,
+  useDashboardDraft,
+} from '~components/dashboard/use-dashboard-draft';
 import { openTextPromptModal } from '~components/system/text-prompt-modal';
 import { appsQueryOptions } from '~queries/apps';
 import {
@@ -42,14 +57,13 @@ import {
 } from '~queries/dashboards';
 import {
   type Dashboard,
-  addDashboardWidget,
   deleteDashboard,
-  removeDashboardWidget,
   renameDashboard,
   setDashboardAutoRefresh,
   setDashboardDescription,
-  updateDashboardLayout,
 } from '~server/dashboards';
+import type { DashboardBreakpoint } from '~/lib/dashboard-layout';
+import classes from './dashboard.module.css';
 
 const DEFAULT_DASHBOARD_DESCRIPTION =
   'A home for the widgets and apps you care about.';
@@ -59,7 +73,7 @@ export const Route = createFileRoute('/_app/dashboard/$dashboardId')({
     const dashboards = await context.queryClient.ensureQueryData(
       dashboardsQueryOptions,
     );
-    if (!dashboards.some((d) => d.id === params.dashboardId)) {
+    if (!dashboards.some((dashboard) => dashboard.id === params.dashboardId)) {
       const first = dashboards[0]?.id;
       if (first) {
         throw redirect({
@@ -81,158 +95,257 @@ export const Route = createFileRoute('/_app/dashboard/$dashboardId')({
 
 function DashboardPage() {
   const { dashboardId } = Route.useParams();
+
+  return (
+    <Suspense
+      fallback={
+        <Center h="100%">
+          <Loader />
+        </Center>
+      }
+    >
+      <DashboardWorkspace key={dashboardId} dashboardId={dashboardId} />
+    </Suspense>
+  );
+}
+
+function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
   const { data: dashboards } = useSuspenseQuery(dashboardsQueryOptions);
-  const current = dashboards.find((d) => d.id === dashboardId);
-  // Empty description is a valid state: render no subtitle rather than
-  // falling back to a canned default.
+  const { data: dashboardData } = useSuspenseQuery(
+    dashboardQueryOptions(dashboardId),
+  );
+  const { data: available } = useSuspenseQuery(availableWidgetsQueryOptions);
+  const { data: apps } = useSuspenseQuery(appsQueryOptions);
+  const current = dashboards.find((dashboard) => dashboard.id === dashboardId);
   const description = current?.description?.trim() || undefined;
-
-  // Bumping this fans a refresh out to every widget on the dashboard (each
-  // widget refetches in place via its registered context.onRefresh handler).
+  const [editing, setEditing] = useState(false);
+  const [previewBreakpoint, setPreviewBreakpoint] =
+    useState<DashboardBreakpoint>('desktop');
+  const [addWidgetOpened, setAddWidgetOpened] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
+  const editor = useDashboardDraft({
+    dashboardId,
+    initialData: dashboardData,
+  });
+  useBlocker({
+    shouldBlockFn: () =>
+      editing &&
+      (editor.dirty || editor.locked) &&
+      !window.confirm('Dashboard changes are not saved yet. Leave this page?'),
+    enableBeforeUnload: editing && (editor.dirty || editor.locked),
+  });
 
-  // Grafana-style auto-refresh: when an interval is configured, tick the same
-  // refresh signal the manual button uses so every widget refetches in place.
-  // dashboardId is a dependency so switching dashboards restarts the timer with
-  // a fresh phase (otherwise a same-interval switch would inherit the old one).
   const autoRefreshSeconds = current?.autoRefreshSeconds ?? 0;
   useEffect(() => {
-    if (autoRefreshSeconds <= 0) return;
-    const id = setInterval(
-      () => setRefreshSignal((s) => s + 1),
+    if (editing || autoRefreshSeconds <= 0) return;
+    const id = window.setInterval(
+      () => setRefreshSignal((signal) => signal + 1),
       autoRefreshSeconds * 1000,
     );
-    return () => clearInterval(id);
-  }, [autoRefreshSeconds, dashboardId]);
+    return () => window.clearInterval(id);
+  }, [autoRefreshSeconds, dashboardId, editing]);
+
+  const beginEditing = () => {
+    editor.reset(dashboardData);
+    setPreviewBreakpoint('desktop');
+    setEditing(true);
+  };
+  const openAddWidget = () => {
+    if (!editing) beginEditing();
+    setAddWidgetOpened(true);
+  };
+  const cancelEditing = () => {
+    if (!editor.cancel()) return;
+    setAddWidgetOpened(false);
+    setEditing(false);
+  };
+  const saveEditing = async () => {
+    if (!(await editor.save())) return;
+    setAddWidgetOpened(false);
+    setEditing(false);
+    toast.success('Dashboard changes saved');
+  };
+  const checkSaveStatus = async () => {
+    if (!(await editor.checkStatus())) return;
+    setAddWidgetOpened(false);
+    setEditing(false);
+    toast.success('Dashboard changes saved');
+  };
+
+  const emptyState: DashboardEmptyStateKind =
+    apps.length === 0
+      ? 'no-apps'
+      : available.length === 0
+        ? 'no-widgets'
+        : 'empty-dashboard';
+
+  const activeData = editing ? editor.draft : dashboardData;
+  const renderGrid = (transformScale: number) =>
+    activeData.widgets.length > 0 ? (
+      <DashboardGrid
+        items={activeData.widgets}
+        layouts={activeData.layouts}
+        editing={editing}
+        previewBreakpoint={editing ? previewBreakpoint : undefined}
+        transformScale={transformScale}
+        refreshSignal={refreshSignal}
+        removeDisabled={editor.locked}
+        interactionDisabled={editor.locked}
+        onRemove={editor.removeWidget}
+        onLayoutCommit={editor.commitLayout}
+      />
+    ) : (
+      <DashboardEmptyState
+        state={emptyState}
+        onAddWidget={
+          emptyState === 'empty-dashboard' ? openAddWidget : undefined
+        }
+      />
+    );
 
   return (
     <Page
       title={current?.name ?? 'Dashboard'}
       description={description}
+      size={editing ? 1360 : 1180}
+      hideHeader={editing}
       actions={
-        <>
-          <Tooltip label="Refresh all widgets" withArrow>
-            <ActionIcon
-              variant="default"
-              size="input-sm"
-              aria-label="Refresh all widgets"
-              onClick={() => setRefreshSignal((s) => s + 1)}
-            >
-              <IconRefresh size={18} stroke={1.7} />
-            </ActionIcon>
-          </Tooltip>
-          {current ? <AutoRefreshMenu dashboard={current} /> : null}
-          <AddWidgetMenu dashboardId={dashboardId} />
-          {current ? <DashboardMenu dashboard={current} /> : null}
-        </>
+        editing ? undefined : (
+          <>
+            <Tooltip label="Refresh all widgets" withArrow>
+              <ActionIcon
+                variant="default"
+                size="input-sm"
+                aria-label="Refresh all widgets"
+                onClick={() => setRefreshSignal((signal) => signal + 1)}
+              >
+                <IconRefresh size={18} stroke={1.7} />
+              </ActionIcon>
+            </Tooltip>
+            {current ? <AutoRefreshMenu dashboard={current} /> : null}
+            {current ? (
+              <DashboardMenu dashboard={current} onEdit={beginEditing} />
+            ) : null}
+          </>
+        )
       }
     >
-      <Suspense
-        fallback={
-          <Center py={64}>
-            <Loader />
-          </Center>
-        }
-      >
-        <DashboardWidgets
-          key={dashboardId}
-          dashboardId={dashboardId}
-          refreshSignal={refreshSignal}
-        />
-      </Suspense>
+      <Box>
+        {editing ? (
+          <Box
+            className={classes.editorToolbar}
+            role="toolbar"
+            aria-label="Dashboard editor"
+          >
+            <Box className={classes.editorToolbarScroll}>
+              <Group
+                justify="space-between"
+                gap="md"
+                wrap="nowrap"
+                className={classes.editorToolbarRow}
+              >
+                <Group gap="sm" wrap="nowrap">
+                  <DashboardLayoutPreview
+                    value={previewBreakpoint}
+                    onChange={setPreviewBreakpoint}
+                  />
+                  <Divider
+                    orientation="vertical"
+                    className={classes.editorDivider}
+                  />
+                  <AddWidgetPicker
+                    available={available}
+                    placed={editor.draft.widgets}
+                    opened={addWidgetOpened}
+                    onOpenedChange={setAddWidgetOpened}
+                    onAdd={editor.addWidget}
+                    disabled={editor.locked}
+                  />
+                </Group>
+                <Group gap="sm" wrap="nowrap">
+                  <DraftStatus
+                    status={editor.status}
+                    onCheckStatus={() => void checkSaveStatus()}
+                  />
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    color="gray"
+                    disabled={editor.cancelDisabled}
+                    onClick={cancelEditing}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    leftSection={<IconCheck size={16} stroke={1.9} />}
+                    loading={editor.status.state === 'saving'}
+                    disabled={!editor.dirty || editor.locked}
+                    onClick={() => void saveEditing()}
+                  >
+                    Save changes
+                  </Button>
+                </Group>
+              </Group>
+            </Box>
+          </Box>
+        ) : null}
+        <DashboardGridStage
+          editing={editing}
+          previewBreakpoint={previewBreakpoint}
+        >
+          {renderGrid}
+        </DashboardGridStage>
+      </Box>
     </Page>
   );
 }
 
-function DashboardWidgets({
-  dashboardId,
-  refreshSignal,
+function DraftStatus({
+  status,
+  onCheckStatus,
 }: {
-  dashboardId: string;
-  refreshSignal: number;
+  status: DashboardDraftStatus;
+  onCheckStatus: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const { data: widgets } = useSuspenseQuery(
-    dashboardQueryOptions(dashboardId),
-  );
-  const { data: apps } = useSuspenseQuery(appsQueryOptions);
-
-  const invalidate = () =>
-    queryClient.invalidateQueries({
-      queryKey: dashboardQueryOptions(dashboardId).queryKey,
-    });
-
-  const remove = useMutation({
-    mutationFn: (id: string) => removeDashboardWidget({ data: id }),
-    onSuccess: () => void invalidate(),
-  });
-
-  // Persist layout saves one at a time, always sending the most recent layout
-  // last. Each drag/resize fires onLayoutChange; firing independent requests
-  // lets a slow earlier save land after a newer one and overwrite it. We keep
-  // only the latest pending layout and drain it after the in-flight save.
-  const pendingLayout = useRef<
-    { id: string; x: number; y: number; w: number; h: number }[] | null
-  >(null);
-  const savingLayout = useRef(false);
-  const flushLayout = useCallback(async () => {
-    if (savingLayout.current) return;
-    savingLayout.current = true;
-    try {
-      while (pendingLayout.current) {
-        const next = pendingLayout.current;
-        pendingLayout.current = null;
-        try {
-          await updateDashboardLayout({ data: next });
-        } catch (error) {
-          toast.error((error as Error).message);
-          // Don't retry the failed layout (avoids a spin on a persistent
-          // failure), but leave pendingLayout untouched: if the user moved again
-          // during this save, that newer layout is queued there and must still
-          // be persisted on the next loop turn.
-        }
-      }
-    } finally {
-      savingLayout.current = false;
-    }
-  }, []);
-
-  if (widgets.length === 0) {
-    return <DashboardEmptyState hasApps={apps.length > 0} />;
+  if (
+    status.state === 'conflict' ||
+    status.state === 'error' ||
+    status.state === 'unknown'
+  ) {
+    return (
+      <Group gap="xs" className={classes.draftError} wrap="nowrap">
+        <IconAlertCircle size={16} stroke={1.8} />
+        <Text size="sm" fw={500}>
+          {status.message}
+        </Text>
+        {status.state === 'unknown' ? (
+          <Button
+            type="button"
+            variant="subtle"
+            color="red"
+            size="compact-xs"
+            onClick={onCheckStatus}
+          >
+            Check status
+          </Button>
+        ) : null}
+      </Group>
+    );
   }
 
-  return (
-    <DashboardGrid
-      items={widgets}
-      refreshSignal={refreshSignal}
-      onRemove={(id) => remove.mutate(id)}
-      onLayoutChange={(layout) => {
-        const next = layout.map((l) => ({
-          id: l.i,
-          x: l.x,
-          y: l.y,
-          w: l.w,
-          h: l.h,
-        }));
-        pendingLayout.current = next;
-        // Reflect the new geometry in the cache immediately. The layout save
-        // intentionally doesn't refetch, so without this a size-aware widget
-        // (one reading context.size.w/h) would keep its stale grid units until
-        // the next reload — the resized iframe never gets the `units` message.
-        // It also matches what RGL already rendered, so it can't fight a drag.
-        const byId = new Map(next.map((n) => [n.id, n]));
-        queryClient.setQueryData(
-          dashboardQueryOptions(dashboardId).queryKey,
-          (old) =>
-            old?.map((item) => {
-              const g = byId.get(item.id);
-              return g ? { ...item, x: g.x, y: g.y, w: g.w, h: g.h } : item;
-            }),
-        );
-        void flushLayout();
-      }}
-    />
-  );
+  if (status.state === 'checking') {
+    return (
+      <Group gap={6} className={classes.draftStatus} aria-live="polite">
+        <Loader size={14} />
+        <Text size="sm" fw={500}>
+          Checking save status
+        </Text>
+      </Group>
+    );
+  }
+
+  return null;
 }
 
 function AutoRefreshMenu({ dashboard }: { dashboard: Dashboard }) {
@@ -280,59 +393,13 @@ function AutoRefreshMenu({ dashboard }: { dashboard: Dashboard }) {
   );
 }
 
-function AddWidgetMenu({ dashboardId }: { dashboardId: string }) {
-  const queryClient = useQueryClient();
-  const { data: available } = useSuspenseQuery(availableWidgetsQueryOptions);
-
-  const add = useMutation({
-    mutationFn: (input: { appId: string; widgetId: string }) =>
-      addDashboardWidget({ data: { dashboardId, ...input } }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: dashboardQueryOptions(dashboardId).queryKey,
-      });
-      toast.success('Widget added to dashboard');
-    },
-  });
-
-  return (
-    <Menu position="bottom-end" withArrow shadow="md" width={260}>
-      <Menu.Target>
-        <Button
-          leftSection={<IconPlus size={16} stroke={1.8} />}
-          variant="default"
-          disabled={available.length === 0}
-        >
-          Add widget
-        </Button>
-      </Menu.Target>
-      <Menu.Dropdown>
-        {available.length === 0 ? (
-          <Menu.Item disabled>No deployed widgets yet</Menu.Item>
-        ) : (
-          available.map((widget) => (
-            <Menu.Item
-              key={`${widget.appId}:${widget.widgetId}`}
-              onClick={() =>
-                add.mutate({
-                  appId: widget.appId,
-                  widgetId: widget.widgetId,
-                })
-              }
-            >
-              <Text size="sm">{widget.name}</Text>
-              <Text size="xs" c="dimmed">
-                {widget.appName}
-              </Text>
-            </Menu.Item>
-          ))
-        )}
-      </Menu.Dropdown>
-    </Menu>
-  );
-}
-
-function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
+function DashboardMenu({
+  dashboard,
+  onEdit,
+}: {
+  dashboard: Dashboard;
+  onEdit: () => void;
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: dashboards } = useSuspenseQuery(dashboardsQueryOptions);
@@ -363,7 +430,7 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
   const remove = useMutation({
     mutationFn: () => deleteDashboard({ data: dashboard.id }),
     onSuccess: async () => {
-      const next = dashboards.find((d) => d.id !== dashboard.id);
+      const next = dashboards.find((item) => item.id !== dashboard.id);
       if (next) {
         await navigate({
           to: '/dashboard/$dashboardId',
@@ -400,7 +467,7 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
       centered: true,
       children: (
         <Text size="sm">
-          Delete “{dashboard.name}”? Its widget layout will be removed.
+          Delete "{dashboard.name}"? Its widget layouts will be removed.
         </Text>
       ),
       labels: { confirm: 'Delete', cancel: 'Cancel' },
@@ -409,41 +476,12 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
     });
 
   return (
-    <>
-      <Menu position="bottom-end" withArrow shadow="md" width={200}>
-        <Menu.Target>
-          <ActionIcon
-            variant="default"
-            size="input-sm"
-            aria-label="Dashboard options"
-          >
-            <IconDots size={18} stroke={1.7} />
-          </ActionIcon>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item
-            leftSection={<IconPencil size={15} stroke={1.7} />}
-            onClick={openRename}
-          >
-            Rename
-          </Menu.Item>
-          <Menu.Item
-            leftSection={<IconFileText size={15} stroke={1.7} />}
-            onClick={openDescription}
-          >
-            Edit description
-          </Menu.Item>
-          <Menu.Divider />
-          <Menu.Item
-            color="red"
-            leftSection={<IconTrash size={15} stroke={1.7} />}
-            disabled={dashboards.length <= 1}
-            onClick={confirmDelete}
-          >
-            Delete
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
-    </>
+    <DashboardOptionsMenu
+      onEdit={onEdit}
+      onRename={openRename}
+      onEditDescription={openDescription}
+      onDelete={confirmDelete}
+      deleteDisabled={dashboards.length <= 1}
+    />
   );
 }

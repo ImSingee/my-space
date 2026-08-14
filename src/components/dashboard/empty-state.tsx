@@ -8,7 +8,12 @@ import {
   Title,
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { IconLayoutGrid, IconSparkles, IconStack2 } from '@tabler/icons-react';
+import {
+  IconLayoutGrid,
+  IconPlus,
+  IconSparkles,
+  IconStack2,
+} from '@tabler/icons-react';
 import classes from './empty-state.module.css';
 
 const STARTER_IDEAS = [
@@ -17,13 +22,19 @@ const STARTER_IDEAS = [
   'A simple budget tracker',
 ];
 
-/**
- * Shown when a dashboard has no widgets. For a brand-new account (no apps yet)
- * it becomes a welcome that funnels into building the first app; once apps
- * exist it explains how widgets get here.
- */
-export function DashboardEmptyState({ hasApps }: { hasApps: boolean }) {
-  if (hasApps) {
+export type DashboardEmptyStateKind =
+  | 'no-apps'
+  | 'no-widgets'
+  | 'empty-dashboard';
+
+export function DashboardEmptyState({
+  state,
+  onAddWidget,
+}: {
+  state: DashboardEmptyStateKind;
+  onAddWidget?: () => void;
+}) {
+  if (state === 'empty-dashboard') {
     return (
       <Box className={classes.root}>
         <Stack className={classes.inner} align="center" gap="md">
@@ -32,11 +43,40 @@ export function DashboardEmptyState({ hasApps }: { hasApps: boolean }) {
           </ThemeIcon>
           <Stack gap={6} align="center">
             <Title order={2} className={classes.title}>
-              This dashboard is empty
+              A clean slate
             </Title>
             <Text c="dimmed" ta="center" maw={420}>
-              Use <strong>Add widget</strong> above to place a widget from one
-              of your apps here, or build something new with the Agent.
+              Add the first widget and shape this dashboard around what matters
+              to you.
+            </Text>
+          </Stack>
+          {onAddWidget ? (
+            <Button
+              type="button"
+              leftSection={<IconPlus size={16} stroke={1.8} />}
+              onClick={onAddWidget}
+            >
+              Add widget
+            </Button>
+          ) : null}
+        </Stack>
+      </Box>
+    );
+  }
+
+  if (state === 'no-widgets') {
+    return (
+      <Box className={classes.root}>
+        <Stack className={classes.inner} align="center" gap="md">
+          <ThemeIcon size={56} radius="xl" variant="light" color="gray">
+            <IconStack2 size={28} stroke={1.5} />
+          </ThemeIcon>
+          <Stack gap={6} align="center">
+            <Title order={2} className={classes.title}>
+              No widgets available
+            </Title>
+            <Text c="dimmed" ta="center" maw={420}>
+              Your current apps do not include any dashboard widgets.
             </Text>
           </Stack>
           <Group gap="sm">

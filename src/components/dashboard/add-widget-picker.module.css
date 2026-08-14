@@ -1,0 +1,32 @@
+.option {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--mantine-radius-sm);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.option:hover,
+.option:focus-visible {
+  background: var(--mantine-color-default-hover);
+}
+
+.option:focus-visible {
+  outline: 2px solid var(--mantine-color-ember-filled);
+  outline-offset: -2px;
+}
+
+.option:disabled {
+  opacity: 0.55;
+}
+
+.optionText {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .option {
+    transition-duration: 0.01ms;
+  }
+}

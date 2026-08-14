@@ -17,6 +17,8 @@ count.txt
 .vinxi
 test-results
 playwright-report
+.playwright-cli/
+.pnpm-store/
 __screenshots__
 .vitest
 todos.json
