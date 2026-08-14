@@ -192,6 +192,22 @@ const editDetails: EditFileDetails = {
   firstChangedLine: 2,
 };
 
+function expectLeadingEllipsisDetail(header: Element, value: string) {
+  const bidi = header.querySelector('bdi[dir="ltr"]');
+  if (!(bidi instanceof HTMLElement)) {
+    throw new TypeError('Expected a left-to-right path detail');
+  }
+  expect(bidi.textContent).toBe(value);
+
+  const detail = bidi.parentElement;
+  if (!detail) throw new TypeError('Expected a path detail container');
+  const style = getComputedStyle(detail);
+  expect(style.direction).toBe('rtl');
+  expect(style.textAlign).toBe('left');
+  expect(style.textOverflow).toBe('ellipsis');
+  expect(detail.scrollWidth).toBeGreaterThan(detail.clientWidth);
+}
+
 test('shows a persisted model error even when the reply has no content', async () => {
   const screen = await renderMessage({
     role: 'assistant',
@@ -379,6 +395,64 @@ test('wraps long and multiline provider errors inside a narrow message', async (
   const shell = screen.getByTestId('message-shell').element();
   expect(getComputedStyle(detailElement).whiteSpace).toBe('pre-wrap');
   expect(getComputedStyle(detailElement).overflowWrap).toBe('anywhere');
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('keeps the tail of a persisted read path visible in a narrow header', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'read-long-path',
+          name: 'read_file',
+          arguments: { path: attemptedWritePath },
+        },
+      ],
+    },
+    {
+      width: 320,
+      toolResults: new Map([
+        [
+          'read-long-path',
+          {
+            role: 'toolResult',
+            toolName: 'read_file',
+            content: [{ type: 'text', text: 'file contents' }],
+          },
+        ],
+      ]),
+    },
+  );
+
+  const header = screen.getByRole('button', { name: /Read file/ }).element();
+  expectLeadingEllipsisDetail(header, attemptedWritePath);
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('keeps the tail of a completed live write path visible', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <Box data-testid="live-write-shell" w={320}>
+        <StreamingToolStep
+          tool={{
+            id: 'write-long-path',
+            name: 'write_file',
+            args: { path: attemptedWritePath, content: 'contents' },
+            done: true,
+            output: `Wrote ${canonicalWritePath} (8 chars).`,
+            details: { path: canonicalWritePath },
+          }}
+        />
+      </Box>
+    </MantineProvider>,
+  );
+
+  const header = screen.getByRole('button', { name: /Write file/ }).element();
+  expectLeadingEllipsisDetail(header, attemptedWritePath);
+  const shell = screen.getByTestId('live-write-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
 

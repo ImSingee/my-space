@@ -138,15 +138,23 @@ export function toolLabel(name: string, label?: string): string {
   return label ?? TOOL_LABELS[name] ?? name;
 }
 
-/** A short argument hint shown next to a tool chip, e.g. the path or id. */
+export type ToolDetail = {
+  value: string;
+  ellipsis: 'start' | 'end';
+};
+
+/** A short argument hint shown next to a tool step, e.g. the path or id. */
 export function toolDetail(
   name: string,
   args: Record<string, unknown> | undefined,
-): string | undefined {
+): ToolDetail | undefined {
   if (!args) return undefined;
-  const pick = (key: string) => {
+  const pick = (
+    key: string,
+    ellipsis: ToolDetail['ellipsis'] = 'end',
+  ): ToolDetail | undefined => {
     const value = args[key];
-    return typeof value === 'string' ? value : undefined;
+    return typeof value === 'string' ? { value, ellipsis } : undefined;
   };
   const raw =
     name === 'run_command'
@@ -155,10 +163,17 @@ export function toolDetail(
         ? pick('query')
         : name === 'web_fetch'
           ? pick('url')
-          : (pick('id') ?? pick('path') ?? pick('name'));
+          : (pick('id') ?? pick('path', 'start') ?? pick('name'));
   if (!raw) return undefined;
-  const oneLine = raw.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 48 ? `${oneLine.slice(0, 48)}…` : oneLine;
+  const oneLine = raw.value.replace(/\s+/g, ' ').trim();
+  if (!oneLine) return undefined;
+  return {
+    value:
+      raw.ellipsis === 'end' && oneLine.length > 48
+        ? `${oneLine.slice(0, 48)}…`
+        : oneLine,
+    ellipsis: raw.ellipsis,
+  };
 }
 
 export type ToolInputDetail = {

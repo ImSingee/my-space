@@ -25,13 +25,50 @@ describe('web tool presentation', () => {
       toolDetail('web_search', {
         query: 'latest advances in battery chemistry',
       }),
-    ).toBe('latest advances in battery chemistry');
+    ).toEqual({
+      value: 'latest advances in battery chemistry',
+      ellipsis: 'end',
+    });
     expect(
       toolDetail('web_fetch', {
         url: 'https://example.com/research/paper',
         query: 'ignored for the compact summary',
       }),
-    ).toBe('https://example.com/research/paper');
+    ).toEqual({
+      value: 'https://example.com/research/paper',
+      ellipsis: 'end',
+    });
+  });
+});
+
+describe('tool header details', () => {
+  it('keeps complete paths and marks them for leading ellipsis', () => {
+    const path =
+      '/Users/wangxuan/Documents/PProjects/my-space/skills/building-apps/SKILL.md';
+
+    expect(toolDetail('read_file', { path })).toEqual({
+      value: path,
+      ellipsis: 'start',
+    });
+    expect(toolDetail('write_file', { path, content: 'contents' })).toEqual({
+      value: path,
+      ellipsis: 'start',
+    });
+  });
+
+  it('keeps non-path details compact and preserves their beginning', () => {
+    const command = `pnpm exec ${'command-part-'.repeat(8)}`;
+
+    expect(toolDetail('run_command', { command })).toEqual({
+      value: `${command.slice(0, 48)}…`,
+      ellipsis: 'end',
+    });
+    expect(
+      toolDetail('custom_tool', {
+        id: 'app-id',
+        path: '/ignored/path/to/app-id',
+      }),
+    ).toEqual({ value: 'app-id', ellipsis: 'end' });
   });
 });
 
