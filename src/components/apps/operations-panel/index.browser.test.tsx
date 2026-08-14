@@ -12,6 +12,10 @@ const fixtures = vi.hoisted(() => ({
     vi.fn<
       (input: { data: { id: string; dbName: string } }) => Promise<{ ok: true }>
     >(),
+  deleteDataDatabase:
+    vi.fn<
+      (input: { data: { id: string; dbName: string } }) => Promise<{ ok: true }>
+    >(),
 }));
 
 vi.mock('~queries/apps', () => ({
@@ -47,6 +51,7 @@ vi.mock('~server/apps', () => {
   };
 
   return {
+    deleteAppDataDatabaseFn: fixtures.deleteDataDatabase,
     deleteAppDatabaseFn: fixtures.deleteDatabase,
     deleteAppKvFn: notCalled,
     mutateAppDataTableFn: notCalled,
@@ -62,6 +67,11 @@ vi.mock('~server/apps', () => {
 function appOps(
   storageEnabled: boolean,
   database: AppOps['database'] = { enabled: false, dbName: null },
+  dataTable: AppOps['dataTable'] = {
+    enabled: false,
+    dbName: null,
+    schemaHash: null,
+  },
 ): AppOps {
   return {
     backend: { capable: false, mode: null },
@@ -75,7 +85,7 @@ function appOps(
     },
     storage: { enabled: storageEnabled },
     kv: { enabled: false },
-    dataTable: { enabled: false, dbName: null, schemaHash: null },
+    dataTable,
   };
 }
 
@@ -106,6 +116,15 @@ beforeEach(() => {
       fixtures.ops = {
         ...fixtures.ops,
         database: { enabled: false, dbName: null },
+      };
+    }
+    return { ok: true };
+  });
+  fixtures.deleteDataDatabase.mockImplementation(async () => {
+    if (fixtures.ops) {
+      fixtures.ops = {
+        ...fixtures.ops,
+        dataTable: { enabled: false, dbName: null, schemaHash: null },
       };
     }
     return { ok: true };
@@ -262,4 +281,140 @@ test('keeps a failed deletion open and allows retrying', async () => {
   await expect
     .element(screen.getByText('Database', { exact: true }))
     .not.toBeInTheDocument();
+});
+
+test('shows an enabled Data Table without a database delete action', async () => {
+  const screen = await renderPanel(
+    appOps(false, undefined, {
+      enabled: true,
+      dbName: 'hatch_data_app_1',
+      schemaHash: 'schema-hash',
+    }),
+  );
+
+  await expect
+    .element(screen.getByText('Data Tables', { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(
+      screen.getByRole('button', {
+        name: 'Delete Data Table database hatch_data_app_1',
+      }),
+    )
+    .not.toBeInTheDocument();
+});
+
+test('shows retained Data Table metadata while access is disabled', async () => {
+  const screen = await renderPanel(
+    appOps(false, undefined, {
+      enabled: false,
+      dbName: 'hatch_data_app_1',
+      schemaHash: 'schema-hash',
+    }),
+  );
+
+  await expect
+    .element(screen.getByText('Disabled', { exact: true }))
+    .toBeVisible();
+  await expect.element(screen.getByText('hatch_data_app_1')).toBeVisible();
+  await expect.element(screen.getByText('schema-has')).toBeVisible();
+  await expect
+    .element(screen.getByText(/App, Agent, and Realtime access is unavailable/))
+    .toBeVisible();
+  await expect
+    .element(
+      screen.getByRole('button', {
+        name: 'Delete Data Table database hatch_data_app_1',
+      }),
+    )
+    .toBeVisible();
+});
+
+test('requires the exact retained Data Table database name', async () => {
+  const screen = await renderPanel(
+    appOps(false, undefined, {
+      enabled: false,
+      dbName: 'hatch_data_app_1',
+      schemaHash: 'schema-hash',
+    }),
+  );
+  await screen
+    .getByRole('button', {
+      name: 'Delete Data Table database hatch_data_app_1',
+    })
+    .click();
+
+  const input = screen.getByRole('textbox', {
+    name: 'Type hatch_data_app_1 to confirm',
+  });
+  const submit = screen.getByRole('button', {
+    name: 'Delete Data Table data',
+    exact: true,
+  });
+  await expect.element(submit).toBeDisabled();
+  await input.fill('HATCH_DATA_APP_1');
+  await expect.element(submit).toBeDisabled();
+  await input.fill('hatch_data_app_1');
+  await expect.element(submit).toBeEnabled();
+});
+
+test('deletes retained Data Table data and hides its section', async () => {
+  const screen = await renderPanel(
+    appOps(false, undefined, {
+      enabled: false,
+      dbName: 'hatch_data_app_1',
+      schemaHash: 'schema-hash',
+    }),
+  );
+  await screen
+    .getByRole('button', {
+      name: 'Delete Data Table database hatch_data_app_1',
+    })
+    .click();
+  await screen
+    .getByRole('textbox', { name: 'Type hatch_data_app_1 to confirm' })
+    .fill('hatch_data_app_1');
+  await screen
+    .getByRole('button', { name: 'Delete Data Table data', exact: true })
+    .click();
+
+  await vi.waitFor(() =>
+    expect(fixtures.deleteDataDatabase).toHaveBeenCalledWith({
+      data: { id: 'app-1', dbName: 'hatch_data_app_1' },
+    }),
+  );
+  await expect
+    .element(screen.getByText('Data Tables', { exact: true }))
+    .not.toBeInTheDocument();
+});
+
+test('keeps a failed Data Table deletion open for retry', async () => {
+  fixtures.deleteDataDatabase.mockRejectedValueOnce(
+    new Error('Data Table cleanup failed'),
+  );
+  const screen = await renderPanel(
+    appOps(false, undefined, {
+      enabled: false,
+      dbName: 'hatch_data_app_1',
+      schemaHash: 'schema-hash',
+    }),
+  );
+  await screen
+    .getByRole('button', {
+      name: 'Delete Data Table database hatch_data_app_1',
+    })
+    .click();
+  await screen
+    .getByRole('textbox', { name: 'Type hatch_data_app_1 to confirm' })
+    .fill('hatch_data_app_1');
+  await screen
+    .getByRole('button', { name: 'Delete Data Table data', exact: true })
+    .click();
+
+  await expect
+    .element(screen.getByRole('alert'))
+    .toHaveTextContent('Data Table cleanup failed');
+  await expect
+    .element(screen.getByText('Data Tables', { exact: true }))
+    .toBeVisible();
 });

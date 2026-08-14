@@ -164,6 +164,14 @@ export function createAppTools(options: {
         : databaseEnabled
           ? 'enabled, not provisioned'
           : 'not provisioned';
+      const dataTableEnabled = detail.capabilities.includes('dataTable');
+      const dataTableStatus = detail.ops.dataTable.dbName
+        ? `${detail.ops.dataTable.dbName} (${
+            dataTableEnabled ? 'enabled' : 'disabled, retained'
+          }; ${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+        : dataTableEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
       const lines: (string | null)[] = [
         `${detail.name} (slug: ${detail.slug}, id: ${detail.id}) — ${detail.status}` +
           (detail.currentVersion != null

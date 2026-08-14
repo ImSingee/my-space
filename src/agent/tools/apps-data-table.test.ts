@@ -2,6 +2,7 @@ import { validateToolArguments } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { PlatformClient } from '../platform-client';
 import { buildSystemPrompt } from '../system-prompt';
+import type { AppDetail } from '../../server/apps/inspect';
 import { createAppTools } from './apps';
 
 function toolText(result: { content: { type: string; text?: string }[] }) {
@@ -17,6 +18,14 @@ function queryDataTableTool(platform: PlatformClient, sessionId?: string) {
   );
   if (!query) throw new Error('Missing query_app_data_table tool.');
   return query;
+}
+
+function getAppTool(platform: PlatformClient) {
+  const getApp = createAppTools({ platform }).find(
+    (tool) => tool.name === 'get_app',
+  );
+  if (!getApp) throw new Error('Missing get_app tool.');
+  return getApp;
 }
 
 describe('query_app_data_table', () => {

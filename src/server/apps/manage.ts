@@ -116,8 +116,12 @@ export async function listDeployments(
         Boolean(d.sourceTag) &&
         hasArtifact;
       const rollbackBlockedReason = baseCanRollback
-        ? databaseRollbackBlockedReason(
-            app?.dbName ?? null,
+        ? deploymentRollbackBlockedReason(
+            {
+              dbName: app?.dbName ?? null,
+              dataDbName: app?.dataDbName ?? null,
+              dataDbPasswordCiphertext: app?.dataDbPasswordCiphertext ?? null,
+            },
             d.manifestNormalized,
           )
         : null;
@@ -198,7 +202,9 @@ async function setAppArchivedInner(
       // A Data request may already hold the shared migration lock after checking
       // the previous live status. Drain it before reporting archive complete, so
       // no mutation can commit after the user sees the App as archived.
-      await waitForDataMigrationBarrier(id);
+      if (app.dataDbPasswordCiphertext) {
+        await waitForDataMigrationBarrier(id);
+      }
     }
   }
   // Archived apps must not keep firing cron; restored ones resume.
@@ -485,6 +491,7 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
     columns: {
       capabilities: true,
       dataDbName: true,
+      dataDbPasswordCiphertext: true,
       dataSchemaHash: true,
       dataActivationId: true,
     },
@@ -506,7 +513,9 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
   stopApp(id);
   if (hasManagedData) {
     await closeDataRealtime(id);
-    await waitForDataMigrationBarrier(id);
+    if (app?.dataDbPasswordCiphertext) {
+      await waitForDataMigrationBarrier(id);
+    }
 
     // Data DB ownership is derived from the reusable App id. Do not delete the
     // platform row when cleanup fails: losing that ownership record would let a
