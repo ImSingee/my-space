@@ -1,0 +1,38 @@
+.stage {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  padding: var(--mantine-spacing-xs);
+}
+
+.viewport {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.frame {
+  flex: 0 0 auto;
+  margin-inline: auto;
+}
+
+.canvas {
+  min-width: 0;
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-ember-3);
+  border-radius: var(--mantine-radius-sm);
+  background: transparent;
+  box-shadow: var(--mantine-shadow-sm);
+  transform-origin: top left;
+}
+
+.canvas[data-breakpoint='mobile'] {
+  padding: var(--mantine-spacing-sm);
+}
+
+@media (max-width: 47.99em) {
+  .canvas {
+    padding: var(--mantine-spacing-xs);
+  }
+}

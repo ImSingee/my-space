@@ -9,7 +9,6 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
-import { useElementSize } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import {
   useMutation,
@@ -34,6 +33,7 @@ import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { AddWidgetPicker } from '~components/dashboard/add-widget-picker';
 import { DashboardGrid } from '~components/dashboard/dashboard-grid';
+import { DashboardGridStage } from '~components/dashboard/dashboard-grid-stage';
 import { DashboardLayoutPreview } from '~components/dashboard/dashboard-layout-preview';
 import { DashboardOptionsMenu } from '~components/dashboard/dashboard-options-menu';
 import {
@@ -62,11 +62,7 @@ import {
   setDashboardAutoRefresh,
   setDashboardDescription,
 } from '~server/dashboards';
-import {
-  DASHBOARD_PREVIEW_WIDTH,
-  dashboardPreviewScale,
-  type DashboardBreakpoint,
-} from '~/lib/dashboard-layout';
+import type { DashboardBreakpoint } from '~/lib/dashboard-layout';
 import classes from './dashboard.module.css';
 
 const DEFAULT_DASHBOARD_DESCRIPTION =
@@ -122,10 +118,6 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
   const { data: apps } = useSuspenseQuery(appsQueryOptions);
   const current = dashboards.find((dashboard) => dashboard.id === dashboardId);
   const description = current?.description?.trim() || undefined;
-  const { ref: measurePreviewViewport, width: availablePreviewWidth } =
-    useElementSize<HTMLDivElement>();
-  const { ref: measurePreviewCanvas, height: previewCanvasHeight } =
-    useElementSize<HTMLDivElement>();
   const [editing, setEditing] = useState(false);
   const [previewBreakpoint, setPreviewBreakpoint] =
     useState<DashboardBreakpoint>('desktop');
@@ -135,14 +127,6 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
     dashboardId,
     initialData: dashboardData,
   });
-  const previewTargetWidth = DASHBOARD_PREVIEW_WIDTH[previewBreakpoint];
-  const previewScale = dashboardPreviewScale(
-    previewBreakpoint,
-    availablePreviewWidth,
-  );
-  const scaledPreviewWidth = previewTargetWidth * previewScale;
-  const scaledPreviewHeight = previewCanvasHeight * previewScale;
-
   useBlocker({
     shouldBlockFn: () =>
       editing &&
@@ -196,14 +180,14 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
         : 'empty-dashboard';
 
   const activeData = editing ? editor.draft : dashboardData;
-  const grid =
+  const renderGrid = (transformScale: number) =>
     activeData.widgets.length > 0 ? (
       <DashboardGrid
         items={activeData.widgets}
         layouts={activeData.layouts}
         editing={editing}
         previewBreakpoint={editing ? previewBreakpoint : undefined}
-        transformScale={editing ? previewScale : 1}
+        transformScale={transformScale}
         refreshSignal={refreshSignal}
         removeDisabled={editor.locked}
         interactionDisabled={editor.locked}
@@ -267,62 +251,36 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
     >
       <Box>
         {editing ? (
-          <>
-            <Box className={classes.editorToolbar}>
-              <Group justify="space-between" gap="md" wrap="wrap">
-                <Group gap="md" wrap="wrap">
-                  <DashboardLayoutPreview
-                    value={previewBreakpoint}
-                    onChange={setPreviewBreakpoint}
-                  />
-                  <DraftStatus
-                    status={editor.status}
-                    dirty={editor.dirty}
-                    onCheckStatus={() => void checkSaveStatus()}
-                  />
-                </Group>
-                <AddWidgetPicker
-                  available={available}
-                  placed={editor.draft.widgets}
-                  opened={addWidgetOpened}
-                  onOpenedChange={setAddWidgetOpened}
-                  onAdd={editor.addWidget}
-                  disabled={editor.locked}
+          <Box className={classes.editorToolbar}>
+            <Group justify="space-between" gap="md" wrap="wrap">
+              <Group gap="md" wrap="wrap">
+                <DashboardLayoutPreview
+                  value={previewBreakpoint}
+                  onChange={setPreviewBreakpoint}
+                />
+                <DraftStatus
+                  status={editor.status}
+                  dirty={editor.dirty}
+                  onCheckStatus={() => void checkSaveStatus()}
                 />
               </Group>
-            </Box>
-            <Box className={classes.previewStage}>
-              <Box
-                ref={measurePreviewViewport}
-                className={classes.previewViewport}
-              >
-                <Box
-                  className={classes.previewFrame}
-                  style={{
-                    width: scaledPreviewWidth,
-                    height:
-                      previewCanvasHeight > 0 ? scaledPreviewHeight : undefined,
-                  }}
-                >
-                  <Box
-                    ref={measurePreviewCanvas}
-                    className={classes.previewCanvas}
-                    style={{
-                      width: previewTargetWidth,
-                      transform: `scale(${previewScale})`,
-                    }}
-                    data-breakpoint={previewBreakpoint}
-                    data-preview-scale={previewScale}
-                  >
-                    {grid}
-                  </Box>
-                </Box>
-              </Box>
-            </Box>
-          </>
-        ) : (
-          grid
-        )}
+              <AddWidgetPicker
+                available={available}
+                placed={editor.draft.widgets}
+                opened={addWidgetOpened}
+                onOpenedChange={setAddWidgetOpened}
+                onAdd={editor.addWidget}
+                disabled={editor.locked}
+              />
+            </Group>
+          </Box>
+        ) : null}
+        <DashboardGridStage
+          editing={editing}
+          previewBreakpoint={previewBreakpoint}
+        >
+          {renderGrid}
+        </DashboardGridStage>
       </Box>
     </Page>
   );
