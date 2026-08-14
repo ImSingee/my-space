@@ -26,11 +26,8 @@ import {
   IconAlertCircle,
   IconCheck,
   IconChevronDown,
-  IconDots,
-  IconFileText,
   IconPencil,
   IconRefresh,
-  IconTrash,
 } from '@tabler/icons-react';
 import { Suspense, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -38,6 +35,7 @@ import { Page } from '~components/app-shell/page';
 import { AddWidgetPicker } from '~components/dashboard/add-widget-picker';
 import { DashboardGrid } from '~components/dashboard/dashboard-grid';
 import { DashboardLayoutPreview } from '~components/dashboard/dashboard-layout-preview';
+import { DashboardOptionsMenu } from '~components/dashboard/dashboard-options-menu';
 import {
   DashboardEmptyState,
   type DashboardEmptyStateKind,
@@ -260,15 +258,9 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
               </ActionIcon>
             </Tooltip>
             {current ? <AutoRefreshMenu dashboard={current} /> : null}
-            <Button
-              type="button"
-              variant="default"
-              leftSection={<IconPencil size={16} stroke={1.8} />}
-              onClick={beginEditing}
-            >
-              Edit dashboard
-            </Button>
-            {current ? <DashboardMenu dashboard={current} /> : null}
+            {current ? (
+              <DashboardMenu dashboard={current} onEdit={beginEditing} />
+            ) : null}
           </>
         )
       }
@@ -439,7 +431,13 @@ function AutoRefreshMenu({ dashboard }: { dashboard: Dashboard }) {
   );
 }
 
-function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
+function DashboardMenu({
+  dashboard,
+  onEdit,
+}: {
+  dashboard: Dashboard;
+  onEdit: () => void;
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: dashboards } = useSuspenseQuery(dashboardsQueryOptions);
@@ -516,39 +514,12 @@ function DashboardMenu({ dashboard }: { dashboard: Dashboard }) {
     });
 
   return (
-    <Menu position="bottom-end" withArrow shadow="md" width={200}>
-      <Menu.Target>
-        <ActionIcon
-          variant="default"
-          size="input-sm"
-          aria-label="Dashboard options"
-        >
-          <IconDots size={18} stroke={1.7} />
-        </ActionIcon>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Item
-          leftSection={<IconPencil size={15} stroke={1.7} />}
-          onClick={openRename}
-        >
-          Rename
-        </Menu.Item>
-        <Menu.Item
-          leftSection={<IconFileText size={15} stroke={1.7} />}
-          onClick={openDescription}
-        >
-          Edit description
-        </Menu.Item>
-        <Menu.Divider />
-        <Menu.Item
-          color="red"
-          leftSection={<IconTrash size={15} stroke={1.7} />}
-          disabled={dashboards.length <= 1}
-          onClick={confirmDelete}
-        >
-          Delete
-        </Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
+    <DashboardOptionsMenu
+      onEdit={onEdit}
+      onRename={openRename}
+      onEditDescription={openDescription}
+      onDelete={confirmDelete}
+      deleteDisabled={dashboards.length <= 1}
+    />
   );
 }
