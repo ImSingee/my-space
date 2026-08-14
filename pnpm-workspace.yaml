@@ -1,8 +1,11 @@
-ignoredBuiltDependencies:
-  - lefthook
-onlyBuiltDependencies:
-  - esbuild
-  - lefthook
-  - playwright
-overrides:
-  drizzle-orm: $drizzle-orm
+allowBuilds:
+  '@bufbuild/buf': false
+  '@google/genai': false
+  '@prisma/client': false
+  '@prisma/engines': false
+  better-sqlite3: false
+  esbuild: true
+  lefthook: true
+  playwright: true
+  prisma: false
+  protobufjs: false

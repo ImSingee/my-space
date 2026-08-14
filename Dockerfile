@@ -6,14 +6,14 @@ FROM denoland/deno:bin-2.8.3 AS deno
 # --- Base image with pnpm ----------------------------------------------------
 FROM node:24-slim AS base
 WORKDIR /app
-RUN npm install --global pnpm@10.12.2
+RUN npm install --global pnpm@11.21.0
 
 # --- Dependencies ------------------------------------------------------------
 # Install ALL deps (including dev) and DO run install scripts: the platform
 # needs `buf` + `protoc-gen-es` (codegen) and `esbuild` (bundling) at runtime
 # when it builds apps, and those packages fetch native binaries on install.
 FROM base AS deps
-# pnpm-workspace.yaml carries `onlyBuiltDependencies` (incl. esbuild) — required
+# pnpm-workspace.yaml carries `allowBuilds` (incl. esbuild) — required
 # so pnpm runs esbuild's install script and fetches its native binary.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
