@@ -7,9 +7,55 @@ export type RenderTurn =
       kind: 'assistant';
       key: string;
       blocks: AssistantBlock[];
+      /** Block offset where the latest persisted assistant message begins. */
+      lastMessageStart: number;
       stopReason?: StopReason;
       errorMessage?: string;
     };
+
+export type AssistantTurnParts = {
+  work: AssistantBlock[];
+  final: AssistantBlock[];
+};
+
+/**
+ * Split a finished assistant turn into collapsible work and its visible answer.
+ *
+ * Persisted tool loops contain several assistant messages. Message boundaries
+ * keep prose from earlier tool-use messages in the work history, while the last
+ * technical block inside the terminal message separates its reasoning from the
+ * trailing answer text.
+ */
+export function splitAssistantTurn(
+  blocks: AssistantBlock[],
+  lastMessageStart: number,
+  stopReason?: StopReason,
+): AssistantTurnParts {
+  if (
+    stopReason === 'error' ||
+    stopReason === 'aborted' ||
+    stopReason === 'toolUse'
+  ) {
+    return { work: blocks, final: [] };
+  }
+
+  const safeLastMessageStart = Math.min(
+    Math.max(lastMessageStart, 0),
+    blocks.length,
+  );
+  let finalStart = safeLastMessageStart;
+  for (let index = blocks.length - 1; index >= safeLastMessageStart; index--) {
+    if (blocks[index].type !== 'text') {
+      finalStart = index + 1;
+      break;
+    }
+  }
+
+  return {
+    work: blocks.slice(0, finalStart),
+    final: blocks.slice(finalStart),
+  };
+}
 
 /**
  * Collapse one agent reply — which the backend may split across several
@@ -24,6 +70,7 @@ export function groupTurns(messages: ChatMessage[]): RenderTurn[] {
     } else if (message.role === 'assistant') {
       const last = turns.at(-1);
       if (last?.kind === 'assistant') {
+        last.lastMessageStart = last.blocks.length;
         last.blocks = [...last.blocks, ...message.content];
         last.stopReason = message.stopReason ?? last.stopReason;
         last.errorMessage = message.errorMessage ?? last.errorMessage;
@@ -32,6 +79,7 @@ export function groupTurns(messages: ChatMessage[]): RenderTurn[] {
           kind: 'assistant',
           key: `m${index}`,
           blocks: [...message.content],
+          lastMessageStart: 0,
           ...(message.stopReason ? { stopReason: message.stopReason } : {}),
           ...(message.errorMessage
             ? { errorMessage: message.errorMessage }
