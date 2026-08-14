@@ -164,6 +164,12 @@ button.stepHeader:hover {
   color: var(--mantine-color-dimmed);
 }
 
+.stepDetailStart {
+  composes: stepDetail;
+  direction: rtl;
+  text-align: left;
+}
+
 .stepChevron {
   flex-shrink: 0;
   margin-left: auto;

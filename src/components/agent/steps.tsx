@@ -13,6 +13,7 @@ import { isWriteFileDetails } from '~agent/write-file-details';
 import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
 import {
+  type ToolDetail,
   type ToolInputDetail,
   toolDetail,
   toolInputDetails,
@@ -73,6 +74,18 @@ function hasCompleteWriteInput(
   );
 }
 
+function StepDetailText({ detail }: { detail?: ToolDetail }) {
+  if (!detail) return null;
+  if (detail.ellipsis === 'start') {
+    return (
+      <span className={classes.stepDetailStart}>
+        <bdi dir="ltr">{detail.value}</bdi>
+      </span>
+    );
+  }
+  return <span className={classes.stepDetail}>{detail.value}</span>;
+}
+
 /**
  * One quiet line in the agent's activity timeline. Used for thinking and tool
  * calls/results alike so the whole "process" reads with a single visual
@@ -88,7 +101,7 @@ function StepRow({
 }: {
   icon: ReactNode;
   label: string;
-  detail?: string;
+  detail?: ToolDetail;
   error?: boolean;
   children?: ReactNode;
 }) {
@@ -101,7 +114,7 @@ function StepRow({
         {icon}
       </span>
       <span className={classes.stepLabel}>{label}</span>
-      {detail ? <span className={classes.stepDetail}>{detail}</span> : null}
+      <StepDetailText detail={detail} />
       {expandable ? (
         <IconChevronRight
           size={14}
@@ -221,7 +234,7 @@ export function ToolStep({
 }: {
   name: string;
   args?: Record<string, unknown>;
-  detail?: string;
+  detail?: ToolDetail;
   status: ToolStatus;
   result?: ToolResult;
 }) {
@@ -383,7 +396,7 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
         {icon}
       </span>
       <span className={classes.stepLabel}>{label}</span>
-      {detail ? <span className={classes.stepDetail}>{detail}</span> : null}
+      <StepDetailText detail={detail} />
       {expandable ? (
         <IconChevronRight
           size={14}
