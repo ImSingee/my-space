@@ -3,9 +3,14 @@ import { type Static, type TSchema } from '@earendil-works/pi-ai';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 
 export type StreamDetailsSelector = (details: unknown) => unknown;
+export type StreamStartDetailsSelector = (
+  args: Record<string, unknown>,
+) => unknown;
 
 /** Local tool metadata consumed by the live Agent event bridge. */
 export type AgentToolWithStreamDetails = AgentTool & {
+  /** Select safe structured details for the live tool-start event. */
+  selectStreamStartDetails?: StreamStartDetailsSelector;
   /** Select and validate structured details that the frontend needs live. */
   selectStreamDetails?: StreamDetailsSelector;
 };
@@ -17,6 +22,7 @@ export function tool<S extends TSchema>(def: {
   description: string;
   parameters: S;
   executionMode?: AgentTool['executionMode'];
+  selectStreamStartDetails?: StreamStartDetailsSelector;
   selectStreamDetails?: StreamDetailsSelector;
   execute: (
     id: string,

@@ -15,7 +15,8 @@ export type StreamTool = {
   name: string;
   /** Display label sent by the server on tool_start (avoids raw snake_case). */
   label?: string;
-  args?: Record<string, unknown>;
+  /** Raw model arguments; malformed values remain visible to safe renderers. */
+  args?: unknown;
   done: boolean;
   isError?: boolean;
   /** Live (while running) or final (on completion) tool output text. */
@@ -327,9 +328,10 @@ export function reduceStreamState(
               id: event.id,
               name: event.name,
               ...(event.label ? { label: event.label } : {}),
-              args: (event.args ?? undefined) as
-                | Record<string, unknown>
-                | undefined,
+              args: event.args,
+              ...(event.details === undefined
+                ? {}
+                : { details: event.details }),
               done: false,
             },
           },
@@ -350,8 +352,8 @@ export function reduceStreamState(
           ...tool,
           done: true,
           isError: event.isError,
-          output: event.output || tool.output,
-          details: event.details,
+          output: event.output ?? tool.output,
+          details: event.details ?? tool.details,
         })),
       };
     case 'error':

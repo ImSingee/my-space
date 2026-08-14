@@ -10,7 +10,8 @@ export type ToolCallBlock = {
   type: 'toolCall';
   id: string;
   name: string;
-  arguments: Record<string, unknown>;
+  /** Provider output is persisted before tool validation and may be malformed. */
+  arguments: unknown;
 };
 export type AssistantBlock = TextBlock | ThinkingBlock | ToolCallBlock;
 
@@ -143,11 +144,32 @@ export type ToolDetail = {
   ellipsis: 'start' | 'end';
 };
 
+export function toolArgumentsRecord(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+export function listFilesPathArgument(value: unknown): string | undefined {
+  const args = toolArgumentsRecord(value);
+  if (!args) return undefined;
+  if (!Object.hasOwn(args, 'path')) return '.';
+  if (typeof args.path !== 'string') return undefined;
+  return args.path === '' ? '.' : args.path;
+}
+
 /** A short argument hint shown next to a tool step, e.g. the path or id. */
 export function toolDetail(
   name: string,
-  args: Record<string, unknown> | undefined,
+  value: unknown,
 ): ToolDetail | undefined {
+  if (name === 'list_files') {
+    const path = listFilesPathArgument(value);
+    return path === undefined ? undefined : { value: path, ellipsis: 'start' };
+  }
+  const args = toolArgumentsRecord(value);
   if (!args) return undefined;
   const pick = (
     key: string,
@@ -203,8 +225,19 @@ function appendSerializableInput(
 /** Complete inputs that need an inspectable form beyond the compact summary. */
 export function toolInputDetails(
   name: string,
-  args: Record<string, unknown> | undefined,
+  value: unknown,
 ): ToolInputDetail[] | undefined {
+  if (name === 'list_files') {
+    const path = listFilesPathArgument(value);
+    if (path === undefined) return undefined;
+    return [
+      {
+        label: 'File path',
+        value: path,
+      },
+    ];
+  }
+  const args = toolArgumentsRecord(value);
   if (!args) return undefined;
   if (name === 'run_command' && typeof args.command === 'string') {
     return [{ label: 'Command', value: args.command }];
@@ -266,7 +299,7 @@ export function successfullyDeployedAppIds(
     if (block.type === 'toolCall' && block.name === 'deploy_app') {
       const result = toolResults?.get(block.id);
       if (!result || result.isError) continue;
-      const id = block.arguments?.id;
+      const id = toolArgumentsRecord(block.arguments)?.id;
       if (typeof id === 'string') ids.add(id);
     }
   }

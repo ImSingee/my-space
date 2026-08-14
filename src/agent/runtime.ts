@@ -23,7 +23,10 @@ import { loadAgentSkills } from './skills';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge, type EnvBridge } from './tools';
 import { isCommandResultDetails } from './tools/command';
-import type { StreamDetailsSelector } from './tools/shared';
+import type {
+  StreamDetailsSelector,
+  StreamStartDetailsSelector,
+} from './tools/shared';
 
 /** Keep streamed tool output small; the full result is persisted on `done`. */
 const MAX_STREAM_OUTPUT = 4000;
@@ -80,13 +83,13 @@ function isJsonValue(
   return valid;
 }
 
-function extractToolDetails(
-  value: unknown,
-  selectDetails: StreamDetailsSelector | undefined,
+function selectBoundedDetails<T>(
+  value: T,
+  selectDetails: ((value: T) => unknown) | undefined,
 ): JsonValue | undefined {
-  if (!selectDetails || !value || typeof value !== 'object') return undefined;
+  if (!selectDetails) return undefined;
   try {
-    const details = selectDetails((value as { details?: unknown }).details);
+    const details = selectDetails(value);
     if (!isJsonValue(details)) return undefined;
     const serialized = JSON.stringify(details);
     return Buffer.byteLength(serialized, 'utf8') <= MAX_STREAM_DETAILS_BYTES
@@ -95,6 +98,67 @@ function extractToolDetails(
   } catch {
     return undefined;
   }
+}
+
+function extractToolDetails(
+  value: unknown,
+  selectDetails: StreamDetailsSelector | undefined,
+): JsonValue | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  return selectBoundedDetails(
+    (value as { details?: unknown }).details,
+    selectDetails,
+  );
+}
+
+function asDetailsRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function mergeToolStartDetails(
+  startDetails: unknown,
+  existingDetails: unknown,
+): Record<string, unknown> | undefined {
+  const startDetailsRecord = asDetailsRecord(startDetails);
+  if (!startDetailsRecord) return undefined;
+  return {
+    ...startDetailsRecord,
+    ...asDetailsRecord(existingDetails),
+  };
+}
+
+function addToolStartDetailsToTranscript(
+  messages: JsonValue[],
+  toolStartDetailsById: ReadonlyMap<string, JsonValue | undefined>,
+): JsonValue[] {
+  const latestToolResultIndexById = new Map<string, number>();
+  for (const [index, message] of messages.entries()) {
+    const messageRecord = asDetailsRecord(message);
+    if (
+      messageRecord?.role === 'toolResult' &&
+      typeof messageRecord.toolCallId === 'string' &&
+      toolStartDetailsById.has(messageRecord.toolCallId)
+    ) {
+      latestToolResultIndexById.set(messageRecord.toolCallId, index);
+    }
+  }
+  return messages.map((message, index) => {
+    const messageRecord = asDetailsRecord(message);
+    if (
+      messageRecord?.role !== 'toolResult' ||
+      typeof messageRecord.toolCallId !== 'string' ||
+      latestToolResultIndexById.get(messageRecord.toolCallId) !== index
+    ) {
+      return message;
+    }
+    const details = mergeToolStartDetails(
+      toolStartDetailsById.get(messageRecord.toolCallId),
+      messageRecord.details,
+    );
+    return details ? ({ ...messageRecord, details } as JsonValue) : message;
+  });
 }
 
 export type RunAgentTurnOptions = {
@@ -156,8 +220,15 @@ export async function runAgentTurn(
   // tool_start lets the client show it without maintaining a second copy of
   // every tool name (which drifted out of date and showed raw snake_case).
   const labelByName = new Map(tools.map((tool) => [tool.name, tool.label]));
+  const streamStartDetailsByName = new Map<
+    string,
+    StreamStartDetailsSelector
+  >();
   const streamDetailsByName = new Map<string, StreamDetailsSelector>();
   for (const tool of tools) {
+    if (tool.selectStreamStartDetails) {
+      streamStartDetailsByName.set(tool.name, tool.selectStreamStartDetails);
+    }
     if (tool.selectStreamDetails) {
       streamDetailsByName.set(tool.name, tool.selectStreamDetails);
     }
@@ -174,19 +245,30 @@ export async function runAgentTurn(
       buildSystemPrompt(opts.appUrl, resources.skills ?? []),
     thinkingLevel: picked.model.reasoning ? 'medium' : 'off',
   });
+  const toolStartDetailsById = new Map<string, JsonValue | undefined>();
 
-  // A shell process exiting non-zero is an executed command with useful
-  // stdout/stderr/details, not an ExecutionEnv transport failure. Mark it as a
-  // failed tool result here so the transcript and UI keep that diagnostic
-  // payload while giving the model the correct failure signal.
-  const removeCommandResultHook = harness.on('tool_result', (event) => {
-    if (
+  // Persist the path identity selected at tool start even when execution
+  // fails. The same hook also marks a non-zero shell exit as an error while
+  // retaining its useful stdout/stderr/details.
+  const removeToolResultHook = harness.on('tool_result', (event) => {
+    const startDetails = toolStartDetailsById.has(event.toolCallId)
+      ? toolStartDetailsById.get(event.toolCallId)
+      : selectBoundedDetails(
+          event.input,
+          streamStartDetailsByName.get(event.toolName),
+        );
+    const details = mergeToolStartDetails(startDetails, event.details);
+    const commandFailed =
       event.toolName === 'run_command' &&
       !event.isError &&
       isCommandResultDetails(event.details) &&
-      event.details.exitCode !== 0
-    ) {
-      return { isError: true };
+      event.details.exitCode !== 0;
+
+    if (details || commandFailed) {
+      return {
+        ...(details ? { details } : {}),
+        ...(commandFailed ? { isError: true } : {}),
+      };
     }
     return undefined;
   });
@@ -242,12 +324,25 @@ export async function runAgentTurn(
       }
       case 'tool_execution_start': {
         const label = labelByName.get(event.toolName);
+        const streamedArgs = isJsonValue(event.args) ? event.args : null;
+        const args = asDetailsRecord(streamedArgs);
+        const details = args
+          ? selectBoundedDetails(
+              args,
+              streamStartDetailsByName.get(event.toolName),
+            )
+          : undefined;
+        // Keep an explicit undefined entry: validation may coerce invalid raw
+        // arguments before the tool-result hook runs, and recomputing details
+        // from those coerced values would fabricate a different path.
+        toolStartDetailsById.set(event.toolCallId, details);
         emit({
           type: 'tool_start',
           id: event.toolCallId,
           name: event.toolName,
           ...(label ? { label } : {}),
-          args: (event.args ?? {}) as JsonValue,
+          args: streamedArgs,
+          ...(details === undefined ? {} : { details }),
         });
         break;
       }
@@ -264,10 +359,11 @@ export async function runAgentTurn(
         break;
       }
       case 'tool_execution_end': {
-        const details = extractToolDetails(
-          event.result,
-          streamDetailsByName.get(event.toolName),
-        );
+        const details =
+          extractToolDetails(
+            event.result,
+            streamDetailsByName.get(event.toolName),
+          ) ?? toolStartDetailsById.get(event.toolCallId);
         emit({
           type: 'tool_end',
           id: event.toolCallId,
@@ -294,8 +390,10 @@ export async function runAgentTurn(
   }));
 
   const buildTranscript = async (): Promise<JsonValue[]> => {
-    const messages = (await session.buildContext())
-      .messages as unknown as JsonValue[];
+    const messages = addToolStartDetailsToTranscript(
+      (await session.buildContext()).messages as unknown as JsonValue[],
+      toolStartDetailsById,
+    );
     const attachments = opts.attachments ?? [];
     if (attachments.length === 0) return messages;
     for (let index = messages.length - 1; index >= 0; index--) {
@@ -348,7 +446,7 @@ export async function runAgentTurn(
     };
   } finally {
     unsubscribe();
-    removeCommandResultHook();
+    removeToolResultHook();
     signal.removeEventListener('abort', onAbort);
   }
 }
