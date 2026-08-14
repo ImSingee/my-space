@@ -49,6 +49,13 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (id: string, sourceDir: string, version: number) => Promise<unknown>
     >(),
+  beginAppDatabaseDeployment:
+    vi.fn<
+      (
+        id: string,
+        enabled: boolean,
+      ) => Promise<{ dbName: string | undefined; release(): Promise<void> }>
+    >(),
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -305,8 +312,7 @@ vi.mock('./git', () => ({
   publishDeploymentSource: mocks.publishDeploymentSource,
 }));
 vi.mock('./provision', () => ({
-  appDbName: (id: string) => `app_${id}`,
-  ensureAppDatabase: vi.fn<(id: string) => Promise<string>>(),
+  beginAppDatabaseDeployment: mocks.beginAppDatabaseDeployment,
 }));
 vi.mock('./runtime', () => ({
   ensureAppRunning: mocks.ensureAppRunning,
@@ -539,6 +545,12 @@ describe('App deployment activation recovery', () => {
       commit: 'source-commit',
       repoPath: 'apps/example',
     });
+    mocks.beginAppDatabaseDeployment.mockImplementation(
+      async (id, enabled) => ({
+        dbName: enabled ? `app_${id}` : undefined,
+        release: async () => {},
+      }),
+    );
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await fs.rm(mocks.root, { recursive: true, force: true });
   });

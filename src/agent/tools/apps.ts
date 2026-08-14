@@ -158,6 +158,12 @@ export function createAppTools(options: {
       const detail = await platform.getApp(params.id);
       if (!detail) throw new Error(`App "${params.id}" not found.`);
       const m = detail.manifest;
+      const databaseEnabled = detail.capabilities.includes('database');
+      const databaseStatus = detail.dbName
+        ? `${detail.dbName} (${databaseEnabled ? 'enabled' : 'disabled, retained'})`
+        : databaseEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
       const lines: (string | null)[] = [
         `${detail.name} (slug: ${detail.slug}, id: ${detail.id}) — ${detail.status}` +
           (detail.currentVersion != null
@@ -588,8 +594,11 @@ export function createAppTools(options: {
     name: 'query_app_db',
     label: 'Query app DB',
     description:
-      "Run SQL against an app's own Postgres database (provisioned on first " +
-      'use). Use to create tables and inspect data. Returns up to 100 rows.',
+      "Run SQL against an app's already-provisioned Postgres database. This " +
+      'tool never provisions or recreates a database; deploy a version with ' +
+      'capabilities.database enabled first. A retained database remains ' +
+      'queryable after the capability is disabled until the user deletes it. ' +
+      'Returns up to 100 rows.',
     parameters: Type.Object({
       id: Type.String({
         description: 'App id.',

@@ -31,9 +31,12 @@ modules share the emitted bundle URL.
 
 ## App Postgres database
 
-Enable `database`. The backend receives `DATABASE_URL`; create required tables
-idempotently on startup so a fresh deployment works. Use `query_app_db` during
-development to inspect or initialize data. Each App database is isolated.
+Enable `database` and deploy successfully to provision the database. The backend
+receives `DATABASE_URL` only while the capability is enabled; create required
+tables idempotently on startup so a fresh deployment works. `query_app_db` can
+inspect or initialize an already-provisioned database and can query it while
+retained after capability disable, but never provisions or recreates one. Each
+App database is isolated.
 
 ## Managed Data Tables
 

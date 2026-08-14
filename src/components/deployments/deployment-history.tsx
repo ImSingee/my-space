@@ -44,6 +44,7 @@ export type DeploymentLike = {
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  rollbackBlockedReason?: string | null;
   sourceCommit: string | null;
   sourceTag: string | null;
   hasArtifact: boolean;
@@ -146,6 +147,7 @@ function DeploymentItem<TDeployment extends DeploymentLike>({
 }) {
   const [open, handlers] = useDisclosure(false);
   const hasLog = Boolean(deployment.error) || deployment.hasBuildLog;
+  const rollbackReasonId = `rollback-reason-${deployment.id}`;
   const artifactNode =
     deployment.status === 'deployed' ? renderArtifact(deployment) : null;
   const defaultRollbackAction = deployment.canRollback ? (
@@ -189,6 +191,17 @@ function DeploymentItem<TDeployment extends DeploymentLike>({
           ? renderRollbackAction(deployment, defaultRollbackAction)
           : defaultRollbackAction}
       </Group>
+
+      {deployment.rollbackBlockedReason ? (
+        <Text
+          id={rollbackReasonId}
+          size="xs"
+          c="dimmed"
+          style={{ maxWidth: '70ch' }}
+        >
+          {deployment.rollbackBlockedReason}
+        </Text>
+      ) : null}
 
       {deployment.sourceCommit ||
       deployment.sourceTag ||

@@ -28,7 +28,10 @@ import {
   publishDeploymentSource,
 } from './git';
 import type { NormalizedManifest } from './manifest';
-import { ensureAppDatabase, appDbName } from './provision';
+import {
+  beginAppDatabaseDeployment,
+  type AppDatabaseDeploymentLease,
+} from './provision';
 import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
 import {
@@ -543,6 +546,8 @@ async function deployAppInner(
   let compatibilityVersion: number | null = null;
   let version = 0;
   let markedBuildingByThisAttempt = false;
+  let appDatabaseLease: AppDatabaseDeploymentLease | null = null;
+  let provisionedDbName: string | undefined;
 
   try {
     build = await buildApp(id, {
@@ -673,11 +678,11 @@ async function deployAppInner(
       markedBuildingByThisAttempt = true;
     }
 
-    let dbName = app.dbName ?? null;
-    if (build.source.capabilities.database) {
-      await ensureAppDatabase(id);
-      dbName = appDbName(id);
-    }
+    appDatabaseLease = await beginAppDatabaseDeployment(
+      id,
+      build.source.capabilities.database,
+    );
+    provisionedDbName = appDatabaseLease.dbName;
     let dataDbName = app.dataDbName ?? null;
     let dataSchemaHash = app.dataSchemaHash ?? null;
     let deploymentDataSchemaHash: string | null = null;
@@ -742,7 +747,6 @@ async function deployAppInner(
       }
       app = currentApp;
       prevDeploymentId = app.currentDeploymentId ?? null;
-      dbName = app.dbName ?? dbName;
       dataDbName = app.dataDbName ?? dataDbName;
       dataSchemaHash = app.dataSchemaHash ?? dataSchemaHash;
       webhookSecret = app.webhookSecret ?? webhookSecret;
@@ -912,7 +916,11 @@ async function deployAppInner(
             manifest: releaseBuild.source as unknown as JsonObject,
             repoPath: published.repoPath,
             currentSourceCommit: published.commit,
-            dbName,
+            // A database-free deploy preserves the latest registration instead
+            // of writing its stale pre-build snapshot over a manual deletion.
+            ...(provisionedDbName === undefined
+              ? {}
+              : { dbName: provisionedDbName }),
             dataDbName,
             dataSchemaHash,
             dataActivationId: deploymentId,
@@ -1124,6 +1132,7 @@ async function deployAppInner(
     }
     throw error;
   } finally {
+    await appDatabaseLease?.release();
     await fs.rm(path.dirname(tempBuild), { recursive: true, force: true });
   }
 }

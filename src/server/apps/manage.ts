@@ -33,7 +33,8 @@ import {
   isValidAppId,
   isValidAppSlug,
 } from './manifest';
-import { dropAppDatabase } from './provision';
+import { dropAppDatabase, withAppDatabaseLifecycle } from './provision';
+import { databaseRollbackBlockedReason } from './rollback-policy';
 import {
   dropAppDataDatabase,
   withAppDataCutoverLock,
@@ -65,6 +66,7 @@ export type DeploymentSummary = {
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  rollbackBlockedReason: string | null;
   /** Commit on the app's `master` branch this version was built from. */
   sourceCommit: string | null;
   /** Immutable `deploy/v<version>` Git tag for this version. */
@@ -108,6 +110,17 @@ export async function listDeployments(
         (d.artifactPath
           ? await pathExists(deploymentArtifactDir(id, d.id))
           : false) || (await pathExists(deploymentBuildDir(id, d.id)));
+      const baseCanRollback =
+        !isCurrent &&
+        d.status === 'deployed' &&
+        Boolean(d.sourceTag) &&
+        hasArtifact;
+      const rollbackBlockedReason = baseCanRollback
+        ? databaseRollbackBlockedReason(
+            app?.dbName ?? null,
+            d.manifestNormalized,
+          )
+        : null;
       return {
         id: d.id,
         version: d.version,
@@ -120,16 +133,13 @@ export async function listDeployments(
         sourceTag: d.sourceTag,
         hasArtifact,
         hasBuildLog: Boolean(d.buildLog),
+        rollbackBlockedReason,
         dataSchemaMismatch:
           (dataActivationPending && !isCurrent) ||
           (Boolean(d.dataSchemaHash || liveDataSchemaHash) &&
             (d.dataSchemaHash ?? null) !== liveDataSchemaHash),
         compatibility: appCompatibility(d.compatibilityVersion),
-        canRollback:
-          !isCurrent &&
-          d.status === 'deployed' &&
-          Boolean(d.sourceTag) &&
-          hasArtifact,
+        canRollback: baseCanRollback && !rollbackBlockedReason,
       };
     }),
   );

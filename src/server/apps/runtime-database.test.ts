@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  ensureAppDatabase: vi.fn<(id: string) => Promise<string>>(),
+  resolveAppDatabaseUrl: vi.fn<(id: string) => Promise<string>>(),
 }));
 
 vi.mock('./provision', () => ({
-  ensureAppDatabase: mocks.ensureAppDatabase,
+  resolveAppDatabaseUrl: mocks.resolveAppDatabaseUrl,
 }));
 
 import { appDatabaseRuntimeEnv } from './runtime-database';
@@ -19,17 +19,17 @@ describe('App backend database capability', () => {
     await expect(appDatabaseRuntimeEnv('data-only', false)).resolves.toEqual(
       {},
     );
-    expect(mocks.ensureAppDatabase).not.toHaveBeenCalled();
+    expect(mocks.resolveAppDatabaseUrl).not.toHaveBeenCalled();
   });
 
-  it('provisions and exposes the App database when enabled', async () => {
-    mocks.ensureAppDatabase.mockResolvedValue(
+  it('resolves and exposes the registered App database when enabled', async () => {
+    mocks.resolveAppDatabaseUrl.mockResolvedValue(
       'postgres://app:secret@localhost/app',
     );
 
     await expect(appDatabaseRuntimeEnv('sql-app', true)).resolves.toEqual({
       DATABASE_URL: 'postgres://app:secret@localhost/app',
     });
-    expect(mocks.ensureAppDatabase).toHaveBeenCalledWith('sql-app');
+    expect(mocks.resolveAppDatabaseUrl).toHaveBeenCalledWith('sql-app');
   });
 });

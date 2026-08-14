@@ -8,7 +8,7 @@ calling top-level Workflows.
 For a manifest declaring `backend.runtime: "deno-serve"`, the platform starts the
 bundled backend with `deno serve` and owns its loopback listener. Default-export
 a Fetch handler; do not call `listen()` or read `PORT`. The platform injects
-`DATABASE_URL` only with the database capability. Import generated code with an
+`DATABASE_URL` only when the database capability is enabled and a deployment has provisioned the database. Import generated code with an
 explicit `.ts` extension.
 
 ```ts
