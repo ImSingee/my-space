@@ -318,7 +318,7 @@ describe('managed Data Table service', () => {
 
     expect(unsafe).toHaveBeenCalledWith(
       expect.stringContaining(
-        '("payload" is null or "payload" is not distinct from $1::jsonb)',
+        '("payload" is null or "payload" is not distinct from $1::text::jsonb)',
       ),
       ['null', 51],
     );
@@ -338,7 +338,7 @@ describe('managed Data Table service', () => {
     });
 
     expect(unsafe).toHaveBeenCalledWith(
-      expect.stringContaining('"payload" = $1::jsonb'),
+      expect.stringContaining('"payload" = $1::text::jsonb'),
       ['null', 51],
     );
   });
@@ -943,10 +943,43 @@ describe('managed Data Table service', () => {
     });
 
     expect(unsafe).toHaveBeenCalledWith(
-      expect.stringContaining('values ($1, $2::jsonb)'),
+      expect.stringContaining('values ($1, $2::text::jsonb)'),
       [expect.any(String), 'null'],
     );
     expect(result.results[0]?.payload).toBeNull();
+  });
+
+  it('binds a JSON array as text for a single PostgreSQL JSON parse', async () => {
+    const payload = [
+      { time: '08:00', dose: '1 tablet' },
+      { time: '20:00', dose: '1 tablet' },
+    ];
+    const schema = schemaWithFields({
+      payload: { kind: 'json', optional: false },
+    });
+    const { unsafe } = createHarness(schema, {
+      unsafe: async (statement) => {
+        if (!statement.startsWith('insert into')) return [];
+        return [
+          {
+            id: 'row-1',
+            created_at: NOW,
+            updated_at: NOW,
+            payload,
+          },
+        ];
+      },
+    });
+    mocks.findApp.mockResolvedValue(liveApp());
+
+    await mutateDataTable(APP_ID, {
+      operations: [{ type: 'insert', table: 'items', value: { payload } }],
+    });
+
+    expect(unsafe).toHaveBeenCalledWith(
+      expect.stringContaining('values ($1, $2::text::jsonb)'),
+      [expect.any(String), JSON.stringify(payload)],
+    );
   });
 
   it('does not treat an ordinary JSON $hatch key as defaultNow', async () => {
@@ -974,7 +1007,7 @@ describe('managed Data Table service', () => {
     });
 
     expect(unsafe).toHaveBeenCalledWith(
-      expect.stringContaining('values ($1, $2::jsonb)'),
+      expect.stringContaining('values ($1, $2::text::jsonb)'),
       [expect.any(String), JSON.stringify(payload)],
     );
   });
@@ -1004,7 +1037,7 @@ describe('managed Data Table service', () => {
     });
 
     expect(unsafe).toHaveBeenCalledWith(
-      expect.stringContaining('values ($1, $2::jsonb)'),
+      expect.stringContaining('values ($1, $2::text::jsonb)'),
       [expect.any(String), JSON.stringify(payload)],
     );
   });
@@ -1178,7 +1211,7 @@ describe('managed Data Table service', () => {
 
     const [statement, params] = unsafe.mock.calls[0] ?? [];
     expect(statement).toContain('"payload" = null');
-    expect(statement).not.toContain('"payload" = $1::jsonb');
+    expect(statement).not.toContain('"payload" = $1::text::jsonb');
     expect(params).toEqual(['row-1']);
   });
 
