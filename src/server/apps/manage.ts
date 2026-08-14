@@ -28,7 +28,7 @@ import {
 } from './manifest';
 import { dropAppDatabase, withAppDatabaseLifecycle } from './provision';
 import {
-  databaseRollbackBlockedReason,
+  deploymentRollbackBlockedReason,
   deploymentRequiresDatabase,
 } from './rollback-policy';
 import {
@@ -104,8 +104,12 @@ export async function listDeployments(
         Boolean(d.sourceTag) &&
         hasArtifact;
       const rollbackBlockedReason = baseCanRollback
-        ? databaseRollbackBlockedReason(
-            app?.dbName ?? null,
+        ? deploymentRollbackBlockedReason(
+            {
+              dbName: app?.dbName ?? null,
+              dataDbName: app?.dataDbName ?? null,
+              dataDbPasswordCiphertext: app?.dataDbPasswordCiphertext ?? null,
+            },
             d.manifestNormalized,
           )
         : null;
@@ -186,7 +190,9 @@ async function setAppArchivedInner(
       // A Data request may already hold the shared migration lock after checking
       // the previous live status. Drain it before reporting archive complete, so
       // no mutation can commit after the user sees the App as archived.
-      await waitForDataMigrationBarrier(id);
+      if (app.dataDbPasswordCiphertext) {
+        await waitForDataMigrationBarrier(id);
+      }
     }
   }
   // Archived apps must not keep firing cron; restored ones resume.
@@ -296,9 +302,14 @@ async function rollbackAppInner(
   const requiresDatabase = deploymentRequiresDatabase(
     deployment.manifestNormalized,
   );
-  const initiallyBlockedReason = requiresDatabase
-    ? databaseRollbackBlockedReason(app.dbName, deployment.manifestNormalized)
-    : null;
+  const initiallyBlockedReason = deploymentRollbackBlockedReason(
+    {
+      dbName: app.dbName,
+      dataDbName: app.dataDbName,
+      dataDbPasswordCiphertext: app.dataDbPasswordCiphertext,
+    },
+    deployment.manifestNormalized,
+  );
   if (initiallyBlockedReason) {
     throw new AppError(
       `Cannot restore v${deployment.version}. ${initiallyBlockedReason}`,
@@ -334,20 +345,27 @@ async function rollbackAppInner(
       await appDeployLock.acquire(tx, id);
       const current = await tx.query.apps.findFirst({
         where: (row, { eq: equal }) => equal(row.id, id),
-        columns: { currentDeploymentId: true, dbName: true },
+        columns: {
+          currentDeploymentId: true,
+          dbName: true,
+          dataDbName: true,
+          dataDbPasswordCiphertext: true,
+        },
       });
       if (!current) throw new Error(`App "${id}" not found.`);
-      if (requiresDatabase) {
-        const rollbackBlockedReason = databaseRollbackBlockedReason(
-          current.dbName,
-          deployment.manifestNormalized,
+      const rollbackBlockedReason = deploymentRollbackBlockedReason(
+        {
+          dbName: current.dbName,
+          dataDbName: current.dataDbName,
+          dataDbPasswordCiphertext: current.dataDbPasswordCiphertext,
+        },
+        deployment.manifestNormalized,
+      );
+      if (rollbackBlockedReason) {
+        throw new AppError(
+          `Cannot restore v${deployment.version}. ${rollbackBlockedReason}`,
+          409,
         );
-        if (rollbackBlockedReason) {
-          throw new AppError(
-            `Cannot restore v${deployment.version}. ${rollbackBlockedReason}`,
-            409,
-          );
-        }
       }
       previousDeploymentId = current.currentDeploymentId ?? null;
       const live = appBuildDir(id);
@@ -482,6 +500,7 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
     columns: {
       capabilities: true,
       dataDbName: true,
+      dataDbPasswordCiphertext: true,
       dataSchemaHash: true,
       dataActivationId: true,
     },
@@ -503,7 +522,9 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
   stopApp(id);
   if (hasManagedData) {
     await closeDataRealtime(id);
-    await waitForDataMigrationBarrier(id);
+    if (app?.dataDbPasswordCiphertext) {
+      await waitForDataMigrationBarrier(id);
+    }
 
     // Data DB ownership is derived from the reusable App id. Do not delete the
     // platform row when cleanup fails: losing that ownership record would let a

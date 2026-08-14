@@ -1105,6 +1105,102 @@ describe('App deployment activation recovery', () => {
     });
   });
 
+  it('retains Data state when a successful release disables the capability', async () => {
+    const id = 'disable-retained-data';
+    const app = appState(id, {
+      status: 'deployed',
+      currentDeploymentId: 'deployment-current',
+      capabilities: { backend: false, dataTable: true },
+      dataDbName: `data_${id}`,
+      dataSchemaHash: 'retained-schema-hash',
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id, {
+        dataSchemaHash: 'retained-schema-hash',
+      }),
+    );
+    await writeBuild(
+      `${mocks.root}/live/${id}`,
+      'deployment-current',
+      'current deployment',
+    );
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+
+    const result = await deployApp(id, {
+      message: 'Disable Data Tables',
+      sourceDir: '/source',
+    });
+
+    expect(mocks.applyDataMigration).not.toHaveBeenCalled();
+    expect(app).toMatchObject({
+      status: 'deployed',
+      currentDeploymentId: result.deploymentId,
+      capabilities: expect.objectContaining({ dataTable: false }),
+      dataDbName: `data_${id}`,
+      dataSchemaHash: 'retained-schema-hash',
+      dataActivationId: null,
+    });
+  });
+
+  it('provisions fresh Data state when re-enabled after permanent deletion', async () => {
+    const id = 're-enable-deleted-data';
+    const app = appState(id, {
+      status: 'deployed',
+      currentDeploymentId: 'deployment-current',
+      capabilities: { backend: false, dataTable: false },
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id),
+    );
+    await writeBuild(
+      `${mocks.root}/live/${id}`,
+      'deployment-current',
+      'current deployment',
+    );
+    mocks.buildApp.mockImplementationOnce(stageDataTableBuild);
+    mocks.applyDataMigration.mockResolvedValueOnce({
+      hash: 'fresh-schema-hash',
+      schema: { version: 1, tables: {} },
+      plan: {
+        fromHash: null,
+        toHash: 'fresh-schema-hash',
+        steps: [],
+        destructive: false,
+        approvalToken: 'fresh-approval-token',
+      },
+      applied: true,
+    });
+
+    const result = await deployApp(id, {
+      message: 'Re-enable Data Tables',
+      sourceDir: '/source',
+    });
+
+    expect(mocks.applyDataMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id,
+        deploymentId: result.deploymentId,
+        schema: { version: 1, tables: {} },
+      }),
+    );
+    expect(app).toMatchObject({
+      status: 'deployed',
+      currentDeploymentId: result.deploymentId,
+      capabilities: expect.objectContaining({ dataTable: true }),
+      dataDbName: `data_${id}`,
+      dataSchemaHash: 'fresh-schema-hash',
+      dataActivationId: null,
+    });
+  });
+
   it('retains the fence when the pending release outcome cannot be read', async () => {
     const app = appState('unknown');
     mocks.apps.set('unknown', app);

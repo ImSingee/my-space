@@ -189,6 +189,16 @@ export const deleteAppDatabaseFn = createServerFn({ method: 'POST' })
     return deleteAppDatabase(data.id, data.dbName);
   });
 
+export const deleteAppDataDatabaseFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; dbName: string }) =>
+    z.object({ id: idSchema, dbName: z.string().min(1) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { deleteAppDataDatabase } = await import('./apps/data-table/delete');
+    return deleteAppDataDatabase(data.id, data.dbName);
+  });
+
 export const setAppSlugFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((input: { id: string; slug: string }) =>

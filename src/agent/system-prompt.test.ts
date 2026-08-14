@@ -93,7 +93,7 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('adding casts');
   });
 
-  it('defines App database provisioning and destructive recovery boundaries', () => {
+  it('defines persistent database provisioning and recovery boundaries', () => {
     const prompt = buildSystemPrompt(appUrl);
 
     expect(prompt).toMatch(
@@ -107,10 +107,13 @@ describe('Agent system prompt skills', () => {
       /use `query_app_db` only after that successful\s+deploy/,
     );
     expect(prompt).toMatch(
-      /rollback is blocked because the App database was\s+permanently deleted/,
+      /rollback is blocked because the App database or Data Table\s+database was permanently deleted/,
     );
-    expect(prompt).toContain('restore the reported source tag');
+    expect(prompt).toMatch(/restore the reported\s+source tag/);
     expect(prompt).toContain('Do not detach or rewind master');
+    expect(prompt).toMatch(
+      /Disabling\s+the capability retains its database but blocks App, Agent, and Realtime access/,
+    );
   });
 
   it('keeps existing checkout synchronization non-destructive', () => {

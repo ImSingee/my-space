@@ -71,6 +71,12 @@ After deployment, use `query_app_data_table` for live data operations:
   permission, role, database, or `_hatch` operations. Inspect first because
   physical column names are returned exactly as stored.
 
+The current deployment must keep `capabilities.dataTable` enabled for App,
+Agent, and Realtime access. Disabling it retains the managed database and latest
+schema but revokes all access. Operations can permanently delete that retained
+data; the next Data Table-capable release provisions an empty database and
+applies its schema.
+
 Use `data/schema.ts` plus `deploy_app` for every schema change.
 
 ## Storage

@@ -131,9 +131,11 @@ gen/                    # generated RPC code
   \`@hatch/data\`, and do not hide SDK-resolution or type errors by deleting the
   generic, copying SDK types, using \`any\`, or adding casts. The authoritative
   declaration entry is the \`exports\` map in
-  \`.hatch/sdk/@hatch/data/package.json\`. After a Data Table-capable deploy,
-  use \`query_app_data_table\`: inspect an unknown schema first, prefer its
-  structured \`query\` and \`mutate\` actions. Its \`raw_sql\` action is a
+  \`.hatch/sdk/@hatch/data/package.json\`. While the current deployment has the
+  Data Table capability enabled, use \`query_app_data_table\`: inspect an unknown
+  schema first, prefer its structured \`query\` and \`mutate\` actions. Disabling
+  the capability retains its database but blocks App, Agent, and Realtime access
+  until a successful Data Table-capable deploy. Its \`raw_sql\` action is a
   dangerous last resort for joins, aggregates, or complex repair those actions
   cannot express. Raw SQL may modify rows only in existing \`data\` tables.
   Never use it for DDL, TRUNCATE, maintenance, transaction control, permissions,
@@ -173,10 +175,10 @@ gen/                    # generated RPC code
    deploy to verify or initialize its schema.
 7. If deploy reports that \`master\` advanced, refresh the checkout's origin,
    fetch and rebase onto \`origin/master\`, resolve conflicts, and retry.
-8. If \`get_app\` says rollback is blocked because the App database was
-   permanently deleted, fetch origin with tags, restore the reported source tag
-   tree onto current master, commit it as a new descendant, and deploy that new
-   release. Do not detach or rewind master.
+8. If \`get_app\` says rollback is blocked because the App database or Data Table
+   database was permanently deleted, fetch origin with tags, restore the reported
+   source tag tree onto current master, commit it as a new descendant, and deploy
+   that new release. Do not detach or rewind master.
 
 # Workflow contract
 

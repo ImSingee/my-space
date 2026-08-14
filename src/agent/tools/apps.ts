@@ -143,6 +143,14 @@ export function createAppTools(options: {
         : databaseEnabled
           ? 'enabled, not provisioned'
           : 'not provisioned';
+      const dataTableEnabled = detail.capabilities.includes('dataTable');
+      const dataTableStatus = detail.ops.dataTable.dbName
+        ? `${detail.ops.dataTable.dbName} (${
+            dataTableEnabled ? 'enabled' : 'disabled, retained'
+          }; ${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+        : dataTableEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
       const lines: (string | null)[] = [
         `${detail.name} (slug: ${detail.slug}, id: ${detail.id}) — ${detail.status}` +
           (detail.currentVersion != null
@@ -157,10 +165,7 @@ export function createAppTools(options: {
             : 'none'
         }`,
         `Database: ${databaseStatus}`,
-        detail.ops.dataTable.enabled
-          ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +
-            `(${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
-          : null,
+        `Data Tables: ${dataTableStatus}`,
         detail.ops.storage.enabled
           ? 'Persistent storage: enabled (backend STORAGE_DIR)'
           : null,
@@ -485,10 +490,10 @@ export function createAppTools(options: {
       "version's artifact and moves the app repo master branch to its " +
       'deployment tag commit. Pass the version number shown by get_app ' +
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
-      'restored. A database-dependent version cannot be restored after its ' +
-      'database was permanently deleted. In that case, use its get_app source ' +
-      'tag to restore the tag tree onto current master, commit, and deploy it ' +
-      'as a new release.',
+      'restored. A version that depends on an App database or Data Table ' +
+      'database cannot be restored after that resource was permanently deleted. ' +
+      'In that case, use its get_app source tag to restore the tag tree onto ' +
+      'current master, commit, and deploy it as a new release.',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to rollback.' }),
       version: Type.Number({

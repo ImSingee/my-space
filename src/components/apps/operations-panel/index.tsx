@@ -14,11 +14,16 @@ import {
   appOpsQueryOptions,
   deploymentsQueryOptions,
 } from '~queries/apps';
-import { deleteAppDatabaseFn, type AppOps } from '~server/apps';
+import {
+  deleteAppDataDatabaseFn,
+  deleteAppDatabaseFn,
+  type AppOps,
+} from '~server/apps';
 import { CronSection } from './cron-section';
 import { DataTableSection } from './data-table-section';
 import { DatabaseSection } from './database-section';
 import { KvSection } from './kv-section';
+import { RetainedDataTableSection } from './retained-data-table-section';
 import { SectionHeader } from './section-header';
 import { WebhookSection } from './webhook-section';
 
@@ -146,6 +151,15 @@ export function OperationsPanel({ appId }: { appId: string }) {
     ]);
   };
 
+  const deleteDataDatabase = async (dbName: string) => {
+    await deleteAppDataDatabaseFn({ data: { id: appId, dbName } });
+    toast.success('Data Table data deleted');
+    await Promise.allSettled([
+      queryClient.invalidateQueries(appOpsQueryOptions(appId)),
+      queryClient.invalidateQueries(deploymentsQueryOptions(appId)),
+    ]);
+  };
+
   if (query.isLoading) {
     return (
       <Box component="section">
@@ -163,6 +177,8 @@ export function OperationsPanel({ appId }: { appId: string }) {
   if (!ops) return null;
 
   const databaseVisible = ops.database.enabled || Boolean(ops.database.dbName);
+  const dataTableVisible =
+    ops.dataTable.enabled || Boolean(ops.dataTable.dbName);
   const hasOperations =
     ops.backend.capable ||
     databaseVisible ||
@@ -170,7 +186,7 @@ export function OperationsPanel({ appId }: { appId: string }) {
     ops.cron.enabled ||
     ops.webhook.enabled ||
     ops.kv.enabled ||
-    ops.dataTable.enabled;
+    dataTableVisible;
 
   return (
     <Box component="section">
@@ -196,7 +212,16 @@ export function OperationsPanel({ appId }: { appId: string }) {
             />
           ) : null}
           {ops.storage.enabled ? <PersistentStorageSection /> : null}
-          {ops.dataTable.enabled ? <DataTableSection appId={appId} /> : null}
+          {ops.dataTable.enabled ? (
+            <DataTableSection appId={appId} />
+          ) : ops.dataTable.dbName ? (
+            <RetainedDataTableSection
+              appId={appId}
+              dbName={ops.dataTable.dbName}
+              schemaHash={ops.dataTable.schemaHash}
+              onDelete={deleteDataDatabase}
+            />
+          ) : null}
           {ops.cron.enabled ? (
             <CronSection appId={appId} cron={ops.cron} />
           ) : null}
