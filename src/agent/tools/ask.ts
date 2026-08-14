@@ -43,6 +43,7 @@ export function createAskTool(askBridge: AskBridge): AgentTool {
       'things you can reasonably decide yourself. Each question needs at ' +
       'least two options; the user can also type a custom answer. Returns the ' +
       "user's selections so you can continue.",
+    executionMode: 'sequential',
     parameters: Type.Object({
       questions: Type.Array(
         Type.Object({

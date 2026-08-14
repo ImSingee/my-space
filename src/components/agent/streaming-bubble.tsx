@@ -5,6 +5,7 @@ import type { AskAnswer } from '~agent/events';
 import { AgentErrorNotice } from './agent-error-notice';
 import { AskForm } from './ask-form';
 import { Markdownish } from './markdownish';
+import { EnvForm, type EnvEntry } from './env-form';
 import { StreamingThinkingStep, StreamingToolStep } from './steps';
 import type { StreamState } from './use-agent-stream';
 import classes from './chat.module.css';
@@ -12,11 +13,14 @@ import classes from './chat.module.css';
 export function StreamingBubble({
   state,
   onAnswer,
+  onSubmitEnv,
 }: {
   state: StreamState;
   onAnswer: (askId: string, answers: AskAnswer[]) => void;
+  onSubmitEnv: (requestId: string, entries: EnvEntry[]) => Promise<boolean>;
 }) {
   const ask = state.pendingAsk;
+  const envRequest = state.pendingEnvRequest;
 
   // The last thinking block is the only one that may still be streaming.
   let lastThinkingIndex = -1;
@@ -69,7 +73,7 @@ export function StreamingBubble({
   // visibly in flight — before the first token, between tool calls, or during
   // whitespace-only reasoning — show a loading row so the agent never looks
   // stalled. A running tool, an actively streaming thinking block, answer text,
-  // or a pending ask each carry their own progress signal.
+  // or a pending human-input request each carry their own progress signal.
   const hasText = state.blocks.some(
     (b) => b.kind === 'text' && b.text.length > 0,
   );
@@ -85,6 +89,7 @@ export function StreamingBubble({
     state.active &&
     !state.terminalError &&
     !ask &&
+    !envRequest &&
     !hasText &&
     !thinkingVisible &&
     !anyToolRunning;
@@ -97,6 +102,14 @@ export function StreamingBubble({
           key={ask.askId}
           questions={ask.questions}
           onSubmit={(answers) => onAnswer(ask.askId, answers)}
+        />
+      ) : null}
+      {envRequest ? (
+        <EnvForm
+          key={`${state.runId ?? 'pending'}:${envRequest.requestId}`}
+          reason={envRequest.reason}
+          variables={envRequest.variables}
+          onSubmit={(entries) => onSubmitEnv(envRequest.requestId, entries)}
         />
       ) : null}
       {state.terminalError ? (

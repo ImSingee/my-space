@@ -27,11 +27,26 @@ export const REPOS_DIR = path.resolve(WORKSPACE_ROOT, 'repos');
 /** Persistent Agent session roots (namespaced work, bundles, runner metadata). */
 export const AGENTS_DIR = path.resolve(WORKSPACE_ROOT, 'agents');
 /**
- * Sandbox HOME for the Agent's shell. run_command points HOME/XDG/cache dirs
- * here so prompt-injected commands can't read the server user's real home
- * (~/.npmrc, ~/.ssh, ~/.aws, …). Persistent so tool caches stay warm.
+ * Root of per-session sandbox homes. Each child is private to one Agent
+ * identity; sharing a HOME would let one chat read another chat's tool caches
+ * and credentials.
  */
 export const AGENT_HOME_DIR = path.resolve(WORKSPACE_ROOT, 'agent-home');
+/** Root-only quarantine for credentials left by the legacy shared Agent HOME. */
+export const AGENT_LEGACY_HOME_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  'agent-home-legacy',
+);
+/** Root-owned persistent allocation of Linux uid/gid pairs to sessions. */
+export const AGENT_IDENTITIES_PATH = path.resolve(
+  WORKSPACE_ROOT,
+  'agent-identities.json',
+);
+/** Cross-process lock directory protecting Agent identity allocation. */
+export const AGENT_IDENTITIES_LOCK_PATH = path.resolve(
+  WORKSPACE_ROOT,
+  'agent-identities.lock',
+);
 /** Server-managed source checkouts used for non-Agent deploys. */
 export const CHECKOUTS_DIR = path.resolve(WORKSPACE_ROOT, 'checkouts');
 /** Deploy artifacts, one dir per deployment id (tagged deploy/v<version>). */
@@ -48,13 +63,26 @@ export const SKILLS_DIR = path.resolve(REPO_ROOT, 'skills');
 /** App scaffolding template. */
 export const TEMPLATES_DIR = path.resolve(REPO_ROOT, 'templates');
 
+function isWellFormed(value: string): boolean {
+  return (
+    value as string & {
+      isWellFormed(): boolean;
+    }
+  ).isWellFormed();
+}
+
 export function isSafePathSegment(value: string): boolean {
   return (
     value.length > 0 &&
+    isWellFormed(value) &&
     value !== '.' &&
     value !== '..' &&
     !value.includes('\\') &&
     !value.includes('\0') &&
+    ![...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    }) &&
     path.basename(value) === value
   );
 }
@@ -89,6 +117,10 @@ export function agentSessionDir(sessionId: string): string {
 
 export function agentWorkDir(sessionId: string): string {
   return path.resolve(agentSessionDir(sessionId), 'work');
+}
+
+export function agentHomeDir(sessionId: string): string {
+  return childPath(AGENT_HOME_DIR, sessionId, 'Agent session id');
 }
 
 export function agentAppWorkDir(sessionId: string, id: string): string {

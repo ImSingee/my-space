@@ -7,6 +7,7 @@ import { LAST_SELECTED_MODEL_STORAGE_KEY } from './model-preference';
 
 const fixtures = vi.hoisted(() => ({
   failSessionFetch: false,
+  sessionFetchCount: 0,
   session: {
     id: 'session-1',
     title: 'Failed request',
@@ -33,6 +34,11 @@ const fixtures = vi.hoisted(() => ({
       id: string;
       status: 'running';
       pendingAsk: null;
+      pendingEnvRequest: null | {
+        requestId: string;
+        reason: string;
+        variables: { key: string; description: string; secret: boolean }[];
+      };
     },
   },
   providers: [
@@ -93,6 +99,7 @@ vi.mock('~queries/agent', () => ({
   sessionQueryOptions: (sessionId: string) => ({
     queryKey: ['test-agent-session', sessionId],
     queryFn: async () => {
+      fixtures.sessionFetchCount += 1;
       if (fixtures.failSessionFetch) {
         throw new Error('Session refetch failed');
       }
@@ -115,9 +122,23 @@ function doneResponse(): Response {
   );
 }
 
+function openResponse(signal?: AbortSignal | null): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        signal?.addEventListener('abort', () => controller.close(), {
+          once: true,
+        });
+      },
+    }),
+    { status: 200 },
+  );
+}
+
 beforeEach(() => {
   localStorage.removeItem(LAST_SELECTED_MODEL_STORAGE_KEY);
   fixtures.failSessionFetch = false;
+  fixtures.sessionFetchCount = 0;
   fixtures.session.updatedAt = '2026-07-11T12:00:00.000Z';
   fixtures.session.activeRun = null;
   for (const provider of fixtures.providers) {
@@ -150,6 +171,145 @@ test('keeps the conversation model when another model was selected elsewhere', a
   await expect
     .element(screen.getByRole('button', { name: 'Original model' }))
     .toBeVisible();
+});
+
+test('hydrates a pending env request from the active session run', async () => {
+  fixtures.session.activeRun = {
+    id: 'run-waiting-for-env',
+    status: 'running',
+    pendingAsk: null,
+    pendingEnvRequest: {
+      requestId: 'env-from-session',
+      reason: 'Connect the deployment provider.',
+      variables: [
+        {
+          key: 'DEPLOY_TOKEN',
+          description: 'Token with deployment access.',
+          secret: true,
+        },
+      ],
+    },
+  };
+  const fetchMock = vi.fn<typeof fetch>(async (_input, init) =>
+    openResponse(init?.signal),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Chat sessionId="session-1" />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  const input = screen.getByLabelText(/^DEPLOY_TOKEN(?: \*)?$/);
+  await expect.element(input).toBeVisible();
+  const sentinel = 'private-value-not-in-query-cache';
+  await input.fill(sentinel);
+  expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+    '/api/agent/runs/run-waiting-for-env/events?after=0',
+  );
+  expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain(sentinel);
+  expect(
+    JSON.stringify(
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.state.data),
+    ),
+  ).not.toContain(sentinel);
+});
+
+test('syncs changed prompt metadata without reconnecting the active stream', async () => {
+  fixtures.session.activeRun = {
+    id: 'run-with-refreshed-seed',
+    status: 'running',
+    pendingAsk: null,
+    pendingEnvRequest: null,
+  };
+  const fetchMock = vi.fn<typeof fetch>(async (_input, init) =>
+    openResponse(init?.signal),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Chat sessionId="session-1" />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  queryClient.setQueryData(['test-agent-session', 'session-1'], {
+    ...structuredClone(fixtures.session),
+    activeRun: {
+      ...structuredClone(fixtures.session.activeRun!),
+      pendingEnvRequest: {
+        requestId: 'env-from-refetch',
+        reason: 'Connect the deployment provider.',
+        variables: [
+          {
+            key: 'DEPLOY_TOKEN',
+            description: 'Token with deployment access.',
+            secret: true,
+          },
+        ],
+      },
+    },
+  });
+
+  await expect
+    .element(screen.getByLabelText(/^DEPLOY_TOKEN(?: \*)?$/))
+    .toBeVisible();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+    '/api/agent/runs/run-with-refreshed-seed/events?after=0',
+  );
+});
+
+test('keeps reconnect backoff when an unchanged session refetch succeeds', async () => {
+  fixtures.session.activeRun = {
+    id: 'run-with-outage',
+    status: 'running',
+    pendingAsk: null,
+    pendingEnvRequest: null,
+  };
+  const eventRequestTimes: number[] = [];
+  const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+    eventRequestTimes.push(performance.now());
+    return eventRequestTimes.length === 1
+      ? new Response(null, { status: 503 })
+      : openResponse(init?.signal);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Chat sessionId="session-1" />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+
+  // The failed stream invalidates the session query. That unchanged refetch
+  // must finish without opening a second stream ahead of the 750 ms timer.
+  await vi.waitFor(() => expect(fixtures.sessionFetchCount).toBeGreaterThan(1));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), {
+    timeout: 2000,
+  });
+  expect(eventRequestTimes[1]! - eventRequestTimes[0]!).toBeGreaterThanOrEqual(
+    700,
+  );
 });
 
 test('retries once with the selected model, hides stale error, and allows a same-index failure again', async () => {
@@ -250,6 +410,7 @@ test('refreshes a stale error after another tab has consumed its Retry', async (
       id: 'run-from-another-tab',
       status: 'running',
       pendingAsk: null,
+      pendingEnvRequest: null,
     };
     return new Response('This chat already has a running Agent turn.', {
       status: 409,

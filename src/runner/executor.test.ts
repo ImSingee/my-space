@@ -8,7 +8,21 @@ vi.mock('~agent/runtime', () => {
   return { runAgentTurn: vi.fn<Runtime['runAgentTurn']>() };
 });
 
+vi.mock('~agent/env-file', () => ({
+  writeEnvFile: vi.fn<(typeof import('~agent/env-file'))['writeEnvFile']>(
+    async () => {},
+  ),
+}));
+
+vi.mock('~agent/shell-sandbox', () => ({
+  prepareAgentSessionSandbox: vi.fn<
+    (typeof import('~agent/shell-sandbox'))['prepareAgentSessionSandbox']
+  >(() => undefined),
+}));
+
 const { runAgentTurn } = await import('~agent/runtime');
+const { writeEnvFile } = await import('~agent/env-file');
+const { prepareAgentSessionSandbox } = await import('~agent/shell-sandbox');
 const { RunnerExecutor } = await import('./executor');
 
 const APP_URL = 'https://hatch.example.test';
@@ -63,14 +77,313 @@ function setupExecutor(tavilyApiKey?: string) {
     sent.find(
       (message): message is FinishedMessage => message.type === 'run.finished',
     );
-  return { executor, finished };
+  return { executor, finished, sent };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(prepareAgentSessionSandbox).mockReturnValue(undefined);
+  vi.mocked(writeEnvFile).mockResolvedValue(undefined);
+});
+
+describe('RunnerExecutor environment delivery', () => {
+  it('writes every value but reveals only final non-secret entries', async () => {
+    const canary = 'runner-canary-never-crosses-outbound';
+    const visible = 'account-1';
+    vi.mocked(runAgentTurn).mockImplementationOnce(async (options) => {
+      const stored = await options.requestEnv?.('Call the private service.', [
+        {
+          key: 'SERVICE_TOKEN',
+          description: 'Read-only token.',
+          secret: false,
+        },
+        {
+          key: 'ACCOUNT_ID',
+          description: 'Public account id.',
+          secret: true,
+        },
+      ]);
+      return {
+        messages: [{ role: 'assistant', content: JSON.stringify(stored) }],
+      };
+    });
+    const { executor, sent, finished } = setupExecutor();
+    expect(executor.start(payload)).toEqual({ accepted: true });
+    await vi.waitFor(() =>
+      expect(
+        sent.some(
+          (message) =>
+            message.type === 'run.event' &&
+            message.event.type === 'env_request',
+        ),
+      ).toBe(true),
+    );
+    const request = sent.find(
+      (message) =>
+        message.type === 'run.event' && message.event.type === 'env_request',
+    );
+    if (request?.type !== 'run.event' || request.event.type !== 'env_request') {
+      throw new Error('Missing environment request.');
+    }
+    expect(JSON.stringify(request.event)).not.toContain(canary);
+
+    executor.env(payload.runId, request.event.requestId, 'delivery-success', [
+      { key: 'SERVICE_TOKEN', value: canary, secret: true },
+      { key: 'ACCOUNT_ID', value: visible, secret: false },
+    ]);
+    await vi.waitFor(() => expect(finished()).toBeDefined());
+
+    expect(writeEnvFile).toHaveBeenCalledWith(expect.any(String), [
+      { key: 'SERVICE_TOKEN', value: canary, secret: true },
+      { key: 'ACCOUNT_ID', value: visible, secret: false },
+    ]);
+    expect(
+      sent.some(
+        (message) =>
+          message.type === 'run.event' &&
+          message.event.type === 'env_stored' &&
+          message.event.variables.every((variable) => !('value' in variable)),
+      ),
+    ).toBe(true);
+    expect(
+      sent.some(
+        (message) =>
+          message.type === 'run.env_result' &&
+          message.deliveryId === 'delivery-success' &&
+          message.ok,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(sent)).not.toContain(canary);
+    expect(JSON.stringify(finished()?.messages)).not.toContain(canary);
+    expect(JSON.stringify(finished()?.messages)).toContain(visible);
+
+    // A replay can arrive after the tool settled; it still receives the exact
+    // safe acknowledgement without values.
+    executor.env(payload.runId, request.event.requestId, 'delivery-success', [
+      { key: 'SERVICE_TOKEN', value: 'replayed', secret: true },
+      { key: 'ACCOUNT_ID', value: visible, secret: false },
+    ]);
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        type: 'run.env_result',
+        deliveryId: 'delivery-success',
+        ok: true,
+      }),
+    );
+
+    // A delivery id's safe signature includes the final classifications.
+    executor.env(payload.runId, request.event.requestId, 'delivery-success', [
+      { key: 'SERVICE_TOKEN', value: 'different', secret: false },
+      { key: 'ACCOUNT_ID', value: visible, secret: false },
+    ]);
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        type: 'run.env_result',
+        deliveryId: 'delivery-success',
+        ok: false,
+        errorCode: 'request_mismatch',
+      }),
+    );
+    executor.ackFinish(payload.runId);
+  });
+
+  it('keeps a failed request pending so a later delivery can retry', async () => {
+    vi.mocked(writeEnvFile)
+      .mockRejectedValueOnce(new Error('disk failed'))
+      .mockResolvedValueOnce(undefined);
+    vi.mocked(runAgentTurn).mockImplementationOnce(async (options) => {
+      await options.requestEnv?.('Need access.', [
+        { key: 'TOKEN', description: 'Token.', secret: true },
+      ]);
+      return { messages: [] };
+    });
+    const { executor, sent, finished } = setupExecutor();
+    executor.start(payload);
+    await vi.waitFor(() =>
+      expect(
+        sent.some(
+          (message) =>
+            message.type === 'run.event' &&
+            message.event.type === 'env_request',
+        ),
+      ).toBe(true),
+    );
+    const request = sent.find(
+      (message) =>
+        message.type === 'run.event' && message.event.type === 'env_request',
+    );
+    if (request?.type !== 'run.event' || request.event.type !== 'env_request') {
+      throw new Error('Missing environment request.');
+    }
+
+    executor.env(payload.runId, request.event.requestId, 'delivery-first', [
+      { key: 'TOKEN', value: 'first-attempt', secret: true },
+    ]);
+    await vi.waitFor(() =>
+      expect(
+        sent.some(
+          (message) =>
+            message.type === 'run.env_result' &&
+            message.deliveryId === 'delivery-first' &&
+            !message.ok &&
+            message.errorCode === 'write_failed',
+        ),
+      ).toBe(true),
+    );
+    expect(finished()).toBeUndefined();
+
+    executor.env(payload.runId, request.event.requestId, 'delivery-second', [
+      { key: 'TOKEN', value: 'second-attempt', secret: true },
+    ]);
+    await vi.waitFor(() => expect(finished()).toBeDefined());
+    expect(writeEnvFile).toHaveBeenCalledTimes(2);
+    executor.ackFinish(payload.runId);
+  });
+
+  it('rejects a mismatched key set without writing', async () => {
+    vi.mocked(runAgentTurn).mockImplementationOnce(async (options) => {
+      await options.requestEnv?.('Need access.', [
+        { key: 'TOKEN', description: 'Token.', secret: true },
+      ]);
+      return { messages: [] };
+    });
+    const { executor, sent } = setupExecutor();
+    executor.start(payload);
+    await vi.waitFor(() =>
+      expect(
+        sent.some(
+          (message) =>
+            message.type === 'run.event' &&
+            message.event.type === 'env_request',
+        ),
+      ).toBe(true),
+    );
+    const request = sent.find(
+      (message) =>
+        message.type === 'run.event' && message.event.type === 'env_request',
+    );
+    if (request?.type !== 'run.event' || request.event.type !== 'env_request') {
+      throw new Error('Missing environment request.');
+    }
+    executor.env(payload.runId, request.event.requestId, 'delivery-mismatch', [
+      { key: 'OTHER_TOKEN', value: 'value', secret: true },
+    ]);
+
+    await vi.waitFor(() =>
+      expect(
+        sent.some(
+          (message) =>
+            message.type === 'run.env_result' &&
+            message.deliveryId === 'delivery-mismatch' &&
+            !message.ok &&
+            message.errorCode === 'request_mismatch',
+        ),
+      ).toBe(true),
+    );
+    expect(writeEnvFile).not.toHaveBeenCalled();
+    executor.cancel(payload.runId);
+    await vi.waitFor(() =>
+      expect(sent.some((message) => message.type === 'run.finished')).toBe(
+        true,
+      ),
+    );
+    executor.ackFinish(payload.runId);
+  });
+
+  it('correlates concurrent deliveries and acknowledges a write after cancel', async () => {
+    let finishWrite!: () => void;
+    vi.mocked(writeEnvFile).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        }),
+    );
+    vi.mocked(runAgentTurn).mockImplementationOnce(async (options) => {
+      try {
+        await options.requestEnv?.('Need access.', [
+          { key: 'TOKEN', description: 'Token.', secret: true },
+        ]);
+      } catch {
+        // Cancellation rejects the bridge and must not expose a later value.
+      }
+      return { messages: [{ role: 'assistant', content: 'cancelled safely' }] };
+    });
+    const { executor, sent, finished } = setupExecutor();
+    executor.start(payload);
+    await vi.waitFor(() =>
+      expect(
+        sent.some(
+          (message) =>
+            message.type === 'run.event' &&
+            message.event.type === 'env_request',
+        ),
+      ).toBe(true),
+    );
+    const request = sent.find(
+      (message) =>
+        message.type === 'run.event' && message.event.type === 'env_request',
+    );
+    if (request?.type !== 'run.event' || request.event.type !== 'env_request') {
+      throw new Error('Missing environment request.');
+    }
+
+    executor.env(payload.runId, request.event.requestId, 'delivery-a', [
+      { key: 'TOKEN', value: 'first-value', secret: false },
+    ]);
+    executor.env(payload.runId, request.event.requestId, 'delivery-b', [
+      { key: 'TOKEN', value: 'second-value', secret: true },
+    ]);
+    await vi.waitFor(() =>
+      expect(sent).toContainEqual(
+        expect.objectContaining({
+          type: 'run.env_result',
+          deliveryId: 'delivery-b',
+          ok: false,
+          errorCode: 'delivery_busy',
+        }),
+      ),
+    );
+    expect(writeEnvFile).toHaveBeenCalledOnce();
+
+    executor.cancel(payload.runId);
+    await vi.waitFor(() => expect(finished()?.status).toBe('cancelled'));
+    finishWrite();
+    await vi.waitFor(() =>
+      expect(sent).toContainEqual(
+        expect.objectContaining({
+          type: 'run.env_result',
+          deliveryId: 'delivery-a',
+          ok: true,
+        }),
+      ),
+    );
+    expect(
+      sent.some(
+        (message) =>
+          message.type === 'run.event' && message.event.type === 'env_stored',
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(finished()?.messages)).not.toContain('first-value');
+    executor.ackFinish(payload.runId);
+  });
 });
 
 describe('RunnerExecutor terminal outcomes', () => {
+  it('rejects before claiming a session whose workspace cannot be prepared', () => {
+    vi.mocked(prepareAgentSessionSandbox).mockImplementationOnce(() => {
+      throw new Error('unsafe workspace layout');
+    });
+    const { executor, sent } = setupExecutor();
+
+    expect(executor.start(payload)).toEqual({
+      accepted: false,
+      reason: 'unsafe workspace layout',
+    });
+    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+    expect(executor.activeCount).toBe(0);
+  });
+
   it('reports a runtime error as failed with the transcript', async () => {
     const messages: RunAgentTurnResult['messages'] = [
       { role: 'user', content: 'hello' },

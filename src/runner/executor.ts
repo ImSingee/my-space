@@ -5,11 +5,20 @@
  */
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { submitAnswer, waitForAnswer } from '~agent/ask-registry';
-import type { AgentStreamEvent, AskAnswer, AskQuestion } from '~agent/events';
+import type {
+  AgentStreamEvent,
+  AskAnswer,
+  AskQuestion,
+  EnvVariableField,
+} from '~agent/events';
+import { writeEnvFile } from '~agent/env-file';
+import { agentWorkDir } from '~agent/paths';
 import { buildRunModels } from '~agent/remote-models';
 import { runAgentTurn } from '~agent/runtime';
 import type { PlatformClient } from '~agent/platform-client';
-import type { RunnerMessage, RunStartPayload } from '~agent/protocol';
+import type { EnvEntry, RunnerMessage, RunStartPayload } from '~agent/protocol';
+import { prepareAgentSessionSandbox } from '~agent/shell-sandbox';
+import type { StoredEnvVariable } from '~agent/tools/request-env';
 import { RunEventQueue } from './event-queue';
 
 /** Resend an unacked `run.finished` this often while connected. */
@@ -31,6 +40,17 @@ type ActiveRun = {
   discarded: boolean;
   /** Set once the turn ended; cleared from `runs` when the platform acks. */
   finished?: FinishedPayload;
+  emit: (event: AgentStreamEvent) => void;
+  pendingEnv?: {
+    requestId: string;
+    keys: Set<string>;
+    resolve: (variables: StoredEnvVariable[]) => void;
+    reject: (error: Error) => void;
+    cleanup: () => void;
+    inFlight?: { deliveryId: string; write: Promise<void> };
+  };
+  /** Safe, bounded delivery idempotency memory; never stores values. */
+  completedEnvDeliveries: Map<string, string>;
   done: Promise<void>;
 };
 
@@ -69,6 +89,10 @@ export class RunnerExecutor {
 
     let run: ActiveRun;
     try {
+      // `run.accepted` commits this Runner as the persistent workspace owner.
+      // Prepare the session synchronously before returning accepted so a
+      // rejected/unsafe filesystem layout can never pin an empty workspace.
+      prepareAgentSessionSandbox(payload.sessionId);
       const { models, picked } = buildRunModels(payload.model);
       run = {
         runId: payload.runId,
@@ -77,6 +101,8 @@ export class RunnerExecutor {
         controller: new AbortController(),
         cancelled: false,
         discarded: false,
+        emit: () => {},
+        completedEnvDeliveries: new Map(),
         done: Promise.resolve(),
       };
       this.runs.set(payload.runId, run);
@@ -90,6 +116,7 @@ export class RunnerExecutor {
           event: queued.event,
         });
       };
+      run.emit = emit;
 
       const ask = async (
         questions: AskQuestion[],
@@ -108,6 +135,64 @@ export class RunnerExecutor {
         return answers;
       };
 
+      const requestEnv = (
+        reason: string,
+        variables: EnvVariableField[],
+        envSignal?: AbortSignal,
+      ): Promise<StoredEnvVariable[]> => {
+        if (run.cancelled) {
+          return Promise.reject(new Error('Agent run was cancelled.'));
+        }
+        if (run.pendingEnv) {
+          return Promise.reject(
+            new Error('Another environment request is already pending.'),
+          );
+        }
+        const requestId = crypto.randomUUID();
+        const keys = new Set(variables.map((variable) => variable.key));
+        return new Promise<StoredEnvVariable[]>((resolve, reject) => {
+          let settled = false;
+          const finish = (
+            error?: Error,
+            storedVariables?: StoredEnvVariable[],
+          ) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (run.pendingEnv?.requestId === requestId) {
+              run.pendingEnv = undefined;
+            }
+            if (error) reject(error);
+            else resolve(storedVariables ?? []);
+          };
+          const onAbort = () =>
+            finish(new Error('Environment request cancelled.'));
+          const signals = [
+            ...new Set([envSignal, run.controller.signal]),
+          ].filter((value): value is AbortSignal => Boolean(value));
+          const cleanup = () => {
+            for (const signal of signals) {
+              signal.removeEventListener('abort', onAbort);
+            }
+          };
+          if (signals.some((signal) => signal.aborted)) {
+            finish(new Error('Environment request cancelled.'));
+            return;
+          }
+          for (const signal of signals) {
+            signal.addEventListener('abort', onAbort, { once: true });
+          }
+          run.pendingEnv = {
+            requestId,
+            keys,
+            resolve: (storedVariables) => finish(undefined, storedVariables),
+            reject: (error) => finish(error),
+            cleanup,
+          };
+          emit({ type: 'env_request', requestId, reason, variables });
+        });
+      };
+
       run.done = runAgentTurn({
         appUrl: this.opts.appUrl,
         ...(this.opts.tavilyApiKey
@@ -123,6 +208,7 @@ export class RunnerExecutor {
         platform: this.opts.platform,
         signal: run.controller.signal,
         ask,
+        requestEnv,
         emit,
       })
         .then((result) => {
@@ -187,6 +273,109 @@ export class RunnerExecutor {
     submitAnswer(runId, askId, answers);
   }
 
+  /** Store a transient environment delivery for the exact pending request. */
+  env(
+    runId: string,
+    requestId: string,
+    deliveryId: string,
+    entries: EnvEntry[],
+  ): void {
+    const run = this.runs.get(runId);
+    const keys = entries.map((entry) => entry.key);
+    const signature = JSON.stringify([
+      requestId,
+      entries
+        .map(({ key, secret }) => ({ key, secret }))
+        .sort((left, right) => left.key.localeCompare(right.key)),
+    ]);
+    const completedSignature = run?.completedEnvDeliveries.get(deliveryId);
+    if (run && completedSignature !== undefined) {
+      this.sendEnvResult(
+        runId,
+        requestId,
+        deliveryId,
+        completedSignature === signature,
+        completedSignature === signature ? undefined : 'request_mismatch',
+      );
+      return;
+    }
+    if (!run || run.cancelled || run.finished) {
+      this.sendEnvResult(runId, requestId, deliveryId, false, 'run_not_active');
+      return;
+    }
+    const pending = run.pendingEnv;
+    const expectedKeys = pending?.keys ?? new Set<string>();
+    if (
+      !pending ||
+      pending.requestId !== requestId ||
+      new Set(keys).size !== keys.length ||
+      expectedKeys.size !== keys.length ||
+      keys.some((key) => !expectedKeys.has(key))
+    ) {
+      this.sendEnvResult(
+        runId,
+        requestId,
+        deliveryId,
+        false,
+        'request_mismatch',
+      );
+      return;
+    }
+    // A delivery id identifies one HTTP submission. A duplicate frame for the
+    // in-flight id waits for that exact result; a different submission fails
+    // safely instead of inheriting the first write's acknowledgement.
+    if (pending.inFlight) {
+      if (pending.inFlight.deliveryId !== deliveryId) {
+        this.sendEnvResult(
+          runId,
+          requestId,
+          deliveryId,
+          false,
+          'delivery_busy',
+        );
+      }
+      return;
+    }
+
+    const write = writeEnvFile(agentWorkDir(run.sessionId), entries)
+      .then(() => {
+        run.completedEnvDeliveries.set(deliveryId, signature);
+        if (run.completedEnvDeliveries.size > 32) {
+          const oldest = run.completedEnvDeliveries.keys().next().value;
+          if (oldest) run.completedEnvDeliveries.delete(oldest);
+        }
+        if (run.pendingEnv === pending && !run.cancelled && !run.finished) {
+          const storedVariables: StoredEnvVariable[] = entries.map((entry) =>
+            entry.secret
+              ? { key: entry.key, secret: true }
+              : { key: entry.key, secret: false, value: entry.value },
+          );
+          run.emit({
+            type: 'env_stored',
+            requestId,
+            variables: storedVariables.map(({ key, secret }) => ({
+              key,
+              secret,
+            })),
+          });
+          pending.resolve(storedVariables);
+        }
+        // Once disk I/O starts, its exact outcome is reported even if cancel
+        // has already stopped the model and cleared the pending tool request.
+        this.sendEnvResult(runId, requestId, deliveryId, true);
+      })
+      .catch(() => {
+        if (
+          run.pendingEnv === pending &&
+          pending.inFlight?.deliveryId === deliveryId
+        ) {
+          pending.inFlight = undefined;
+        }
+        this.sendEnvResult(runId, requestId, deliveryId, false, 'write_failed');
+      });
+    pending.inFlight = { deliveryId, write };
+  }
+
   ackEvents(runId: string, upToRunnerSeq: number): void {
     this.runs.get(runId)?.queue.ack(upToRunnerSeq);
   }
@@ -242,6 +431,23 @@ export class RunnerExecutor {
     }
     run.finished = payload;
     this.sendFinished(run);
+  }
+
+  private sendEnvResult(
+    runId: string,
+    requestId: string,
+    deliveryId: string,
+    ok: boolean,
+    errorCode?: string,
+  ): void {
+    this.opts.send({
+      type: 'run.env_result',
+      runId,
+      requestId,
+      deliveryId,
+      ok,
+      ...(ok ? {} : { errorCode: errorCode ?? 'write_failed' }),
+    });
   }
 
   private sendFinished(run: ActiveRun): void {

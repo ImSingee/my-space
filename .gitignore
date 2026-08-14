@@ -5,6 +5,11 @@ dist-ssr
 *.local
 count.txt
 .env
+.env.*.tmp
+# Legacy Agent credential files remain ignored across the `.env` migration.
+.secrets
+.secrets.*.tmp
+/workspace/
 .nitro
 .tanstack
 .wrangler

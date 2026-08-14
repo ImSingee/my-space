@@ -36,6 +36,13 @@
       "when": 1786627920961,
       "tag": "0004_abandoned_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786635620376,
+      "tag": "0005_slippery_korg",
+      "breakpoints": true
     }
   ]
 }

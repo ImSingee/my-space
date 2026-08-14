@@ -10,12 +10,22 @@
  * bind at import time).
  */
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 const root = await mkdtemp(path.join(tmpdir(), 'hatch-bundle-rt-'));
+// Per-session Linux UIDs need to traverse the fixture root to reach their
+// private runner-data worktrees. Keep it non-listable and non-writable.
+await chmod(root, 0o711);
 const GENERATION = '2026-07-12T00:00:00.000Z';
 const NEXT_GENERATION = '2026-07-12T01:00:00.000Z';
 process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
@@ -23,6 +33,8 @@ process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 // Import after HATCH_DATA_DIR is set (module-level path constants).
 const { bundleWorktreeForDeploy, checkoutFromBundle, initNewWorktree } =
   await import('~agent/local-sources');
+const { agentHomeDir } = await import('~agent/paths');
+const { sandboxSpawn } = await import('~agent/shell-sandbox');
 const { createGitSource } = await import('~server/source-git');
 
 const platform = createGitSource({
@@ -35,8 +47,21 @@ const platform = createGitSource({
 });
 
 function run(cmd: string, args: string[], cwd: string): Promise<string> {
+  return runSpawn(cmd, args, cwd);
+}
+
+function runSpawn(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => (out += d.toString()));
@@ -51,6 +76,20 @@ function run(cmd: string, args: string[], cwd: string): Promise<string> {
 
 const git = (args: string[], cwd: string) => run('git', args, cwd);
 
+function agentGit(
+  sessionId: string,
+  args: string[],
+  cwd: string,
+): Promise<string> {
+  const wrapped = sandboxSpawn(['git', ...args], sessionId);
+  return runSpawn(wrapped.command, wrapped.args, cwd, {
+    PATH: process.env.PATH,
+    HOME: agentHomeDir(sessionId),
+    LANG: process.env.LANG,
+    GIT_TERMINAL_PROMPT: '0',
+  });
+}
+
 const SOURCE_KINDS = ['app', 'workflow'] as const;
 type SourceKind = (typeof SOURCE_KINDS)[number];
 
@@ -61,10 +100,17 @@ type TestSource = {
   bundleBase64: string | null;
 };
 
-async function commitAll(worktree: string, message: string): Promise<string> {
-  await git(['add', '-A'], worktree);
-  await git(['commit', '-m', message], worktree);
-  return git(['rev-parse', 'HEAD'], worktree);
+async function commitAll(
+  worktree: string,
+  message: string,
+  sessionId?: string,
+): Promise<string> {
+  const runGit = sessionId
+    ? (args: string[]) => agentGit(sessionId, args, worktree)
+    : (args: string[]) => git(args, worktree);
+  await runGit(['add', '-A']);
+  await runGit(['commit', '-m', message]);
+  return runGit(['rev-parse', 'HEAD']);
 }
 
 async function seedPlatformSource(
@@ -105,7 +151,11 @@ async function publishAgentChange(options: {
   const { kind, source, sessionId, version, contents } = options;
   const checkout = await checkoutFromBundle(sessionId, kind, source);
   await writeFile(path.join(checkout.absolutePath, 'README.md'), contents);
-  const commit = await commitAll(checkout.absolutePath, `publish v${version}`);
+  const commit = await commitAll(
+    checkout.absolutePath,
+    `publish v${version}`,
+    sessionId,
+  );
   const deploy = await bundleWorktreeForDeploy(
     sessionId,
     kind,
@@ -125,15 +175,21 @@ async function publishAgentChange(options: {
   return commit;
 }
 
-async function currentBranch(worktree: string): Promise<string | null> {
-  return git(['symbolic-ref', '--quiet', '--short', 'HEAD'], worktree).catch(
-    () => null,
-  );
+async function currentBranch(
+  worktree: string,
+  sessionId: string,
+): Promise<string | null> {
+  return agentGit(
+    sessionId,
+    ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+    worktree,
+  ).catch(() => null);
 }
 
 async function expectSynchronizedCheckout(
   checkout: Awaited<ReturnType<typeof checkoutFromBundle>>,
   expectedCommit: string,
+  sessionId: string,
 ): Promise<void> {
   expect(checkout).toMatchObject({
     dirty: false,
@@ -142,16 +198,26 @@ async function expectSynchronizedCheckout(
     replacedExisting: false,
     synchronizedExisting: true,
   });
-  await expect(currentBranch(checkout.absolutePath)).resolves.toBe('master');
-  await expect(
-    git(['rev-parse', 'refs/heads/master'], checkout.absolutePath),
-  ).resolves.toBe(expectedCommit);
-  await expect(
-    git(['rev-parse', 'refs/remotes/origin/master'], checkout.absolutePath),
-  ).resolves.toBe(expectedCommit);
-  await expect(git(['status', '--short'], checkout.absolutePath)).resolves.toBe(
-    '',
+  await expect(currentBranch(checkout.absolutePath, sessionId)).resolves.toBe(
+    'master',
   );
+  await expect(
+    agentGit(
+      sessionId,
+      ['rev-parse', 'refs/heads/master'],
+      checkout.absolutePath,
+    ),
+  ).resolves.toBe(expectedCommit);
+  await expect(
+    agentGit(
+      sessionId,
+      ['rev-parse', 'refs/remotes/origin/master'],
+      checkout.absolutePath,
+    ),
+  ).resolves.toBe(expectedCommit);
+  await expect(
+    agentGit(sessionId, ['status', '--short'], checkout.absolutePath),
+  ).resolves.toBe('');
 }
 
 afterAll(async () => {
@@ -192,7 +258,11 @@ describe('git bundle round-trip (platform <-> runner)', () => {
 
     // -- Agent work: edit + commit in the runner worktree. ------------------
     await writeFile(path.join(checkout.absolutePath, 'README.md'), 'v2\n');
-    const localCommit = await commitAll(checkout.absolutePath, 'agent edit');
+    const localCommit = await commitAll(
+      checkout.absolutePath,
+      'agent edit',
+      SESSION,
+    );
 
     // -- Runner -> platform: bundle the worktree, stage it, publish. --------
     const deploy = await bundleWorktreeForDeploy(
@@ -236,7 +306,11 @@ describe('git bundle round-trip (platform <-> runner)', () => {
 
         const synchronized = await checkoutFromBundle(sessionId, kind, source);
 
-        await expectSynchronizedCheckout(synchronized, expectedCommit);
+        await expectSynchronizedCheckout(
+          synchronized,
+          expectedCommit,
+          sessionId,
+        );
         await expect(
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v1\n');
@@ -263,7 +337,11 @@ describe('git bundle round-trip (platform <-> runner)', () => {
           advancedSource,
         );
 
-        await expectSynchronizedCheckout(synchronized, expectedCommit);
+        await expectSynchronizedCheckout(
+          synchronized,
+          expectedCommit,
+          sessionId,
+        );
         await expect(
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v2\n');
@@ -286,7 +364,11 @@ describe('git bundle round-trip (platform <-> runner)', () => {
 
         const synchronized = await checkoutFromBundle(sessionId, kind, source);
 
-        await expectSynchronizedCheckout(synchronized, expectedCommit);
+        await expectSynchronizedCheckout(
+          synchronized,
+          expectedCommit,
+          sessionId,
+        );
         await expect(
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v1\n');
@@ -312,6 +394,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
           const localCommit = await commitAll(
             local.absolutePath,
             'local-only commit',
+            sessionId,
           );
           let remoteSource = initialSource;
           if (relation === 'diverged') {
@@ -333,17 +416,22 @@ describe('git bundle round-trip (platform <-> runner)', () => {
           ).rejects.toThrow(
             /local master.*commits.*platform master.*origin\/master.*refreshed/is,
           );
-          await expect(currentBranch(local.absolutePath)).resolves.toBe(
-            'master',
-          );
           await expect(
-            git(['rev-parse', 'HEAD'], local.absolutePath),
+            currentBranch(local.absolutePath, sessionId),
+          ).resolves.toBe('master');
+          await expect(
+            agentGit(sessionId, ['rev-parse', 'HEAD'], local.absolutePath),
           ).resolves.toBe(localCommit);
           await expect(
-            git(['rev-parse', 'refs/heads/master'], local.absolutePath),
+            agentGit(
+              sessionId,
+              ['rev-parse', 'refs/heads/master'],
+              local.absolutePath,
+            ),
           ).resolves.toBe(localCommit);
           await expect(
-            git(
+            agentGit(
+              sessionId,
               ['rev-parse', 'refs/remotes/origin/master'],
               local.absolutePath,
             ),
@@ -352,7 +440,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
             readFile(path.join(local.absolutePath, 'local.txt'), 'utf8'),
           ).resolves.toBe('local-only\n');
           await expect(
-            git(['status', '--short'], local.absolutePath),
+            agentGit(sessionId, ['status', '--short'], local.absolutePath),
           ).resolves.toBe('');
         });
       }
@@ -366,25 +454,39 @@ describe('git bundle round-trip (platform <-> runner)', () => {
           const source = await exportSource(id);
           const sessionId = `${id}-session`;
           const local = await checkoutFromBundle(sessionId, kind, source);
-          const head = await git(['rev-parse', 'HEAD'], local.absolutePath);
+          const head = await agentGit(
+            sessionId,
+            ['rev-parse', 'HEAD'],
+            local.absolutePath,
+          );
           if (state === 'dirty') {
             await writeFile(
               path.join(local.absolutePath, 'README.md'),
               'dirty\n',
             );
           } else if (state === 'feature') {
-            await git(['switch', '-c', 'feature'], local.absolutePath);
+            await agentGit(
+              sessionId,
+              ['switch', '-c', 'feature'],
+              local.absolutePath,
+            );
           } else {
-            await git(['switch', '--detach'], local.absolutePath);
+            await agentGit(
+              sessionId,
+              ['switch', '--detach'],
+              local.absolutePath,
+            );
           }
 
           await expect(
             checkoutFromBundle(sessionId, kind, source),
           ).rejects.toThrow(/already exists.*origin bundle was refreshed/is);
           await expect(
-            git(['rev-parse', 'HEAD'], local.absolutePath),
+            agentGit(sessionId, ['rev-parse', 'HEAD'], local.absolutePath),
           ).resolves.toBe(head);
-          await expect(currentBranch(local.absolutePath)).resolves.toBe(
+          await expect(
+            currentBranch(local.absolutePath, sessionId),
+          ).resolves.toBe(
             state === 'detached'
               ? null
               : state === 'feature'
@@ -395,7 +497,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
             readFile(path.join(local.absolutePath, 'README.md'), 'utf8'),
           ).resolves.toBe(state === 'dirty' ? 'dirty\n' : 'v1\n');
           await expect(
-            git(['status', '--short'], local.absolutePath),
+            agentGit(sessionId, ['status', '--short'], local.absolutePath),
           ).resolves.toBe(state === 'dirty' ? 'M README.md' : '');
         });
       }
@@ -413,7 +515,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       bundleBase64: exported!.toString('base64'),
     });
     await writeFile(path.join(stale.absolutePath, 'README.md'), 'stale\n');
-    await commitAll(stale.absolutePath, 'stale edit');
+    await commitAll(stale.absolutePath, 'stale edit', 'rt-stale');
     const staleBundle = await bundleWorktreeForDeploy(
       'rt-stale',
       'app',
@@ -430,7 +532,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       bundleBase64: exported!.toString('base64'),
     });
     await writeFile(path.join(winner.absolutePath, 'README.md'), 'winner\n');
-    await commitAll(winner.absolutePath, 'winner edit');
+    await commitAll(winner.absolutePath, 'winner edit', 'rt-winner');
     const winnerBundle = await bundleWorktreeForDeploy(
       'rt-winner',
       'app',
@@ -510,7 +612,11 @@ describe('git bundle round-trip (platform <-> runner)', () => {
         Promise.resolve(),
       );
       await writeFile(path.join(fresh.absolutePath, 'a.txt'), 'work\n');
-      const localCommit = await commitAll(fresh.absolutePath, 'local work');
+      const localCommit = await commitAll(
+        fresh.absolutePath,
+        'local work',
+        sessionId,
+      );
       const emptySource: TestSource = {
         id,
         generation: GENERATION,
@@ -522,7 +628,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
         checkoutFromBundle(sessionId, kind, emptySource),
       ).rejects.toThrow(/already exists.*platform master is currently empty/);
       await expect(
-        git(['rev-parse', 'HEAD'], fresh.absolutePath),
+        agentGit(sessionId, ['rev-parse', 'HEAD'], fresh.absolutePath),
       ).resolves.toBe(localCommit);
 
       const replacement = await checkoutFromBundle(

@@ -1,6 +1,8 @@
 /** The run_command shell tool with bounded, throttled live output. */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
+import { readEnvFile } from '../env-file';
+import { ENV_KEY_PATTERN, requireEnvKey } from '../env-keys';
 import { MAX_FILE_CHARS, text, tool } from './shared';
 
 /** Bounded tail of a running command's output kept in memory / per update. */
@@ -22,16 +24,51 @@ function capCommandStream(label: string, value: string): string | null {
   );
 }
 
-export function createCommandTool(env: ExecutionEnv): AgentTool {
+export function createCommandTool(
+  env: ExecutionEnv,
+  sessionId?: string,
+): AgentTool {
   return tool({
     name: 'run_command',
     label: 'Run command',
     description:
-      'Run a shell command in the workspace root. Use for git, ls, grep, etc.',
+      'Run a shell command in the workspace root. Use env_keys to inject only ' +
+      'named values previously saved with request_env.',
     parameters: Type.Object({
       command: Type.String({ description: 'Shell command to run.' }),
+      env_keys: Type.Optional(
+        Type.Array(
+          Type.String({
+            pattern: ENV_KEY_PATTERN,
+            maxLength: 64,
+            description: 'A saved environment key to inject into this command.',
+          }),
+          { maxItems: 10 },
+        ),
+      ),
     }),
     execute: async (_id, params, signal, onUpdate) => {
+      const requestedKeys = params.env_keys ?? [];
+      if (new Set(requestedKeys).size !== requestedKeys.length) {
+        throw new Error('env_keys must be unique.');
+      }
+      for (const key of requestedKeys) requireEnvKey(key);
+
+      let selectedEnv: Record<string, string> | undefined;
+      if (requestedKeys.length > 0) {
+        const stored = await readEnvFile(env.cwd);
+        const missing = requestedKeys.filter((key) => !stored.has(key));
+        if (missing.length > 0) {
+          throw new Error(
+            `Missing environment keys: ${missing.join(', ')}. ` +
+              'Request them with request_env first.',
+          );
+        }
+        selectedEnv = Object.fromEntries(
+          requestedKeys.map((key) => [key, stored.get(key)!]),
+        );
+      }
+
       // Keep only a bounded tail of the live stream and throttle updates so a
       // chatty command can't grow `live` (and every persisted update event)
       // without bound. Past a hard total, throw from the callback:
@@ -60,7 +97,8 @@ export function createCommandTool(env: ExecutionEnv): AgentTool {
       // files, host credential dirs); the env allowlist alone doesn't stop a
       // command from reading those by path.
       const { wrapShellCommand } = await import('../shell-sandbox');
-      const res = await env.exec(wrapShellCommand(params.command), {
+      const res = await env.exec(wrapShellCommand(params.command, sessionId), {
+        ...(selectedEnv ? { env: selectedEnv } : {}),
         timeout: 120,
         abortSignal: signal,
         onStdout: stream,

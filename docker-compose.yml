@@ -73,10 +73,10 @@ services:
   # its own container. It only opens OUTBOUND connections to the platform's
   # internal server (3701) — it has no database credentials, no auth secrets,
   # and no access to the platform's workspace volume. Inside the container the
-  # runner demotes every agent-controlled subprocess (run_command shell,
-  # worktree git) to the unprivileged `hatch-sandbox` user via setpriv, so
-  # model-run commands cannot read AGENT_RUNNER_TOKEN from the runner
-  # process's /proc environment.
+  # runner uses setpriv to run each session's agent-controlled subprocesses
+  # (run_command shell and worktree git) under a distinct numeric UID/GID, so
+  # sessions cannot read one another's files or AGENT_RUNNER_TOKEN from the
+  # root Runner process's /proc environment.
   agent:
     image: ${HATCH_IMAGE:-ghcr.io/imsingee/my-space:master}
     pull_policy: always

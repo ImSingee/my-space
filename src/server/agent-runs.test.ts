@@ -13,12 +13,24 @@ vi.mock('~server/agent-runner/hub', () => {
   return {
     connectedRunnerCount: vi.fn<Hub['connectedRunnerCount']>(() => 1),
     dispatchRun: vi.fn<Hub['dispatchRun']>(async () => 'runner-test'),
+    sendRunEnvAndWait: vi.fn<Hub['sendRunEnvAndWait']>(async () => ({
+      ok: true,
+    })),
   };
 });
 
 const { db, schema } = await import('~/db');
 const hub = await import('~server/agent-runner/hub');
-const { startAgentRun } = await import('./agent-runs');
+const {
+  assignRunToRunner,
+  completeRunFromRunner,
+  finalizeRunWorkspaceAffinity,
+  getActiveAgentRun,
+  getSessionWorkspaceAffinity,
+  ingestRunnerEvent,
+  startAgentRun,
+  submitAgentEnv,
+} = await import('./agent-runs');
 
 const PROVIDER_A_ID = 'provider-a';
 const MODEL_A_ID = 'model-a';
@@ -29,6 +41,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   vi.mocked(hub.connectedRunnerCount).mockReturnValue(1);
   vi.mocked(hub.dispatchRun).mockResolvedValue('runner-test');
+  vi.mocked(hub.sendRunEnvAndWait).mockResolvedValue({ ok: true });
   await db.delete(schema.agentRunEvents);
   await db.delete(schema.agentRuns);
   await db.delete(schema.agentAttachments);
@@ -74,6 +87,284 @@ async function seedSession(id: string, messages: JsonValue[]) {
     .returning({ updatedAt: schema.agentSessions.updatedAt });
   return session.updatedAt.toISOString();
 }
+
+async function seedEnvRun(runId = 'run-secret') {
+  await seedAvailableModels();
+  await seedSession('session-secret', []);
+  await db.insert(schema.agentRuns).values({
+    id: runId,
+    sessionId: 'session-secret',
+    providerId: PROVIDER_A_ID,
+    modelId: MODEL_A_ID,
+    status: 'running',
+    input: { userText: 'Deploy the app' },
+    runnerId: 'runner-test',
+    leaseExpiresAt: new Date(Date.now() + 60_000),
+  });
+}
+
+describe('session workspace affinity', () => {
+  it('finalizes an unowned session only after the assigned runner accepts', async () => {
+    await seedEnvRun('run-affinity');
+    await db
+      .update(schema.agentRuns)
+      .set({ runnerId: null })
+      .where(eq(schema.agentRuns.id, 'run-affinity'));
+
+    await expect(
+      getSessionWorkspaceAffinity('session-secret'),
+    ).resolves.toEqual({ state: 'uninitialized', runnerId: null });
+    await assignRunToRunner('run-affinity', 'session-secret', 'runner-owner');
+    await expect(
+      getSessionWorkspaceAffinity('session-secret'),
+    ).resolves.toEqual({ state: 'uninitialized', runnerId: null });
+    await expect(
+      finalizeRunWorkspaceAffinity(
+        'run-affinity',
+        'runner-owner',
+        'session-secret',
+      ),
+    ).resolves.toBe('session-secret');
+    await expect(
+      getSessionWorkspaceAffinity('session-secret'),
+    ).resolves.toEqual({ state: 'claimed', runnerId: 'runner-owner' });
+    await expect(
+      assignRunToRunner('run-affinity', 'session-secret', 'runner-different'),
+    ).rejects.toThrow('belongs to another Runner');
+
+    const run = await db.query.agentRuns.findFirst({
+      where: (row, { eq }) => eq(row.id, 'run-affinity'),
+    });
+    expect(run?.runnerId).toBe('runner-owner');
+  });
+
+  it('does not pin a session when a provisional dispatch never accepts', async () => {
+    await seedEnvRun('run-provisional');
+    await db
+      .update(schema.agentRuns)
+      .set({ runnerId: null })
+      .where(eq(schema.agentRuns.id, 'run-provisional'));
+
+    await assignRunToRunner(
+      'run-provisional',
+      'session-secret',
+      'runner-owner',
+    );
+    await db
+      .update(schema.agentRuns)
+      .set({ status: 'failed' })
+      .where(eq(schema.agentRuns.id, 'run-provisional'));
+
+    await expect(
+      getSessionWorkspaceAffinity('session-secret'),
+    ).resolves.toEqual({ state: 'uninitialized', runnerId: null });
+  });
+
+  it('finalizes affinity when a finish report races terminal cancellation', async () => {
+    await seedEnvRun('run-cancelled-before-finish');
+    await db
+      .update(schema.agentRuns)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(eq(schema.agentRuns.id, 'run-cancelled-before-finish'));
+
+    await expect(
+      completeRunFromRunner('runner-test', {
+        runId: 'run-cancelled-before-finish',
+        status: 'cancelled',
+        messages: [],
+      }),
+    ).resolves.toBe('session-secret');
+    await expect(
+      getSessionWorkspaceAffinity('session-secret'),
+    ).resolves.toEqual({ state: 'claimed', runnerId: 'runner-test' });
+  });
+});
+
+describe('environment request delivery', () => {
+  it('persists only safe request metadata and clears it on matching storage', async () => {
+    const canary = 'plaintext-canary-must-not-be-persisted';
+    await seedEnvRun();
+
+    await expect(
+      ingestRunnerEvent('runner-test', {
+        runId: 'run-secret',
+        runnerSeq: 1,
+        event: {
+          type: 'env_request',
+          requestId: 'secret-1',
+          reason: 'Deploy to the service',
+          variables: [
+            {
+              key: 'SERVICE_TOKEN',
+              description: 'Service API token',
+              secret: false,
+            },
+          ],
+        },
+      }),
+    ).resolves.toEqual({ status: 'ok', sessionId: 'session-secret' });
+
+    await expect(
+      getSessionWorkspaceAffinity('session-secret'),
+    ).resolves.toEqual({ state: 'claimed', runnerId: 'runner-test' });
+
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      id: 'run-secret',
+      status: 'blocked',
+      pendingEnvRequest: {
+        requestId: 'secret-1',
+        reason: 'Deploy to the service',
+        variables: [
+          {
+            key: 'SERVICE_TOKEN',
+            description: 'Service API token',
+            secret: false,
+          },
+        ],
+      },
+    });
+
+    await submitAgentEnv('run-secret', 'secret-1', [
+      { key: 'SERVICE_TOKEN', value: canary, secret: true },
+    ]);
+    expect(hub.sendRunEnvAndWait).toHaveBeenCalledWith(
+      'runner-test',
+      'run-secret',
+      'secret-1',
+      [{ key: 'SERVICE_TOKEN', value: canary, secret: true }],
+    );
+
+    // Delivery acknowledgement is transient; only the Runner's safe event
+    // advances the persisted run state.
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      status: 'blocked',
+      pendingEnvRequest: { requestId: 'secret-1' },
+    });
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-secret',
+      runnerSeq: 2,
+      event: {
+        type: 'env_stored',
+        requestId: 'secret-1',
+        variables: [{ key: 'SERVICE_TOKEN', secret: true }],
+      },
+    });
+
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      status: 'running',
+      pendingEnvRequest: null,
+    });
+    const persisted = {
+      runs: await db.query.agentRuns.findMany(),
+      events: await db.query.agentRunEvents.findMany(),
+      sessions: await db.query.agentSessions.findMany(),
+    };
+    expect(JSON.stringify(persisted)).not.toContain(canary);
+    expect(persisted.events.map((event) => event.payload)).toEqual([
+      {
+        type: 'env_request',
+        requestId: 'secret-1',
+        reason: 'Deploy to the service',
+        variables: [
+          {
+            key: 'SERVICE_TOKEN',
+            description: 'Service API token',
+            secret: false,
+          },
+        ],
+      },
+      {
+        type: 'env_stored',
+        requestId: 'secret-1',
+        variables: [{ key: 'SERVICE_TOKEN', secret: true }],
+      },
+    ]);
+  });
+
+  it('does not let stale acknowledgements clear a newer request', async () => {
+    await seedEnvRun();
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-secret',
+      runnerSeq: 1,
+      event: {
+        type: 'env_request',
+        requestId: 'secret-current',
+        reason: 'Need credentials',
+        variables: [{ key: 'TOKEN', description: 'Token', secret: true }],
+      },
+    });
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-secret',
+      runnerSeq: 2,
+      event: {
+        type: 'env_stored',
+        requestId: 'secret-old',
+        variables: [{ key: 'TOKEN', secret: true }],
+      },
+    });
+
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      status: 'blocked',
+      pendingEnvRequest: { requestId: 'secret-current' },
+    });
+  });
+
+  it('rejects conflicting keys and maps transient delivery failures', async () => {
+    await seedEnvRun();
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-secret',
+      runnerSeq: 1,
+      event: {
+        type: 'env_request',
+        requestId: 'secret-1',
+        reason: 'Need two credentials',
+        variables: [
+          { key: 'TOKEN', description: 'Token', secret: true },
+          { key: 'ACCOUNT_ID', description: 'Account id', secret: false },
+        ],
+      },
+    });
+
+    await expect(
+      submitAgentEnv('run-secret', 'secret-1', [
+        { key: 'TOKEN', value: 'value', secret: true },
+      ]),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(hub.sendRunEnvAndWait).not.toHaveBeenCalled();
+
+    vi.mocked(hub.sendRunEnvAndWait).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'runner_timeout',
+    });
+    await expect(
+      submitAgentEnv('run-secret', 'secret-1', [
+        { key: 'ACCOUNT_ID', value: 'account', secret: true },
+        { key: 'TOKEN', value: 'value', secret: false },
+      ]),
+    ).rejects.toMatchObject({
+      status: 504,
+      message: 'Agent Runner did not confirm environment storage.',
+    });
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      status: 'blocked',
+      pendingEnvRequest: { requestId: 'secret-1' },
+    });
+
+    vi.mocked(hub.sendRunEnvAndWait).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'write_failed',
+    });
+    await expect(
+      submitAgentEnv('run-secret', 'secret-1', [
+        { key: 'TOKEN', value: 'value', secret: false },
+        { key: 'ACCOUNT_ID', value: 'account', secret: true },
+      ]),
+    ).rejects.toMatchObject({
+      status: 502,
+      message: 'Agent Runner could not store the environment.',
+    });
+  });
+});
 
 describe('startAgentRun retry', () => {
   it('replaces the failed tail and retries it with the requested latest model', async () => {

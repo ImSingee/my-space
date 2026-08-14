@@ -56,6 +56,7 @@ import { Route as ApiAppAppIdKvSplatRouteImport } from './routes/api/app/$appId/
 import { Route as ApiAppAppIdDataSplatRouteImport } from './routes/api/app/$appId/data/$'
 import { Route as ApiAppAppIdAppSplatRouteImport } from './routes/api/app/$appId/app/$'
 import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
+import { Route as ApiAgentRunsRunIdEnvRouteImport } from './routes/api/agent/runs/$runId/env'
 import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
 import { Route as ApiAgentRunsRunIdAnswerRouteImport } from './routes/api/agent/runs/$runId/answer'
 import { Route as AppWorkflowsWorkflowIdExecutionsRunIdRouteImport } from './routes/_app/workflows/$workflowId/executions/$runId'
@@ -305,6 +306,11 @@ const ApiAgentRunsRunIdEventsRoute = ApiAgentRunsRunIdEventsRouteImport.update({
   path: '/$runId/events',
   getParentRoute: () => ApiAgentRunsRoute,
 } as any)
+const ApiAgentRunsRunIdEnvRoute = ApiAgentRunsRunIdEnvRouteImport.update({
+  id: '/$runId/env',
+  path: '/$runId/env',
+  getParentRoute: () => ApiAgentRunsRoute,
+} as any)
 const ApiAgentRunsRunIdCancelRoute = ApiAgentRunsRunIdCancelRouteImport.update({
   id: '/$runId/cancel',
   path: '/$runId/cancel',
@@ -364,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId/executions/$runId': typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
+  '/api/agent/runs/$runId/env': typeof ApiAgentRunsRunIdEnvRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/app/$appId/app/$': typeof ApiAppAppIdAppSplatRoute
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
@@ -414,6 +421,7 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId/executions/$runId': typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
+  '/api/agent/runs/$runId/env': typeof ApiAgentRunsRunIdEnvRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/app/$appId/app/$': typeof ApiAppAppIdAppSplatRoute
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
@@ -468,6 +476,7 @@ export interface FileRoutesById {
   '/_app/workflows/$workflowId/executions/$runId': typeof AppWorkflowsWorkflowIdExecutionsRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
+  '/api/agent/runs/$runId/env': typeof ApiAgentRunsRunIdEnvRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
   '/api/app/$appId/app/$': typeof ApiAppAppIdAppSplatRoute
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
@@ -522,6 +531,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId/executions/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
+    | '/api/agent/runs/$runId/env'
     | '/api/agent/runs/$runId/events'
     | '/api/app/$appId/app/$'
     | '/api/app/$appId/data/$'
@@ -572,6 +582,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId/executions/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
+    | '/api/agent/runs/$runId/env'
     | '/api/agent/runs/$runId/events'
     | '/api/app/$appId/app/$'
     | '/api/app/$appId/data/$'
@@ -625,6 +636,7 @@ export interface FileRouteTypes {
     | '/_app/workflows/$workflowId/executions/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
+    | '/api/agent/runs/$runId/env'
     | '/api/agent/runs/$runId/events'
     | '/api/app/$appId/app/$'
     | '/api/app/$appId/data/$'
@@ -1003,6 +1015,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAgentRunsRunIdEventsRouteImport
       parentRoute: typeof ApiAgentRunsRoute
     }
+    '/api/agent/runs/$runId/env': {
+      id: '/api/agent/runs/$runId/env'
+      path: '/$runId/env'
+      fullPath: '/api/agent/runs/$runId/env'
+      preLoaderRoute: typeof ApiAgentRunsRunIdEnvRouteImport
+      parentRoute: typeof ApiAgentRunsRoute
+    }
     '/api/agent/runs/$runId/cancel': {
       id: '/api/agent/runs/$runId/cancel'
       path: '/$runId/cancel'
@@ -1109,12 +1128,14 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 interface ApiAgentRunsRouteChildren {
   ApiAgentRunsRunIdAnswerRoute: typeof ApiAgentRunsRunIdAnswerRoute
   ApiAgentRunsRunIdCancelRoute: typeof ApiAgentRunsRunIdCancelRoute
+  ApiAgentRunsRunIdEnvRoute: typeof ApiAgentRunsRunIdEnvRoute
   ApiAgentRunsRunIdEventsRoute: typeof ApiAgentRunsRunIdEventsRoute
 }
 
 const ApiAgentRunsRouteChildren: ApiAgentRunsRouteChildren = {
   ApiAgentRunsRunIdAnswerRoute: ApiAgentRunsRunIdAnswerRoute,
   ApiAgentRunsRunIdCancelRoute: ApiAgentRunsRunIdCancelRoute,
+  ApiAgentRunsRunIdEnvRoute: ApiAgentRunsRunIdEnvRoute,
   ApiAgentRunsRunIdEventsRoute: ApiAgentRunsRunIdEventsRoute,
 }
 

@@ -9,6 +9,7 @@ import { useAgentStream, type StreamState } from './use-agent-stream';
 type TerminalCallback = (errorMessage?: string) => boolean | Promise<boolean>;
 
 const noop = () => {};
+const noopEnv = async () => false;
 
 function errorResponse(message: string): Response {
   const envelope = JSON.stringify({
@@ -54,7 +55,7 @@ function StreamHarness({ onTerminal }: { onTerminal: TerminalCallback }) {
         {state.runId ?? 'none'}:{state.active ? 'active' : 'idle'}
       </div>
       {state.active || state.terminalError ? (
-        <StreamingBubble state={state} onAnswer={noop} />
+        <StreamingBubble state={state} onAnswer={noop} onSubmitEnv={noopEnv} />
       ) : null}
     </MantineProvider>
   );
@@ -76,7 +77,11 @@ test('keeps partial output and announces a live terminal error', async () => {
 
   const screen = await render(
     <MantineProvider>
-      <StreamingBubble state={state} onAnswer={onAnswer} />
+      <StreamingBubble
+        state={state}
+        onAnswer={onAnswer}
+        onSubmitEnv={noopEnv}
+      />
     </MantineProvider>,
   );
 
@@ -133,4 +138,50 @@ test('an old terminal refresh cannot clear a newly connected run', async () => {
     .element(screen.getByTestId('stream-state'))
     .toHaveTextContent('run-2:active');
   await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+});
+
+test('does not carry an env value into a later run with the same request id', async () => {
+  const envRequest = {
+    requestId: 'request-1',
+    reason: 'Connect to GitHub.',
+    variables: [
+      {
+        key: 'GITHUB_TOKEN',
+        description: 'Repository access token',
+        secret: true,
+      },
+    ],
+  };
+  const state = (runId: string): StreamState => ({
+    active: true,
+    runId,
+    blocks: [],
+    thinkingActive: false,
+    pendingEnvRequest: envRequest,
+  });
+  const screen = await render(
+    <MantineProvider>
+      <StreamingBubble
+        state={state('run-1')}
+        onAnswer={noop}
+        onSubmitEnv={noopEnv}
+      />
+    </MantineProvider>,
+  );
+  const input = screen.getByLabelText(/^GITHUB_TOKEN(?: \*)?$/);
+  await input.fill('first-run-value');
+
+  await screen.rerender(
+    <MantineProvider>
+      <StreamingBubble
+        state={state('run-2')}
+        onAnswer={noop}
+        onSubmitEnv={noopEnv}
+      />
+    </MantineProvider>,
+  );
+
+  await expect
+    .element(screen.getByLabelText(/^GITHUB_TOKEN(?: \*)?$/))
+    .toHaveValue('');
 });

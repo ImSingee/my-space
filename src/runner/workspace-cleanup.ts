@@ -9,6 +9,7 @@ import {
 } from '~agent/local-sources';
 import {
   AGENTS_DIR,
+  agentHomeDir,
   agentSessionDir,
   agentWorkDir,
   isSafeEntityId,
@@ -38,7 +39,10 @@ export async function removeSessionWorkspace(sessionId: string): Promise<void> {
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('Session workspace escapes the Agent data root.');
   }
-  await rm(target, { recursive: true, force: true });
+  await Promise.all([
+    rm(target, { recursive: true, force: true }),
+    rm(agentHomeDir(sessionId), { recursive: true, force: true }),
+  ]);
 }
 
 async function defaultWorkspaceIds(

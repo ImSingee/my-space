@@ -116,7 +116,7 @@ describe('download_attachment', () => {
 
     await expect(
       writeResolvedAgentWorkspaceFile(destination, Uint8Array.from([1, 2, 3])),
-    ).rejects.toThrow(/escaped the Agent workdir/);
+    ).rejects.toThrow(/File operation/);
     await expect(
       readFile(path.join(outside, 'escaped.bin')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
@@ -134,33 +134,32 @@ describe('download_attachment', () => {
       sessionId,
       'rename-race/escaped.bin',
     );
+    let movedDirectory = false;
     const outcome = writeResolvedAgentWorkspaceFile(
       destination,
-      new Uint8Array(25 * 1024 * 1024),
+      Uint8Array.from([1, 2, 3]),
+      undefined,
+      async () => {
+        const names = await readdir(cwd);
+        expect(names.some((name) => name.startsWith('.hatch-write-'))).toBe(
+          true,
+        );
+        await rename(parent, moved);
+        await symlink(moved, parent);
+        movedDirectory = true;
+      },
     ).then(
       () => null,
       (error: unknown) => error,
     );
 
-    let movedDirectory = false;
-    for (let attempt = 0; attempt < 10_000; attempt += 1) {
-      const names = await readdir(cwd).catch(() => []);
-      if (names.some((name) => name.startsWith('.hatch-download-'))) {
-        await rename(parent, moved);
-        await symlink(moved, parent);
-        movedDirectory = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-
-    expect(movedDirectory).toBe(true);
     await expect(outcome).resolves.toBeInstanceOf(Error);
+    expect(movedDirectory).toBe(true);
     await expect(
       readFile(path.join(moved, 'escaped.bin')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     expect(
-      (await readdir(cwd)).some((name) => name.startsWith('.hatch-download-')),
+      (await readdir(cwd)).some((name) => name.startsWith('.hatch-write-')),
     ).toBe(false);
   });
 });
