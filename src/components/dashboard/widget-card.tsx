@@ -300,9 +300,10 @@ export function WidgetCard({
             <Tooltip label="Remove from dashboard" withArrow>
               <ActionIcon
                 variant="subtle"
-                color="red"
+                color="gray"
                 size="sm"
                 aria-label="Remove widget"
+                className={classes.removeAction}
                 disabled={removeDisabled}
                 onClick={onRemove}
               >

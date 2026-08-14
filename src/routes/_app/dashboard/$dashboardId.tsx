@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Center,
+  Divider,
   Group,
   Loader,
   Menu,
@@ -25,7 +26,6 @@ import {
   IconAlertCircle,
   IconCheck,
   IconChevronDown,
-  IconPencil,
   IconRefresh,
 } from '@tabler/icons-react';
 import { Suspense, useEffect, useState } from 'react';
@@ -208,28 +208,9 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
       title={current?.name ?? 'Dashboard'}
       description={description}
       size={editing ? 1360 : 1180}
+      hideHeader={editing}
       actions={
-        editing ? (
-          <>
-            <Button
-              type="button"
-              variant="default"
-              disabled={editor.cancelDisabled}
-              onClick={cancelEditing}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              leftSection={<IconCheck size={16} stroke={1.9} />}
-              loading={editor.status.state === 'saving'}
-              disabled={!editor.dirty || editor.locked}
-              onClick={() => void saveEditing()}
-            >
-              Save changes
-            </Button>
-          </>
-        ) : (
+        editing ? undefined : (
           <>
             <Tooltip label="Refresh all widgets" withArrow>
               <ActionIcon
@@ -251,28 +232,62 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
     >
       <Box>
         {editing ? (
-          <Box className={classes.editorToolbar}>
-            <Group justify="space-between" gap="md" wrap="wrap">
-              <Group gap="md" wrap="wrap">
-                <DashboardLayoutPreview
-                  value={previewBreakpoint}
-                  onChange={setPreviewBreakpoint}
-                />
-                <DraftStatus
-                  status={editor.status}
-                  dirty={editor.dirty}
-                  onCheckStatus={() => void checkSaveStatus()}
-                />
+          <Box
+            className={classes.editorToolbar}
+            role="toolbar"
+            aria-label="Dashboard editor"
+          >
+            <Box className={classes.editorToolbarScroll}>
+              <Group
+                justify="space-between"
+                gap="md"
+                wrap="nowrap"
+                className={classes.editorToolbarRow}
+              >
+                <Group gap="sm" wrap="nowrap">
+                  <DashboardLayoutPreview
+                    value={previewBreakpoint}
+                    onChange={setPreviewBreakpoint}
+                  />
+                  <Divider
+                    orientation="vertical"
+                    className={classes.editorDivider}
+                  />
+                  <AddWidgetPicker
+                    available={available}
+                    placed={editor.draft.widgets}
+                    opened={addWidgetOpened}
+                    onOpenedChange={setAddWidgetOpened}
+                    onAdd={editor.addWidget}
+                    disabled={editor.locked}
+                  />
+                </Group>
+                <Group gap="sm" wrap="nowrap">
+                  <DraftStatus
+                    status={editor.status}
+                    onCheckStatus={() => void checkSaveStatus()}
+                  />
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    color="gray"
+                    disabled={editor.cancelDisabled}
+                    onClick={cancelEditing}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    leftSection={<IconCheck size={16} stroke={1.9} />}
+                    loading={editor.status.state === 'saving'}
+                    disabled={!editor.dirty || editor.locked}
+                    onClick={() => void saveEditing()}
+                  >
+                    Save changes
+                  </Button>
+                </Group>
               </Group>
-              <AddWidgetPicker
-                available={available}
-                placed={editor.draft.widgets}
-                opened={addWidgetOpened}
-                onOpenedChange={setAddWidgetOpened}
-                onAdd={editor.addWidget}
-                disabled={editor.locked}
-              />
-            </Group>
+            </Box>
           </Box>
         ) : null}
         <DashboardGridStage
@@ -288,11 +303,9 @@ function DashboardWorkspace({ dashboardId }: { dashboardId: string }) {
 
 function DraftStatus({
   status,
-  dirty,
   onCheckStatus,
 }: {
   status: DashboardDraftStatus;
-  dirty: boolean;
   onCheckStatus: () => void;
 }) {
   if (
@@ -301,7 +314,7 @@ function DraftStatus({
     status.state === 'unknown'
   ) {
     return (
-      <Group gap="xs" className={classes.draftError} wrap="wrap">
+      <Group gap="xs" className={classes.draftError} wrap="nowrap">
         <IconAlertCircle size={16} stroke={1.8} />
         <Text size="sm" fw={500}>
           {status.message}
@@ -321,27 +334,18 @@ function DraftStatus({
     );
   }
 
-  const busy = status.state === 'saving' || status.state === 'checking';
-  return (
-    <Group gap={6} className={classes.draftStatus} aria-live="polite">
-      {busy ? (
+  if (status.state === 'checking') {
+    return (
+      <Group gap={6} className={classes.draftStatus} aria-live="polite">
         <Loader size={14} />
-      ) : dirty ? (
-        <IconPencil size={15} stroke={1.8} />
-      ) : (
-        <IconCheck size={15} stroke={2} />
-      )}
-      <Text size="sm" c="dimmed">
-        {status.state === 'saving'
-          ? 'Saving changes'
-          : status.state === 'checking'
-            ? 'Checking save status'
-            : dirty
-              ? 'Unsaved changes'
-              : 'No changes'}
-      </Text>
-    </Group>
-  );
+        <Text size="sm" fw={500}>
+          Checking save status
+        </Text>
+      </Group>
+    );
+  }
+
+  return null;
 }
 
 function AutoRefreshMenu({ dashboard }: { dashboard: Dashboard }) {

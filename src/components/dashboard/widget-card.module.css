@@ -5,7 +5,29 @@
   overflow: hidden;
   transition:
     border-color var(--transition-fast),
-    background-color var(--transition-fast);
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.card[data-editing] {
+  background: var(--mantine-color-body);
+}
+
+.card[data-editing]:hover {
+  border-color: var(--mantine-color-secondary-3);
+}
+
+/* Lift the card while it is actively dragged or resized. */
+:global(.react-grid-item.react-draggable-dragging) .card,
+:global(.react-grid-item.react-grid-item--resizing) .card {
+  border-color: var(--mantine-color-secondary-4);
+  box-shadow: 0 12px 32px -12px rgba(28, 25, 23, 0.28);
+}
+
+/* Quiet at rest; the destructive tint appears on intent. */
+.removeAction:not(:disabled):hover {
+  color: var(--mantine-color-red-6);
+  background-color: var(--mantine-color-red-0);
 }
 
 .dragHeader,

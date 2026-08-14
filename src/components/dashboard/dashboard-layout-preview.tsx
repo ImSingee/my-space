@@ -40,6 +40,7 @@ export function DashboardLayoutPreview({
     <SegmentedControl
       value={value}
       onChange={(next) => onChange(next as DashboardBreakpoint)}
+      withItemsBorders={false}
       data={PREVIEW_OPTIONS.map((option) => ({
         value: option.value,
         label: (

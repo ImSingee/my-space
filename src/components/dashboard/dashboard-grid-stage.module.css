@@ -20,10 +20,9 @@
 .canvas {
   min-width: 0;
   padding: var(--mantine-spacing-md);
-  border: 1px solid var(--mantine-color-ember-3);
-  border-radius: var(--mantine-radius-sm);
-  background: transparent;
-  box-shadow: var(--mantine-shadow-sm);
+  border: 1px solid var(--mantine-color-stone-2);
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-color-body);
   transform-origin: top left;
 }
 
