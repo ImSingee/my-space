@@ -266,7 +266,11 @@ function defaultValue(field: DataField): JsonValue | undefined {
 }
 
 function parameterExpression(field: DataField | null, index: number): string {
-  if (field?.kind === 'json') return `$${index}::jsonb`;
+  if (field?.kind === 'json') {
+    // parameterValue produces JSON text. Binding it as text prevents postgres.js
+    // from applying its jsonb serializer and encoding that text a second time.
+    return `$${index}::text::jsonb`;
+  }
   if (field?.kind === 'datetime') return `$${index}::timestamptz`;
   return `$${index}`;
 }
