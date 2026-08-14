@@ -56,6 +56,20 @@ describe('tool header details', () => {
     });
   });
 
+  it('normalizes list roots without inventing a path for invalid input', () => {
+    expect(toolDetail('list_files', {})).toEqual({
+      value: '.',
+      ellipsis: 'start',
+    });
+    expect(toolDetail('list_files', { path: '' })).toEqual({
+      value: '.',
+      ellipsis: 'start',
+    });
+    expect(toolDetail('list_files', { path: null })).toBeUndefined();
+    expect(toolDetail('list_files', null)).toBeUndefined();
+    expect(toolDetail('list_files', [])).toBeUndefined();
+  });
+
   it('keeps non-path details compact and preserves their beginning', () => {
     const command = `pnpm exec ${'command-part-'.repeat(8)}`;
 
@@ -103,6 +117,21 @@ describe('toolInputDetails', () => {
     expect(toolInputDetails('edit_file', { path: 'src/app.ts' })).toEqual([
       { label: 'File path', value: 'src/app.ts' },
     ]);
+  });
+
+  it('normalizes valid listed directory paths without masking invalid ones', () => {
+    expect(toolInputDetails('list_files', {})).toEqual([
+      { label: 'File path', value: '.' },
+    ]);
+    expect(toolInputDetails('list_files', { path: '' })).toEqual([
+      { label: 'File path', value: '.' },
+    ]);
+    expect(toolInputDetails('list_files', { path: 'src/components' })).toEqual([
+      { label: 'File path', value: 'src/components' },
+    ]);
+    expect(toolInputDetails('list_files', { path: null })).toBeUndefined();
+    expect(toolInputDetails('list_files', null)).toBeUndefined();
+    expect(toolInputDetails('list_files', [])).toBeUndefined();
   });
 
   it('omits a read file path when it is missing or invalid', () => {

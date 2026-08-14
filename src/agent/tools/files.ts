@@ -4,6 +4,7 @@ import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
 import { isAppManagedPathSegment } from '~/app-managed-path';
 import { isEditFileDetails } from '../edit-file-details';
+import { type FilePathDetails, isFilePathDetails } from '../file-path-details';
 import { isWriteFileDetails } from '../write-file-details';
 import { generateEditFileDetails } from './edit-diff';
 import { MAX_FILE_CHARS, text, tool, unwrap } from './shared';
@@ -12,12 +13,47 @@ function isInsidePath(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return (
     relative === '' ||
-    (!relative.startsWith('..') && !path.isAbsolute(relative))
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
   );
 }
 
 function toWorkspacePath(root: string, target: string): string {
   return path.relative(root, target).split(path.sep).join('/');
+}
+
+function toRelativeDisplayPath(root: string, target: string): string {
+  return toWorkspacePath(root, target) || '.';
+}
+
+function filePathDetails(root: string, absolutePath: string): FilePathDetails {
+  return {
+    relativePath: toRelativeDisplayPath(root, absolutePath),
+    absolutePath,
+  };
+}
+
+function inputFilePathDetails(
+  env: ExecutionEnv,
+  inputPath: unknown,
+  readOnlyRoots: readonly string[] = [],
+): FilePathDetails | undefined {
+  if (typeof inputPath !== 'string') return undefined;
+  const workspaceRoot = path.resolve(env.cwd);
+  const absolutePath = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(workspaceRoot, inputPath);
+  const roots = [
+    workspaceRoot,
+    ...readOnlyRoots.map((root) =>
+      path.isAbsolute(root)
+        ? path.resolve(root)
+        : path.resolve(workspaceRoot, root),
+    ),
+  ];
+  const containingRoot = roots.find((root) => isInsidePath(root, absolutePath));
+  return filePathDetails(containingRoot ?? workspaceRoot, absolutePath);
 }
 
 function assertNotPlatformManagedPath(
@@ -101,6 +137,7 @@ async function canonicalWorkspaceRoot(
 type ResolvedPath = {
   canonicalPath: string;
   displayPath: string;
+  relativePath: string;
 };
 
 async function canonicalReadOnlyRoots(
@@ -158,6 +195,7 @@ async function resolveReadablePath(
   }
   return {
     canonicalPath,
+    relativePath: toRelativeDisplayPath(containingRoot, canonicalPath),
     displayPath:
       containingRoot === workspaceRoot
         ? toWorkspacePath(workspaceRoot, canonicalPath)
@@ -194,7 +232,11 @@ async function resolveWritableTextFile(
   env: ExecutionEnv,
   inputPath: string,
   signal?: AbortSignal,
-): Promise<{ workspacePath: string }> {
+): Promise<{
+  workspacePath: string;
+  canonicalPath: string;
+  relativePath: string;
+}> {
   const root = await canonicalWorkspaceRoot(env, signal);
   const addressedRoot = unwrap(await env.absolutePath('.', signal));
   const absolutePath = unwrap(await env.absolutePath(inputPath, signal));
@@ -208,7 +250,7 @@ async function resolveWritableTextFile(
   if (exists) {
     const existing = await resolveWorkspaceTextFile(env, absolutePath, signal);
     assertNotPlatformManagedPath(root, existing.canonicalPath);
-    return { workspacePath: existing.workspacePath };
+    return { ...existing, relativePath: existing.workspacePath };
   }
 
   let parent = path.dirname(absolutePath);
@@ -234,10 +276,18 @@ async function resolveWritableTextFile(
 
   if (isInsidePath(root, absolutePath)) {
     assertNotPlatformManagedPath(root, absolutePath);
-    return { workspacePath: toWorkspacePath(root, absolutePath) };
+    return {
+      workspacePath: toWorkspacePath(root, absolutePath),
+      canonicalPath: canonicalTarget,
+      relativePath: toWorkspacePath(root, canonicalTarget),
+    };
   }
   if (isInsidePath(addressedRoot, absolutePath)) {
-    return { workspacePath: toWorkspacePath(addressedRoot, absolutePath) };
+    return {
+      workspacePath: toWorkspacePath(addressedRoot, absolutePath),
+      canonicalPath: canonicalTarget,
+      relativePath: toWorkspacePath(root, canonicalTarget),
+    };
   }
   throw new Error(`${inputPath} is outside the workspace.`);
 }
@@ -262,6 +312,14 @@ export function createFileTools(
         Type.String({ description: 'Directory path. Defaults to ".".' }),
       ),
     }),
+    selectStreamStartDetails: (args) =>
+      inputFilePathDetails(
+        env,
+        Object.hasOwn(args, 'path') ? args.path : '.',
+        readOnlyRoots,
+      ),
+    selectStreamDetails: (details) =>
+      isFilePathDetails(details) ? details : undefined,
     execute: async (_id, params, signal) => {
       const resolved = await resolveReadablePath(
         env,
@@ -277,6 +335,8 @@ export function createFileTools(
       return text(lines.join('\n') || '(empty)', {
         count: entries.length,
         path: resolved.displayPath,
+        relativePath: resolved.relativePath,
+        absolutePath: resolved.canonicalPath,
       });
     },
   });
@@ -289,6 +349,10 @@ export function createFileTools(
       'under a read-only resource root referenced by the system prompt. When ' +
       'the result is truncated, call again with the returned offset.',
     executionMode: 'sequential',
+    selectStreamStartDetails: (args) =>
+      inputFilePathDetails(env, args.path, readOnlyRoots),
+    selectStreamDetails: (details) =>
+      isFilePathDetails(details) ? details : undefined,
     parameters: Type.Object({
       path: Type.String({ description: 'File path to read.' }),
       offset: Type.Optional(
@@ -329,6 +393,8 @@ export function createFileTools(
         : page;
       return text(output, {
         path: resolved.displayPath,
+        relativePath: resolved.relativePath,
+        absolutePath: resolved.canonicalPath,
         offset,
         limit,
         truncated,
@@ -343,8 +409,11 @@ export function createFileTools(
     description:
       'Create or overwrite a text file (parent directories are created).',
     executionMode: 'sequential',
+    selectStreamStartDetails: (args) => inputFilePathDetails(env, args.path),
     selectStreamDetails: (details) =>
-      isWriteFileDetails(details) ? { path: details.path } : undefined,
+      isWriteFileDetails(details) || isFilePathDetails(details)
+        ? details
+        : undefined,
     parameters: Type.Object({
       path: Type.String({ description: 'File path to write.' }),
       content: Type.String({ description: 'Full file contents.' }),
@@ -356,6 +425,8 @@ export function createFileTools(
         `Wrote ${writable.workspacePath} (${params.content.length} chars).`,
         {
           path: writable.workspacePath,
+          relativePath: writable.relativePath,
+          absolutePath: writable.canonicalPath,
         },
       );
     },
@@ -368,8 +439,11 @@ export function createFileTools(
       'Edit an existing UTF-8 text file by replacing an exact string. ' +
       'Read the file first so old_string can be copied exactly.',
     executionMode: 'sequential',
+    selectStreamStartDetails: (args) => inputFilePathDetails(env, args.path),
     selectStreamDetails: (details) =>
-      isEditFileDetails(details) ? details : undefined,
+      isEditFileDetails(details) || isFilePathDetails(details)
+        ? details
+        : undefined,
     parameters: Type.Object({
       path: Type.String({ description: 'File path to edit.' }),
       old_string: Type.String({
@@ -399,6 +473,8 @@ export function createFileTools(
       unwrap(await env.writeFile(resolved.canonicalPath, updated, signal));
       const details = generateEditFileDetails({
         path: resolved.workspacePath,
+        relativePath: resolved.workspacePath,
+        absolutePath: resolved.canonicalPath,
         replacements: count,
         oldContent: content,
         newContent: updated,

@@ -9,12 +9,14 @@ import {
 } from '@tabler/icons-react';
 import { type ReactNode, type Ref, useEffect, useId, useRef } from 'react';
 import { isEditFileDetails } from '~agent/edit-file-details';
-import { isWriteFileDetails } from '~agent/write-file-details';
+import { isFilePathDetails, isFilePathTool } from '~agent/file-path-details';
 import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
 import {
+  listFilesPathArgument,
   type ToolDetail,
   type ToolInputDetail,
+  toolArgumentsRecord,
   toolDetail,
   toolInputDetails,
   toolLabel,
@@ -33,44 +35,108 @@ function successfulEditDetails(name: string, result?: ToolResult) {
     : undefined;
 }
 
-function successfulWriteDetails(name: string, result?: ToolResult) {
-  return name === 'write_file' &&
-    result?.isError !== true &&
-    isWriteFileDetails(result?.details)
-    ? result.details
+function detailsRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function legacyResultPath(name: string, details: unknown): string | undefined {
+  const value = detailsRecord(details)?.path;
+  if (typeof value !== 'string') return undefined;
+  return value === '' && name === 'list_files' ? '.' : value || undefined;
+}
+
+function resolvedToolDetail(
+  name: string,
+  args: unknown,
+  details: unknown,
+  isError: boolean,
+  fallback?: ToolDetail,
+): ToolDetail | undefined {
+  if (isFilePathTool(name) && isFilePathDetails(details)) {
+    return { value: details.relativePath, ellipsis: 'start' };
+  }
+  if (!isError) {
+    const legacyPath = legacyResultPath(name, details);
+    if (legacyPath !== undefined) {
+      return { value: legacyPath, ellipsis: 'start' };
+    }
+  }
+  return fallback ?? toolDetail(name, args);
 }
 
 function resolvedToolInputs(
   name: string,
-  args: Record<string, unknown> | undefined,
+  args: unknown,
   result?: ToolResult,
 ): ToolInputDetail[] | undefined {
   const inputs = toolInputDetails(name, args) ?? [];
-  const canonicalPath =
-    successfulEditDetails(name, result)?.path ??
-    successfulWriteDetails(name, result)?.path;
-  if (canonicalPath === undefined) {
+  if (!isFilePathTool(name)) {
+    return inputs.length > 0 ? inputs : undefined;
+  }
+  const absolutePath = isFilePathDetails(result?.details)
+    ? result.details.absolutePath
+    : result?.isError === true
+      ? undefined
+      : legacyResultPath(name, result?.details);
+  const argsRecord = toolArgumentsRecord(args);
+  const attemptedPath =
+    name === 'list_files'
+      ? listFilesPathArgument(args)
+      : typeof argsRecord?.path === 'string'
+        ? argsRecord.path
+        : undefined;
+  const displayedPath = absolutePath ?? attemptedPath;
+  if (displayedPath === undefined) {
     return inputs.length > 0 ? inputs : undefined;
   }
 
   const pathIndex = inputs.findIndex((input) => input.label === 'File path');
   if (pathIndex === -1) {
-    return [{ label: 'File path', value: canonicalPath }, ...inputs];
+    return [{ label: 'File path', value: displayedPath }, ...inputs];
   }
   return inputs.map((input, index) =>
-    index === pathIndex ? { ...input, value: canonicalPath } : input,
+    index === pathIndex ? { ...input, value: displayedPath } : input,
   );
 }
 
-function hasCompleteWriteInput(
+function outputPresentation(
   name: string,
-  args: Record<string, unknown> | undefined,
-): boolean {
+  isError: boolean,
+  args: unknown,
+  result?: ToolResult,
+): { label: string; emptyText: string } {
+  if (isError) return { label: 'Error', emptyText: '(no error details)' };
+  if (name === 'read_file') {
+    const resultDetails = detailsRecord(result?.details);
+    const offset = [
+      resultDetails?.offset,
+      toolArgumentsRecord(args)?.offset,
+    ].find(
+      (value): value is number =>
+        typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
+    );
+    return {
+      label: 'File contents',
+      emptyText:
+        offset && offset > 0
+          ? `(no content at offset ${offset})`
+          : '(empty file)',
+    };
+  }
+  if (name === 'list_files') {
+    return { label: 'Directory contents', emptyText: '(empty directory)' };
+  }
+  return { label: 'Output', emptyText: '(no output)' };
+}
+
+function hasCompleteWriteInput(name: string, args: unknown): boolean {
+  const argsRecord = toolArgumentsRecord(args);
   return (
     name === 'write_file' &&
-    typeof args?.path === 'string' &&
-    typeof args.content === 'string'
+    typeof argsRecord?.path === 'string' &&
+    typeof argsRecord.content === 'string'
   );
 }
 
@@ -170,17 +236,22 @@ function ToolStepBody({
   output,
   outputRef,
   editDiff,
+  outputLabel,
+  outputEmptyText,
 }: {
   inputs?: ToolInputDetail[];
   output?: string;
   outputRef?: Ref<HTMLDivElement>;
   editDiff?: string;
+  outputLabel: string;
+  outputEmptyText: string;
 }) {
   const hasInputs = (inputs?.length ?? 0) > 0;
   const hasOutput = output !== undefined || editDiff !== undefined;
+  const showOutputSection = hasInputs || outputLabel !== 'Output';
   const outputNode = (
     <Box ref={outputRef} className={classes.stepBodyCode}>
-      {output || '(no output)'}
+      {output === '' ? outputEmptyText : output}
     </Box>
   );
 
@@ -204,8 +275,8 @@ function ToolStepBody({
           <EditDiff diff={editDiff} />
         )
       ) : hasOutput ? (
-        hasInputs ? (
-          <ToolBodySection label="Output">{outputNode}</ToolBodySection>
+        showOutputSection ? (
+          <ToolBodySection label={outputLabel}>{outputNode}</ToolBodySection>
         ) : (
           outputNode
         )
@@ -233,7 +304,7 @@ export function ToolStep({
   result,
 }: {
   name: string;
-  args?: Record<string, unknown>;
+  args?: unknown;
   detail?: ToolDetail;
   status: ToolStatus;
   result?: ToolResult;
@@ -241,6 +312,7 @@ export function ToolStep({
   const isError = status === 'error' || result?.isError === true;
   const editDetails = successfulEditDetails(name, result);
   const inputs = resolvedToolInputs(name, args, result);
+  const output = outputPresentation(name, isError, args, result);
   const hideSuccessfulWriteOutput =
     status === 'done' &&
     result !== undefined &&
@@ -258,7 +330,7 @@ export function ToolStep({
     <StepRow
       icon={icon}
       label={toolLabel(name)}
-      detail={detail}
+      detail={resolvedToolDetail(name, args, result?.details, isError, detail)}
       error={isError}
     >
       {inputs !== undefined || result ? (
@@ -266,6 +338,8 @@ export function ToolStep({
           inputs={inputs}
           output={hideSuccessfulWriteOutput ? undefined : result?.text}
           editDiff={editDetails?.diff}
+          outputLabel={output.label}
+          outputEmptyText={output.emptyText}
         />
       ) : null}
     </StepRow>
@@ -361,11 +435,17 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   };
   const editDetails = successfulEditDetails(tool.name, result);
   const inputs = resolvedToolInputs(tool.name, tool.args, result);
+  const outputPresentationDetails = outputPresentation(
+    tool.name,
+    isError,
+    tool.args,
+    result,
+  );
   const hideSuccessfulWriteOutput =
     tool.done && !isError && hasCompleteWriteInput(tool.name, tool.args);
   const output = hideSuccessfulWriteOutput
     ? undefined
-    : tool.output
+    : tool.output !== undefined
       ? tool.output
       : tool.done && tool.name === 'run_command' && inputs !== undefined
         ? ''
@@ -388,7 +468,12 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   ) : (
     <IconCheck size={14} stroke={2} />
   );
-  const detail = toolDetail(tool.name, tool.args);
+  const detail = resolvedToolDetail(
+    tool.name,
+    tool.args,
+    tool.details,
+    isError,
+  );
   const label = toolLabel(tool.name, tool.label);
   const header = (
     <>
@@ -427,6 +512,8 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
             output={output}
             outputRef={bodyRef}
             editDiff={editDetails?.diff}
+            outputLabel={outputPresentationDetails.label}
+            outputEmptyText={outputPresentationDetails.emptyText}
           />
         </Collapse>
       ) : null}

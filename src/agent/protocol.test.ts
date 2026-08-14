@@ -13,8 +13,8 @@ import {
 } from './protocol';
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v6 for Data Table and environment delivery', () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+  it('uses protocol v7 for tool-start path details', () => {
+    expect(PROTOCOL_VERSION).toBe(7);
   });
 
   it('parses runner.hello', () => {
@@ -62,6 +62,34 @@ describe('runner -> platform messages', () => {
     if (message.type !== 'run.event') throw new Error('wrong type');
     expect(message.runnerSeq).toBe(7);
     expect(message.event).toEqual({ type: 'text', delta: 'hi' });
+  });
+
+  it('parses structured details on a tool-start event', () => {
+    const message = parseRunnerMessage({
+      type: 'run.event',
+      runId: 'r1',
+      runnerSeq: 8,
+      event: {
+        type: 'tool_start',
+        id: 'tool-1',
+        name: 'read_file',
+        args: { path: 'src/app.ts' },
+        details: {
+          relativePath: 'src/app.ts',
+          absolutePath: '/runner/work/src/app.ts',
+        },
+      },
+    });
+
+    expect(message).toMatchObject({
+      event: {
+        type: 'tool_start',
+        details: {
+          relativePath: 'src/app.ts',
+          absolutePath: '/runner/work/src/app.ts',
+        },
+      },
+    });
   });
 
   it('parses run.finished with and without error', () => {

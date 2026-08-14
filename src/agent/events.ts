@@ -63,6 +63,8 @@ export type AgentStreamEvent =
       name: string;
       label?: string;
       args: JsonValue;
+      /** Safe path identity available before a file tool finishes. */
+      details?: JsonValue;
     }
   | {
       /** Incremental output for a still-running tool (e.g. live shell stdout). */

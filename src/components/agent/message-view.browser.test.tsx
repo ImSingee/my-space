@@ -118,12 +118,25 @@ function runCommandCall(id: string, command: string): ToolCallBlock {
   };
 }
 
-function readFileCall(id: string, path: string): ToolCallBlock {
+function readFileCall(
+  id: string,
+  path: string,
+  options: { offset?: number; limit?: number } = {},
+): ToolCallBlock {
   return {
     type: 'toolCall',
     id,
     name: 'read_file',
-    arguments: { path },
+    arguments: { path, ...options },
+  };
+}
+
+function listFilesCall(id: string, path?: string): ToolCallBlock {
+  return {
+    type: 'toolCall',
+    id,
+    name: 'list_files',
+    arguments: path === undefined ? {} : { path },
   };
 }
 
@@ -158,6 +171,7 @@ const longReadPath = [
   'notification-preferences-and-delivery-channels',
   `${'read-target-'.repeat(16)}settings.ts`,
 ].join('/');
+const absoluteReadPath = `/workspace/${longReadPath}`;
 
 const longWritePathSuffix = [
   'apps/customer-support/src/features',
@@ -185,6 +199,8 @@ const canonicalEditPath = longEditPathSuffix;
 
 const editDetails: EditFileDetails = {
   path: canonicalEditPath,
+  relativePath: canonicalEditPath,
+  absolutePath: attemptedEditPath,
   replacements: 1,
   diff: ' 1 const value = true;\n-2 const oldName = 1;\n+2 const newName = 1;\n   \\ No newline at end of file',
   patch:
@@ -192,12 +208,18 @@ const editDetails: EditFileDetails = {
   firstChangedLine: 2,
 };
 
-function expectLeadingEllipsisDetail(header: Element, value: string) {
+function expectPathDetail(header: Element, value: string): HTMLElement {
   const bidi = header.querySelector('bdi[dir="ltr"]');
   if (!(bidi instanceof HTMLElement)) {
     throw new TypeError('Expected a left-to-right path detail');
   }
   expect(bidi.textContent).toBe(value);
+
+  return bidi;
+}
+
+function expectLeadingEllipsisDetail(header: Element, value: string) {
+  const bidi = expectPathDetail(header, value);
 
   const detail = bidi.parentElement;
   if (!detail) throw new TypeError('Expected a path detail container');
@@ -443,7 +465,11 @@ test('keeps the tail of a completed live write path visible', async () => {
             args: { path: attemptedWritePath, content: 'contents' },
             done: true,
             output: `Wrote ${canonicalWritePath} (8 chars).`,
-            details: { path: canonicalWritePath },
+            details: {
+              path: canonicalWritePath,
+              relativePath: canonicalWritePath,
+              absolutePath: attemptedWritePath,
+            },
           }}
         />
       </Box>
@@ -451,7 +477,7 @@ test('keeps the tail of a completed live write path visible', async () => {
   );
 
   const header = screen.getByRole('button', { name: /Write file/ }).element();
-  expectLeadingEllipsisDetail(header, attemptedWritePath);
+  expectLeadingEllipsisDetail(header, canonicalWritePath);
   const shell = screen.getByTestId('live-write-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
@@ -726,21 +752,28 @@ test('reveals a persisted read path without overflowing a narrow message', async
             role: 'toolResult',
             toolName: 'read_file',
             content: [{ type: 'text', text: 'export const value = true;\n' }],
+            details: {
+              path: longReadPath,
+              relativePath: longReadPath,
+              absolutePath: absoluteReadPath,
+            },
           },
         ],
       ]),
     },
   );
 
-  await screen.getByRole('button', { name: /Read file/ }).click();
+  const toggle = screen.getByRole('button', { name: /Read file/ });
+  expectLeadingEllipsisDetail(toggle.element(), longReadPath);
+  await toggle.click();
   const pathRegion = screen.getByRole('region', { name: 'File path' });
   const path = pathRegion.element().lastElementChild as HTMLElement;
   await expect.element(pathRegion).toBeVisible();
-  expect(path.textContent).toBe(longReadPath);
+  expect(path.textContent).toBe(absoluteReadPath);
   expect(getComputedStyle(path).overflowWrap).toBe('anywhere');
   expect(path.scrollWidth).toBeLessThanOrEqual(path.clientWidth);
   await expect
-    .element(screen.getByRole('region', { name: 'Output' }))
+    .element(screen.getByRole('region', { name: 'File contents' }))
     .toHaveTextContent('export const value = true;');
 
   const shell = screen.getByTestId('message-shell').element();
@@ -755,6 +788,10 @@ test('preserves a live read path through completion', async () => {
           id: 'read-live',
           name: 'read_file',
           args: { path: longReadPath, offset: 20, limit: 100 },
+          details: {
+            relativePath: longReadPath,
+            absolutePath: absoluteReadPath,
+          },
           done: false,
           output: 'partial contents',
         }}
@@ -765,10 +802,10 @@ test('preserves a live read path through completion', async () => {
   const runningPath = screen.getByRole('region', { name: 'File path' });
   await expect.element(runningPath).toBeVisible();
   expect(runningPath.element().lastElementChild?.textContent).toBe(
-    longReadPath,
+    absoluteReadPath,
   );
   await expect
-    .element(screen.getByRole('region', { name: 'Output' }))
+    .element(screen.getByRole('region', { name: 'File contents' }))
     .toHaveTextContent('partial contents');
 
   await screen.rerender(
@@ -780,6 +817,10 @@ test('preserves a live read path through completion', async () => {
           args: { path: longReadPath, offset: 20, limit: 100 },
           done: true,
           output: 'final contents',
+          details: {
+            relativePath: longReadPath,
+            absolutePath: absoluteReadPath,
+          },
         }}
       />
     </MantineProvider>,
@@ -793,11 +834,343 @@ test('preserves a live read path through completion', async () => {
   const completedPath = screen.getByRole('region', { name: 'File path' });
   await expect.element(completedPath).toBeVisible();
   expect(completedPath.element().lastElementChild?.textContent).toBe(
-    longReadPath,
+    absoluteReadPath,
   );
   await expect
-    .element(screen.getByRole('region', { name: 'Output' }))
+    .element(screen.getByRole('region', { name: 'File contents' }))
     .toHaveTextContent('final contents');
+});
+
+test('expands a listed directory with stable path and contents labels', async () => {
+  const listPath = longReadPath.slice(0, longReadPath.lastIndexOf('/'));
+  const absoluteListPath = `/workspace/${listPath}`;
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [listFilesCall('list-persisted', absoluteListPath)],
+    },
+    {
+      width: 320,
+      toolResults: new Map([
+        [
+          'list-persisted',
+          {
+            role: 'toolResult',
+            toolName: 'list_files',
+            content: [{ type: 'text', text: '- main.ts\nd components' }],
+            details: {
+              path: listPath,
+              relativePath: listPath,
+              absolutePath: absoluteListPath,
+            },
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expectLeadingEllipsisDetail(toggle.element(), listPath);
+  await toggle.click();
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  const contentsRegion = screen.getByRole('region', {
+    name: 'Directory contents',
+  });
+  await expect.element(pathRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe(
+    absoluteListPath,
+  );
+  await expect.element(contentsRegion).toHaveTextContent('- main.ts');
+  await expect.element(contentsRegion).toHaveTextContent('d components');
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('normalizes a legacy root listing path to the workspace root', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [listFilesCall('list-legacy-root')],
+    },
+    {
+      toolResults: new Map([
+        [
+          'list-legacy-root',
+          {
+            role: 'toolResult',
+            toolName: 'list_files',
+            content: [{ type: 'text', text: '- package.json' }],
+            details: { path: '', count: 1 },
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expectPathDetail(toggle.element(), '.');
+  await toggle.click();
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  await expect.element(pathRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe('.');
+  expect(pathRegion.element().textContent).not.toContain('(empty file path)');
+});
+
+test('normalizes an explicit legacy empty list path to the workspace root', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [listFilesCall('list-legacy-empty-root', '')],
+    },
+    {
+      toolResults: new Map([
+        [
+          'list-legacy-empty-root',
+          {
+            role: 'toolResult',
+            toolName: 'list_files',
+            content: [{ type: 'text', text: '- package.json' }],
+            details: { path: '', count: 1 },
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expectPathDetail(toggle.element(), '.');
+  await toggle.click();
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  await expect.element(pathRegion).toBeVisible();
+  expect(pathRegion.element().lastElementChild?.textContent).toBe('.');
+  expect(pathRegion.element().textContent).not.toContain('(empty file path)');
+});
+
+test('does not show the workspace root for an invalid persisted list path', async () => {
+  const error = 'Invalid arguments for tool list_files: path must be a string';
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'list-invalid-null',
+          name: 'list_files',
+          arguments: { path: null },
+        },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'list-invalid-null',
+          {
+            role: 'toolResult',
+            toolName: 'list_files',
+            content: [{ type: 'text', text: error }],
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expect(toggle.element().querySelector('bdi')).toBeNull();
+  await toggle.click();
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toHaveTextContent(error);
+});
+
+test('does not show the workspace root for an invalid live list path', async () => {
+  const error = 'Invalid arguments for tool list_files: path must be a string';
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'list-invalid-null-live',
+          name: 'list_files',
+          args: { path: null },
+          done: true,
+          isError: true,
+          output: error,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expect(toggle.element().querySelector('bdi')).toBeNull();
+  await toggle.click();
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toHaveTextContent(error);
+});
+
+test('does not show the workspace root for invalid persisted list arguments', async () => {
+  const error = 'Invalid arguments for tool list_files: expected an object';
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'list-invalid-arguments',
+          name: 'list_files',
+          arguments: null,
+        },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'list-invalid-arguments',
+          {
+            role: 'toolResult',
+            toolName: 'list_files',
+            content: [{ type: 'text', text: error }],
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expect(toggle.element().querySelector('bdi')).toBeNull();
+  await toggle.click();
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toHaveTextContent(error);
+});
+
+test('does not show the workspace root for invalid live list arguments', async () => {
+  const error = 'Invalid arguments for tool list_files: expected an object';
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'list-invalid-arguments-live',
+          name: 'list_files',
+          args: null,
+          done: true,
+          isError: true,
+          output: error,
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const toggle = screen.getByRole('button', { name: /List files/ });
+  expect(toggle.element().querySelector('bdi')).toBeNull();
+  await toggle.click();
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toHaveTextContent(error);
+});
+
+test('labels an empty read result as empty file contents', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [readFileCall('read-empty', 'empty.txt')],
+    },
+    {
+      toolResults: new Map([
+        [
+          'read-empty',
+          {
+            role: 'toolResult',
+            toolName: 'read_file',
+            content: [{ type: 'text', text: '' }],
+            details: {
+              relativePath: 'empty.txt',
+              absolutePath: '/workspace/empty.txt',
+            },
+          },
+        ],
+      ]),
+    },
+  );
+
+  await screen.getByRole('button', { name: /Read file/ }).click();
+  await expect
+    .element(screen.getByRole('region', { name: 'File contents' }))
+    .toHaveTextContent('(empty file)');
+});
+
+test('distinguishes an empty read page from an empty file', async () => {
+  const offset = 128;
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        readFileCall('read-empty-page', 'non-empty.txt', {
+          offset,
+          limit: 64,
+        }),
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'read-empty-page',
+          {
+            role: 'toolResult',
+            toolName: 'read_file',
+            content: [{ type: 'text', text: '' }],
+            details: {
+              relativePath: 'non-empty.txt',
+              absolutePath: '/workspace/non-empty.txt',
+              offset,
+              limit: 64,
+              truncated: false,
+            },
+          },
+        ],
+      ]),
+    },
+  );
+
+  await screen.getByRole('button', { name: /Read file/ }).click();
+  const contents = screen.getByRole('region', { name: 'File contents' });
+  await expect
+    .element(contents)
+    .toHaveTextContent('(no content at offset 128)');
+  expect(contents.element().textContent).not.toContain('(empty file)');
+});
+
+test('keeps the empty-page wording in a completed live read', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'read-live-empty-page',
+          name: 'read_file',
+          args: { path: 'non-empty.txt', offset: 128, limit: 64 },
+          done: true,
+          output: '',
+          details: {
+            relativePath: 'non-empty.txt',
+            absolutePath: '/workspace/non-empty.txt',
+            offset: 128,
+            limit: 64,
+            truncated: false,
+          },
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  await screen.getByRole('button', { name: /Read file/ }).click();
+  await expect
+    .element(screen.getByRole('region', { name: 'File contents' }))
+    .toHaveTextContent('(no content at offset 128)');
 });
 
 test('reveals a successful persisted write without overflowing a narrow message', async () => {
@@ -818,7 +1191,11 @@ test('reveals a successful persisted write without overflowing a narrow message'
             role: 'toolResult',
             toolName: 'write_file',
             content: [{ type: 'text', text: summary }],
-            details: { path: canonicalWritePath },
+            details: {
+              path: canonicalWritePath,
+              relativePath: canonicalWritePath,
+              absolutePath: attemptedWritePath,
+            },
           },
         ],
       ]),
@@ -826,6 +1203,7 @@ test('reveals a successful persisted write without overflowing a narrow message'
   );
 
   const toggle = screen.getByRole('button', { name: /Write file/ });
+  expectLeadingEllipsisDetail(toggle.element(), canonicalWritePath);
   expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
@@ -837,7 +1215,7 @@ test('reveals a successful persisted write without overflowing a narrow message'
   await expect.element(pathRegion).toBeVisible();
   await expect.element(contentsRegion).toBeVisible();
   expect(pathRegion.element().lastElementChild?.textContent).toBe(
-    canonicalWritePath,
+    attemptedWritePath,
   );
 
   const contents = contentsRegion.element().lastElementChild as HTMLElement;
@@ -887,6 +1265,10 @@ test('preserves a live write from its attempted inputs to canonical completion',
           id: 'write-live',
           name: 'write_file',
           args: { path: attemptedWritePath, content },
+          details: {
+            relativePath: canonicalWritePath,
+            absolutePath: attemptedWritePath,
+          },
           done: false,
         }}
       />
@@ -914,7 +1296,11 @@ test('preserves a live write from its attempted inputs to canonical completion',
           args: { path: attemptedWritePath, content },
           done: true,
           output: summary,
-          details: { path: canonicalWritePath },
+          details: {
+            path: canonicalWritePath,
+            relativePath: canonicalWritePath,
+            absolutePath: attemptedWritePath,
+          },
         }}
       />
     </MantineProvider>,
@@ -932,7 +1318,7 @@ test('preserves a live write from its attempted inputs to canonical completion',
   await expect.element(completedPath).toBeVisible();
   await expect.element(completedContents).toBeVisible();
   expect(completedPath.element().lastElementChild?.textContent).toBe(
-    canonicalWritePath,
+    attemptedWritePath,
   );
   expect(completedContents.element().lastElementChild?.textContent).toBe(
     content,
@@ -957,7 +1343,10 @@ test('keeps attempted write inputs and the output when a write fails', async () 
             role: 'toolResult',
             toolName: 'write_file',
             content: [{ type: 'text', text: error }],
-            details: { path: canonicalWritePath },
+            details: {
+              relativePath: canonicalWritePath,
+              absolutePath: attemptedWritePath,
+            },
             isError: true,
           },
         ],
@@ -970,7 +1359,7 @@ test('keeps attempted write inputs and the output when a write fails', async () 
   const contentsRegion = screen.getByRole('region', {
     name: 'File contents',
   });
-  const outputRegion = screen.getByRole('region', { name: 'Output' });
+  const outputRegion = screen.getByRole('region', { name: 'Error' });
   await expect.element(pathRegion).toBeVisible();
   await expect.element(contentsRegion).toBeVisible();
   await expect.element(outputRegion).toBeVisible();
@@ -1068,11 +1457,13 @@ test('renders a persisted edit result as a colored diff', async () => {
     },
   );
 
-  await screen.getByRole('button', { name: /Edit file/ }).click();
+  const toggle = screen.getByRole('button', { name: /Edit file/ });
+  expectLeadingEllipsisDetail(toggle.element(), canonicalEditPath);
+  await toggle.click();
   const fileRegion = screen.getByRole('region', { name: 'File path' });
   await expect.element(fileRegion).toBeVisible();
   const filePath = fileRegion.element().lastElementChild as HTMLElement;
-  expect(filePath.textContent).toBe(canonicalEditPath);
+  expect(filePath.textContent).toBe(attemptedEditPath);
   expect(getComputedStyle(filePath).overflowWrap).toBe('anywhere');
   expect(filePath.scrollWidth).toBeLessThanOrEqual(filePath.clientWidth);
   await expect
@@ -1103,6 +1494,10 @@ test('preserves a live edit path from execution through its completed diff', asy
           id: 'edit-live',
           name: 'edit_file',
           args: { path: attemptedEditPath },
+          details: {
+            relativePath: canonicalEditPath,
+            absolutePath: attemptedEditPath,
+          },
           done: false,
         }}
       />
@@ -1137,7 +1532,7 @@ test('preserves a live edit path from execution through its completed diff', asy
   const completedFile = screen.getByRole('region', { name: 'File path' });
   await expect.element(completedFile).toBeVisible();
   expect(completedFile.element().lastElementChild?.textContent).toBe(
-    canonicalEditPath,
+    attemptedEditPath,
   );
   await expect
     .element(screen.getByRole('region', { name: 'File changes' }))
@@ -1201,7 +1596,7 @@ test('keeps the attempted path and error for a failed paired edit', async () => 
 
   await screen.getByRole('button', { name: /Edit file/ }).click();
   const fileRegion = screen.getByRole('region', { name: 'File path' });
-  const outputRegion = screen.getByRole('region', { name: 'Output' });
+  const outputRegion = screen.getByRole('region', { name: 'Error' });
   await expect.element(fileRegion).toBeVisible();
   expect(fileRegion.element().lastElementChild?.textContent).toBe(
     attemptedEditPath,

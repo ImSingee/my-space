@@ -301,11 +301,15 @@ function truncateDetailsDiff(details: EditFileDetails): EditFileDetails {
 
 export function generateEditFileDetails({
   path,
+  relativePath,
+  absolutePath,
   replacements,
   oldContent,
   newContent,
 }: {
   path: string;
+  relativePath?: string;
+  absolutePath?: string;
   replacements: number;
   oldContent: string;
   newContent: string;
@@ -313,6 +317,9 @@ export function generateEditFileDetails({
   const display = generateDiffString(oldContent, newContent);
   const base: EditFileDetails = {
     path,
+    ...(relativePath === undefined || absolutePath === undefined
+      ? {}
+      : { relativePath, absolutePath }),
     replacements,
     diff: display.diff,
     ...(display.firstChangedLine === undefined

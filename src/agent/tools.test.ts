@@ -5,6 +5,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -53,13 +54,17 @@ async function setup(
   files: Record<string, string> = {},
   readOnlyFiles?: Record<string, string>,
 ) {
-  const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-tools-'));
+  const root = await realpath(
+    await mkdtemp(path.join(tmpdir(), 'hatch-agent-tools-')),
+  );
   tempRoots.push(root);
   for (const [filePath, content] of Object.entries(files)) {
     await writeFixture(root, filePath, content);
   }
   const readOnlyRoot = readOnlyFiles
-    ? await mkdtemp(path.join(tmpdir(), 'hatch-agent-resources-'))
+    ? await realpath(
+        await mkdtemp(path.join(tmpdir(), 'hatch-agent-resources-')),
+      )
     : undefined;
   if (readOnlyRoot) {
     tempRoots.push(readOnlyRoot);
@@ -101,7 +106,9 @@ describe('agent file tools', () => {
   });
 
   it('reads a complete file with the default pagination values', async () => {
-    const { getTool } = await setup({ 'app.ts': 'const value = 1;\n' });
+    const { root, getTool } = await setup({
+      'app.ts': 'const value = 1;\n',
+    });
 
     const result = await getTool('read_file').execute('read', {
       path: 'app.ts',
@@ -110,6 +117,8 @@ describe('agent file tools', () => {
     expect(textOf(result)).toBe('const value = 1;\n');
     expect(result.details).toEqual({
       path: 'app.ts',
+      relativePath: 'app.ts',
+      absolutePath: path.join(root, 'app.ts'),
       offset: 0,
       limit: MAX_FILE_CHARS,
       truncated: false,
@@ -118,7 +127,7 @@ describe('agent file tools', () => {
 
   it('returns a continuation offset when the default read is truncated', async () => {
     const firstPage = 'a'.repeat(MAX_FILE_CHARS);
-    const { getTool } = await setup({
+    const { root, getTool } = await setup({
       'large.txt': `${firstPage}remaining`,
     });
 
@@ -131,6 +140,8 @@ describe('agent file tools', () => {
     );
     expect(first.details).toEqual({
       path: 'large.txt',
+      relativePath: 'large.txt',
+      absolutePath: path.join(root, 'large.txt'),
       offset: 0,
       limit: MAX_FILE_CHARS,
       truncated: true,
@@ -144,6 +155,8 @@ describe('agent file tools', () => {
     expect(textOf(second)).toBe('remaining');
     expect(second.details).toEqual({
       path: 'large.txt',
+      relativePath: 'large.txt',
+      absolutePath: path.join(root, 'large.txt'),
       offset: MAX_FILE_CHARS,
       limit: MAX_FILE_CHARS,
       truncated: false,
@@ -176,7 +189,9 @@ describe('agent file tools', () => {
   });
 
   it('supports custom read windows and reports the next offset', async () => {
-    const { getTool } = await setup({ 'digits.txt': '0123456789' });
+    const { root, getTool } = await setup({
+      'digits.txt': '0123456789',
+    });
 
     const result = await getTool('read_file').execute('read', {
       path: 'digits.txt',
@@ -189,6 +204,8 @@ describe('agent file tools', () => {
     );
     expect(result.details).toEqual({
       path: 'digits.txt',
+      relativePath: 'digits.txt',
+      absolutePath: path.join(root, 'digits.txt'),
       offset: 2,
       limit: 3,
       truncated: true,
@@ -197,7 +214,9 @@ describe('agent file tools', () => {
   });
 
   it('does not report another page at or beyond the end of the file', async () => {
-    const { getTool } = await setup({ 'digits.txt': '0123456789' });
+    const { root, getTool } = await setup({
+      'digits.txt': '0123456789',
+    });
 
     const finalPage = await getTool('read_file').execute('final', {
       path: 'digits.txt',
@@ -207,6 +226,8 @@ describe('agent file tools', () => {
     expect(textOf(finalPage)).toBe('56789');
     expect(finalPage.details).toEqual({
       path: 'digits.txt',
+      relativePath: 'digits.txt',
+      absolutePath: path.join(root, 'digits.txt'),
       offset: 5,
       limit: 5,
       truncated: false,
@@ -221,6 +242,8 @@ describe('agent file tools', () => {
       expect(textOf(atOrPastEnd)).toBe('');
       expect(atOrPastEnd.details).toEqual({
         path: 'digits.txt',
+        relativePath: 'digits.txt',
+        absolutePath: path.join(root, 'digits.txt'),
         offset,
         limit: 5,
         truncated: false,
@@ -287,7 +310,7 @@ describe('agent file tools', () => {
     );
   });
 
-  it('writes exact contents and returns only the canonical workspace path', async () => {
+  it('writes exact contents and returns both display paths', async () => {
     const { root, getTool } = await setup();
     const content = '  const value = 1;\n\nexport { value };\n';
 
@@ -302,7 +325,11 @@ describe('agent file tools', () => {
     expect(textOf(result)).toBe(
       `Wrote nested/file.ts (${content.length} chars).`,
     );
-    expect(result.details).toEqual({ path: 'nested/file.ts' });
+    expect(result.details).toEqual({
+      path: 'nested/file.ts',
+      relativePath: 'nested/file.ts',
+      absolutePath: path.join(root, 'nested/file.ts'),
+    });
   });
 
   it('allows edit_file after write_file creates a file', async () => {
@@ -500,6 +527,8 @@ describe('agent file tools', () => {
     );
     expect(details).toEqual({
       path: 'large.txt',
+      relativePath: 'large.txt',
+      absolutePath: path.join(root, 'large.txt'),
       replacements: lineCount,
       diff: DIFF_TRUNCATION_LINE,
       diffTruncated: true,
@@ -571,11 +600,57 @@ describe('agent file tools', () => {
       path: skillPath,
     });
     expect(textOf(readResult)).toBe('# Building apps\n');
+    expect(readResult.details).toMatchObject({
+      relativePath: 'building-apps/SKILL.md',
+      absolutePath: skillPath,
+    });
 
     const listResult = await getTool('list_files').execute('list', {
       path: path.join(readOnlyRoot, 'building-apps', 'references'),
     });
     expect(textOf(listResult)).toBe('- manifest.md');
+    expect(listResult.details).toMatchObject({
+      relativePath: 'building-apps/references',
+      absolutePath: path.join(readOnlyRoot, 'building-apps', 'references'),
+    });
+  });
+
+  it('selects relative and absolute paths before file tools execute', async () => {
+    const { root, readOnlyRoot, getTool } = await setup(
+      { 'app.ts': 'export {};\n' },
+      { 'building-apps/SKILL.md': '# Building apps\n' },
+    );
+    if (!readOnlyRoot) throw new Error('Missing read-only fixture root');
+
+    expect(getTool('list_files').selectStreamStartDetails?.({})).toEqual({
+      relativePath: '.',
+      absolutePath: root,
+    });
+    expect(
+      getTool('list_files').selectStreamStartDetails?.({ path: '' }),
+    ).toEqual({
+      relativePath: '.',
+      absolutePath: root,
+    });
+    expect(
+      getTool('list_files').selectStreamStartDetails?.({ path: null } as never),
+    ).toBeUndefined();
+    expect(
+      getTool('read_file').selectStreamStartDetails?.({
+        path: path.join(readOnlyRoot, 'building-apps', 'SKILL.md'),
+      }),
+    ).toEqual({
+      relativePath: 'building-apps/SKILL.md',
+      absolutePath: path.join(readOnlyRoot, 'building-apps', 'SKILL.md'),
+    });
+    expect(
+      getTool('write_file').selectStreamStartDetails?.({
+        path: '../outside.txt',
+      }),
+    ).toEqual({
+      relativePath: '../outside.txt',
+      absolutePath: path.resolve(root, '../outside.txt'),
+    });
   });
 
   it('rejects symlinks escaping a configured read-only root', async () => {

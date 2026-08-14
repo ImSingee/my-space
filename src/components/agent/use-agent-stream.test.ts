@@ -189,6 +189,27 @@ describe('reduceStreamState', () => {
     ]);
   });
 
+  it('preserves malformed non-object tool arguments', () => {
+    const state = reduceStreamState(baseState(), {
+      type: 'tool_start',
+      id: 'list-invalid-arguments',
+      name: 'list_files',
+      args: null,
+    });
+
+    expect(state.blocks).toEqual([
+      {
+        kind: 'tool',
+        tool: {
+          id: 'list-invalid-arguments',
+          name: 'list_files',
+          args: null,
+          done: false,
+        },
+      },
+    ]);
+  });
+
   it('starts a new thinking block for each assistant turn', () => {
     let state = reduceStreamState(baseState(), {
       type: 'thinking',
@@ -242,6 +263,42 @@ describe('reduceStreamState', () => {
             patch: '--- src/app.ts\n+++ src/app.ts',
             firstChangedLine: 1,
           },
+        },
+      },
+    ]);
+  });
+
+  it('keeps tool-start path details and an empty final output', () => {
+    const details = {
+      relativePath: 'empty.txt',
+      absolutePath: '/runner/work/empty.txt',
+    };
+    let state = reduceStreamState(baseState(), {
+      type: 'tool_start',
+      id: 'read-empty',
+      name: 'read_file',
+      args: { path: 'empty.txt' },
+      details,
+    });
+    state = reduceStreamState(state, {
+      type: 'tool_end',
+      id: 'read-empty',
+      name: 'read_file',
+      isError: false,
+      output: '',
+    });
+
+    expect(state.blocks).toEqual([
+      {
+        kind: 'tool',
+        tool: {
+          id: 'read-empty',
+          name: 'read_file',
+          args: { path: 'empty.txt' },
+          details,
+          done: true,
+          isError: false,
+          output: '',
         },
       },
     ]);

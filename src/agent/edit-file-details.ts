@@ -1,6 +1,11 @@
+import { isFilePathDetails } from './file-path-details';
+
 /** Structured result emitted by a successful `edit_file` call. */
 export type EditFileDetails = {
   path: string;
+  /** Added for path-aware UI; optional so historical details remain valid. */
+  relativePath?: string;
+  absolutePath?: string;
   replacements: number;
   /** Display-oriented diff with line numbers and limited context. */
   diff: string;
@@ -21,8 +26,12 @@ export function isEditFileDetails(value: unknown): value is EditFileDetails {
   const firstChangedLine = details.firstChangedLine;
   const patch = details.patch;
   const patchOmitted = details.patchOmitted;
+  const hasNoPathPair =
+    details.relativePath === undefined && details.absolutePath === undefined;
+  const hasCompletePathPair = isFilePathDetails(value);
   return (
     typeof details.path === 'string' &&
+    (hasNoPathPair || hasCompletePathPair) &&
     Number.isInteger(details.replacements) &&
     (details.replacements as number) > 0 &&
     typeof details.diff === 'string' &&

@@ -128,6 +128,9 @@ describe('edit diff generation', () => {
     });
     expect(isEditFileDetails(details)).toBe(true);
     expect(
+      isEditFileDetails({ ...details, relativePath: 'src/large.txt' }),
+    ).toBe(false);
+    expect(
       Buffer.byteLength(JSON.stringify(details), 'utf8'),
     ).toBeLessThanOrEqual(MAX_EDIT_DETAILS_BYTES);
   });

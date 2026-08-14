@@ -1,7 +1,15 @@
 import { Buffer } from 'node:buffer';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { createModels } from '@earendil-works/pi-ai';
 import {
   fauxAssistantMessage,
@@ -59,6 +67,7 @@ async function runWithResponses(
   emit: (event: AgentStreamEvent) => void = () => {},
   platform: PlatformClient = stubPlatform,
   requestEnv?: EnvBridge,
+  priorMessages: AgentMessage[] = [],
 ) {
   const providerId = `runtime-test-${sessionId}`;
   const faux = fauxProvider({ provider: providerId });
@@ -74,7 +83,7 @@ async function runWithResponses(
 
   return runAgentTurn({
     appUrl: 'https://hatch.example.test',
-    priorMessages: [],
+    priorMessages,
     sessionId,
     userText: 'hello',
     models,
@@ -423,12 +432,21 @@ describe('runAgentTurn terminal outcomes', () => {
       path: './nested/file.txt',
       content,
     });
+    const absolutePath = await realpath(path.join(cwd, 'nested/file.txt'));
+    expect(toolStart?.details).toEqual({
+      relativePath: 'nested/file.txt',
+      absolutePath,
+    });
 
     const toolEnd = events.find(
       (event): event is Extract<AgentStreamEvent, { type: 'tool_end' }> =>
         event.type === 'tool_end' && event.name === 'write_file',
     );
-    expect(toolEnd?.details).toEqual({ path: 'nested/file.txt' });
+    expect(toolEnd?.details).toEqual({
+      path: 'nested/file.txt',
+      relativePath: 'nested/file.txt',
+      absolutePath,
+    });
 
     const toolResult = result.messages.find(
       (message) =>
@@ -438,10 +456,253 @@ describe('runAgentTurn terminal outcomes', () => {
         message.role === 'toolResult' &&
         message.toolName === 'write_file',
     ) as { details?: unknown } | undefined;
-    expect(toolResult?.details).toEqual({ path: 'nested/file.txt' });
+    expect(toolResult?.details).toEqual({
+      path: 'nested/file.txt',
+      relativePath: 'nested/file.txt',
+      absolutePath,
+    });
     await expect(
       readFile(path.join(cwd, 'nested/file.txt'), 'utf8'),
     ).resolves.toBe(content);
+  });
+
+  it('keeps an attempted absolute path when a file tool fails', async () => {
+    const sessionId = 'failed-write-path-details';
+    const attemptedPath = '../outside.txt';
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall('write_file', {
+            path: attemptedPath,
+            content: 'blocked',
+          }),
+        ),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      (event) => events.push(event),
+    );
+    const canonicalCwd = await realpath(agentWorkDir(sessionId));
+    const expectedDetails = {
+      relativePath: attemptedPath,
+      absolutePath: path.resolve(canonicalCwd, attemptedPath),
+    };
+
+    expect(
+      events.find(
+        (event) => event.type === 'tool_start' && event.name === 'write_file',
+      ),
+    ).toMatchObject({ details: expectedDetails });
+    expect(
+      events.find(
+        (event) => event.type === 'tool_end' && event.name === 'write_file',
+      ),
+    ).toMatchObject({ isError: true, details: expectedDetails });
+    expect(
+      result.messages.find(
+        (message) =>
+          message !== null &&
+          typeof message === 'object' &&
+          !Array.isArray(message) &&
+          message.role === 'toolResult' &&
+          message.toolName === 'write_file',
+      ),
+    ).toMatchObject({ isError: true, details: expectedDetails });
+  });
+
+  it.each([
+    {
+      toolName: 'read_file',
+      args: { path: 'invalid-page.txt', limit: 0 },
+    },
+    {
+      toolName: 'write_file',
+      args: { path: 'missing-content.txt' },
+    },
+  ])(
+    'persists attempted paths when $toolName fails argument validation',
+    async ({ toolName, args }) => {
+      const sessionId = `invalid-${toolName}`;
+      const events: AgentStreamEvent[] = [];
+
+      const result = await runWithResponses(
+        [
+          fauxAssistantMessage(fauxToolCall(toolName, args)),
+          fauxAssistantMessage('done'),
+        ],
+        sessionId,
+        (event) => events.push(event),
+      );
+      const canonicalCwd = await realpath(agentWorkDir(sessionId));
+      const expectedDetails = {
+        relativePath: args.path,
+        absolutePath: path.join(canonicalCwd, args.path),
+      };
+
+      expect(
+        events.find(
+          (event) => event.type === 'tool_start' && event.name === toolName,
+        ),
+      ).toMatchObject({ details: expectedDetails });
+      expect(
+        events.find(
+          (event) => event.type === 'tool_end' && event.name === toolName,
+        ),
+      ).toMatchObject({ isError: true, details: expectedDetails });
+      expect(
+        result.messages.find(
+          (message) =>
+            message !== null &&
+            typeof message === 'object' &&
+            !Array.isArray(message) &&
+            message.role === 'toolResult' &&
+            message.toolName === toolName,
+        ),
+      ).toMatchObject({ isError: true, details: expectedDetails });
+    },
+  );
+
+  it('does not fabricate root details for an invalid list path', async () => {
+    const sessionId = 'invalid-list-path';
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(fauxToolCall('list_files', { path: null })),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      (event) => events.push(event),
+    );
+    const toolStart = events.find(
+      (event) => event.type === 'tool_start' && event.name === 'list_files',
+    );
+    const toolEnd = events.find(
+      (event) => event.type === 'tool_end' && event.name === 'list_files',
+    );
+    const toolResult = result.messages.find(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'toolResult' &&
+        message.toolName === 'list_files',
+    );
+
+    expect(toolStart).toMatchObject({ args: { path: null } });
+    expect(toolStart).not.toHaveProperty('details');
+    expect(toolEnd).toMatchObject({ isError: true });
+    expect(toolEnd).not.toHaveProperty('details');
+    expect(toolResult).toMatchObject({ isError: true });
+    expect(toolResult).not.toHaveProperty('details.relativePath');
+    expect(toolResult).not.toHaveProperty('details.absolutePath');
+  });
+
+  it('does not fabricate root details for non-object list arguments', async () => {
+    const sessionId = 'invalid-list-arguments';
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(fauxToolCall('list_files', null as never)),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      (event) => events.push(event),
+    );
+    const toolStart = events.find(
+      (event) => event.type === 'tool_start' && event.name === 'list_files',
+    );
+    const toolEnd = events.find(
+      (event) => event.type === 'tool_end' && event.name === 'list_files',
+    );
+    const toolResult = result.messages.find(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'toolResult' &&
+        message.toolName === 'list_files',
+    );
+
+    expect(toolStart).toMatchObject({ args: null });
+    expect(toolStart).not.toHaveProperty('details');
+    expect(toolEnd).toMatchObject({ isError: true });
+    expect(toolEnd).not.toHaveProperty('details');
+    expect(toolResult).toMatchObject({ isError: true });
+    expect(toolResult).not.toHaveProperty('details.relativePath');
+    expect(toolResult).not.toHaveProperty('details.absolutePath');
+    expect(result.messages).toContainEqual(
+      expect.objectContaining({
+        role: 'assistant',
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'list_files',
+            arguments: null,
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('does not apply current path details to a prior reused tool-call id', async () => {
+    const sessionId = 'reused-file-call-id';
+    const toolCallId = 'shared-read-id';
+    const priorMessages: AgentMessage[] = [
+      fauxAssistantMessage(
+        fauxToolCall('read_file', { path: 'legacy.txt' }, { id: toolCallId }),
+      ),
+      {
+        role: 'toolResult',
+        toolCallId,
+        toolName: 'read_file',
+        content: [{ type: 'text', text: 'legacy contents' }],
+        details: { path: 'legacy.txt' },
+        isError: false,
+        timestamp: Date.now(),
+      },
+    ];
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall(
+            'read_file',
+            { path: 'current.txt', limit: 0 },
+            { id: toolCallId },
+          ),
+        ),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      undefined,
+      stubPlatform,
+      undefined,
+      priorMessages,
+    );
+    const matchingResults = result.messages.filter(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'toolResult' &&
+        message.toolCallId === toolCallId,
+    );
+    const canonicalCwd = await realpath(agentWorkDir(sessionId));
+
+    expect(matchingResults).toHaveLength(2);
+    expect(matchingResults[0]).toMatchObject({
+      details: { path: 'legacy.txt' },
+    });
+    expect(matchingResults[0]).not.toHaveProperty('details.relativePath');
+    expect(matchingResults[1]).toMatchObject({
+      details: {
+        relativePath: 'current.txt',
+        absolutePath: path.join(canonicalCwd, 'current.txt'),
+      },
+    });
   });
 
   it('keeps large edit details bounded in stream and transcript payloads', async () => {
