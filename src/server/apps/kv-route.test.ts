@@ -127,7 +127,7 @@ describe('signed app KV route secret storage', () => {
       secret: true,
     });
     const legacyGet = await handle({
-      request: signedRequest(`/api/apps/${APP_ID}/kv/legacy-token`),
+      request: signedRequest(`/api/app/${APP_ID}/kv/legacy-token`),
     });
     expect(legacyGet.status).toBe(200);
     await expect(legacyGet.json()).resolves.toMatchObject({

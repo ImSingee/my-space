@@ -69,7 +69,7 @@ describe('managed Data Table runtime fence', () => {
 
     const response = await handle({
       request: new Request(
-        'https://hatch.test/api/apps/example/data/events?since=0',
+        'https://hatch.test/api/app/example/data/events?since=0',
         { headers: { 'x-hatch-data-deployment': 'deployment-v1' } },
       ),
     });

@@ -37,7 +37,6 @@ import { Route as AppWorkflowsWorkflowIdIndexRouteImport } from './routes/_app/w
 import { Route as AppWorkflowsWorkflowIdManageRouteImport } from './routes/_app/workflows/$workflowId/manage'
 import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
 import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
-import { Route as ApiAppsAppIdDownloadRouteImport } from './routes/api/apps/$appId/download'
 import { Route as ApiHooksAppIdSplatRouteImport } from './routes/api/hooks/$appId/$'
 import { Route as ApiWorkflowHooksWorkflowIdSplatRouteImport } from './routes/api/workflow-hooks/$workflowId/$'
 import { Route as ApiWorkflowsWorkflowIdDownloadRouteImport } from './routes/api/workflows/$workflowId/download'
@@ -54,12 +53,6 @@ import { Route as ApiAppAppIdKvSplatRouteImport } from './routes/api/app/$appId/
 import { Route as ApiAppAppIdRpcSplatRouteImport } from './routes/api/app/$appId/rpc/$'
 import { Route as ApiAppAppIdUserscriptsScriptIdRouteImport } from './routes/api/app/$appId/userscripts/$scriptId'
 import { Route as ApiAppAppIdWidgetWidgetIdRouteImport } from './routes/api/app/$appId/widget/$widgetId'
-import { Route as ApiAppsAppIdAppSplatRouteImport } from './routes/api/apps/$appId/app/$'
-import { Route as ApiAppsAppIdDataSplatRouteImport } from './routes/api/apps/$appId/data/$'
-import { Route as ApiAppsAppIdKvSplatRouteImport } from './routes/api/apps/$appId/kv/$'
-import { Route as ApiAppsAppIdRpcSplatRouteImport } from './routes/api/apps/$appId/rpc/$'
-import { Route as ApiAppsAppIdUserscriptsScriptIdRouteImport } from './routes/api/apps/$appId/userscripts/$scriptId'
-import { Route as ApiAppsAppIdWidgetWidgetIdRouteImport } from './routes/api/apps/$appId/widget/$widgetId'
 import { Route as ApiAgentSessionsSessionIdAttachmentsAttachmentIdRouteImport } from './routes/api/agent/sessions/$sessionId/attachments/$attachmentId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -204,11 +197,6 @@ const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
   path: '/api/app/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAppsAppIdDownloadRoute = ApiAppsAppIdDownloadRouteImport.update({
-  id: '/api/apps/$appId/download',
-  path: '/api/apps/$appId/download',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiHooksAppIdSplatRoute = ApiHooksAppIdSplatRouteImport.update({
   id: '/api/hooks/$appId/$',
   path: '/api/hooks/$appId/$',
@@ -295,38 +283,6 @@ const ApiAppAppIdWidgetWidgetIdRoute =
     path: '/api/app/$appId/widget/$widgetId',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiAppsAppIdAppSplatRoute = ApiAppsAppIdAppSplatRouteImport.update({
-  id: '/api/apps/$appId/app/$',
-  path: '/api/apps/$appId/app/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdDataSplatRoute = ApiAppsAppIdDataSplatRouteImport.update({
-  id: '/api/apps/$appId/data/$',
-  path: '/api/apps/$appId/data/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdKvSplatRoute = ApiAppsAppIdKvSplatRouteImport.update({
-  id: '/api/apps/$appId/kv/$',
-  path: '/api/apps/$appId/kv/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdRpcSplatRoute = ApiAppsAppIdRpcSplatRouteImport.update({
-  id: '/api/apps/$appId/rpc/$',
-  path: '/api/apps/$appId/rpc/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAppsAppIdUserscriptsScriptIdRoute =
-  ApiAppsAppIdUserscriptsScriptIdRouteImport.update({
-    id: '/api/apps/$appId/userscripts/$scriptId',
-    path: '/api/apps/$appId/userscripts/$scriptId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiAppsAppIdWidgetWidgetIdRoute =
-  ApiAppsAppIdWidgetWidgetIdRouteImport.update({
-    id: '/api/apps/$appId/widget/$widgetId',
-    path: '/api/apps/$appId/widget/$widgetId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute =
   ApiAgentSessionsSessionIdAttachmentsAttachmentIdRouteImport.update({
     id: '/api/agent/sessions/$sessionId/attachments/$attachmentId',
@@ -360,7 +316,6 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId/manage': typeof AppWorkflowsWorkflowIdManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
-  '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/api/workflow-hooks/$workflowId/$': typeof ApiWorkflowHooksWorkflowIdSplatRoute
   '/api/workflows/$workflowId/download': typeof ApiWorkflowsWorkflowIdDownloadRoute
@@ -378,12 +333,6 @@ export interface FileRoutesByFullPath {
   '/api/app/$appId/rpc/$': typeof ApiAppAppIdRpcSplatRoute
   '/api/app/$appId/userscripts/$scriptId': typeof ApiAppAppIdUserscriptsScriptIdRoute
   '/api/app/$appId/widget/$widgetId': typeof ApiAppAppIdWidgetWidgetIdRoute
-  '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
-  '/api/apps/$appId/data/$': typeof ApiAppsAppIdDataSplatRoute
-  '/api/apps/$appId/kv/$': typeof ApiAppsAppIdKvSplatRoute
-  '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
-  '/api/apps/$appId/userscripts/$scriptId': typeof ApiAppsAppIdUserscriptsScriptIdRoute
-  '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
   '/workflows/$workflowId/executions/': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
   '/api/agent/sessions/$sessionId/attachments/$attachmentId': typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
 }
@@ -411,7 +360,6 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId/manage': typeof AppWorkflowsWorkflowIdManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
-  '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/api/workflow-hooks/$workflowId/$': typeof ApiWorkflowHooksWorkflowIdSplatRoute
   '/api/workflows/$workflowId/download': typeof ApiWorkflowsWorkflowIdDownloadRoute
@@ -429,12 +377,6 @@ export interface FileRoutesByTo {
   '/api/app/$appId/rpc/$': typeof ApiAppAppIdRpcSplatRoute
   '/api/app/$appId/userscripts/$scriptId': typeof ApiAppAppIdUserscriptsScriptIdRoute
   '/api/app/$appId/widget/$widgetId': typeof ApiAppAppIdWidgetWidgetIdRoute
-  '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
-  '/api/apps/$appId/data/$': typeof ApiAppsAppIdDataSplatRoute
-  '/api/apps/$appId/kv/$': typeof ApiAppsAppIdKvSplatRoute
-  '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
-  '/api/apps/$appId/userscripts/$scriptId': typeof ApiAppsAppIdUserscriptsScriptIdRoute
-  '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
   '/workflows/$workflowId/executions': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
   '/api/agent/sessions/$sessionId/attachments/$attachmentId': typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
 }
@@ -466,7 +408,6 @@ export interface FileRoutesById {
   '/_app/workflows/$workflowId/manage': typeof AppWorkflowsWorkflowIdManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
-  '/api/apps/$appId/download': typeof ApiAppsAppIdDownloadRoute
   '/api/hooks/$appId/$': typeof ApiHooksAppIdSplatRoute
   '/api/workflow-hooks/$workflowId/$': typeof ApiWorkflowHooksWorkflowIdSplatRoute
   '/api/workflows/$workflowId/download': typeof ApiWorkflowsWorkflowIdDownloadRoute
@@ -484,12 +425,6 @@ export interface FileRoutesById {
   '/api/app/$appId/rpc/$': typeof ApiAppAppIdRpcSplatRoute
   '/api/app/$appId/userscripts/$scriptId': typeof ApiAppAppIdUserscriptsScriptIdRoute
   '/api/app/$appId/widget/$widgetId': typeof ApiAppAppIdWidgetWidgetIdRoute
-  '/api/apps/$appId/app/$': typeof ApiAppsAppIdAppSplatRoute
-  '/api/apps/$appId/data/$': typeof ApiAppsAppIdDataSplatRoute
-  '/api/apps/$appId/kv/$': typeof ApiAppsAppIdKvSplatRoute
-  '/api/apps/$appId/rpc/$': typeof ApiAppsAppIdRpcSplatRoute
-  '/api/apps/$appId/userscripts/$scriptId': typeof ApiAppsAppIdUserscriptsScriptIdRoute
-  '/api/apps/$appId/widget/$widgetId': typeof ApiAppsAppIdWidgetWidgetIdRoute
   '/_app/workflows/$workflowId/executions/': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
   '/api/agent/sessions/$sessionId/attachments/$attachmentId': typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
 }
@@ -521,7 +456,6 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
-    | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
     | '/api/workflow-hooks/$workflowId/$'
     | '/api/workflows/$workflowId/download'
@@ -539,12 +473,6 @@ export interface FileRouteTypes {
     | '/api/app/$appId/rpc/$'
     | '/api/app/$appId/userscripts/$scriptId'
     | '/api/app/$appId/widget/$widgetId'
-    | '/api/apps/$appId/app/$'
-    | '/api/apps/$appId/data/$'
-    | '/api/apps/$appId/kv/$'
-    | '/api/apps/$appId/rpc/$'
-    | '/api/apps/$appId/userscripts/$scriptId'
-    | '/api/apps/$appId/widget/$widgetId'
     | '/workflows/$workflowId/executions/'
     | '/api/agent/sessions/$sessionId/attachments/$attachmentId'
   fileRoutesByTo: FileRoutesByTo
@@ -572,7 +500,6 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
-    | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
     | '/api/workflow-hooks/$workflowId/$'
     | '/api/workflows/$workflowId/download'
@@ -590,12 +517,6 @@ export interface FileRouteTypes {
     | '/api/app/$appId/rpc/$'
     | '/api/app/$appId/userscripts/$scriptId'
     | '/api/app/$appId/widget/$widgetId'
-    | '/api/apps/$appId/app/$'
-    | '/api/apps/$appId/data/$'
-    | '/api/apps/$appId/kv/$'
-    | '/api/apps/$appId/rpc/$'
-    | '/api/apps/$appId/userscripts/$scriptId'
-    | '/api/apps/$appId/widget/$widgetId'
     | '/workflows/$workflowId/executions'
     | '/api/agent/sessions/$sessionId/attachments/$attachmentId'
   id:
@@ -626,7 +547,6 @@ export interface FileRouteTypes {
     | '/_app/workflows/$workflowId/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
-    | '/api/apps/$appId/download'
     | '/api/hooks/$appId/$'
     | '/api/workflow-hooks/$workflowId/$'
     | '/api/workflows/$workflowId/download'
@@ -644,12 +564,6 @@ export interface FileRouteTypes {
     | '/api/app/$appId/rpc/$'
     | '/api/app/$appId/userscripts/$scriptId'
     | '/api/app/$appId/widget/$widgetId'
-    | '/api/apps/$appId/app/$'
-    | '/api/apps/$appId/data/$'
-    | '/api/apps/$appId/kv/$'
-    | '/api/apps/$appId/rpc/$'
-    | '/api/apps/$appId/userscripts/$scriptId'
-    | '/api/apps/$appId/widget/$widgetId'
     | '/_app/workflows/$workflowId/executions/'
     | '/api/agent/sessions/$sessionId/attachments/$attachmentId'
   fileRoutesById: FileRoutesById
@@ -664,7 +578,6 @@ export interface RootRouteChildren {
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
-  ApiAppsAppIdDownloadRoute: typeof ApiAppsAppIdDownloadRoute
   ApiHooksAppIdSplatRoute: typeof ApiHooksAppIdSplatRoute
   ApiWorkflowHooksWorkflowIdSplatRoute: typeof ApiWorkflowHooksWorkflowIdSplatRoute
   ApiWorkflowsWorkflowIdDownloadRoute: typeof ApiWorkflowsWorkflowIdDownloadRoute
@@ -675,12 +588,6 @@ export interface RootRouteChildren {
   ApiAppAppIdRpcSplatRoute: typeof ApiAppAppIdRpcSplatRoute
   ApiAppAppIdUserscriptsScriptIdRoute: typeof ApiAppAppIdUserscriptsScriptIdRoute
   ApiAppAppIdWidgetWidgetIdRoute: typeof ApiAppAppIdWidgetWidgetIdRoute
-  ApiAppsAppIdAppSplatRoute: typeof ApiAppsAppIdAppSplatRoute
-  ApiAppsAppIdDataSplatRoute: typeof ApiAppsAppIdDataSplatRoute
-  ApiAppsAppIdKvSplatRoute: typeof ApiAppsAppIdKvSplatRoute
-  ApiAppsAppIdRpcSplatRoute: typeof ApiAppsAppIdRpcSplatRoute
-  ApiAppsAppIdUserscriptsScriptIdRoute: typeof ApiAppsAppIdUserscriptsScriptIdRoute
-  ApiAppsAppIdWidgetWidgetIdRoute: typeof ApiAppsAppIdWidgetWidgetIdRoute
   ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute: typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
 }
 
@@ -882,13 +789,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/apps/$appId/download': {
-      id: '/api/apps/$appId/download'
-      path: '/api/apps/$appId/download'
-      fullPath: '/api/apps/$appId/download'
-      preLoaderRoute: typeof ApiAppsAppIdDownloadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/hooks/$appId/$': {
       id: '/api/hooks/$appId/$'
       path: '/api/hooks/$appId/$'
@@ -1001,48 +901,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppAppIdWidgetWidgetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/apps/$appId/app/$': {
-      id: '/api/apps/$appId/app/$'
-      path: '/api/apps/$appId/app/$'
-      fullPath: '/api/apps/$appId/app/$'
-      preLoaderRoute: typeof ApiAppsAppIdAppSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/data/$': {
-      id: '/api/apps/$appId/data/$'
-      path: '/api/apps/$appId/data/$'
-      fullPath: '/api/apps/$appId/data/$'
-      preLoaderRoute: typeof ApiAppsAppIdDataSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/kv/$': {
-      id: '/api/apps/$appId/kv/$'
-      path: '/api/apps/$appId/kv/$'
-      fullPath: '/api/apps/$appId/kv/$'
-      preLoaderRoute: typeof ApiAppsAppIdKvSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/rpc/$': {
-      id: '/api/apps/$appId/rpc/$'
-      path: '/api/apps/$appId/rpc/$'
-      fullPath: '/api/apps/$appId/rpc/$'
-      preLoaderRoute: typeof ApiAppsAppIdRpcSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/userscripts/$scriptId': {
-      id: '/api/apps/$appId/userscripts/$scriptId'
-      path: '/api/apps/$appId/userscripts/$scriptId'
-      fullPath: '/api/apps/$appId/userscripts/$scriptId'
-      preLoaderRoute: typeof ApiAppsAppIdUserscriptsScriptIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/apps/$appId/widget/$widgetId': {
-      id: '/api/apps/$appId/widget/$widgetId'
-      path: '/api/apps/$appId/widget/$widgetId'
-      fullPath: '/api/apps/$appId/widget/$widgetId'
-      preLoaderRoute: typeof ApiAppsAppIdWidgetWidgetIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/agent/sessions/$sessionId/attachments/$attachmentId': {
       id: '/api/agent/sessions/$sessionId/attachments/$attachmentId'
       path: '/api/agent/sessions/$sessionId/attachments/$attachmentId'
@@ -1153,7 +1011,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
-  ApiAppsAppIdDownloadRoute: ApiAppsAppIdDownloadRoute,
   ApiHooksAppIdSplatRoute: ApiHooksAppIdSplatRoute,
   ApiWorkflowHooksWorkflowIdSplatRoute: ApiWorkflowHooksWorkflowIdSplatRoute,
   ApiWorkflowsWorkflowIdDownloadRoute: ApiWorkflowsWorkflowIdDownloadRoute,
@@ -1164,12 +1021,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAppAppIdRpcSplatRoute: ApiAppAppIdRpcSplatRoute,
   ApiAppAppIdUserscriptsScriptIdRoute: ApiAppAppIdUserscriptsScriptIdRoute,
   ApiAppAppIdWidgetWidgetIdRoute: ApiAppAppIdWidgetWidgetIdRoute,
-  ApiAppsAppIdAppSplatRoute: ApiAppsAppIdAppSplatRoute,
-  ApiAppsAppIdDataSplatRoute: ApiAppsAppIdDataSplatRoute,
-  ApiAppsAppIdKvSplatRoute: ApiAppsAppIdKvSplatRoute,
-  ApiAppsAppIdRpcSplatRoute: ApiAppsAppIdRpcSplatRoute,
-  ApiAppsAppIdUserscriptsScriptIdRoute: ApiAppsAppIdUserscriptsScriptIdRoute,
-  ApiAppsAppIdWidgetWidgetIdRoute: ApiAppsAppIdWidgetWidgetIdRoute,
   ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute:
     ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute,
 }
