@@ -154,7 +154,10 @@ export const apps = pgTable(
     currentSourceCommit: text(),
     /** Backend mode of the current successful deployment; null before one exists. */
     backendMode: text().$type<'serverless' | 'long-running'>(),
-    /** Provisioned per-app Postgres database name, when database capability is on. */
+    /**
+     * Registered per-app Postgres database. Retained when the capability is
+     * disabled, then cleared only after an explicit permanent deletion.
+     */
     dbName: text(),
     /**
      * Versioned authenticated ciphertext for the per-app database password.

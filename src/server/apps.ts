@@ -179,6 +179,16 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
     return deleteApp(id);
   });
 
+export const deleteAppDatabaseFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; dbName: string }) =>
+    z.object({ id: idSchema, dbName: z.string().min(1) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { deleteAppDatabase } = await import('./apps/database');
+    return deleteAppDatabase(data.id, data.dbName);
+  });
+
 export const setAppSlugFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((input: { id: string; slug: string }) =>
@@ -212,6 +222,7 @@ export type AppOps = {
     capable: boolean;
     mode: 'serverless' | 'long-running' | null;
   };
+  database: { enabled: boolean; dbName: string | null };
   cron: { enabled: boolean; jobs: CronJobView[] };
   webhook: {
     enabled: boolean;
@@ -241,6 +252,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
     if (!app) {
       return {
         backend: { capable: false, mode: null },
+        database: { enabled: false, dbName: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false },
@@ -258,6 +270,10 @@ export const getAppOps = createServerFn({ method: 'GET' })
       backend: {
         capable: Boolean(caps?.backend),
         mode: app.backendMode ?? null,
+      },
+      database: {
+        enabled: Boolean(caps?.database),
+        dbName: app.dbName ?? null,
       },
       cron: { enabled: Boolean(caps?.cron), jobs: cronJobs },
       webhook: {

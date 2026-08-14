@@ -287,9 +287,11 @@ permission, role, database, or `_hatch` operations. The platform does not
 enforce that SQL rule, so the Agent must obey it. Schema changes always go
 through `data/schema.ts` and `deploy_app`.
 
-For arbitrary SQL, joins, aggregates, or ORM control, enable `database`, use
-`query_app_db` while developing, and create tables idempotently on backend
-startup. Each App database is isolated.
+For arbitrary SQL, joins, aggregates, or ORM control, enable `database` and
+deploy successfully before the first `query_app_db` call. The query tool never
+provisions or recreates a database. It can query a retained database after the
+capability is disabled until the user permanently deletes it. Create tables
+idempotently on backend startup. Each App database is isolated.
 
 ## KV secrets
 
@@ -319,3 +321,10 @@ Use `get_app` to inspect successfully deployed versions and `rollback_app` with
 the selected version. Rollback changes platform `master`, not an existing Agent
 worktree. Refresh its checkout and rebase before making further changes.
 Rollback restores code but never runs a Data Table down migration.
+
+A version requiring Database cannot be rolled back after that database was
+permanently deleted. `get_app` reports the blocked reason and source tag. Start
+from a clean checkout of current master, run `git fetch origin master --tags`,
+then `git restore --source=<sourceTag> --staged --worktree .`. Review and commit
+the restored tree on master, then deploy it as a new release. Do not detach or
+rewind master; the new commit must preserve the fast-forward deploy contract.

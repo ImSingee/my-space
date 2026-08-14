@@ -82,6 +82,9 @@ export type AgentDeploymentSummary = {
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  rollbackBlockedReason: string | null;
+  sourceCommit: string | null;
+  sourceTag: string | null;
   dataSchemaMismatch: boolean;
 };
 
@@ -228,6 +231,9 @@ export async function getAppDetailForAgent(
       createdAt: d.createdAt,
       isCurrent: d.isCurrent,
       canRollback: d.canRollback,
+      rollbackBlockedReason: d.rollbackBlockedReason,
+      sourceCommit: d.sourceCommit,
+      sourceTag: d.sourceTag,
       dataSchemaMismatch: d.dataSchemaMismatch,
     })),
   };

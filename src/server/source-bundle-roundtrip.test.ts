@@ -253,6 +253,9 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     expect(checkout.dirty).toBe(false);
     expect(checkout.synchronizedExisting).toBe(false);
     await expect(
+      agentGit(SESSION, ['rev-parse', 'deploy/v1'], checkout.absolutePath),
+    ).resolves.toBe(seedCommit);
+    await expect(
       readFile(path.join(checkout.absolutePath, 'README.md'), 'utf8'),
     ).resolves.toBe('v1\n');
 

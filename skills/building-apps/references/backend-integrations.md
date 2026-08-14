@@ -5,8 +5,9 @@ calling top-level Workflows.
 
 ## Deno Connect backend
 
-The platform injects `PORT`. It injects `DATABASE_URL` only with the database
-capability. Import generated code with an explicit `.ts` extension.
+The platform injects `PORT`. It injects `DATABASE_URL` only when the database
+capability is enabled and a successful deployment has provisioned the database.
+Import generated code with an explicit `.ts` extension.
 
 ```ts
 import http from 'node:http';

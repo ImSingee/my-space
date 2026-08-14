@@ -1,17 +1,23 @@
 import { Box, Center, Group, Loader, Stack, Text } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
-import { IconDatabase, IconFolder, IconServerBolt } from '@tabler/icons-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { IconFolder, IconServerBolt } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 import {
   BackendControls,
   BackendStatus,
   BackendTime,
   backendLastExitLabel,
 } from '~components/apps/backend-controls';
-import { appBackendsQueryOptions, appOpsQueryOptions } from '~queries/apps';
-import type { AppOps } from '~server/apps';
+import {
+  appBackendsQueryOptions,
+  appOpsQueryOptions,
+  deploymentsQueryOptions,
+} from '~queries/apps';
+import { deleteAppDatabaseFn, type AppOps } from '~server/apps';
 import { CronSection } from './cron-section';
 import { DataTableSection } from './data-table-section';
+import { DatabaseSection } from './database-section';
 import { KvSection } from './kv-section';
 import { SectionHeader } from './section-header';
 import { WebhookSection } from './webhook-section';
@@ -106,33 +112,6 @@ function BackendSection({
   );
 }
 
-function DatabaseSection({ dbName }: { dbName?: string | null }) {
-  return (
-    <Stack gap={6}>
-      <SectionHeader
-        icon={<IconDatabase size={16} stroke={1.8} />}
-        title="Database"
-        meta={
-          dbName ? (
-            <Text size="xs" c="dimmed" ff="monospace" truncate>
-              {dbName}
-            </Text>
-          ) : (
-            <Text size="xs" c="dimmed">
-              not provisioned
-            </Text>
-          )
-        }
-      />
-      <Text size="xs" c="dimmed">
-        {dbName
-          ? 'A dedicated Postgres database for this app.'
-          : 'A Postgres database is provisioned automatically on first use.'}
-      </Text>
-    </Stack>
-  );
-}
-
 function PersistentStorageSection() {
   return (
     <Stack gap={6}>
@@ -154,18 +133,18 @@ function PersistentStorageSection() {
   );
 }
 
-export function OperationsPanel({
-  appId,
-  dbName,
-  dbEnabled,
-}: {
-  appId: string;
-  /** Provisioned database name, or null when not yet provisioned. */
-  dbName?: string | null;
-  /** Whether this app declares/uses a database (controls the Database row). */
-  dbEnabled?: boolean;
-}) {
+export function OperationsPanel({ appId }: { appId: string }) {
   const query = useQuery(appOpsQueryOptions(appId));
+  const queryClient = useQueryClient();
+
+  const deleteDatabase = async (dbName: string) => {
+    await deleteAppDatabaseFn({ data: { id: appId, dbName } });
+    toast.success('Database deleted');
+    await Promise.allSettled([
+      queryClient.invalidateQueries(appOpsQueryOptions(appId)),
+      queryClient.invalidateQueries(deploymentsQueryOptions(appId)),
+    ]);
+  };
 
   if (query.isLoading) {
     return (
@@ -183,9 +162,10 @@ export function OperationsPanel({
   const ops = query.data;
   if (!ops) return null;
 
-  const anyEnabled =
+  const databaseVisible = ops.database.enabled || Boolean(ops.database.dbName);
+  const hasOperations =
     ops.backend.capable ||
-    Boolean(dbEnabled) ||
+    databaseVisible ||
     ops.storage.enabled ||
     ops.cron.enabled ||
     ops.webhook.enabled ||
@@ -198,7 +178,7 @@ export function OperationsPanel({
         Operations
       </Text>
 
-      {!anyEnabled ? (
+      {!hasOperations ? (
         <Text size="sm" c="dimmed">
           No database, Data Tables, persistent storage, backend, scheduled jobs,
           webhook, or KV to manage for this app.
@@ -208,7 +188,13 @@ export function OperationsPanel({
           {ops.backend.capable ? (
             <BackendSection appId={appId} backend={ops.backend} />
           ) : null}
-          {dbEnabled ? <DatabaseSection dbName={dbName} /> : null}
+          {databaseVisible ? (
+            <DatabaseSection
+              appId={appId}
+              database={ops.database}
+              onDelete={deleteDatabase}
+            />
+          ) : null}
           {ops.storage.enabled ? <PersistentStorageSection /> : null}
           {ops.dataTable.enabled ? <DataTableSection appId={appId} /> : null}
           {ops.cron.enabled ? (
