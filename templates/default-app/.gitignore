@@ -1,5 +1,8 @@
 # Installed locally with Deno; never committed.
 node_modules/
 
+# Platform-owned SDK and import map (regenerated on checkout and deploy).
+.hatch/
+
 # Connect codegen output (regenerated from proto/ by the platform on build).
 gen/

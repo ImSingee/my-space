@@ -19,9 +19,21 @@
  * `.env`, and containerized deployments rely on the container boundary.
  */
 
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { agentHomeDir } from './paths';
+import {
+  AGENT_HOME_DIR,
+  agentHomeDir,
+  REPO_ROOT,
+  WORKSPACE_ROOT,
+} from './paths';
+
+/** Platform-provided CLI shims used by App codegen and Agent instructions. */
+export const PLATFORM_NODE_BIN_DIR = path.join(
+  REPO_ROOT,
+  'node_modules',
+  '.bin',
+);
 
 /**
  * Variables a dev shell legitimately needs (git / pnpm / deno / node / tools).
@@ -65,6 +77,71 @@ const ALLOWLIST_LOWER: ReadonlySet<string> = new Set(
   [...ALLOWLIST].map((key) => key.toLowerCase()),
 );
 
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function inheritedPath(): string {
+  const entry = Object.entries(process.env).find(
+    ([key]) => key.toLowerCase() === 'path',
+  );
+  return entry?.[1] ?? '';
+}
+
+/**
+ * Preserve the runner's toolchain PATH while excluding every Agent-writable
+ * workspace directory (and relative entries such as `node_modules/.bin`).
+ * The repository's installed CLI shims always win, which keeps manual
+ * `buf generate` aligned with platform preparation in production images.
+ */
+export function agentTrustedPath(): string {
+  let canonicalWorkspaceRoot = WORKSPACE_ROOT;
+  try {
+    canonicalWorkspaceRoot = realpathSync(WORKSPACE_ROOT);
+  } catch {
+    // The data root may not exist yet on first startup.
+  }
+  let platformBin: string | null = null;
+  try {
+    const resolved = realpathSync(PLATFORM_NODE_BIN_DIR);
+    if (statSync(resolved).isDirectory()) platformBin = resolved;
+  } catch {
+    // A dependency install may not have populated the platform CLI bin yet.
+  }
+  const entries = [
+    PLATFORM_NODE_BIN_DIR,
+    ...inheritedPath().split(path.delimiter),
+  ];
+  const seen = new Set<string>();
+  return entries
+    .filter((entry) => entry.length > 0 && path.isAbsolute(entry))
+    .map((entry) => {
+      try {
+        const resolved = realpathSync(entry);
+        return statSync(resolved).isDirectory() ? resolved : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is string => entry !== null)
+    .filter(
+      (entry) =>
+        entry === platformBin || !isInside(canonicalWorkspaceRoot, entry),
+    )
+    .filter((entry) => {
+      if (seen.has(entry)) return false;
+      seen.add(entry);
+      return true;
+    })
+    .join(path.delimiter);
+}
+
 /**
  * Build the `shellEnv` for NodeExecutionEnv:
  * 1. neutralize every non-allowlisted server variable (set to `undefined`) so
@@ -75,13 +152,17 @@ const ALLOWLIST_LOWER: ReadonlySet<string> = new Set(
  *
  * Allowlisted keys keep their original casing (left untouched in process.env).
  */
-export function agentShellEnv(sessionId: string): NodeJS.ProcessEnv {
+export function agentShellEnv(sessionId?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of Object.keys(process.env)) {
     if (!ALLOWLIST_LOWER.has(key.toLowerCase())) env[key] = undefined;
+    // Normalize PATH casing and replace it with the trusted value below.
+    if (key.toLowerCase() === 'path') env[key] = undefined;
   }
 
-  const home = agentHomeDir(sessionId);
+  // Production Agent turns always provide a session id. The fallback is kept
+  // for isolated preparation tests over non-Agent temporary roots.
+  const home = sessionId ? agentHomeDir(sessionId) : path.join(AGENT_HOME_DIR);
   mkdirSync(home, { recursive: true });
   // Point home + caches at the sandbox (these override the host values that
   // were just neutralized). Tools create the subdirs lazily on first use.
@@ -92,5 +173,6 @@ export function agentShellEnv(sessionId: string): NodeJS.ProcessEnv {
   env.XDG_DATA_HOME = path.join(home, '.local', 'share');
   env.DENO_DIR = path.join(home, '.cache', 'deno');
   env.PNPM_HOME = path.join(home, '.local', 'share', 'pnpm');
+  env.PATH = agentTrustedPath();
   return env;
 }

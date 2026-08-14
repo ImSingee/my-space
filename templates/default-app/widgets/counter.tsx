@@ -10,7 +10,7 @@ import {
 import { createClient } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-web';
 import { z } from 'zod';
-import { CounterService } from '../gen/service_pb';
+import { CounterService } from '../gen/service_pb.ts';
 
 declare const __RPC_BASE_URL__: string;
 

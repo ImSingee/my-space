@@ -25,7 +25,7 @@ function defaultCounterTemplateFixture(): Plugin {
       }
       if (!isDefaultCounterTemplate(importer)) return;
       if (
-        source === '../gen/service_pb' ||
+        source === '../gen/service_pb.ts' ||
         source === '@connectrpc/connect' ||
         source === '@connectrpc/connect-web'
       ) {

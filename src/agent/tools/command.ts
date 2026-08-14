@@ -14,6 +14,18 @@ const HARD_OUTPUT_LIMIT = 5_000_000;
 /** Minimum gap between streamed run_command updates. */
 const COMMAND_UPDATE_INTERVAL_MS = 100;
 
+export type CommandResultDetails = { exitCode: number };
+
+export function isCommandResultDetails(
+  details: unknown,
+): details is CommandResultDetails {
+  return (
+    typeof details === 'object' &&
+    details !== null &&
+    typeof (details as { exitCode?: unknown }).exitCode === 'number'
+  );
+}
+
 /** Cap a captured stream for the tool result, keeping the (more useful) tail. */
 function capCommandStream(label: string, value: string): string | null {
   if (!value) return null;
@@ -34,6 +46,8 @@ export function createCommandTool(
     description:
       'Run a shell command in the workspace root. Use env_keys to inject only ' +
       'named values previously saved with request_env.',
+    selectStreamDetails: (details) =>
+      isCommandResultDetails(details) ? details : undefined,
     parameters: Type.Object({
       command: Type.String({ description: 'Shell command to run.' }),
       env_keys: Type.Optional(

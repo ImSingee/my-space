@@ -14,6 +14,15 @@ export const WORKSPACE_ROOT = path.resolve(
   REPO_ROOT,
   process.env.HATCH_DATA_DIR ?? 'workspace',
 );
+/**
+ * Platform-private staging for generated App SDK generations. This must stay
+ * outside Agent-owned worktrees while remaining on the workspace filesystem
+ * so the final directory install can be atomic.
+ */
+export const HATCH_SDK_STAGING_DIR = path.resolve(
+  WORKSPACE_ROOT,
+  '.hatch-sdk-staging',
+);
 /** Legacy app source trees used before Git-backed app repositories. */
 export const APPS_DIR = path.resolve(WORKSPACE_ROOT, 'apps');
 /** Built artifacts (live, served): workspace/builds/<id>/{app,widgets}. */

@@ -1,3 +1,10 @@
 {
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"]
+  },
   "allowScripts": []
 }

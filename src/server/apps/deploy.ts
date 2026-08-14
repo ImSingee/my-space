@@ -530,17 +530,9 @@ async function deployAppInner(
   let keepDataFenceOnFailure = Boolean(app.dataActivationId);
   let build: BuildResult | undefined;
   let version = 0;
+  let markedBuildingByThisAttempt = false;
 
   try {
-    await db
-      .update(schema.apps)
-      // An archived app must remain unavailable throughout its build. A
-      // successful activation below deliberately promotes it to deployed.
-      .set({
-        status: statusBeforeBuild === 'archived' ? 'archived' : 'building',
-      })
-      .where(eq(schema.apps.id, id));
-
     build = await buildApp(id, {
       sourceDir,
       outputDir: tempBuild,
@@ -633,6 +625,31 @@ async function deployAppInner(
         'Inbound webhooks require a backend: set capabilities.backend and ' +
           'define backend.entry (verified webhooks are forwarded to /__webhook).',
       );
+    }
+
+    // Source validation, schema evaluation, and every production bundle have
+    // passed. Only now expose a persistent build marker: type/build failures
+    // must leave the App row exactly as the deploy attempt found it. Use a CAS
+    // so an archive/state change committed while the build was running is never
+    // overwritten using the stale status read above.
+    if (statusBeforeBuild !== 'archived') {
+      const marked = await db
+        .update(schema.apps)
+        .set({ status: 'building' })
+        .where(
+          and(
+            eq(schema.apps.id, id),
+            eq(schema.apps.status, statusBeforeBuild),
+          ),
+        )
+        .returning({ id: schema.apps.id });
+      if (marked.length === 0) {
+        throw new Error(
+          `App "${id}" changed state while its deployment was building. ` +
+            'The build was not activated; deploy the current state again.',
+        );
+      }
+      markedBuildingByThisAttempt = true;
     }
 
     let dbName = app.dbName ?? null;
@@ -1035,7 +1052,7 @@ async function deployAppInner(
     // until a retry or explicit rollback completes recovery.
     const preserveActivationState =
       !recorded && (releaseOutcomeUnknown || keepDataFenceOnFailure);
-    if (!preserveActivationState) {
+    if (!preserveActivationState && markedBuildingByThisAttempt) {
       await db
         .update(schema.apps)
         .set({

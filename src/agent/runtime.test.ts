@@ -214,6 +214,49 @@ describe('runAgentTurn terminal outcomes', () => {
     });
   });
 
+  it('marks a non-zero command as an error without dropping diagnostics', async () => {
+    const sessionId = 'command-nonzero';
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall('run_command', {
+            command: "printf 'kept-output\\n'; exit 7",
+          }),
+        ),
+        fauxAssistantMessage('done'),
+      ],
+      sessionId,
+      (event) => events.push(event),
+    );
+
+    const toolEnd = events.find(
+      (event): event is Extract<AgentStreamEvent, { type: 'tool_end' }> =>
+        event.type === 'tool_end' && event.name === 'run_command',
+    );
+    expect(toolEnd).toMatchObject({
+      isError: true,
+      details: { exitCode: 7 },
+    });
+    expect(toolEnd?.output).toContain('kept-output');
+    expect(toolEnd?.output).toContain('exit code: 7');
+
+    const toolResult = result.messages.find(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        !Array.isArray(message) &&
+        message.role === 'toolResult' &&
+        message.toolName === 'run_command',
+    );
+    expect(toolResult).toMatchObject({
+      isError: true,
+      details: { exitCode: 7 },
+    });
+    expect(JSON.stringify(toolResult)).toContain('kept-output');
+  });
+
   it('does not stream details from tools that did not opt in', async () => {
     const sessionId = 'non-streamed-app-details';
     const apps = Array.from({ length: 2_000 }, (_, index) => ({

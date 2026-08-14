@@ -7,6 +7,10 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import {
+  AppPreparationError,
+  prepareAppWorktree,
+} from '../app-worktree-prepare';
 import { appHatchSdkMaterializer } from '../hatch-sdk';
 import {
   assertWorkspacePathAvailable,
@@ -16,6 +20,7 @@ import {
   type LocalCheckout,
   withSourceWorkspaceLock,
 } from '../local-sources';
+import { agentAppWorkDir } from '../paths';
 import type { PlatformClient } from '../platform-client';
 import {
   QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH,
@@ -23,6 +28,11 @@ import {
   queryAppKvRequestSchema,
 } from '../protocol';
 import { writeScaffoldFiles } from '../scaffold-files';
+import {
+  materializeWorktree,
+  WorktreeMaterializationError,
+} from '../worktree-materializer';
+import { resolveAgentWorkspacePath } from '../workspace-paths';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 function checkoutLines(id: string, checkout: LocalCheckout): string[] {
@@ -46,11 +56,44 @@ function checkoutLines(id: string, checkout: LocalCheckout): string[] {
   ];
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function preparationFailure(
+  context: string,
+  stage: 'SDK materialization' | 'dependency install or Connect codegen',
+  error: unknown,
+): Error {
+  const stageError =
+    error instanceof WorktreeMaterializationError && error.cause !== undefined
+      ? error.cause
+      : error;
+  const reason =
+    stageError instanceof AppPreparationError
+      ? stageError.message
+      : `App preparation failed during ${stage}: ${errorMessage(stageError)}`;
+  return new Error(`${context}, but ${reason}`);
+}
+
+type PrepareWorktree = (root: string, signal?: AbortSignal) => Promise<void>;
+
 export function createAppTools(options: {
   sessionId?: string;
   platform: PlatformClient;
+  /** Test seam for platform-owned SDK materialization. */
+  materializeSdk?: (root: string) => Promise<void>;
+  /** Test seam for the generated dependency/codegen preparation step. */
+  prepareWorktree?: PrepareWorktree;
 }): AgentTool[] {
   const { platform } = options;
+  const materializeSdk =
+    options.materializeSdk ?? appHatchSdkMaterializer.materialize;
+  const sdkMaterializer = {
+    gitExcludePatterns: appHatchSdkMaterializer.gitExcludePatterns,
+    materialize: materializeSdk,
+  };
+  const prepareWorktree = options.prepareWorktree ?? prepareAppWorktree;
 
   const listAppsTool = tool({
     name: 'list_apps',
@@ -164,7 +207,9 @@ export function createAppTools(options: {
       'Use before reading or editing an existing app. An existing target is ' +
       'synchronized only when it is the same owned checkout, clean, on master, ' +
       'and remote master is a fast-forward; otherwise it fails unless force is ' +
-      'true.',
+      'true. Before returning, it reproduces frozen dependencies, generates ' +
+      'Connect stubs, and materializes the platform-owned Hatch SDK. App ' +
+      'dependencies that require npm lifecycle scripts are rejected.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to checkout.' }),
@@ -191,12 +236,44 @@ export function createAppTools(options: {
         sessionId,
         async () => {
           const source = await platform.getAppSource(params.id);
-          const checkout = await checkoutFromBundle(sessionId, 'app', source, {
-            targetPath: params.target_path,
-            force: params.force ?? false,
-            materializer: appHatchSdkMaterializer,
-          });
-          return text(checkoutLines(source.id, checkout).join('\n'), checkout);
+          const resolved = await resolveAgentWorkspacePath(
+            sessionId,
+            params.target_path ?? agentAppWorkDir(sessionId, source.id),
+          );
+          let checkout: LocalCheckout;
+          try {
+            checkout = await checkoutFromBundle(sessionId, 'app', source, {
+              targetPath: params.target_path,
+              force: params.force ?? false,
+              materializer: sdkMaterializer,
+            });
+          } catch (error) {
+            if (error instanceof WorktreeMaterializationError) {
+              throw preparationFailure(
+                `Checked out "${source.id}" at ${resolved.absolutePath}`,
+                'SDK materialization',
+                error,
+              );
+            }
+            throw error;
+          }
+          const context = `Checked out "${source.id}" at ${checkout.absolutePath}`;
+          try {
+            await prepareWorktree(checkout.absolutePath, signal);
+          } catch (error) {
+            throw preparationFailure(
+              context,
+              'dependency install or Connect codegen',
+              error,
+            );
+          }
+          return text(
+            [
+              ...checkoutLines(source.id, checkout),
+              'Preparation: ready (dependencies, Connect stubs, Hatch SDK).',
+            ].join('\n'),
+            { ...checkout, preparation: 'ready' },
+          );
         },
         signal,
       );
@@ -209,7 +286,9 @@ export function createAppTools(options: {
     description:
       "Scaffold a new app from the platform template in this chat's " +
       'worktree with manifest, proto, Deno backend, React app, and a sample ' +
-      'widget.',
+      'widget. Before returning, it reproduces frozen dependencies, generates ' +
+      'Connect stubs, and materializes the platform-owned Hatch SDK. App ' +
+      'dependencies that require npm lifecycle scripts are rejected.',
     executionMode: 'sequential',
     parameters: Type.Object({
       slug: Type.String({
@@ -259,20 +338,40 @@ export function createAppTools(options: {
             res.generation,
             (root) => writeScaffoldFiles(root, res.files),
             targetPath,
-            appHatchSdkMaterializer,
           );
+          const context =
+            `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}) ` +
+            `at ${checkout.absolutePath}`;
+          try {
+            await materializeWorktree(checkout.absolutePath, sdkMaterializer);
+          } catch (error) {
+            throw preparationFailure(context, 'SDK materialization', error);
+          }
+          try {
+            await prepareWorktree(checkout.absolutePath, signal);
+          } catch (error) {
+            throw preparationFailure(
+              context,
+              'dependency install or Connect codegen',
+              error,
+            );
+          }
           return text(
-            `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
-              `Source is at ${checkout.absolutePath}.\n` +
-              'Use the id for checkout_app/deploy_app. Read the scaffolded files, ' +
-              'edit proto/backend/app/widgets, then commit your changes with git ' +
-              'before calling deploy_app.',
+            [
+              `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
+                `Source is at ${checkout.absolutePath}.`,
+              'Preparation is ready: dependencies, Connect stubs, and the Hatch ' +
+                'SDK are available. Use the id for checkout_app/deploy_app. Read ' +
+                'and edit the authored files, run the checks described by the ' +
+                'building-apps Skill, then commit before calling deploy_app.',
+            ].join('\n'),
             {
               id: res.id,
               slug: res.slug,
               name: res.name,
               path: checkout.path,
               absolutePath: checkout.absolutePath,
+              preparation: 'ready',
             },
           );
         },
@@ -285,10 +384,12 @@ export function createAppTools(options: {
     name: 'deploy_app',
     label: 'Deploy app',
     description:
-      'Build (Connect codegen + bundle app/widgets/backend) and ' +
-      'deploy an app so it becomes live. Requires package.json, deno.json, and ' +
-      'a committed deno.lock; load the building-apps Skill to repair dependency ' +
-      'configuration errors. Reports the app/widget/RPC URLs.',
+      'Validate and deploy a committed app so it becomes live. Deploy uses ' +
+      'trusted Connect codegen, a frozen dependency install, source-level Deno ' +
+      'checks for every enabled manifest entry, and production bundles before ' +
+      'database migration or release activation. Requires package.json, ' +
+      'deno.json, and a committed deno.lock; load the building-apps Skill to ' +
+      'repair validation errors. Reports the app/widget/RPC URLs.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to deploy.' }),

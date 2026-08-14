@@ -28,6 +28,7 @@ import {
   AGENT_IDENTITIES_PATH,
   AGENT_LEGACY_HOME_DIR,
   AGENTS_DIR,
+  HATCH_SDK_STAGING_DIR,
   REPO_ROOT,
   WORKSPACE_ROOT,
   agentHomeDir,
@@ -124,6 +125,8 @@ function buildProfile(sessionId?: string): string {
   ];
   const denySubpaths = [
     path.join(REPO_ROOT, '.pi'),
+    // Root-owned SDK generations before their sandbox-UID worktree install.
+    HATCH_SDK_STAGING_DIR,
     path.join(hostHome, '.ssh'),
     path.join(hostHome, '.aws'),
     path.join(hostHome, '.gnupg'),

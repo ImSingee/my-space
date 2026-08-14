@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ulid } from 'ulid';
 import { TEMPLATES_DIR } from '~agent/paths';
 import type { ScaffoldFile } from '~agent/protocol';
+import { isAppManagedPathSegment } from '~/app-managed-path';
 import { db, schema } from '~/db';
 import { slugConflictExists } from './access';
 import { ensureAppRepo } from './git';
@@ -42,12 +43,20 @@ export async function renderTemplate(
 ): Promise<ScaffoldFile[]> {
   const files: ScaffoldFile[] = [];
   const excluded = new Set(opts.exclude ?? []);
+  const excludesManagedDirectory = [...excluded].some((candidate) =>
+    candidate.split('/').some(isAppManagedPathSegment),
+  );
 
   async function walk(dir: string, prefix: string): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (excluded.has(rel)) continue;
+      if (
+        excluded.has(rel) ||
+        (excludesManagedDirectory && isAppManagedPathSegment(entry.name))
+      ) {
+        continue;
+      }
       const abs = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walk(abs, rel);
@@ -138,9 +147,9 @@ export async function createApp(
       'package.json': { __APP_ID__: slug },
       'app/index.html': { __APP_NAME__: name },
     },
-    // Generated stubs are produced at build time, never copied from the
-    // template.
-    { exclude: ['gen'] },
+    // Generated dependencies, stubs, and platform-owned SDK files are prepared
+    // in the Agent worktree. Never let stale template artifacts enter source.
+    { exclude: ['.hatch', 'gen', 'node_modules'] },
   );
 
   const [created] = await db

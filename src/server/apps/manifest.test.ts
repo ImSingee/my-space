@@ -70,10 +70,10 @@ describe('app capabilities manifest', () => {
   });
 
   it('accepts known capabilities and applies their defaults', () => {
-    const parsed = parseSourceManifest(manifest({ backend: true }));
+    const parsed = parseSourceManifest(manifest({}));
 
     expect(parsed.capabilities).toMatchObject({
-      backend: true,
+      backend: false,
       frontend: false,
       storage: false,
       kv: false,
@@ -81,9 +81,7 @@ describe('app capabilities manifest', () => {
   });
 
   it('accepts and preserves storage: false', () => {
-    const parsed = parseSourceManifest(
-      manifest({ backend: true, storage: false }),
-    );
+    const parsed = parseSourceManifest(manifest({ storage: false }));
     const normalized = normalizeManifest(parsed);
 
     expect(parsed.capabilities.storage).toBe(false);
@@ -215,6 +213,31 @@ describe('app route manifest', () => {
     expect(stored).toEqual(before);
   });
 
+  it.each([
+    '.hatch/app.tsx',
+    '.HATCH/app.tsx',
+    './.HaTcH/app.tsx',
+    './.hatch/app.tsx',
+    './/.hatch/app.tsx',
+    '.\\.hatch\\app.tsx',
+    'app/.hatch/main.tsx',
+    'app/.HATCH/main.tsx',
+    'app\\.hatch\\main.tsx',
+    'app\\.HaTcH\\main.tsx',
+  ])(
+    'rejects entries inside the platform-owned .hatch directory: %s',
+    (entry) => {
+      expect(() =>
+        parseSourceManifest({
+          id: 'demo',
+          name: 'Demo',
+          capabilities: { frontend: true },
+          app: { entry },
+        }),
+      ).toThrow(/platform-owned.*\.hatch/);
+    },
+  );
+
   it('rejects duplicate route paths', () => {
     expect(() =>
       parseRoutes([
@@ -237,6 +260,48 @@ describe('app route manifest', () => {
     expect(() =>
       parseRoutes([{ path: '/', description: 'Home\nroute' }]),
     ).toThrow(/must not contain line breaks/);
+  });
+});
+
+describe('capability entry contracts', () => {
+  it.each([
+    [{ frontend: true }, /app\.entry is not declared/],
+    [{ backend: true }, /backend\.entry is not declared/],
+    [{ widgets: true }, /no widgets are declared/],
+  ] as const)(
+    'rejects an enabled capability without an entry',
+    (capabilities, error) => {
+      expect(() =>
+        parseSourceManifest({ id: 'demo', name: 'Demo', capabilities }),
+      ).toThrow(error);
+    },
+  );
+
+  it('rejects an RPC declaration without an enabled backend entry', () => {
+    expect(() =>
+      parseSourceManifest({
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { frontend: true },
+        app: { entry: 'app/main.tsx' },
+        rpc: {
+          proto: 'proto/service.proto',
+          service: 'app.v1.DemoService',
+        },
+      }),
+    ).toThrow(/rpc requires capabilities\.backend/);
+  });
+
+  it('requires the RPC proto declaration to name a .proto file', () => {
+    expect(() =>
+      parseSourceManifest({
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts' },
+        rpc: { proto: 'proto/service', service: 'app.v1.DemoService' },
+      }),
+    ).toThrow(/proto entry must name a \.proto file/);
   });
 });
 

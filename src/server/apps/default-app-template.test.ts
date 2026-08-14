@@ -86,11 +86,42 @@ describe('default app template', () => {
     const manifest = JSON.parse(packageJson) as {
       dependencies: Record<string, string>;
     };
+    const denoConfig = JSON.parse(denoJson) as Record<string, unknown>;
     expect(manifest.dependencies).not.toHaveProperty('@hatch/data');
     expect(manifest.dependencies).not.toHaveProperty('postgres');
-    expect(JSON.parse(denoJson)).toEqual({ allowScripts: [] });
+    expect(denoConfig).toEqual({
+      nodeModulesDir: 'auto',
+      compilerOptions: {
+        strict: true,
+        jsx: 'react-jsx',
+        jsxImportSource: 'react',
+        lib: ['deno.ns', 'dom', 'dom.iterable', 'dom.asynciterable', 'esnext'],
+      },
+      allowScripts: [],
+    });
     expect(lock).not.toContain('@hatch/data');
+    expect(lock).not.toContain('@types/node');
     expect(gitignore).toMatch(/^node_modules\/$/m);
+    expect(gitignore).toMatch(/^\.hatch\/$/m);
+  });
+
+  it('uses explicit TypeScript extensions in generated-code imports', async () => {
+    const template = new URL(
+      '../../../templates/default-app/',
+      import.meta.url,
+    );
+    const [app, backend, widget, bufConfig] = await Promise.all([
+      readFile(new URL('app/main.tsx', template), 'utf8'),
+      readFile(new URL('backend/main.ts', template), 'utf8'),
+      readFile(new URL('widgets/counter.tsx', template), 'utf8'),
+      readFile(new URL('buf.gen.yaml', template), 'utf8'),
+    ]);
+
+    expect(app).toContain("from '../gen/service_pb.ts'");
+    expect(backend).toContain("from '../gen/service_pb.ts'");
+    expect(widget).toContain("from '../gen/service_pb.ts'");
+    expect(bufConfig).toContain('import_extension=ts');
+    expect(bufConfig).not.toContain('import_extension=none');
   });
 
   it('renders the scaffolded app with light-only color support', async () => {

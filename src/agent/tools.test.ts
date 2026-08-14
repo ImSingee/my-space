@@ -92,6 +92,14 @@ function editDetailsOf(result: { details?: unknown }): EditFileDetails {
 }
 
 describe('agent file tools', () => {
+  it('reports a missing read target without leaking realpath internals', async () => {
+    const { getTool } = await setup();
+
+    await expect(
+      getTool('read_file').execute('read', { path: 'missing.ts' }),
+    ).rejects.toThrow('File not found: missing.ts');
+  });
+
   it('reads a complete file with the default pagination values', async () => {
     const { getTool } = await setup({ 'app.ts': 'const value = 1;\n' });
 
@@ -314,6 +322,77 @@ describe('agent file tools', () => {
       'one three\n',
     );
   });
+
+  it.each(['.hatch', '.HATCH', '.HaTcH'])(
+    'never writes or edits the platform-owned %s path',
+    async (managedDirectory) => {
+      const { root, getTool } = await setup({
+        [`apps/example/${managedDirectory}/import-map.json`]:
+          '{"imports":{}}\n',
+      });
+      const managed = path.join(
+        root,
+        'apps',
+        'example',
+        managedDirectory,
+        'import-map.json',
+      );
+
+      await expect(
+        getTool('read_file').execute('read', { path: managed }),
+      ).resolves.toBeDefined();
+      await expect(
+        getTool('write_file').execute('write', {
+          path: managed,
+          content: 'overwritten',
+        }),
+      ).rejects.toThrow('platform-owned .hatch directory');
+      await expect(
+        getTool('write_file').execute('write', {
+          path: `apps/example/${managedDirectory}/new.json`,
+          content: '{}\n',
+        }),
+      ).rejects.toThrow('platform-owned .hatch directory');
+      await expect(
+        getTool('edit_file').execute('edit', {
+          path: managed,
+          old_string: '{}',
+          new_string: '{"changed":true}',
+        }),
+      ).rejects.toThrow('platform-owned .hatch directory');
+      await expect(readFile(managed, 'utf8')).resolves.toBe('{"imports":{}}\n');
+    },
+  );
+
+  it.each(['.hatch', '.HATCH'])(
+    'rejects an existing file addressed through a symlinked %s alias',
+    async (managedDirectory) => {
+      const { root, getTool } = await setup({
+        'ordinary/import-map.json': '{"imports":{}}\n',
+      });
+      const alias = path.join(root, 'apps', 'example', managedDirectory);
+      await mkdir(path.dirname(alias), { recursive: true });
+      await symlink(path.join(root, 'ordinary'), alias, 'dir');
+      const addressed = `apps/example/${managedDirectory}/import-map.json`;
+
+      await expect(
+        getTool('write_file').execute('write', {
+          path: addressed,
+          content: 'overwritten',
+        }),
+      ).rejects.toThrow('platform-owned .hatch directory');
+      await expect(
+        getTool('edit_file').execute('edit', {
+          path: addressed,
+          old_string: '{}',
+          new_string: '{"changed":true}',
+        }),
+      ).rejects.toThrow('platform-owned .hatch directory');
+      await expect(
+        readFile(path.join(root, 'ordinary', 'import-map.json'), 'utf8'),
+      ).resolves.toBe('{"imports":{}}\n');
+    },
+  );
 
   it('inserts replacement metacharacters literally', async () => {
     const { root, getTool } = await setup({ 'app.ts': 'value = TOKEN;\n' });
@@ -567,6 +646,19 @@ describe('run_command sandbox', () => {
     });
     expect(textOf(result)).toContain('sandbox-ok');
     expect(textOf(result)).toContain('exit code: 0');
+    expect(result.details).toEqual({ exitCode: 0 });
+  });
+
+  it('keeps output and exit details for a non-zero command', async () => {
+    const { getTool } = await setup();
+    const result = await getTool('run_command').execute('cmd', {
+      command: "printf 'command-out\\n'; printf 'command-err\\n' >&2; exit 7",
+    });
+
+    expect(textOf(result)).toContain('command-out');
+    expect(textOf(result)).toContain('command-err');
+    expect(textOf(result)).toContain('exit code: 7');
+    expect(result.details).toEqual({ exitCode: 7 });
   });
 
   it('injects only explicitly selected saved environment keys', async () => {

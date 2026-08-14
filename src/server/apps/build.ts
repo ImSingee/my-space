@@ -1,7 +1,8 @@
 /** Server-only: compile an app source tree into deployable artifacts. */
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import {
   BUILD_WORK_DIR,
@@ -10,9 +11,11 @@ import {
   appSrcDir,
 } from '~agent/paths';
 import {
+  appHatchDataPackageDir,
   appHatchImportMapPath,
   materializeAppHatchSdk,
 } from '~agent/hatch-sdk';
+import { PLATFORM_APP_BUF_GEN_YAML } from '~agent/app-codegen';
 import {
   type AppApi,
   type NormalizedManifest,
@@ -48,22 +51,6 @@ export type BuildAppOptions = {
 const BIN_DIR = path.join(REPO_ROOT, 'node_modules', '.bin');
 
 /**
- * The only codegen config `buf generate` ever runs with. App sources carry a
- * copy for local iteration, but the build overwrites it (see below) because
- * buf `local:` plugins are arbitrary commands. Must mirror the scaffold
- * template so agent-side and platform-side codegen agree.
- */
-const PLATFORM_BUF_GEN_YAML = `version: v2
-clean: true
-plugins:
-  - local: protoc-gen-es
-    out: gen
-    opt:
-      - target=ts
-      - import_extension=none
-`;
-
-/**
  * Bounded build-step runner (shared timeout + output cap) with the platform's
  * node_modules/.bin prepended so buf can resolve the protoc-gen-es plugin.
  */
@@ -71,7 +58,7 @@ function run(
   cmd: string,
   args: string[],
   opts: { cwd: string; env?: NodeJS.ProcessEnv },
-): Promise<{ code: number; output: string }> {
+): ReturnType<typeof runSubprocess> {
   const baseEnv = opts.env ?? process.env;
   return runSubprocess(cmd, args, {
     cwd: opts.cwd,
@@ -294,6 +281,95 @@ async function readManifest(src: string): Promise<SourceManifest> {
   return parseSourceManifest(json);
 }
 
+type SourceCheckEntry = {
+  path: string;
+  missingMessage: string;
+};
+
+/**
+ * Return the authored TypeScript roots enabled by the source manifest. Deno
+ * follows every transitive import from these roots, so one invocation checks
+ * the complete App graph while avoiding disabled capabilities.
+ */
+function sourceCheckEntries(manifest: SourceManifest): SourceCheckEntry[] {
+  const entries: SourceCheckEntry[] = [];
+  if (manifest.capabilities.frontend && manifest.app) {
+    entries.push({
+      path: manifest.app.entry,
+      missingMessage: `app entry not found: ${manifest.app.entry}`,
+    });
+  }
+  if (manifest.capabilities.backend && manifest.backend) {
+    entries.push({
+      path: manifest.backend.entry,
+      missingMessage: `backend entry not found: ${manifest.backend.entry}`,
+    });
+  }
+  if (manifest.capabilities.widgets) {
+    for (const widget of manifest.widgets) {
+      entries.push({
+        path: widget.entry,
+        missingMessage: `widget entry not found: ${widget.entry}`,
+      });
+    }
+  }
+  if (manifest.capabilities.userscripts) {
+    for (const script of manifest.userscripts) {
+      entries.push({
+        path: script.entry,
+        missingMessage: `userscript entry not found: ${script.entry}`,
+      });
+    }
+  }
+  if (manifest.capabilities.dataTable) {
+    entries.push({
+      path: 'data/schema.ts',
+      missingMessage:
+        'capabilities.dataTable is true but data/schema.ts does not exist.',
+    });
+  }
+
+  return [...new Map(entries.map((entry) => [entry.path, entry])).values()];
+}
+
+/** Type-check every enabled App entry before evaluating or bundling source. */
+async function checkAppSource(
+  src: string,
+  manifest: SourceManifest,
+  logs: string[],
+): Promise<void> {
+  const entries = sourceCheckEntries(manifest);
+  if (entries.length === 0) return;
+
+  for (const entry of entries) {
+    if (!(await pathExists(path.join(src, entry.path)))) {
+      throw new Error(`Source validation failed: ${entry.missingMessage}`);
+    }
+  }
+
+  const checkArgs = [
+    'check',
+    '--config=deno.json',
+    '--no-remote',
+    '--node-modules-dir=auto',
+    `--import-map=${appHatchImportMapPath(src)}`,
+    '--lock=deno.lock',
+    '--frozen',
+    '--',
+    ...entries.map((entry) => entry.path),
+  ];
+  const checked = await run('deno', checkArgs, {
+    cwd: src,
+    env: subprocessSandboxEnv(),
+  });
+  logs.push(`$ deno ${checkArgs.join(' ')}\n${checked.output.trim()}`);
+  if (checked.code !== 0) {
+    throw new Error(
+      `Source validation failed during deno check:\n${checked.output}`,
+    );
+  }
+}
+
 /**
  * Minimal shape of a protoc/buf JSON `FileDescriptorSet`. proto3 JSON omits
  * fields at their default value, so streaming flags are optional (absent =
@@ -413,6 +489,198 @@ function browserDefine(
   };
 }
 
+/** Resolve only the public, platform-owned Hatch SDK browser entrypoints. */
+function hatchSdkPlugin(src: string): esbuild.Plugin {
+  const sdk = appHatchDataPackageDir(src);
+  const entries = new Map([
+    ['@hatch/data', path.join(sdk, 'dist', 'data.js')],
+    ['@hatch/data/react', path.join(sdk, 'dist', 'data-react.js')],
+  ]);
+  return {
+    name: 'hatch-sdk',
+    setup(build) {
+      build.onResolve({ filter: /^@hatch(?:\/|$)/ }, (args) => {
+        const resolved = entries.get(args.path);
+        if (resolved) return { path: resolved };
+        return {
+          errors: [
+            {
+              text:
+                `Unknown Hatch SDK import "${args.path}". ` +
+                'Use @hatch/data or @hatch/data/react.',
+            },
+          ],
+        };
+      });
+    },
+  };
+}
+
+function pathIsInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function browserLoaderForPath(target: string): esbuild.Loader | undefined {
+  switch (path.extname(target).toLowerCase()) {
+    case '.js':
+    case '.mjs':
+    case '.cjs':
+      return 'js';
+    case '.jsx':
+      return 'jsx';
+    case '.ts':
+    case '.mts':
+    case '.cts':
+      return 'ts';
+    case '.tsx':
+      return 'tsx';
+    case '.json':
+      return 'json';
+    case '.css':
+      return 'css';
+    case '.txt':
+      return 'text';
+    default:
+      return undefined;
+  }
+}
+
+function directBrowserLocalPath(
+  specifier: string,
+  resolveDir: string,
+): { path: string; suffix?: string } | null {
+  if (specifier.startsWith('file:')) {
+    let url: URL;
+    try {
+      url = new URL(specifier);
+      if (url.protocol !== 'file:') return null;
+      const suffix = `${url.search}${url.hash}` || undefined;
+      url.search = '';
+      url.hash = '';
+      return { path: fileURLToPath(url), suffix };
+    } catch {
+      return { path: specifier };
+    }
+  }
+  if (/^[A-Za-z]:[\\/]/.test(specifier) || specifier.startsWith('\\\\')) {
+    return { path: specifier };
+  }
+  if (path.isAbsolute(specifier)) return { path: specifier };
+  if (
+    specifier === '.' ||
+    specifier === '..' ||
+    specifier.startsWith('./') ||
+    specifier.startsWith('../')
+  ) {
+    return { path: path.resolve(resolveDir, specifier) };
+  }
+  return null;
+}
+
+/**
+ * Defense in depth for esbuild's separate resolver. Every browser module is
+ * canonicalized before its bytes are returned to esbuild, including package
+ * files reached through node_modules links. Installed dependencies and the
+ * managed .hatch SDK remain valid because both live below the temporary source
+ * root; platform-repository fallback modules do not.
+ */
+function browserSourceBoundaryPlugin(sourceRoot: string): esbuild.Plugin {
+  return {
+    name: 'app-source-boundary',
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, (args) => {
+        const local = directBrowserLocalPath(args.path, args.resolveDir);
+        if (!local) return undefined;
+        const absolute = path.resolve(local.path);
+        if (!pathIsInside(sourceRoot, absolute)) {
+          return {
+            errors: [
+              {
+                text:
+                  `Browser import "${args.path}" must stay inside the App ` +
+                  'source root.',
+              },
+            ],
+          };
+        }
+        // esbuild does not resolve file: URLs itself. Other local forms can use
+        // its normal extension/package metadata handling before onLoad applies
+        // the canonical check below.
+        if (args.path.startsWith('file:')) return local;
+        return undefined;
+      });
+
+      build.onLoad({ filter: /.*/, namespace: 'file' }, async (args) => {
+        let canonical: string;
+        try {
+          canonical = await fs.realpath(args.path);
+        } catch (error) {
+          return {
+            errors: [
+              {
+                text:
+                  `Browser module "${args.path}" could not be verified: ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+        }
+        if (!pathIsInside(sourceRoot, canonical)) {
+          return {
+            errors: [
+              {
+                text:
+                  `Browser module "${args.path}" resolves outside the App ` +
+                  'source root.',
+              },
+            ],
+          };
+        }
+
+        const loader = browserLoaderForPath(canonical);
+        if (!loader) return undefined;
+        let handle;
+        try {
+          handle = await fs.open(
+            canonical,
+            fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+          );
+          if (!(await handle.stat()).isFile()) {
+            return {
+              errors: [
+                { text: `Browser module is not a regular file: ${args.path}` },
+              ],
+            };
+          }
+          return {
+            contents: await handle.readFile(),
+            loader,
+            resolveDir: path.dirname(canonical),
+          };
+        } catch (error) {
+          return {
+            errors: [
+              {
+                text:
+                  `Browser module "${args.path}" could not be read safely: ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+        } finally {
+          await handle?.close();
+        }
+      });
+    },
+  };
+}
+
 const DATA_SCHEMA_SENTINEL = '[[hatch-data-schema]]';
 
 async function describeDataSchema(
@@ -425,16 +693,18 @@ async function describeDataSchema(
       'capabilities.dataTable is true but data/schema.ts does not exist.',
     );
   }
-  const runner = path.join(src, '__hatch_describe_data.ts');
+  const runner = path.join(src, '.hatch', '__describe_data.ts');
   await fs.writeFile(
     runner,
-    `import schema from './data/schema.ts';\n` +
+    `import schema from '../data/schema.ts';\n` +
       `console.log(${JSON.stringify(DATA_SCHEMA_SENTINEL)} + JSON.stringify(schema.descriptor));\n`,
     'utf8',
   );
   const describeArgs = [
     'run',
     '--no-prompt',
+    '--config=deno.json',
+    '--no-remote',
     '--node-modules-dir=auto',
     `--import-map=${appHatchImportMapPath(src)}`,
     '--lock=deno.lock',
@@ -491,27 +761,19 @@ export async function buildApp(
       recursive: true,
       // Reproduce dependencies from the committed lock below; never trust or
       // waste time copying a source checkout's pre-existing installations. The
-      // fixed assets directory is copied byte-for-byte later, so names that have
-      // build meaning elsewhere remain ordinary resource names inside it.
+      // exclusions are platform-generated roots; matching only the first path
+      // segment keeps identically named authored directories below app/, widgets/,
+      // backend/assets/, and other source trees intact.
       filter: (source) => {
         const relative = path
           .relative(originalSrc, source)
           .split(path.sep)
           .join('/');
-        if (
-          relative === 'backend/assets' ||
-          relative.startsWith('backend/assets/')
-        ) {
-          return true;
-        }
-        return !['.git', 'node_modules'].includes(path.basename(source));
+        const rootEntry = relative.split('/', 1)[0]?.toLowerCase();
+        return !['.git', '.hatch', 'gen', 'node_modules'].includes(rootEntry);
       },
     });
     await assertSourceHasNoSymlinks(tempSrc);
-    // Agent worktree dependencies are intentionally absent from deploy bundles.
-    // Always materialize a trusted copy of the platform SDK in this disposable
-    // build checkout before any Deno or esbuild resolution.
-    await materializeAppHatchSdk(src);
 
     const manifest = await readManifest(src);
 
@@ -527,23 +789,42 @@ export async function buildApp(
 
     await validateDenoDependencySource(src, 'app');
 
-    // Fresh output directory.
-    await fs.rm(out, { recursive: true, force: true });
-    await fs.mkdir(out, { recursive: true });
+    // Agent worktree dependencies are intentionally absent from deploy bundles.
+    // After validating authored dependency metadata, materialize the trusted
+    // SDK and fixed platform import map inside this disposable checkout.
+    await materializeAppHatchSdk(src);
 
     // 1) Connect codegen from proto (if the app has a backend RPC service). We
     // also compile the proto to a descriptor set so the platform records the
     // app's declared API (services + methods) and uploads the raw proto.
     const protoPath = manifest.rpc ? path.join(src, manifest.rpc.proto) : null;
     let api: AppApi | undefined;
-    if (manifest.rpc && protoPath && (await pathExists(protoPath))) {
+    if (manifest.rpc && protoPath) {
+      const rpc = manifest.rpc;
+      const protoEntry = await fs.lstat(protoPath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      });
+      if (!protoEntry) {
+        throw new Error(
+          `RPC proto declared by manifest.json was not found: ${rpc.proto}`,
+        );
+      }
+      if (!protoEntry.isFile()) {
+        throw new Error(
+          `RPC proto declared by manifest.json must be a regular file: ${rpc.proto}`,
+        );
+      }
       // `buf generate` executes the plugins listed in buf.gen.yaml, and `local:`
       // plugins are arbitrary commands. The file ships with the app source, so
       // an app could point it at `sh` and run code at build time. Overwrite it
       // (we build from a temp copy) with the platform's fixed codegen config so
       // only the sanctioned plugin ever runs, and withhold platform secrets
       // from the plugin's environment like every other build subprocess.
-      await fs.writeFile(path.join(src, 'buf.gen.yaml'), PLATFORM_BUF_GEN_YAML);
+      await fs.writeFile(
+        path.join(src, 'buf.gen.yaml'),
+        PLATFORM_APP_BUF_GEN_YAML,
+      );
       const gen = await run('buf', ['generate'], {
         cwd: src,
         env: subprocessSandboxEnv(),
@@ -553,17 +834,23 @@ export async function buildApp(
         throw new Error(`Connect codegen failed:\n${gen.output}`);
       }
       api = await extractAppApi(src);
+      if (!api.services.some((service) => service.name === rpc.service)) {
+        throw new Error(
+          `RPC service declared by manifest.json was not found in the compiled proto: ${rpc.service}`,
+        );
+      }
       logs.push(
         `captured app API: ${api.services.length} service(s), ${api.protoFiles.length} proto file(s)`,
       );
     }
 
     // 2) Reproduce the Agent-reviewed dependency install from the committed
-    // package.json + deno.json + deno.lock. `--frozen` makes deploy validation
-    // read-only: dependency edits must be installed and committed by the Agent
-    // before deploy. Deno reads reviewed allowScripts entries from deno.json.
+    // package.json + deno.lock. `--no-config` prevents Deno from implicitly
+    // executing source-controlled lifecycle policy. App deploys never run npm
+    // preinstall/install/postinstall code inside the platform process.
     const installArgs = [
       'install',
+      '--no-config',
       '--package-json',
       '--node-modules-dir=auto',
       '--lock=deno.lock',
@@ -582,22 +869,43 @@ export async function buildApp(
       );
     }
 
-    // Dependency installation validates the package.json graph, but schema.ts
-    // may also contain direct npm:/jsr:/HTTPS imports. Evaluate author code only
-    // after the frozen install and keep the schema run frozen as well, so it can
-    // never add an unreviewed dependency to the temporary lockfile and bless it
-    // for the rest of this build.
+    // Deno checks every enabled manifest entry and its transitive imports after
+    // the frozen install, before schema evaluation, bundling, or artifact writes.
+    await checkAppSource(src, manifest, logs);
+
+    // Source checking validates imports and types, but schema.ts still needs to
+    // execute to produce the declarative migration descriptor. Keep that run
+    // frozen as well so it cannot add an unreviewed dependency to the temporary
+    // lockfile and bless it for the rest of this build.
     let dataSchema: DataSchemaDescriptor | undefined;
     if (manifest.capabilities.dataTable) {
       dataSchema = await describeDataSchema(src, logs);
     }
-    // esbuild resolves bare imports by walking node_modules up from each entry
-    // file, then falling back to `nodePaths`. The app's node_modules from Deno
-    // takes precedence; platform packages remain a fallback for dependencies
-    // supplied by the scaffold/runtime.
+
+    // Only start replacing the requested output after every source validation
+    // step has passed. Deploy builds use a fresh path, while direct callers do
+    // not lose a prior output merely because new source fails validation.
+    await fs.rm(out, { recursive: true, force: true });
+    await fs.mkdir(out, { recursive: true });
+
+    // Browser bundles may resolve only modules materialized inside this build's
+    // disposable App root. Deno installed every declared npm dependency above;
+    // falling back to the platform repository would make builds non-hermetic.
+    const browserSourceRoot = await fs.realpath(src);
     const esbuildResolve = {
       absWorkingDir: src,
-      nodePaths: [path.join(REPO_ROOT, 'node_modules')],
+      plugins: [
+        hatchSdkPlugin(src),
+        browserSourceBoundaryPlugin(browserSourceRoot),
+      ],
+      // Prevent esbuild from walking above the temporary App root in search of
+      // a platform tsconfig. Deno remains the source of truth for type checking.
+      tsconfigRaw: {
+        compilerOptions: {
+          jsx: 'react-jsx' as const,
+          jsxImportSource: 'react',
+        },
+      },
     };
 
     const define = browserDefine(id, manifest.name, options.deploymentId);
@@ -721,6 +1029,8 @@ export async function buildApp(
       await fs.mkdir(path.dirname(bundlePath), { recursive: true });
       const bundleArgs = [
         'bundle',
+        '--config=deno.json',
+        '--no-remote',
         '--platform=deno',
         '--packages=bundle',
         '--node-modules-dir=auto',

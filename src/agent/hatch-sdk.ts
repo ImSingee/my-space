@@ -1,48 +1,44 @@
 /** Platform-owned SDK materialization for Hatch Apps. */
-import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import {
   access,
+  chmod,
   cp,
   lstat,
   mkdir,
+  mkdtemp,
   open,
+  readdir,
+  realpath,
   rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
+import { APP_MANAGED_DIR, isAppManagedPathSegment } from '../app-managed-path';
+import { PLATFORM_APP_BUF_GEN_YAML } from './app-codegen';
 import type { WorktreeMaterializer } from './worktree-materializer';
-import { REPO_ROOT } from './paths';
-import { setAgentOwned } from './shell-sandbox';
+import {
+  AGENTS_DIR,
+  HATCH_SDK_STAGING_DIR,
+  REPO_ROOT,
+  WORKSPACE_ROOT,
+} from './paths';
+import { resolveAgentOwnershipSession, sandboxSpawn } from './shell-sandbox';
 
 const HATCH_DATA_SOURCE_DIR = path.join(REPO_ROOT, 'packages', 'hatch-data');
 
-export const HATCH_SDK_IMPORT_MAP = 'node_modules/@hatch/import-map.json';
+export const HATCH_SDK_IMPORT_MAP = '.hatch/import-map.json';
+export const HATCH_BUF_GEN_CONFIG = '.hatch/buf.gen.yaml';
 
 export const HATCH_SDK_IMPORTS = {
-  '@hatch/data': './data/dist/data.js',
-  '@hatch/data/react': './data/dist/data-react.js',
+  '@hatch/data': './sdk/@hatch/data/dist/data.js',
+  '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
 } as const;
 
-type JsonObject = Record<string, unknown>;
-type ImportMapEntries = Record<string, string>;
-type ImportMapScopes = Record<string, ImportMapEntries>;
-
-type AppImportMap = {
-  baseDir: string;
-  imports: ImportMapEntries;
-  scopes: ImportMapScopes;
-  sourcePath?: string;
-};
-
-type GeneratedImportMap = {
-  imports: ImportMapEntries;
-  scopes?: ImportMapScopes;
-};
-
 export function appHatchDataPackageDir(root: string): string {
-  return path.join(root, 'node_modules', '@hatch', 'data');
+  return path.join(root, '.hatch', 'sdk', '@hatch', 'data');
 }
 
 export function appHatchImportMapPath(root: string): string {
@@ -57,292 +53,10 @@ function managedPathError(target: string, reason: string): Error {
   );
 }
 
-function configError(label: string, reason: string): Error {
-  return new Error(
-    `Cannot generate the Hatch SDK import map: ${label} ${reason}.`,
-  );
-}
-
-function isInsideRoot(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return (
-    relative === '' ||
-    (relative !== '..' &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative))
-  );
-}
-
-async function readAppFile(
-  root: string,
+async function assertReplaceableManagedDirectory(
   target: string,
-  label: string,
-  optional = false,
-): Promise<string | null> {
-  if (!isInsideRoot(root, target)) {
-    throw configError(label, 'must stay inside the App source root');
-  }
-
-  const relative = path.relative(root, target);
-  const segments = relative === '' ? [] : relative.split(path.sep);
-  let current = root;
-  try {
-    const rootEntry = await lstat(root);
-    if (rootEntry.isSymbolicLink()) {
-      throw configError('App source root', 'must not be a symbolic link');
-    }
-    for (const segment of segments) {
-      current = path.join(current, segment);
-      const entry = await lstat(current);
-      if (entry.isSymbolicLink()) {
-        throw configError(label, 'must not contain symbolic links');
-      }
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      if (optional) return null;
-      throw configError(label, 'does not exist');
-    }
-    throw error;
-  }
-
-  let handle;
-  try {
-    handle = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw configError(label, 'must not be a symbolic link');
-    }
-    throw error;
-  }
-  try {
-    if (!(await handle.stat()).isFile()) {
-      throw configError(label, 'must be a regular file');
-    }
-    return await handle.readFile('utf8');
-  } finally {
-    await handle.close();
-  }
-}
-
-function jsonObject(raw: string, label: string): JsonObject {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch (error) {
-    throw configError(
-      label,
-      `is not valid JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw configError(label, 'must contain a JSON object');
-  }
-  return value as JsonObject;
-}
-
-function importMapEntries(value: unknown, label: string): ImportMapEntries {
-  if (value === undefined) return {};
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw configError(label, 'must contain an object of string mappings');
-  }
-
-  const entries: Array<[string, string]> = [];
-  for (const [specifier, target] of Object.entries(value)) {
-    if (typeof target !== 'string') {
-      throw configError(`${label}.${specifier}`, 'must be a string');
-    }
-    entries.push([specifier, target]);
-  }
-  return Object.fromEntries(entries);
-}
-
-function importMapScopes(value: unknown, label: string): ImportMapScopes {
-  if (value === undefined) return {};
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw configError(label, 'must contain an object of scoped mappings');
-  }
-
-  const scopes: Array<[string, ImportMapEntries]> = [];
-  for (const [scope, mappings] of Object.entries(value)) {
-    scopes.push([scope, importMapEntries(mappings, `${label}.${scope}`)]);
-  }
-  return Object.fromEntries(scopes);
-}
-
-function assertNoAppManagedHatchImports(
-  entries: ImportMapEntries,
-  label: string,
-): void {
-  const specifier = Object.keys(entries).find((value) =>
-    /^(?:npm:|jsr:)?@hatch(?:\/|$)/.test(value),
-  );
-  if (specifier) {
-    throw configError(
-      label,
-      `must not map platform-owned specifier "${specifier}"`,
-    );
-  }
-}
-
-function parseAppImportMap(
-  value: JsonObject,
-  label: string,
-  baseDir: string,
-): AppImportMap {
-  const imports = importMapEntries(value.imports, `${label}.imports`);
-  const scopes = importMapScopes(value.scopes, `${label}.scopes`);
-  assertNoAppManagedHatchImports(imports, `${label}.imports`);
-  for (const [scope, mappings] of Object.entries(scopes)) {
-    assertNoAppManagedHatchImports(mappings, `${label}.scopes.${scope}`);
-  }
-  return { baseDir, imports, scopes };
-}
-
-function expandDenoPackageImports(entries: ImportMapEntries): ImportMapEntries {
-  const expanded = { ...entries };
-  for (const [specifier, target] of Object.entries(entries)) {
-    const prefix = `${specifier}/`;
-    if (specifier.endsWith('/') || Object.hasOwn(entries, prefix)) continue;
-
-    const suffixIndex = target.search(/[?#]/);
-    const pathname = suffixIndex === -1 ? target : target.slice(0, suffixIndex);
-    const suffix = suffixIndex === -1 ? '' : target.slice(suffixIndex);
-    const match = /^(jsr|npm):\/?(.+)$/.exec(pathname);
-    if (!match) continue;
-    const packagePath = match[2].endsWith('/') ? match[2] : `${match[2]}/`;
-    expanded[prefix] = `${match[1]}:/${packagePath}${suffix}`;
-  }
-  return expanded;
-}
-
-function applyDenoConfigImportSemantics(map: AppImportMap): AppImportMap {
-  return {
-    ...map,
-    imports: expandDenoPackageImports(map.imports),
-    scopes: Object.fromEntries(
-      Object.entries(map.scopes).map(([scope, entries]) => [
-        scope,
-        expandDenoPackageImports(entries),
-      ]),
-    ),
-  };
-}
-
-async function loadAppImportMap(root: string): Promise<AppImportMap> {
-  const configPath = path.join(root, 'deno.json');
-  const rawConfig = await readAppFile(root, configPath, 'deno.json', true);
-  if (rawConfig === null) return { baseDir: root, imports: {}, scopes: {} };
-
-  const config = jsonObject(rawConfig, 'deno.json');
-  if (Object.hasOwn(config, 'imports') || Object.hasOwn(config, 'scopes')) {
-    return applyDenoConfigImportSemantics(
-      parseAppImportMap(config, 'deno.json', root),
-    );
-  }
-
-  if (config.importMap === undefined) {
-    return { baseDir: root, imports: {}, scopes: {} };
-  }
-  if (typeof config.importMap !== 'string' || config.importMap.length === 0) {
-    throw configError('deno.json.importMap', 'must be a local relative path');
-  }
-  if (
-    path.isAbsolute(config.importMap) ||
-    /^[A-Za-z][A-Za-z\d+.-]*:/.test(config.importMap) ||
-    config.importMap.startsWith('//')
-  ) {
-    throw configError(
-      'deno.json.importMap',
-      'must be a local relative path that can be resolved during builds',
-    );
-  }
-
-  const importMapPath = path.resolve(root, config.importMap);
-  const rawImportMap = await readAppFile(
-    root,
-    importMapPath,
-    'deno.json.importMap',
-  );
-  return {
-    ...parseAppImportMap(
-      jsonObject(rawImportMap as string, 'deno.json.importMap'),
-      'deno.json.importMap',
-      path.dirname(importMapPath),
-    ),
-    sourcePath: importMapPath,
-  };
-}
-
-function rebaseRelativeSpecifier(
-  specifier: string,
-  fromDir: string,
-  toDir: string,
-): string {
-  const suffixIndex = specifier.search(/[?#]/);
-  const pathname =
-    suffixIndex === -1 ? specifier : specifier.slice(0, suffixIndex);
-  const suffix = suffixIndex === -1 ? '' : specifier.slice(suffixIndex);
-  if (
-    pathname !== '.' &&
-    pathname !== '..' &&
-    !pathname.startsWith('./') &&
-    !pathname.startsWith('../')
-  ) {
-    return specifier;
-  }
-
-  const trailingSlash = pathname.endsWith('/');
-  const absolute = path.resolve(fromDir, pathname);
-  let rebased = path.relative(toDir, absolute).split(path.sep).join('/');
-  if (rebased === '') rebased = '.';
-  if (!rebased.startsWith('.')) rebased = `./${rebased}`;
-  if (trailingSlash && !rebased.endsWith('/')) rebased += '/';
-  return `${rebased}${suffix}`;
-}
-
-function rebaseImportMapEntries(
-  entries: ImportMapEntries,
-  fromDir: string,
-  toDir: string,
-): ImportMapEntries {
-  return Object.fromEntries(
-    Object.entries(entries).map(([specifier, target]) => [
-      rebaseRelativeSpecifier(specifier, fromDir, toDir),
-      rebaseRelativeSpecifier(target, fromDir, toDir),
-    ]),
-  );
-}
-
-async function generatedImportMap(
-  root: string,
-  importMapPath: string,
-): Promise<GeneratedImportMap> {
-  const app = await loadAppImportMap(root);
-  const targetDir = path.dirname(importMapPath);
-  const imports = {
-    ...rebaseImportMapEntries(app.imports, app.baseDir, targetDir),
-    ...HATCH_SDK_IMPORTS,
-  };
-  const scopes = Object.fromEntries(
-    Object.entries(app.scopes).map(([scope, entries]) => [
-      rebaseRelativeSpecifier(scope, app.baseDir, targetDir),
-      rebaseImportMapEntries(entries, app.baseDir, targetDir),
-    ]),
-  );
-  return Object.keys(scopes).length > 0 ? { imports, scopes } : { imports };
-}
-
-/** Local external map that deno.json requires the deployment to retain. */
-export async function appExternalImportMapPath(
-  root: string,
-): Promise<string | null> {
-  return (await loadAppImportMap(root)).sourcePath ?? null;
-}
-
-async function ensureManagedDirectory(target: string): Promise<void> {
+): Promise<boolean> {
+  await assertCanonicalManagedDirectoryName(path.dirname(target));
   try {
     const entry = await lstat(target);
     if (entry.isSymbolicLink()) {
@@ -351,20 +65,23 @@ async function ensureManagedDirectory(target: string): Promise<void> {
     if (!entry.isDirectory()) {
       throw managedPathError(target, 'is not a directory');
     }
+    return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    await mkdir(target);
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
   }
 }
 
-async function assertReplaceableTarget(target: string): Promise<void> {
-  try {
-    if ((await lstat(target)).isSymbolicLink()) {
-      throw managedPathError(target, 'is a symbolic link');
+async function assertCanonicalManagedDirectoryName(
+  root: string,
+): Promise<void> {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (isAppManagedPathSegment(entry.name) && entry.name !== APP_MANAGED_DIR) {
+      throw managedPathError(
+        path.join(root, entry.name),
+        'is a non-canonical case variant of the reserved .hatch directory',
+      );
     }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw error;
   }
 }
 
@@ -381,6 +98,328 @@ async function assertSdkBuildExists(): Promise<void> {
   }
 }
 
+type DirectoryIdentity = {
+  dev: bigint;
+  ino: bigint;
+  realPath: string;
+};
+
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function installAgentGeneration(
+  root: string,
+  staged: string,
+  expectedFiles: readonly string[],
+): Promise<void> {
+  const helper = String.raw`
+import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises';
+import path from 'node:path';
+
+const [root, expectedRoot, encodedFiles] = process.argv.slice(1);
+const files = JSON.parse(Buffer.from(encodedFiles, 'base64url').toString());
+if (!Array.isArray(files) || files.length === 0 || files.some((file) =>
+  typeof file !== 'string' || !file || path.isAbsolute(file) ||
+  file.split('/').some((part) => !part || part === '.' || part === '..'))) {
+  throw new Error('Invalid SDK payload manifest.');
+}
+if (await realpath('.') !== expectedRoot || await realpath(root) !== expectedRoot) {
+  throw new Error('App source root changed during SDK install.');
+}
+for (const entry of await readdir(root, { withFileTypes: true })) {
+  if (entry.name.toLowerCase() === '.hatch' && entry.name !== '.hatch') {
+    throw new Error(
+      'Cannot materialize the platform-owned @hatch/data SDK: ' + entry.name +
+      ' is a non-canonical case variant of the reserved .hatch directory.'
+    );
+  }
+}
+const destination = path.join(root, '.hatch');
+const temporary = path.join(root, '.hatch-install-' + crypto.randomUUID());
+const backup = path.join(root, '.hatch-backup-' + crypto.randomUUID());
+let hadDestination = false;
+let movedDestination = false;
+async function removeTree(target) {
+  let entry;
+  try {
+    entry = await lstat(target);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    await rm(target, { force: true });
+    return;
+  }
+  await chmod(target, 0o700);
+  for (const child of await readdir(target)) {
+    await removeTree(path.join(target, child));
+  }
+  await rm(target, { recursive: true, force: true });
+}
+try {
+  const rootEntry = await lstat(root);
+  if (rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) {
+    throw new Error('App source root must be a real directory.');
+  }
+  await mkdir(temporary, { mode: 0o700 });
+  for (const relative of files) {
+    const target = path.join(temporary, ...relative.split('/'));
+    await mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
+    const handle = await open(target, 'wx', 0o644);
+    await handle.close();
+  }
+  let current = 0;
+  let remaining = Buffer.alloc(0);
+  for await (const chunk of process.stdin) {
+    remaining = Buffer.concat([remaining, chunk]);
+    while (current < files.length) {
+      if (remaining.length < 8) break;
+      const size = Number(remaining.readBigUInt64BE(0));
+      if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid SDK payload size.');
+      if (remaining.length < 8 + size) break;
+      const target = path.join(temporary, ...files[current].split('/'));
+      await open(target, 'w').then(async (handle) => {
+        try { await handle.writeFile(remaining.subarray(8, 8 + size)); }
+        finally { await handle.close(); }
+      });
+      remaining = remaining.subarray(8 + size);
+      current += 1;
+    }
+  }
+  if (current !== files.length || remaining.length !== 0) {
+    throw new Error('Incomplete SDK payload.');
+  }
+  try {
+    const destinationEntry = await lstat(destination);
+    if (destinationEntry.isSymbolicLink() || !destinationEntry.isDirectory()) {
+      throw new Error('.hatch must be a real directory.');
+    }
+    hadDestination = true;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (hadDestination) {
+    await rename(destination, backup);
+    movedDestination = true;
+  }
+  try {
+    await rename(temporary, destination);
+  } catch (error) {
+    if (movedDestination) await rename(backup, destination);
+    throw error;
+  }
+  await removeTree(backup);
+} finally {
+  await removeTree(temporary);
+}
+`;
+  const wrapped = sandboxSpawn(
+    [
+      process.execPath,
+      '--input-type=module',
+      '--eval',
+      helper,
+      root,
+      root,
+      Buffer.from(JSON.stringify(expectedFiles)).toString('base64url'),
+    ],
+    resolveAgentOwnershipSession([root]),
+  );
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve();
+    };
+    const child = spawn(wrapped.command, wrapped.args, {
+      cwd: root,
+      env: { PATH: process.env.PATH, LANG: process.env.LANG },
+      stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
+    child.stdin.on('error', (error) => finish(error));
+    child.on('error', finish);
+    child.on('close', (code) => {
+      if (code === 0) finish();
+      else {
+        finish(
+          new Error(
+            stderr.trim() ||
+              `Sandboxed SDK install exited with status ${code ?? 'unknown'}.`,
+          ),
+        );
+      }
+    });
+    void (async () => {
+      try {
+        const writePayload = (chunk: Buffer) =>
+          new Promise<void>((resolve, rejectWrite) => {
+            if (settled || child.stdin.destroyed) {
+              rejectWrite(
+                new Error('Sandboxed SDK install closed its payload stream.'),
+              );
+              return;
+            }
+            child.stdin.write(chunk, (error) => {
+              if (error) rejectWrite(error);
+              else resolve();
+            });
+          });
+        for (const relative of expectedFiles) {
+          const payload = await open(
+            path.join(staged, ...relative.split('/')),
+            fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+          );
+          try {
+            const contents = await payload.readFile();
+            const header = Buffer.alloc(8);
+            header.writeBigUInt64BE(BigInt(contents.length));
+            await writePayload(header);
+            await writePayload(contents);
+          } finally {
+            await payload.close();
+          }
+        }
+        if (!settled) child.stdin.end();
+      } catch (error) {
+        child.stdin.destroy(error as Error);
+        child.kill('SIGKILL');
+        finish(error);
+      }
+    })();
+  });
+}
+
+async function generationFiles(root: string, relative = ''): Promise<string[]> {
+  const current = relative ? path.join(root, ...relative.split('/')) : root;
+  const files: string[] = [];
+  for (const entry of await readdir(current, { withFileTypes: true })) {
+    const child = relative ? `${relative}/${entry.name}` : entry.name;
+    if (entry.isSymbolicLink()) {
+      throw managedPathError(
+        child,
+        'generated output contains a symbolic link',
+      );
+    }
+    if (entry.isDirectory())
+      files.push(...(await generationFiles(root, child)));
+    else if (entry.isFile()) files.push(child);
+    else
+      throw managedPathError(child, 'generated output is not a regular file');
+  }
+  return files.sort();
+}
+
+async function trustedDirectoryIdentity(
+  target: string,
+  label: string,
+): Promise<DirectoryIdentity> {
+  const entry = await lstat(target, { bigint: true });
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw managedPathError(target, `${label} must be a real directory`);
+  }
+  const resolved = await realpath(target);
+  return { dev: entry.dev, ino: entry.ino, realPath: resolved };
+}
+
+async function assertUnchangedDirectory(
+  target: string,
+  expected: DirectoryIdentity,
+  label: string,
+): Promise<void> {
+  const current = await trustedDirectoryIdentity(target, label);
+  if (
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino ||
+    current.realPath !== expected.realPath
+  ) {
+    throw managedPathError(target, `${label} changed during materialization`);
+  }
+}
+
+async function ensureTrustedStagingRoot(): Promise<void> {
+  await mkdir(WORKSPACE_ROOT, { recursive: true });
+  const workspace = await trustedDirectoryIdentity(
+    WORKSPACE_ROOT,
+    'workspace root',
+  );
+  try {
+    await mkdir(HATCH_SDK_STAGING_DIR, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  await assertUnchangedDirectory(WORKSPACE_ROOT, workspace, 'workspace root');
+  await trustedDirectoryIdentity(HATCH_SDK_STAGING_DIR, 'staging root');
+  await chmod(HATCH_SDK_STAGING_DIR, 0o700);
+}
+
+async function makePlatformReadOnly(target: string): Promise<void> {
+  const entry = await lstat(target);
+  if (entry.isSymbolicLink()) {
+    throw managedPathError(target, 'generated output contains a symbolic link');
+  }
+  if (!entry.isDirectory()) {
+    await chmod(target, 0o644);
+    return;
+  }
+  for (const child of await readdir(target)) {
+    await makePlatformReadOnly(path.join(target, child));
+  }
+  await chmod(target, 0o755);
+}
+
+async function preparePlatformGeneration(
+  target: string,
+  generationRoot = true,
+): Promise<void> {
+  const entry = await lstat(target);
+  if (entry.isSymbolicLink()) {
+    throw managedPathError(target, 'generated output contains a symbolic link');
+  }
+  if (!entry.isDirectory()) {
+    await chmod(target, 0o644);
+    return;
+  }
+  for (const child of await readdir(target)) {
+    await preparePlatformGeneration(path.join(target, child), false);
+  }
+  // APFS refuses to move a non-owner-writable source directory across
+  // parents, so only the generation root remains 0700 until its atomic move.
+  // Nested directories must never inherit the runner's permissive umask.
+  await chmod(target, generationRoot ? 0o700 : 0o755);
+}
+
+async function makePlatformRemovable(target: string): Promise<void> {
+  let entry;
+  try {
+    entry = await lstat(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) return;
+  await chmod(target, 0o755);
+  for (const child of await readdir(target)) {
+    await makePlatformRemovable(path.join(target, child));
+  }
+}
+
+async function removePlatformGeneration(target: string): Promise<void> {
+  await makePlatformRemovable(target);
+  await rm(target, { recursive: true, force: true });
+}
+
 /**
  * Refresh the generated SDK package without trusting anything already present
  * in the App checkout. The package is deliberately outside the App dependency
@@ -389,57 +428,111 @@ async function assertSdkBuildExists(): Promise<void> {
  */
 export async function materializeAppHatchSdk(root: string): Promise<void> {
   await assertSdkBuildExists();
-  const nodeModules = path.join(root, 'node_modules');
-  const scope = path.join(nodeModules, '@hatch');
-  const destination = appHatchDataPackageDir(root);
-  const importMap = appHatchImportMapPath(root);
-  const mergedImportMap = await generatedImportMap(root, importMap);
-  await ensureManagedDirectory(nodeModules);
-  await ensureManagedDirectory(scope);
-  await assertReplaceableTarget(destination);
-  await assertReplaceableTarget(importMap);
-
-  const id = randomUUID();
-  const temporary = path.join(scope, `.data-${id}`);
-  const temporaryImportMap = path.join(scope, `.import-map-${id}.json`);
+  const agentWorktree = isInside(AGENTS_DIR, path.resolve(root));
+  const destination = path.join(root, '.hatch');
+  const rootIdentity = await trustedDirectoryIdentity(root, 'App source root');
+  await assertCanonicalManagedDirectoryName(rootIdentity.realPath);
+  await ensureTrustedStagingRoot();
+  const operation = await mkdtemp(
+    path.join(HATCH_SDK_STAGING_DIR, 'generation-'),
+  );
+  const temporary = path.join(operation, 'next');
+  const backup = path.join(operation, 'previous');
+  const temporaryPackage = path.join(temporary, 'sdk', '@hatch', 'data');
+  let preserveBackup = false;
   try {
-    await mkdir(temporary);
+    await mkdir(temporaryPackage, { recursive: true });
     await Promise.all([
       cp(
         path.join(HATCH_DATA_SOURCE_DIR, 'package.json'),
-        path.join(temporary, 'package.json'),
+        path.join(temporaryPackage, 'package.json'),
       ),
       cp(
         path.join(HATCH_DATA_SOURCE_DIR, 'dist'),
-        path.join(temporary, 'dist'),
+        path.join(temporaryPackage, 'dist'),
         { recursive: true },
       ),
       writeFile(
-        temporaryImportMap,
-        `${JSON.stringify(mergedImportMap, null, 2)}\n`,
+        path.join(temporary, 'import-map.json'),
+        `${JSON.stringify({ imports: HATCH_SDK_IMPORTS }, null, 2)}\n`,
+        { encoding: 'utf8', flag: 'wx' },
+      ),
+      writeFile(
+        path.join(temporary, 'buf.gen.yaml'),
+        PLATFORM_APP_BUF_GEN_YAML,
         { encoding: 'utf8', flag: 'wx' },
       ),
     ]);
-    setAgentOwned([temporary, temporaryImportMap]);
-    // Recheck the untrusted parent and final entry immediately before replacing
-    // the managed package. Checkout/build operations serialize materialization.
-    await ensureManagedDirectory(nodeModules);
-    await ensureManagedDirectory(scope);
-    await assertReplaceableTarget(destination);
-    await assertReplaceableTarget(importMap);
-    await rm(destination, { recursive: true, force: true });
-    await rename(temporary, destination);
-    await rm(importMap, { recursive: true, force: true });
-    await rename(temporaryImportMap, importMap);
+    // Normalize every staged entry before it can become visible. Agent
+    // worktrees receive these bytes through the sandbox-UID helper below;
+    // non-Agent build roots make the installed generation read-only.
+    await preparePlatformGeneration(temporary);
+    const stagedIdentity = await lstat(temporary, { bigint: true });
+    if (stagedIdentity.dev !== rootIdentity.dev) {
+      throw managedPathError(
+        destination,
+        'cannot be atomically installed across filesystems',
+      );
+    }
+
+    if (agentWorktree) {
+      // All target mutations run with the Agent's own filesystem authority.
+      // A detached Agent can race its worktree paths, but cannot turn that
+      // race into a privileged write outside paths the Agent already owns.
+      await installAgentGeneration(
+        rootIdentity.realPath,
+        temporary,
+        await generationFiles(temporary),
+      );
+      return;
+    }
+
+    // Replace the platform-owned directory as one unit so the SDK and its
+    // import map always move to the same generation. Staging and rollback stay
+    // outside the Agent-writable App root. Revalidate the complete root path at
+    // the replacement boundary; rename moves the `.hatch` entry itself and
+    // never traverses a symlink stored at that entry.
+    await assertUnchangedDirectory(root, rootIdentity, 'App source root');
+    const hadDestination = await assertReplaceableManagedDirectory(destination);
+    if (hadDestination) {
+      await chmod(destination, 0o755);
+      await rename(destination, backup);
+    }
+    try {
+      await assertUnchangedDirectory(root, rootIdentity, 'App source root');
+      await rename(temporary, destination);
+      await makePlatformReadOnly(destination);
+    } catch (error) {
+      if (hadDestination) {
+        try {
+          await assertUnchangedDirectory(root, rootIdentity, 'App source root');
+          await rename(backup, destination);
+        } catch (restoreError) {
+          preserveBackup = true;
+          throw new AggregateError(
+            [error, restoreError],
+            `Cannot install the platform-owned @hatch/data SDK. The previous generated directory remains in protected staging at ${backup}.`,
+          );
+        }
+      }
+      throw error;
+    }
   } finally {
-    await Promise.all([
-      rm(temporary, { recursive: true, force: true }),
-      rm(temporaryImportMap, { force: true }),
-    ]);
+    await removePlatformGeneration(temporary);
+    if (!preserveBackup) {
+      await removePlatformGeneration(backup);
+      await rm(operation, { recursive: true, force: true });
+    }
   }
 }
 
 export const appHatchSdkMaterializer = {
-  gitExcludePatterns: ['/node_modules/@hatch/'],
+  gitExcludePatterns: [
+    '/.hatch/',
+    '/.hatch-install-*/',
+    '/.hatch-backup-*/',
+    '/node_modules/',
+    '/gen/',
+  ],
   materialize: materializeAppHatchSdk,
 } satisfies WorktreeMaterializer;

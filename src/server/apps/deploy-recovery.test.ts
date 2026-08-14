@@ -806,6 +806,121 @@ describe('App deployment activation recovery', () => {
     expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
   });
 
+  it('leaves durable App status unchanged when build validation fails', async () => {
+    const id = 'source-validation-failure';
+    const app = appState(id, {
+      status: 'deployed',
+      currentDeploymentId: 'deployment-current',
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id),
+    );
+    mocks.buildApp.mockRejectedValueOnce(
+      new Error('Source validation failed during deno check'),
+    );
+
+    await expect(
+      deployApp(id, { message: 'Broken source', sourceDir: '/source' }),
+    ).rejects.toThrow('Source validation failed during deno check');
+
+    expect(app.status).toBe('deployed');
+    expect(mocks.updates).not.toContainEqual(
+      expect.objectContaining({ values: { status: 'building' } }),
+    );
+    expect(mocks.applyDataMigration).not.toHaveBeenCalled();
+  });
+
+  it('does not reinterpret a pre-existing building status after build failure', async () => {
+    const id = 'preexisting-building-status';
+    const app = appState(id, {
+      status: 'building',
+      currentDeploymentId: 'deployment-current',
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id),
+    );
+    mocks.buildApp.mockRejectedValueOnce(
+      new Error('Source validation failed during deno check'),
+    );
+
+    await expect(
+      deployApp(id, { message: 'Retry invalid source', sourceDir: '/source' }),
+    ).rejects.toThrow('Source validation failed during deno check');
+
+    expect(app.status).toBe('building');
+    expect(mocks.updates).not.toContainEqual(
+      expect.objectContaining({ values: { status: 'deployed' } }),
+    );
+    expect(mocks.updates).not.toContainEqual(
+      expect.objectContaining({ values: { status: 'failed' } }),
+    );
+  });
+
+  it('does not overwrite an archive committed while the build was running', async () => {
+    const id = 'archive-during-build';
+    const app = appState(id, {
+      status: 'deployed',
+      currentDeploymentId: 'deployment-current',
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id),
+    );
+    mocks.buildApp.mockImplementationOnce(async () => {
+      app.status = 'archived';
+      return {
+        source: {
+          name: 'Archived during build',
+          description: '',
+          capabilities: {
+            database: false,
+            frontend: false,
+            widgets: false,
+            backend: false,
+            cron: false,
+            webhook: false,
+            storage: false,
+            kv: false,
+            dataTable: false,
+            userscripts: false,
+          },
+          backendMode: 'serverless',
+          workflows: [],
+          userscripts: [],
+        },
+        normalized: { workflows: [], cron: [] },
+        log: '',
+      };
+    });
+
+    await expect(
+      deployApp(id, { message: 'Concurrent archive', sourceDir: '/source' }),
+    ).rejects.toThrow(/changed state while its deployment was building/);
+
+    expect(app.status).toBe('archived');
+    expect(mocks.applyDataMigration).not.toHaveBeenCalled();
+    expect(mocks.updates).toContainEqual(
+      expect.objectContaining({
+        values: { status: 'building' },
+        predicate: {
+          op: 'and',
+          predicates: [
+            { op: 'eq', field: 'id', value: id },
+            { op: 'eq', field: 'status', value: 'deployed' },
+          ],
+        },
+      }),
+    );
+  });
+
   it('removes a superseded pending artifact before a retry claims the fence', async () => {
     const id = 'superseded-artifact';
     const { app, pendingArtifact, pendingId } =

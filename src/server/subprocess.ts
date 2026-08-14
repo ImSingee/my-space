@@ -6,7 +6,7 @@
  * hung tool (or a stalled dependency fetch) from wedging a deploy forever, and
  * captured output is capped so a runaway log can't exhaust memory.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export type RunResult = {
   code: number;
@@ -30,6 +30,23 @@ export type RunOptions = {
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_OUTPUT = 1_000_000;
 
+function killProcessTree(childPid: number | undefined): void {
+  if (!childPid) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(childPid), '/T', '/F'], {
+        stdio: 'ignore',
+      });
+    } else {
+      // POSIX children are spawned as process-group leaders below. Killing the
+      // negative pid catches descendants even after the direct child exits.
+      process.kill(-childPid, 'SIGKILL');
+    }
+  } catch {
+    /* process/group already exited */
+  }
+}
+
 export function run(
   cmd: string,
   args: string[],
@@ -52,6 +69,7 @@ export function run(
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
     let stdout = '';
     let stderr = '';
@@ -61,17 +79,14 @@ export function run(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      killProcessTree(child.pid);
       resolve({ code, stdout, stderr, output });
     };
     const timer = setTimeout(() => {
       const note = `\n${cmd} timed out after ${timeoutMs}ms`;
       stderr = appendCapped(stderr, note);
       output = appendCapped(output, note);
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* best-effort */
-      }
+      killProcessTree(child.pid);
       finish(1);
     }, timeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
@@ -91,6 +106,7 @@ export function run(
       output = appendCapped(output, note);
       finish(1);
     });
+    child.on('exit', () => killProcessTree(child.pid));
     child.on('close', (code) => finish(code ?? 0));
     if (opts.input !== undefined) {
       child.stdin.end(opts.input);

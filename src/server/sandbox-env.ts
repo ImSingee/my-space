@@ -41,5 +41,20 @@ export function subprocessSandboxEnv(
     const value = process.env[key];
     if (value !== undefined) env[key] = value;
   }
-  return { ...env, ...extra };
+  return {
+    ...env,
+    // Build subprocesses must not inherit registry/auth/proxy overrides from
+    // the platform process. Dependency metadata is frozen, and registry
+    // configuration remains a platform deployment concern.
+    NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org/',
+    npm_config_registry: 'https://registry.npmjs.org/',
+    DENO_AUTH_TOKENS: undefined,
+    NPM_CONFIG_USERCONFIG: undefined,
+    npm_config_userconfig: undefined,
+    HTTP_PROXY: undefined,
+    HTTPS_PROXY: undefined,
+    ALL_PROXY: undefined,
+    NO_PROXY: undefined,
+    ...extra,
+  };
 }

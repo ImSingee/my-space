@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   ensureAppRepo: vi.fn<(id: string) => Promise<string>>(
@@ -16,7 +19,8 @@ vi.mock('~/db', async () => {
 vi.mock('./git', () => ({ ensureAppRepo: mocks.ensureAppRepo }));
 
 const { db, schema } = await import('~/db');
-const { createApp } = await import('./scaffold');
+const { createApp, renderTemplate } = await import('./scaffold');
+const tempDirs: string[] = [];
 
 function renderedFile(
   files: Awaited<ReturnType<typeof createApp>>['files'],
@@ -30,6 +34,38 @@ function renderedFile(
 beforeEach(async () => {
   vi.clearAllMocks();
   await db.delete(schema.apps);
+});
+
+afterEach(async () => {
+  await Promise.all(
+    tempDirs
+      .splice(0)
+      .map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
+});
+
+describe('renderTemplate', () => {
+  it('excludes every case variant of a reserved .hatch segment', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hatch-template-'));
+    tempDirs.push(root);
+    await Promise.all([
+      fs.mkdir(path.join(root, '.HATCH'), { recursive: true }),
+      fs.mkdir(path.join(root, 'nested', '.HaTcH'), { recursive: true }),
+    ]);
+    await Promise.all([
+      fs.writeFile(path.join(root, 'keep.txt'), 'keep'),
+      fs.writeFile(path.join(root, '.HATCH', 'secret.txt'), 'drop'),
+      fs.writeFile(path.join(root, 'nested', 'keep.txt'), 'keep'),
+      fs.writeFile(path.join(root, 'nested', '.HaTcH', 'secret.txt'), 'drop'),
+    ]);
+
+    const files = await renderTemplate(root, {}, { exclude: ['.hatch'] });
+
+    expect(files.map((file) => file.path).sort()).toEqual([
+      'keep.txt',
+      'nested/keep.txt',
+    ]);
+  });
 });
 
 describe('createApp', () => {

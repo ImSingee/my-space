@@ -67,6 +67,86 @@ describe('Agent skills', () => {
     }
   });
 
+  it('keeps building-apps concise and routes capability detail to references', async () => {
+    const env = new NodeExecutionEnv({ cwd: process.cwd() });
+    const skills = await loadAgentSkills(env, SKILLS_DIR);
+    const skill = skills.find(({ name }) => name === 'building-apps');
+    if (!skill) throw new Error('Missing building-apps Skill');
+
+    expect(skill.content.split('\n').length).toBeLessThan(500);
+    for (const reference of [
+      'references/frontend-widgets.md',
+      'references/backend-integrations.md',
+      'references/data-storage.md',
+      'references/userscripts.md',
+    ]) {
+      expect(skill.content).toContain(`](${reference})`);
+    }
+    expect(skill.content).toContain('.hatch/import-map.json');
+    expect(skill.content).toContain('reserved case-insensitively');
+    expect(skill.content).toContain('root `.npmrc` in any casing');
+    expect(skill.content).toContain('`deno.jsonc`, `tsconfig.json`, or');
+    expect(skill.content).toContain('`"type": "module"`');
+    expect(skill.content).toContain('`compilerOptions.strict` to `true`');
+    expect(skill.content).toContain(
+      'Do not add `imports`, `scopes`, `importMap`',
+    );
+    expect(skill.content).toContain('createDataClient<typeof schema>');
+    expect(skill.content).toContain('type JsonValue');
+    expect(skill.content).toContain('.hatch/sdk/@hatch/data/package.json');
+    expect(skill.content).toContain('Every relative TypeScript import');
+    expect(skill.content).toContain(
+      'deploy_app` performs the same source check',
+    );
+    expect(skill.content).toContain(
+      'buf generate --template .hatch/buf.gen.yaml',
+    );
+    for (const command of ['deno test', 'deno run', 'deno cache']) {
+      expect(skill.content).toMatch(
+        new RegExp(
+          `${command} --config=deno\\.json --no-remote ` +
+            '--node-modules-dir=auto[\\s\\\\]*' +
+            '--import-map=\\.hatch/import-map\\.json[\\s\\\\]*' +
+            '--lock=deno\\.lock --frozen',
+        ),
+      );
+    }
+    expect(skill.content).toMatch(
+      /deno check --config=deno\.json --no-remote --node-modules-dir=auto/,
+    );
+    expect(skill.content).not.toMatch(/^buf generate$/m);
+    expect(skill.content).not.toContain('node_modules/@hatch');
+    expect(skill.content).not.toContain('validate_app');
+    expect(skill.content).not.toContain('sloppy-imports');
+    expect(skill.content).toContain('Keep `deno.json` `allowScripts` empty');
+    expect(skill.content).toContain(
+      'App preparation and deploy do not\nexecute package',
+    );
+  });
+
+  it('removes generated and platform-owned files from imported App archives', async () => {
+    const env = new NodeExecutionEnv({ cwd: process.cwd() });
+    const skills = await loadAgentSkills(env, SKILLS_DIR);
+    const skill = skills.find(({ name }) => name === 'importing-apps');
+    if (!skill) throw new Error('Missing importing-apps Skill');
+
+    expect(skill.content).toContain('`.git`, `node_modules`,');
+    expect(skill.content).toContain(
+      '`.hatch` (including every casing variant)',
+    );
+    expect(skill.content).toContain('root `.npmrc` in any casing');
+    expect(skill.content).toContain(
+      'Do not copy root `deno.jsonc`, `tsconfig.json`, or `jsconfig.json`',
+    );
+    expect(skill.content).toMatch(
+      /including explicit\s+`\.ts`\/`\.tsx` relative imports/,
+    );
+    expect(skill.content).toContain(
+      'Run the codegen, dependency, source-check',
+    );
+    expect(skill.content).not.toContain('node_modules/@hatch');
+  });
+
   it('advertises shipped skills that the registered read tool can load', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-work-'));
     tempRoots.push(root);

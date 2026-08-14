@@ -55,6 +55,7 @@ const {
   setAgentOwned,
   wrapShellCommand,
 } = await import('./shell-sandbox');
+const { AppPreparationError } = await import('./app-worktree-prepare');
 const { createAppTools } = await import('./tools/apps');
 const { createWorkflowTools } = await import('./tools/workflows');
 const {
@@ -73,11 +74,11 @@ async function exists(target: string): Promise<boolean> {
 }
 
 function appSdkManifest(worktree: string): string {
-  return path.join(worktree, 'node_modules', '@hatch', 'data', 'package.json');
+  return path.join(worktree, '.hatch', 'sdk', '@hatch', 'data', 'package.json');
 }
 
 function appSdkImportMap(worktree: string): string {
-  return path.join(worktree, 'node_modules', '@hatch', 'import-map.json');
+  return path.join(worktree, '.hatch', 'import-map.json');
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -416,6 +417,7 @@ describe('runner source paths', () => {
     const tools = createAppTools({
       sessionId,
       platform: { createApp } as unknown as PlatformClient,
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
     });
     const create = tools.find((candidate) => candidate.name === 'create_app');
     if (!create) throw new Error('Missing create_app tool.');
@@ -457,6 +459,79 @@ describe('runner source paths', () => {
     ).resolves.toBe(false);
   });
 
+  it('reports the created app id, path, and SDK materialization stage', async () => {
+    const sessionId = 'create-sdk-materialization-failure';
+    const appId = 'created-sdk-failure';
+    const prepareWorktree = vi.fn<() => Promise<void>>(async () => undefined);
+    const createApp = vi.fn<PlatformClient['createApp']>(async (input) => ({
+      id: appId,
+      slug: input.slug,
+      name: input.name,
+      generation: GENERATION,
+      files: [],
+    }));
+    const tools = createAppTools({
+      sessionId,
+      platform: { createApp } as unknown as PlatformClient,
+      materializeSdk: vi.fn<() => Promise<void>>(async () => {
+        throw new Error('SDK unavailable');
+      }),
+      prepareWorktree,
+    });
+    const create = tools.find((candidate) => candidate.name === 'create_app');
+    if (!create) throw new Error('Missing create_app tool.');
+    const expectedPath = agentAppWorkDir(sessionId, appId);
+
+    await expect(
+      create.execute('create-sdk-failure', {
+        slug: 'broken-sdk',
+        name: 'Broken SDK',
+      }),
+    ).rejects.toThrow(
+      `Created app "Broken SDK" (slug: broken-sdk, id: ${appId}) at ` +
+        `${expectedPath}, but App preparation failed during SDK ` +
+        'materialization: SDK unavailable',
+    );
+    expect(createApp).toHaveBeenCalledOnce();
+    expect(prepareWorktree).not.toHaveBeenCalled();
+    await expect(exists(path.join(expectedPath, '.git'))).resolves.toBe(true);
+  });
+
+  it('reports the checked-out app id, path, and exact preparation stage', async () => {
+    const sessionId = 'checkout-codegen-failure';
+    const appId = 'checkout-codegen-app';
+    const materializeSdk = vi.fn<() => Promise<void>>(async () => undefined);
+    const tools = createAppTools({
+      sessionId,
+      platform: {
+        getAppSource: vi.fn<PlatformClient['getAppSource']>(async () => ({
+          id: appId,
+          generation: GENERATION,
+          masterCommit: null,
+          bundleBase64: null,
+        })),
+      } as unknown as PlatformClient,
+      materializeSdk,
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => {
+        throw new AppPreparationError('Connect codegen', 'buf failed.');
+      }),
+    });
+    const checkout = tools.find(
+      (candidate) => candidate.name === 'checkout_app',
+    );
+    if (!checkout) throw new Error('Missing checkout_app tool.');
+    const expectedPath = agentAppWorkDir(sessionId, appId);
+
+    await expect(
+      checkout.execute('checkout-codegen-failure', { id: appId }),
+    ).rejects.toThrow(
+      `Checked out "${appId}" at ${expectedPath}, but App preparation failed ` +
+        'during Connect codegen: buf failed.',
+    );
+    expect(materializeSdk).toHaveBeenCalledWith(expectedPath);
+    await expect(exists(path.join(expectedPath, '.git'))).resolves.toBe(true);
+  });
+
   it('exposes force on app and workflow checkout tools', async () => {
     const sessionId = 'checkout-tools-force';
     const source = (id: string) => ({
@@ -472,6 +547,7 @@ describe('runner source paths', () => {
           source('app-id'),
         ),
       } as unknown as PlatformClient,
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
     });
     const workflowTools = createWorkflowTools({
       sessionId,
@@ -549,6 +625,7 @@ describe('runner source paths', () => {
           source('app-id'),
         ),
       } as unknown as PlatformClient,
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => {}),
     });
     const workflowTools = createWorkflowTools({
       sessionId,
@@ -564,10 +641,11 @@ describe('runner source paths', () => {
     );
     if (!app || !workflow) throw new Error('Missing checkout tools.');
 
-    await app.execute('app-first', {
+    const firstApp = await app.execute('app-first', {
       id: 'app-id',
       target_path: 'custom/sync-app',
     });
+    expect(toolText(firstApp)).not.toContain('lifecycle scripts');
     const appWorktree = path.join(agentWorkDir(sessionId), 'custom/sync-app');
     await expect(
       readFile(
@@ -577,22 +655,23 @@ describe('runner source paths', () => {
     ).resolves.toContain('"name": "@hatch/data"');
     await expect(
       readFile(appSdkImportMap(appWorktree), 'utf8'),
-    ).resolves.toContain('"./data/dist/data.js"');
+    ).resolves.toContain('"./sdk/@hatch/data/dist/data.js"');
     await expect(git(appWorktree, 'status', '--short')).resolves.toBe('');
     await expect(exists(path.join(appWorktree, '.gitignore'))).resolves.toBe(
       false,
     );
     const excludePath = path.join(appWorktree, '.git', 'info', 'exclude');
     const exclude = await readFile(excludePath, 'utf8');
-    expect(exclude.match(/^\/node_modules\/@hatch\/$/gm)).toHaveLength(1);
+    expect(exclude.match(/^\/\.hatch\/$/gm)).toHaveLength(1);
+    expect(exclude.match(/^\/\.hatch-install-\*\/$/gm)).toHaveLength(1);
+    expect(exclude.match(/^\/\.hatch-backup-\*\/$/gm)).toHaveLength(1);
+    expect(exclude.match(/^\/node_modules\/$/gm)).toHaveLength(1);
+    expect(exclude.match(/^\/gen\/$/gm)).toHaveLength(1);
 
     // Simulate a checkout materialized before Hatch installed its local rule.
-    await writeFile(
-      excludePath,
-      exclude.replace('/node_modules/@hatch/\n', ''),
-    );
+    await writeFile(excludePath, exclude.replace('/.hatch/\n', ''));
     await expect(git(appWorktree, 'status', '--short')).resolves.toContain(
-      '?? node_modules/',
+      '?? .hatch/',
     );
     const synchronizedApp = await app.execute('app-sync', {
       id: 'app-id',
@@ -607,7 +686,7 @@ describe('runner source paths', () => {
     });
     await expect(git(appWorktree, 'status', '--short')).resolves.toBe('');
     await expect(readFile(excludePath, 'utf8')).resolves.toContain(
-      '/node_modules/@hatch/\n',
+      '/.hatch/\n',
     );
 
     await workflow.execute('workflow-first', {
@@ -639,7 +718,7 @@ describe('runner source paths', () => {
       replacedExisting: false,
       synchronizedExisting: true,
     });
-  });
+  }, 15_000);
 
   it('force replaces one exact indexed target without touching other checkouts', async () => {
     const sessionId = 'force-index-owner';

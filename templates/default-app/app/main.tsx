@@ -20,7 +20,7 @@ import { createClient } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-web';
 import { IconPlus } from '@tabler/icons-react';
 import { z } from 'zod';
-import { CounterService } from '../gen/service_pb';
+import { CounterService } from '../gen/service_pb.ts';
 
 declare const __RPC_BASE_URL__: string;
 declare const __APP_NAME__: string;

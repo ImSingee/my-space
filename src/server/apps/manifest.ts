@@ -6,6 +6,7 @@
  * shape that drives iframe/widget loading.
  */
 import { z } from 'zod';
+import { isAppManagedPathSegment } from '~/app-managed-path';
 
 /**
  * Reject manifest-provided paths that would escape the app source tree once
@@ -29,6 +30,9 @@ const sourceRelativePath = z
   .refine((p) => !isUnsafeSourcePath(p), {
     message:
       'must be a relative path inside the app source (no absolute or ".." paths)',
+  })
+  .refine((p) => !p.split(/[/\\]/).some(isAppManagedPathSegment), {
+    message: 'must not point into the platform-owned ".hatch/" directory',
   });
 
 /**
@@ -64,13 +68,17 @@ const backendEntryPath = sourceRelativePath
  * compile nor be captured. Enforcing the path keeps the app's declared API
  * discoverable by the platform.
  */
-const protoEntryPath = sourceRelativePath.refine(
-  (p) => {
-    const segments = p.split(/[/\\]/);
-    return segments.length >= 2 && segments[0] === 'proto';
-  },
-  { message: 'proto entry must live under the "proto/" directory' },
-);
+const protoEntryPath = sourceRelativePath
+  .refine(
+    (p) => {
+      const segments = p.split(/[/\\]/);
+      return segments.length >= 2 && segments[0] === 'proto';
+    },
+    { message: 'proto entry must live under the "proto/" directory' },
+  )
+  .refine((p) => p.endsWith('.proto'), {
+    message: 'proto entry must name a .proto file',
+  });
 
 /**
  * A metadata value that must stay on one line. Userscript metadata is emitted
@@ -465,6 +473,36 @@ export const sourceManifestSchema = z
       });
     }
 
+    if (manifest.capabilities.frontend && !manifest.app) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'capabilities.frontend is true but app.entry is not declared',
+        path: ['app'],
+      });
+    }
+    if (manifest.capabilities.backend && !manifest.backend) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'capabilities.backend is true but backend.entry is not declared',
+        path: ['backend'],
+      });
+    }
+    if (manifest.rpc && (!manifest.capabilities.backend || !manifest.backend)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'rpc requires capabilities.backend to be true and backend.entry to be declared',
+        path: ['rpc'],
+      });
+    }
+    if (manifest.capabilities.widgets && manifest.widgets.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'capabilities.widgets is true but no widgets are declared',
+        path: ['widgets'],
+      });
+    }
     // A userscript-capable app with no scripts would advertise the capability but
     // serve nothing — almost always a manifest mistake, so reject it (mirrors how
     // an enabled capability without its backing declaration is caught elsewhere).

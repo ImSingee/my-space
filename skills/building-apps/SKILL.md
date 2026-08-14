@@ -1,441 +1,239 @@
 ---
 name: building-apps
-description: How to design, build, and deploy a Hatch app end to end — manifest, Connect proto, Deno Connect backend, React SPA (TanStack Router hash history + Query), dashboard widgets, npm packages installed by Deno, and a per-app Postgres database. Use this whenever you create or modify an app.
+description: Design, build, validate, and deploy Hatch Apps with React frontends, Connect/Deno backends, widgets, managed Data Tables, storage, integrations, and userscripts. Use whenever creating, modifying, debugging, or deploying an App.
 ---
 
-# Building a Hatch app
+# Build a Hatch App
 
-An app is an independent app the platform builds and runs for you. Call
-`checkout_app` before modifying an existing app; its default source path is
-`apps/<id>/`, but the returned absolute path is authoritative. The platform
-handles codegen, bundling, process management, the Postgres database, and
-serving.
+Load this Skill before calling App platform tools or editing an App. Follow the
+workflow in order and load only the capability references needed for the task.
 
-## Source layout
+## Core workflow
 
+1. For a new App, call `list_apps` and use existing `slug · name` pairs to match
+   the user's naming style. Ask for the name and slug in two separate `ask`
+   calls, name first. Explain that both can be changed later. After both are
+   confirmed, call `create_app`; pin user-facing Apps and leave backend-only or
+   widget-only Apps unpinned.
+   The slug is the human-facing `/app/<slug>` segment. Hatch generates a
+   separate immutable id for the repository, data relations, and technical
+   `/api/app/<id>/...` URLs.
+2. For an existing App, inspect it with `list_apps` and `get_app`, then call
+   `checkout_app`. The returned absolute source path is authoritative. Reuse an
+   existing target or choose a different `target_path`; use `force: true` only
+   when discarding that target is intended.
+3. Read the actual source tree before editing. Keep `manifest.json`, proto,
+   backend, frontend, widgets, userscripts, and capabilities synchronized.
+4. If dependencies changed, update the lockfile with the Deno command below.
+   Generate RPC code, run the source check, and run relevant tests.
+5. In the returned worktree, inspect `git status`, stage only intended authored
+   files, and commit. Do not push branches or create/push tags.
+6. Call `deploy_app` with the same `source_path` and a concise release `message`.
+   Deploy repeats source validation before building or changing durable
+   deployment state. Fix any failure, validate again, commit, and redeploy.
+7. Call `get_app` to confirm the deployed state, then explain how to open it.
+
+If deploy says `master` advanced, refresh the same checkout, run
+`git fetch origin master`, rebase onto `origin/master`, resolve conflicts, and
+retry. Checkout never authorizes silently replacing local work.
+
+## Source contract
+
+`create_app` produces a prepared, runnable Counter App:
+
+```text
+manifest.json          App entries, capabilities, routes, widgets, integrations
+proto/service.proto    Connect RPC service; proto files stay under proto/
+backend/main.ts        bundled Deno backend
+backend/assets/        optional read-only runtime assets
+app/index.html         SPA host
+app/main.tsx           React SPA entry
+data/schema.ts         managed Data Table schema
+widgets/counter.tsx    default demo widget
+userscripts/*.ts       optional Tampermonkey entries
+package.json           npm dependencies resolved by Deno
+deno.json              compiler and lifecycle-script deny policy
+deno.lock              committed dependency lock
+buf.yaml
+buf.gen.yaml
+gen/service_pb.ts      generated and ignored
+.hatch/                platform-owned SDK and import map; generated and ignored
 ```
-apps/<id>/
-  manifest.json          declares id, name, capabilities, widgets, rpc service
-  proto/service.proto    Connect RPC service (one service per app)
-  backend/main.ts        Deno Connect server entry (bundled on deploy)
-  backend/assets/        optional read-only runtime files (copied on deploy)
-  app/index.html         HTML host that loads ./app.js
-  app/main.tsx           React SPA entry (TanStack Router, hash history) + Query
-  data/schema.ts         optional managed Data Table schema
-  widgets/<name>.tsx     dashboard widget(s); each exports mount(element)
-  node_modules/@hatch/data generated platform SDK (never edit or commit)
-  node_modules/@hatch/import-map.json generated SDK map (never edit or commit)
-  package.json           npm dependencies (installed only with Deno)
-  deno.json              reviewed lifecycle-script policy
-  deno.lock              Deno dependency lock (commit this file)
-  buf.yaml, buf.gen.yaml Connect codegen config (rarely needs changes)
+
+Create and checkout prepare dependencies, run trusted Buf codegen, and
+materialize `.hatch/` before returning. Treat the `.hatch` path segment as
+reserved case-insensitively; never create spelling variants such as `.HATCH`.
+Never edit or commit `.hatch/`, `gen/`, or `node_modules/`. Do not place an App
+entry inside `.hatch/`. Do not create a root `.npmrc` in any casing; Hatch owns
+App registry configuration. Use only the canonical root `deno.json`; do not
+create `deno.jsonc`, `tsconfig.json`, or `jsconfig.json`.
+
+Keep the App module and compiler contract fixed: `package.json` declares
+`"type": "module"`; `deno.json` sets `compilerOptions.strict` to `true`,
+`compilerOptions.jsx` to `"react-jsx"`, and `compilerOptions.jsxImportSource`
+to `"react"`. Do not add `imports`, `scopes`, `importMap`, or `workspace` to
+`deno.json`. Use explicit relative imports and registry dependencies from
+`package.json` instead.
+
+The public SDK mappings are generated in `.hatch/import-map.json`. Do not add
+`@hatch/*` packages to `package.json` or `deno.lock`; Hatch owns their version
+and materialization. The authoritative declaration entry for `@hatch/data` is
+the `exports` map in `.hatch/sdk/@hatch/data/package.json`.
+
+Buf generates `gen/service_pb.ts` from `proto/service.proto`. Never author
+generated RPC code. Every relative TypeScript import must state its `.ts` or
+`.tsx` extension:
+
+```ts
+import { TodoService } from '../gen/service_pb.ts';
+import schema from '../data/schema.ts';
 ```
 
-Proto files MUST live under the fixed `proto/` directory — the build only
-compiles and uploads protos from there. `gen/service_pb.ts` is generated by the
-build (it runs `buf generate`) and is git-ignored, so it is regenerated on every
-deploy. Never write files under `gen/` yourself. On deploy the platform also
-records the app's declared API (services + methods) from the proto and shows it
-on the app's manage page.
+Do not enable unstable Deno import resolution.
 
-Deploy bundles the backend entry and all statically imported code into a single
-JavaScript file. Backend source files, `gen/`, `package.json`, `deno.json`, and
-`deno.lock` are source or build inputs and are not copied into the deployed
-artifact. The fixed `backend/assets/` directory is the only source directory
-copied beside the bundle. The runtime therefore cannot read other build-only
-files from disk.
+Deploy bundles each enabled entry and its static imports. Source files,
+dependency metadata, installed modules, `.hatch/`, and `gen/` do not become
+runtime files. Only `backend/assets/` is copied beside the backend bundle; read
+it through `HATCH_ASSETS_DIR`. Put mutable files in Storage instead.
 
-`create_app` scaffolds a runnable **Counter** example you adapt in place — not a
-blank tree. The exact files are `manifest.json` (rpc service
-`app.v1.CounterService`), `proto/service.proto`, `backend/main.ts`,
-`app/index.html`, `app/main.tsx`, `package.json`, `deno.json`, `deno.lock`,
-`buf.yaml`, `buf.gen.yaml`, and a single demo widget at `widgets/counter.tsx`
-(widget id `counter`). Read those
-exact paths before editing — don't guess filenames (the demo widget is
-`widgets/counter.tsx`, not `widgets/summary.tsx`). The `todo`/`summary` snippets
-below are illustrative only.
+## Persistent Storage
 
-## Git workflow
+For mutable files, enable both `capabilities.backend` and
+`capabilities.storage`. Hatch creates one fixed private directory for the App
+and injects its absolute path into the backend as `STORAGE_DIR`. Read and write
+only within that directory; never write to `HATCH_ASSETS_DIR`.
 
-Each app has a platform-managed Git repo. You work in a per-chat checkout and
-use native git locally:
-
-1. For a new app, settle the name and slug with the user before creating it:
-   - Call `list_apps` first and study the existing `slug · name` pairs to infer
-     the user's style (casing, length, tone, how each slug derives from its
-     name) so your suggestions feel like part of their collection.
-   - Ask in two separate `ask` calls, name first: one for the **name** (offer a
-     few style-matched candidates), then — after they pick one — a second for
-     the **slug**, suggesting a kebab-case slug derived from the chosen name.
-     Never bundle them into one question or invent a slug without asking.
-   - Both the name and the slug can be changed later (the slug from the manage
-     page), so reassure the user not to overthink it. The slug is the
-     human-facing segment in `/app/<slug>`; the platform generates a separate
-     immutable id that keys the repo, database
-     relations, and technical `/api/app/<id>/...` URLs. Only after they agree
-     to both, call `create_app` (it takes the chosen `slug`).
-     Pass `pin: true` when the app will have a user-facing frontend (the default)
-     so it's pinned to the sidebar, or `pin: false` for backend-only /
-     widget-only apps.
-2. For an existing app, call `checkout_app` and keep the returned source path.
-   Checkout only creates a missing target by default. If the target exists, use
-   it or choose another `target_path`; pass the same path with `force: true` only
-   to permanently discard it and create a fresh checkout.
-3. Edit files under the exact returned source path.
-4. Run `git status`, `git add ...`, and `git commit -m "message"` there.
-5. Call `deploy_app` with that `source_path` and a required `message` (a concise
-   release note, e.g. "Add CSV export"); deploy publishes the clean
-   commit, updates `master`, creates the `deploy/v<version>` tag, and records the
-   artifact and message in the deployment history.
-
-Do not push branches. Do not create or push tags. The platform Git server
-rejects Agent branch/tag pushes. If deploy says `master` advanced, run
-`checkout_app` again with the same `target_path` to refresh the origin bundle
-(the existing-target error does not overwrite files), then run
-`git fetch origin master`, rebase your local work onto `origin/master`, resolve
-conflicts, commit, and call `deploy_app` again.
-
-## Inspecting and rolling back
-
-- Use `list_apps` to see every app (id, status, live version, capabilities)
-  and `get_app <id>` to inspect one app's manifest, live version, runtime
-  state, and deployment history.
-- To roll back, call `rollback_app` with the app `id` and the `version`
-  number to restore (e.g. `version: 4` for v4) — the same version shown by
-  `get_app` and in the management UI. Only successfully deployed versions can
-  be restored. Rolling back moves `master` to that version's commit but does not
-  change existing Agent worktrees. To preserve local work, call `checkout_app`
-  with the same `target_path` to refresh the origin bundle, then fetch/rebase.
-  To discard it and exactly restore rollback source, pass `force: true`.
+Storage is backend-only and has no frontend or widget HTTP API. Its contents
+survive backend restarts, deployments, and rollbacks. Turning the capability
+off revokes backend access but preserves the files; turning it back on exposes
+the same contents. Deleting the App permanently deletes the directory.
 
 ## Manifest
 
-Keep `manifest.json` consistent with the files. Example:
+Keep every declaration consistent with its source file. A representative
+manifest is:
 
 ```json
 {
-  "id": "todo",
+  "id": "generated-app-id",
   "name": "Todo",
   "description": "A simple todo list",
   "version": 1,
   "capabilities": {
-    "database": true,
+    "database": false,
     "frontend": true,
     "widgets": true,
     "backend": true,
-    "storage": false,
     "cron": false,
     "webhook": false,
+    "storage": false,
     "kv": false,
     "dataTable": false,
     "userscripts": false
   },
   "backendMode": "serverless",
-  "rpc": { "proto": "proto/service.proto", "service": "app.v1.TodoService" },
+  "rpc": {
+    "proto": "proto/service.proto",
+    "service": "app.v1.TodoService"
+  },
   "backend": { "entry": "backend/main.ts" },
   "app": {
     "entry": "app/main.tsx",
     "html": "app/index.html",
-    "routes": [
-      { "path": "/", "description": "Todo list" },
-      { "path": "/todos/$todoId", "description": "Todo details" }
-    ]
+    "routes": [{ "path": "/", "description": "Todo list" }]
   },
   "widgets": [
     {
-      "id": "summary",
-      "name": "Todo summary",
-      "entry": "widgets/summary.tsx",
+      "id": "counter",
+      "name": "Counter",
+      "entry": "widgets/counter.tsx",
       "defaultSize": { "w": 4, "h": 3 }
     }
   ]
 }
 ```
 
-The `service` value must be the fully-qualified proto service name
-(`<package>.<ServiceName>`), and the widget `id` is what the dashboard pins.
+Use the generated immutable App id. `rpc.service` is the fully qualified proto
+service name. Each `app.routes` item is discoverability metadata and uses
+TanStack Router `$param` syntax for dynamic paths. Widget ids are stable URL and
+dashboard identifiers.
 
-Keep backend code statically bundleable. A normal static `import` is included in
-the backend bundle. Put every non-module, read-only runtime file in the fixed
-`backend/assets/` directory; deploy copies that whole directory to
-`artifact/backend/assets/` and injects `HATCH_ASSETS_DIR` as its absolute runtime
-path. Read assets through that environment variable, for example:
+## Dependencies
 
-```ts
-import path from 'node:path';
+Deno is the only App package manager. Add normal semver dependencies to
+`package.json`; never run npm or pnpm. After every dependency change, run from
+the App root:
 
-const assetsDir = Deno.env.get('HATCH_ASSETS_DIR')!;
-const template = await Deno.readTextFile(
-  path.join(assetsDir, 'email-template.html'),
-);
-```
-
-Do not locate runtime files relative to a source module's `import.meta.url`:
-after bundling, every module sees the bundle URL instead. Computed dynamic
-imports, separate Worker entrypoints,
-native addons, FFI libraries, runtime sidecars, runtime-generated package files,
-and packages that depend on their own relative runtime resources are not
-supported by the `bundle-v1` runtime. The platform deliberately does not copy
-the backend source tree into the artifact.
-
-For mutable files, enable `capabilities.storage` together with the backend
-capability. The platform creates one fixed, private persistent directory for the
-app and injects its absolute path into the backend as `STORAGE_DIR`. Read and
-write only within that directory; never write to `HATCH_ASSETS_DIR`.
-
-```ts
-import path from 'node:path';
-
-const storageDir = Deno.env.get('STORAGE_DIR')!;
-await Deno.writeTextFile(path.join(storageDir, 'state.json'), '{}');
-```
-
-Persistent storage is backend-only. There is no Storage HTTP API, and frontend
-or widget browser code cannot access the directory directly. Its contents
-survive backend restarts, deployments, and rollbacks. Turning the capability
-off revokes backend access but keeps existing files; turning it back on exposes
-the same contents. Deleting the app permanently deletes the directory.
-
-Keep `app.routes` synchronized with every user-navigable frontend route so the
-platform can autocomplete app entry points. Each path starts with `/` and has a
-concise user-facing description; dynamic route templates use TanStack Router's
-`$param` syntax. The declaration is metadata only — TanStack Router remains the
-runtime source of truth.
-
-Set `defaultSize` to the footprint a widget opens at in the 12-column grid;
-every declared `w` and `h` must be an integer from 1 through 12. Build widgets
-responsive by default: omit `supportedSizes` and adapt to `context.size` /
-`context.onResize`; the dashboard then allows free-form resizing with a `2×2`
-UI floor. Declare `supportedSizes` only when the widget deliberately implements
-and has been verified at every listed footprint. One entry locks resizing;
-multiple entries snap to the nearest size. Include `defaultSize` in the list.
-
-## Proto
-
-```proto
-syntax = "proto3";
-package app.v1;
-
-message Todo { string id = 1; string text = 2; bool done = 3; }
-message ListRequest {}
-message ListReply { repeated Todo todos = 1; }
-message AddRequest { string text = 1; }
-
-service TodoService {
-  rpc List(ListRequest) returns (ListReply);
-  rpc Add(AddRequest) returns (Todo);
-}
-```
-
-Method names become camelCase in generated code (`list`, `add`).
-
-## Backend (Deno + Connect)
-
-The platform always injects `PORT`. It injects `DATABASE_URL` only when
-`capabilities.database` is enabled and `STORAGE_DIR` only when
-`capabilities.storage` is enabled. Create tables on startup so an App using the
-database capability works on a fresh database. Import generated stubs with an
-explicit `.ts`.
-
-```ts
-import http from 'node:http';
-import { connectNodeAdapter } from '@connectrpc/connect-node';
-import type { ConnectRouter } from '@connectrpc/connect';
-import postgres from 'postgres';
-import { TodoService } from '../gen/service_pb.ts';
-
-const sql = postgres(Deno.env.get('DATABASE_URL') ?? '', { max: 4 });
-await sql`create table if not exists todo (
-  id text primary key, text text not null, done boolean not null default false
-)`;
-
-function routes(router: ConnectRouter) {
-  router.service(TodoService, {
-    async list() {
-      const rows = await sql`select id, text, done from todo order by id`;
-      return { todos: rows };
-    },
-    async add(req) {
-      const id = crypto.randomUUID();
-      await sql`insert into todo (id, text) values (${id}, ${req.text})`;
-      return { id, text: req.text, done: false };
-    },
-  });
-}
-
-const port = Number(Deno.env.get('PORT') ?? '8080');
-http.createServer(connectNodeAdapter({ routes })).listen(port);
-```
-
-To use any npm package (frontend, widget, or backend), add it to `package.json`
-`dependencies` with a normal semver range. **Deno is the only package manager:**
-never run `npm install`, `pnpm install`, or generate npm/pnpm lock files. After
-every dependency change, run this in the app source root:
+Apps deploy as standalone source trees. Do not use package/deno workspaces or
+`file:`, `link:`, `workspace:`, absolute-path, or parent-directory dependencies;
+publish or select a registry package version instead.
+Use registry npm dependencies declared in `package.json`; do not import
+`http:`, `https:`, or `jsr:` modules from App source.
 
 ```bash
 deno install --package-json --node-modules-dir=auto --lock=deno.lock
 ```
 
-Commit `package.json`, `deno.json`, and the resulting `deno.lock`. Do not commit
-`node_modules`. Hatch materializes built-in `@hatch/*` SDKs there at checkout
-along with `node_modules/@hatch/import-map.json`. Never add Hatch SDKs to
-`package.json`, version them, edit them, or expect them in `deno.lock`; never
-edit or commit the generated import map. `deploy_app` repeats the Deno install
-with `--frozen`, applies the generated map during schema evaluation and backend
-bundling, and rejects missing or stale dependency files. The SDK code is
-inlined into the backend bundle; the generated SDK directory, import map,
-package metadata, lockfile, and installed modules are not present at runtime.
+Commit `package.json`, `deno.json`, and `deno.lock`. Deploy repeats installation
+with `--frozen` and rejects stale dependency state.
 
-If deploy reports a legacy deno.json-only source, migrate its npm imports to
-`package.json`, run the command above, and commit all three dependency files. If
-an older App declares `@hatch/data` as a dependency, remove it before
-regenerating `deno.lock`; Hatch supplies that SDK. Deno reads `package.json`
-natively, so other bare package imports work in the backend too.
+Deno skips npm lifecycle scripts by default. App preparation and deploy do not
+execute package `preinstall`, `install`, or `postinstall` code, even when a
+package version has been audited. Keep `deno.json` `allowScripts` empty. If a
+dependency needs a lifecycle script, native addon, FFI build, downloaded
+binary, or runtime sidecar, replace it with a dependency that installs without
+those mechanisms.
 
-For local Deno commands that resolve App source imports, run them from the App
-source root and explicitly use Hatch's generated map:
+## Local validation
+
+Create and checkout already generate RPC code. After changing a proto, regenerate
+it from the App root with Hatch's platform-owned template. Do not run bare
+`buf generate`: that reads the App-authored `buf.gen.yaml` instead.
 
 ```bash
-deno check --import-map=node_modules/@hatch/import-map.json ...
-deno run --import-map=node_modules/@hatch/import-map.json ...
-deno test --import-map=node_modules/@hatch/import-map.json ...
-deno cache --import-map=node_modules/@hatch/import-map.json ...
+buf generate --template .hatch/buf.gen.yaml
 ```
 
-This applies to any `check`, `run`, `test`, or `cache` invocation that may reach
-an `@hatch/*` import. `deno install` only resolves `package.json` dependencies
-and does not need the import-map flag.
+Then type-check every enabled entry from `manifest.json`, plus `data/schema.ts`
+when Data Tables are enabled:
 
-### npm lifecycle scripts
-
-Deno does not run npm `preinstall`, `install`, or `postinstall` scripts by
-default. If install reports a skipped lifecycle script, do **not** enable it
-blindly:
-
-1. Find the exact resolved version in `deno.lock` and inspect that package's
-   `package.json` lifecycle command plus every local script it invokes.
-2. Reject the dependency and choose an alternative if the command downloads or
-   executes unreviewed remote code, reads credentials or files outside the
-   project, writes outside the package/project, changes global configuration,
-   elevates privileges, is obfuscated/dynamic, or cannot be fully traced.
-3. Also reject packages that require native addons, FFI, runtime sidecars, or
-   generated files that the app artifact will not carry.
-4. Only after the exact command is confirmed safe, add the exact locked version
-   to `deno.json`, never a boolean, tag, wildcard, or range:
-
-   ```json
-   { "allowScripts": ["npm:trusted-package@1.2.3"] }
-   ```
-
-5. Run the Deno install command again, verify the script output and app, and
-   commit the updated `deno.json` and `deno.lock`. Transitive packages require
-   the same independent review and exact entry.
-
-## Frontend (React SPA, TanStack Router + Query)
-
-The Connect client base URL is the injected global `__RPC_BASE_URL__`. The
-template wires **TanStack Router with hash history** (required — the app is
-served from a static iframe with no server router) and **TanStack Query** for
-data fetching. The platform serves `app/index.html`, which loads the bundled
-`./app.js`.
-
-```tsx
-import { createClient } from '@connectrpc/connect';
-import { createConnectTransport } from '@connectrpc/connect-web';
-import { useQuery } from '@tanstack/react-query';
-import { TodoService } from '../gen/service_pb';
-
-declare const __RPC_BASE_URL__: string;
-const client = createClient(
-  TodoService,
-  createConnectTransport({ baseUrl: __RPC_BASE_URL__ }),
-);
-
-function useTodos() {
-  return useQuery({ queryKey: ['todos'], queryFn: () => client.list({}) });
-}
+```bash
+deno check --config=deno.json --no-remote --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json \
+  --lock=deno.lock --frozen \
+  app/main.tsx backend/main.ts widgets/counter.tsx data/schema.ts
 ```
 
-Use **TanStack Query** (`useQuery`/`useMutation`) for backend calls — never
-`useEffect` + `useState`. For navigation use TanStack Router with
-`createHashHistory()`; never the History API directly. The scaffolded
-`app/main.tsx` shows the full router + query wiring — adapt it in place. Zod and
-`@tabler/icons-react` are also available by default.
+Adjust the final entry list to the manifest; include userscript entries and omit
+disabled or absent entries. Run relevant tests after the check. Do not use a
+different import map for local checks.
 
-## Widgets
+Every other Deno command that resolves App TypeScript must use the same SDK,
+node-modules, and frozen-lock contract. For example:
 
-Each widget is a standalone ES module that bundles its own React. It must export
-`mount(element, context)` and return an unmount function. The optional `context`
-gives the widget its current size — grid units (`w`/`h`) plus live pixel
-dimensions (`width`/`height`) — and an `onResize` subscription that fires
-immediately and again on every resize or placement change:
-
-```tsx
-import { createRoot } from 'react-dom/client';
-
-type WidgetSize = { w: number; h: number; width: number; height: number };
-type WidgetContext = {
-  size: WidgetSize;
-  onResize: (cb: (size: WidgetSize) => void) => () => void;
-  onRefresh: (cb: () => void | Promise<unknown>) => () => void;
-};
-
-export function mount(
-  element: HTMLElement,
-  context?: WidgetContext,
-): () => void {
-  const root = createRoot(element);
-  // Read context.size for the initial size, and context.onResize(...) to react
-  // to the user resizing the widget or the dashboard reflowing it.
-  root.render(<MyWidget context={context} />);
-  return () => root.unmount();
-}
+```bash
+deno test --config=deno.json --no-remote --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json \
+  --lock=deno.lock --frozen <test paths...>
+deno run --config=deno.json --no-remote --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json \
+  --lock=deno.lock --frozen <permission flags...> <entry.ts>
+deno cache --config=deno.json --no-remote --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json \
+  --lock=deno.lock --frozen <entries...>
 ```
 
-Make widgets size-aware: use `context.size` / `context.onResize` to adapt the
-layout (e.g. hide labels when narrow, switch to a compact view at small pixel
-sizes). Default to free-form responsive sizing. Opt into `supportedSizes` only
-after implementing and verifying every declared layout. Register
-`context.onRefresh(...)` only when the widget supports refreshing. Registration
-declares that capability to the dashboard; without it, the widget has no refresh
-button and is skipped by dashboard-wide and automatic refreshes. Widgets can
-also use the same Connect client pattern as the app.
-
-Treat first load and background refresh as different states:
-
-- With no successful data yet, show an initial loading state. An initial load
-  error may replace it with an error state and a **Retry** action.
-- Once data exists, keep the last successful content visible for the entire
-  refresh. Do not clear it or replace the widget with a full loading, skeleton,
-  empty, or error state. Replace it with new data only after a successful
-  refresh; on failure, retain the old data and optionally show a non-destructive
-  error indicator.
-- Return the Promise for the real refresh work from the `onRefresh` callback so
-  the dashboard spinner lasts until that work settles. For one TanStack Query,
-  return `queryClient.invalidateQueries({ queryKey })` (or `refetchQueries`)
-  directly. For multiple independent queries, return
-  `Promise.all([queryClient.invalidateQueries(...), ...])`.
-- For manually managed state, make the loading function return its request
-  Promise and update data only after success. Never call `setData(null)`,
-  `setData(undefined)`, or otherwise clear successful data before the request.
-- Do not add a routine refresh button inside the widget; the dashboard supplies
-  it when `onRefresh` is registered. A Retry action for an initial-load error is
-  still appropriate.
-
-## Database
-
-Use `query_app_db` to create tables and inspect data while developing. The
-backend should also create its tables on startup (idempotent `create table if
-not exists`). Each app has its OWN database — no cross-app access.
+`deploy_app` performs the same source check before schema evaluation, production
+bundling, database migration, artifact persistence, or live-release activation.
+Its later bundle check verifies the emitted artifact and does not replace the
+source check. A failed source check must be fixed in authored source and
+committed before retrying deploy.
 
 ## Managed Data Tables
 
-Use `capabilities.dataTable` for typed CRUD data that does not need arbitrary
-SQL, joins, or aggregates. It works without a backend, automatically migrates
-on deploy, and provides realtime reactive queries. The platform provisions a
-separate database and never exposes its credentials.
-
-Create `data/schema.ts`:
+Use `capabilities.dataTable` for typed CRUD that does not need arbitrary SQL,
+joins, or aggregates. It works without a backend and provides automatic
+forward migrations plus realtime queries.
 
 ```ts
 import { defineSchema, defineTable, t } from '@hatch/data';
@@ -444,422 +242,80 @@ export default defineSchema({
   todos: defineTable({
     title: t.string(),
     completed: t.boolean().default(false),
-    dueAt: t.datetime().optional(),
+    metadata: t.json().optional(),
   }).index('by_completed', ['completed']),
 });
 ```
 
-Tables automatically include `id`, `createdAt`, and `updatedAt`. Use
-`renamedFrom(...)` for table or field renames so migrations preserve data.
-Adding optional/defaulted fields and compatible indexes migrates automatically.
-`.index(...)` declares a physical database index, while `.uniqueIndex(...)`
-also enforces uniqueness. Queries do not name or require an index; PostgreSQL
-automatically chooses a usable declared index. Add indexes for fields that are
-filtered or ordered frequently. Queries without a suitable index are allowed,
-but may scan or sort enough data to reach the statement timeout.
-Dropping tables/fields or narrowing types is destructive: the first deploy
-returns a migration preview without changing data. Ask the user for explicit
-approval, then retry `deploy_app` with
-`allow_destructive_data_migration: true` and the exact
-`data_migration_approval_token` returned by that preview. A token is bound to
-the source schema, target schema, and generated SQL; use a new token whenever
-the preview changes. Rollback restores code only and warns when the live Data
-Table schema differs; it never runs a down migration.
-
-After the app has been deployed with `dataTable` enabled, use
-`query_app_data_table` to inspect and manage its live data:
-
-- `inspect` returns the live schema, fields, defaults, indexes, schema hash,
-  and estimated row counts. Use it first whenever the live schema is unknown.
-- `query` supports up to 16 AND-combined filters, ordering, and cursor
-  pagination. It returns at most 200 rows; continue with the returned cursor.
-- `mutate` atomically applies up to 100 insert, patch, increment, or exact-ID
-  delete operations. If one operation fails, the entire batch rolls back.
-- `raw_sql` is dangerous and is only a last resort when the structured query
-  and mutation actions cannot express required joins, aggregates, or complex
-  data repair.
-
-raw SQL may only query or modify rows in existing `data` tables. Allowed data
-operations include `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, CTEs, joins,
-aggregates, and upserts. Never use it for DDL, `TRUNCATE`,
-maintenance commands, transaction control, permissions, roles, databases, or
-anything in `_hatch`. This is an Agent instruction, not a SQL parser or
-database permission boundary; the platform sends the SQL through unchanged, so
-you must follow it even though the database could technically execute forbidden
-statements. Schema changes always go through `data/schema.ts` and `deploy_app`.
-
-Raw SQL may contain multiple statements. Set `timeout_ms` only when the
-30-second default is insufficient; it accepts 1000 through 1800000 milliseconds
-and applies to the Raw SQL database operation, including statement execution.
-It does not cover App resolution or capability preflight. Raw SQL resolves
-unqualified table names against `data` and then `public`, uses physical column
-names such as `created_at` and `updated_at`, and bypasses logical field mapping,
-generated IDs, value validation, managed `updatedAt` behavior, and row-size
-checks. Inspect the schema first and preserve those contracts yourself.
-If output is truncated, rerun with narrower columns, `LIMIT`, keyset conditions,
-or SQL substring functions.
-
-Frontend example:
-
 ```ts
-import schema from '../data/schema';
-import { createDataClient } from '@hatch/data';
+import schema from '../data/schema.ts';
+import { createDataClient, type JsonValue } from '@hatch/data';
 
 declare const __DATA_BASE_URL__: string;
 export const data = createDataClient<typeof schema>({
   baseUrl: __DATA_BASE_URL__,
 });
 
-const todos = await data.query({
-  table: 'todos',
-  where: [{ field: 'completed', op: 'eq', value: false }],
-});
-
-await data.patch('todos', todoId, {}, { unset: ['dueAt'] });
-
-// Database-atomic arithmetic on a required integer/number field.
-await data.increment('counters', counterId, 'value', 1);
+const metadata: JsonValue = { source: 'app' };
+await data.insert('todos', { title: 'Ship it', metadata });
 ```
 
-Use `data.watch(query, callback)` or `useDataQuery` from `@hatch/data/react`
-for realtime results. A backend creates the same client with `HATCH_DATA_URL`
-and `HATCH_SIGNING_SECRET`. `@hatch/data` is supplied by Hatch, not installed or
-locked by the App; Hatch resolves it with the generated
-`node_modules/@hatch/import-map.json`. Use the `unset` patch option to clear
-optional fields to SQL `NULL`. For JSON fields, assigning `null` stores an
-explicit JSON null instead. `increment` accepts only required `integer` or
-`number` fields, updates the stored value atomically, and returns `null` when
-the row no longer exists. Its raw mutation form can be combined with other
-operations in `data.transaction`.
+Preserve the SDK's schema inference and public types. Do not delete the schema
+generic, copy SDK declarations into App source, replace types with `any`, or add
+casts to conceal an SDK-resolution or type error. Resolve API declarations
+through `.hatch/sdk/@hatch/data/package.json` exports.
 
-## Extended capabilities (cron, webhook, long-running)
+Tables include `id`, `createdAt`, and `updatedAt`. Use `renamedFrom(...)` for
+renames, add indexes for frequent filters/orderings, use `unset` to clear an
+optional field to SQL `NULL`, and use `increment` for atomic arithmetic on
+required numeric fields. Use `data.watch` or `useDataQuery` from
+`@hatch/data/react` for realtime results. Backends use `HATCH_DATA_URL` and
+`HATCH_SIGNING_SECRET` with the same typed client.
 
-Turn these on in the manifest `capabilities` block. When a backend needs to
-serve plain HTTP paths (webhook, or legacy cron `path` jobs) alongside Connect
-RPC, wrap the Connect adapter and handle your custom paths first (RPC-method
-cron jobs need no wrapper — they go straight to the Connect router):
+Dropping tables/fields or narrowing types returns a destructive migration
+preview without changing data. Obtain explicit user approval, then retry with
+`allow_destructive_data_migration: true` and the exact returned approval token.
+Tokens are bound to one preview and must not be reused after source changes.
 
-```ts
-import http from 'node:http';
-import { connectNodeAdapter } from '@connectrpc/connect-node';
+After the first Data Table-capable deploy, use `query_app_data_table` to inspect
+and manage live data. Inspect an unknown schema first, then prefer structured
+`query` and atomic `mutate` operations. The `raw_sql` action is a dangerous last
+resort for joins, aggregates, or complex data repair that structured actions
+cannot express. Raw SQL may query or modify rows in existing `data` tables, but
+it must not perform DDL, `TRUNCATE`, maintenance, transaction control,
+permission, role, database, or `_hatch` operations. The platform does not
+enforce that SQL rule, so the Agent must obey it. Schema changes always go
+through `data/schema.ts` and `deploy_app`.
 
-const connect = connectNodeAdapter({ routes });
-const port = Number(Deno.env.get('PORT') ?? '8080');
+For arbitrary SQL, joins, aggregates, or ORM control, enable `database`, use
+`query_app_db` while developing, and create tables idempotently on backend
+startup. Each App database is isolated.
 
-http
-  .createServer(async (req, res) => {
-    const url = req.url ?? '/';
-    if (req.method === 'POST' && url.startsWith('/__cron/')) {
-      /* run the scheduled task */ res.writeHead(200);
-      res.end('ok');
-      return;
-    }
-    if (req.method === 'POST' && url.startsWith('/__webhook')) {
-      /* handle inbound webhook */ res.writeHead(200);
-      res.end('ok');
-      return;
-    }
-    connect(req, res); // everything else -> Connect RPC
-  })
-  .listen(port);
-```
+## KV secrets
 
-### cron
+Newly created or overwritten KV values marked `secret` are encrypted at rest
+with the platform's stable `SECRET` and masked from ordinary Agent/UI reads.
+Values written before encryption remain plaintext until overwritten; reading
+does not migrate them. Changing `SECRET` makes encrypted values unreadable, and
+older backups may still contain plaintext. When updating a KV value, omit the
+`secret` property to preserve its existing flag.
 
-Set `"cron": true` and declare jobs in the manifest. `schedule` is a standard
-5-field cron expression (`minute hour day-of-month month day-of-week`). A "Run
-now" button is available on the app page.
+## Capability references
 
-Prefer declaring a proto RPC **`method`** for each job: on schedule the platform
-calls that method on your declared service (Connect, empty request) — no custom
-URL needed. The method must exist in your `proto/` service.
+Read only the reference relevant to the requested capability:
 
-```json
-"capabilities": { "cron": true, "backend": true, ... },
-"rpc": { "proto": "proto/service.proto", "service": "app.v1.MyService" },
-"cron": [
-  { "name": "cleanup", "schedule": "0 3 * * *", "method": "RunCleanup" }
-]
-```
+- [Frontend and widgets](references/frontend-widgets.md): React Router/Query,
+  Connect clients, responsive widget sizing, and refresh behavior.
+- [Backend integrations](references/backend-integrations.md): Connect backend,
+  cron authentication, webhooks, long-running mode, and workflow calls.
+- [Data and storage](references/data-storage.md): Postgres, Storage, KV, runtime
+  assets, and Data Table query/mutation details.
+- [Userscripts](references/userscripts.md): Tampermonkey manifest fields,
+  metadata ownership, bundling, and cross-origin calls.
 
-**Verify the call came from the platform.** Your RPC methods are also reachable
-by logged-in users, so a cron handler must authenticate the request. The
-platform injects a per-app `HATCH_SIGNING_SECRET` env var and signs every cron
-call with these headers: `x-hatch-cron` (job name), `x-hatch-timestamp` (unix
-ms), and `x-hatch-signature` (`sha256=` + hex HMAC-SHA256 of
-`<timestamp>.<jobName>`). Verify them in the handler via its `HandlerContext`:
+## Rollback
 
-```ts
-import { Buffer } from 'node:buffer';
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Code, ConnectError } from '@connectrpc/connect';
-
-function assertFromPlatform(headers: Headers) {
-  const secret = Deno.env.get('HATCH_SIGNING_SECRET');
-  const ts = headers.get('x-hatch-timestamp');
-  const job = headers.get('x-hatch-cron');
-  const sig = headers.get('x-hatch-signature');
-  if (!secret || !ts || !job || !sig)
-    throw new ConnectError('unsigned', Code.PermissionDenied);
-  if (Math.abs(Date.now() - Number(ts)) > 5 * 60_000)
-    throw new ConnectError('stale', Code.PermissionDenied);
-  const want =
-    'sha256=' +
-    createHmac('sha256', secret).update(`${ts}.${job}`).digest('hex');
-  const a = Buffer.from(want),
-    b = Buffer.from(sig);
-  if (a.length !== b.length || !timingSafeEqual(a, b))
-    throw new ConnectError('bad signature', Code.PermissionDenied);
-}
-
-function routes(router: ConnectRouter) {
-  router.service(MyService, {
-    async runCleanup(_req, ctx) {
-      assertFromPlatform(ctx.requestHeader);
-      /* ... scheduled work ... */
-      return {};
-    },
-  });
-}
-```
-
-Legacy: a job may instead declare a raw `path`
-(`{ name, schedule, path: "/__cron/x" }`) that the platform POSTs to (also
-signed, same headers). Prefer `method`.
-
-**All platform-forwarded RPC calls are signed too.** Regular user RPC requests
-(proxied through `/api/app/<id>/rpc`) carry `x-hatch-timestamp` +
-`x-hatch-signature`, where the HMAC is over `<timestamp>.<rawBodyBytes>` (like
-webhooks, not like cron). Backends listen on localhost, so another app's
-backend could reach your port directly — but it cannot forge this signature.
-For sensitive RPC methods, verify the signature to accept only platform-vetted
-callers.
-
-### webhook
-
-Set `"webhook": true` (requires a `backend`). The platform exposes a PUBLIC
-endpoint at `/api/hooks/<id>` that forwards inbound requests to your backend
-under `/__webhook/...`. It is always plain HTTP (any verb/body — never Connect
-RPC). A top-level `webhook` manifest block picks the platform-side auth mode:
-
-```json
-"capabilities": { "webhook": true, "backend": true, ... },
-"webhook": { "auth": "platform" }   // or "none"; defaults to "platform"
-```
-
-**`platform` (default) — platform-managed secret + HMAC.** The platform mints a
-per-app secret (shown on the app page) and the public URL is
-`/api/hooks/<id>?secret=<secret>` (or send the secret as an `x-hatch-secret`
-header). The platform verifies the secret, **strips it**, and forwards an
-HMAC-signed request to `/__webhook` — the secret never reaches your app. Verify
-the signature like cron, but the HMAC is over `<timestamp>.<rawBodyBytes>`. Read
-the EXACT raw request bytes (a Buffer, not a decoded string — webhook bodies may
-be binary) and sign empty bytes for GET/HEAD:
-
-```ts
-import { Buffer } from 'node:buffer';
-// rawBody: Buffer of the exact request bytes (e.g. from req body stream)
-const want =
-  'sha256=' +
-  createHmac('sha256', Deno.env.get('HATCH_SIGNING_SECRET')!)
-    .update(Buffer.concat([Buffer.from(`${ts}.`), rawBody]))
-    .digest('hex');
-```
-
-Use this when your own small services need to ping the app and you want the
-platform to handle the shared secret.
-
-**`none` — unauthenticated passthrough.** No secret and no signature: the raw
-request (headers, body, `?secret=` if any) is forwarded untouched to
-`/__webhook`. Your backend authenticates the caller itself (e.g. verifying a
-GitHub/Stripe signature against your own secret). Use this to integrate
-third-party webhook providers that sign requests their own way.
-
-### kv (key/value store)
-
-Set `"kv": true` for a simple per-app key/value store — small durable values like
-tokens, config, or counters — kept in the PLATFORM database. Use it instead of
-the heavier `database` capability when you only need a few values. Limits: key ≤
-512 chars, value ≤ 64 KB, ≤ 1000 keys per app.
-
-After the app has been deployed with `kv` enabled, use `query_app_kv` to list,
-read, initialize, update, or delete its entries during development. The tool is
-a privileged Agent surface, but values marked `secret` are masked by default.
-Pass `reveal_secrets: true` to a list or get action only when the plaintext is
-needed; the revealed value enters the model context. Set responses always mask
-secret values. `delete` is permanent. Omit `secret` when updating an existing
-key to preserve its current flag; a new key defaults to non-secret. The tool is
-unavailable before the first KV-capable deployment.
-
-Newly created or overwritten secret values are encrypted at rest with the
-platform's stable `SECRET`. Secret values written by a platform version that
-predates encryption remain plaintext until they are overwritten; reading them
-does not migrate them. Changing `SECRET` directly makes encrypted KV values
-unreadable. Encryption protects current database storage, not values returned to
-an authorized backend or Agent reveal, nor plaintext retained in older backups.
-
-The backend reads/writes over an injected `HATCH_KV_URL`, signing each request
-with `HATCH_SIGNING_SECRET` (HMAC over `<timestamp>.<rawBody>`, empty body for
-GET/DELETE) — the same handshake the platform uses for cron/webhooks. Requires a
-backend (only backend-capable apps get a signing secret).
-
-```ts
-import { createHmac } from 'node:crypto';
-
-const KV = Deno.env.get('HATCH_KV_URL')!;
-const SECRET = Deno.env.get('HATCH_SIGNING_SECRET')!;
-
-function sign(body: string) {
-  const ts = String(Date.now());
-  const sig = `sha256=${createHmac('sha256', SECRET).update(`${ts}.${body}`).digest('hex')}`;
-  return { 'x-hatch-timestamp': ts, 'x-hatch-signature': sig };
-}
-
-async function kvGet(key: string): Promise<string | null> {
-  const res = await fetch(`${KV}/${encodeURIComponent(key)}`, {
-    headers: sign(''),
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`KV get ${res.status}`);
-  return (await res.json()).value as string;
-}
-
-async function kvSet(key: string, value: string, secret?: boolean) {
-  const payload = secret === undefined ? { value } : { value, secret };
-  const body = JSON.stringify(payload);
-  const res = await fetch(`${KV}/${encodeURIComponent(key)}`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json', ...sign(body) },
-    body,
-  });
-  if (!res.ok) throw new Error(`KV set ${res.status}`);
-}
-```
-
-Endpoints: `GET {HATCH_KV_URL}` lists all entries (`{ items }`), `GET .../<key>`
-reads one, `PUT .../<key>` upserts `{ value, secret? }`, `DELETE .../<key>`
-removes. Mark a value `secret: true` to hide its plaintext in the manage UI
-(the owner can overwrite it there but not read it) and encrypt new writes at
-rest; your backend always reads the real value.
-
-### userscripts (Tampermonkey)
-
-Set `"userscripts": true` and declare a top-level `userscripts` array to publish
-browser userscripts. Each entry is bundled (esbuild, IIFE) into a single
-`.user.js` the platform serves as a tokenized install/subscription link on the
-app's manage page (Browser scripts panel). No backend is required — a userscript
-runs on a third-party page.
-
-```json
-"capabilities": { "userscripts": true, ... },
-"userscripts": [
-  {
-    "id": "price-watch",
-    "name": "Price Watch",
-    "entry": "userscripts/price-watch.ts",
-    "matches": ["https://example.com/*"],
-    "description": "Highlight price drops",
-    "grants": ["GM_xmlhttpRequest", "GM_setValue", "GM_getValue"],
-    "connects": ["api.example.com"],
-    "runAt": "document-idle",
-    "noframes": true,
-    "extraMetadata": { "require": "https://code.jquery.com/jquery-3.7.1.min.js" }
-  }
-]
-```
-
-Field notes:
-
-- `id` is a safe slug (letters/digits/`-`/`_`) used as the URL segment + built
-  filename; `matches` needs at least one `@match` pattern.
-- `entry` is bundled like a widget — write a normal browser script and `import`
-  npm packages freely (they're bundled in). Do NOT write a Tampermonkey metadata
-  block yourself; the platform generates it.
-- `grants` maps to `@grant` (omit/empty → Tampermonkey auto-detects; `["none"]`
-  → page context; `none` can't mix with real grants). `connects` → `@connect`
-  hosts for `GM_xmlhttpRequest`. `runAt` → `@run-at`; `noframes` → `@noframes`;
-  `description` → `@description`.
-- `extraMetadata` is an escape hatch for other directives (`@require`,
-  `@resource`, `@icon`, …), a string or list per key. It CANNOT set the
-  platform-owned/structured keys: `@name`, `@namespace`, `@version`,
-  `@updateURL`, `@downloadURL`, `@match`, `@include`, `@exclude`,
-  `@exclude-match`, `@grant`, `@connect`, `@run-at`, `@noframes`,
-  `@description`. Page scope comes exclusively from `matches`.
-- The platform sets `@version` to a monotonic per-app revision that increases
-  on every deploy AND rollback, so installed subscriptions auto-update in both
-  directions. The install URL carries a private per-app token (auto-update
-  works without a platform login) and is not enumerable from the app id alone
-  — treat it as a secret.
-
-To send data back to the app, call the app's absolute URL via
-`GM_xmlhttpRequest` and add its host to `connects` (a userscript runs on another
-site's origin, so relative URLs won't reach the app).
-
-### long-running backends
-
-Set `"backendMode": "long-running"` to keep the backend warm (started at deploy,
-auto-restarted if it exits) instead of the default `serverless` (booted on
-demand). Use it for in-memory state, websockets, or background loops.
-
-## Calling top-level workflows
-
-An app's backend can invoke **top-level Workflows** (created independently in the
-Workflow module — an app never defines its own workflows). Declare the workflows
-the backend may call in a top-level `workflows` array (NOT under `capabilities`):
-
-```json
-"workflows": [
-  { "workflow": "daily-digest" },
-  { "workflow": "send-report", "alias": "report" }
-]
-```
-
-Each entry references a workflow `id`; `alias` (optional, defaults to the id) is
-the key your code uses. The target workflow MUST already be deployed with its
-**webhook trigger enabled** — use `list_workflows` / `get_workflow` to find one
-and confirm `Webhook: ... [secret set]`. If it is not callable, the app deploy
-fails with a clear error.
-
-At runtime the platform injects `HATCH_WORKFLOWS` into the backend env: a JSON
-map of `alias → { workflow, name, url, secret }`. Call a workflow by POSTing the
-input JSON to its `url` with the secret (reuses the external workflow API, which
-starts a run and returns `{ runId, status }`):
-
-```ts
-const registry = JSON.parse(Deno.env.get('HATCH_WORKFLOWS') ?? '{}');
-
-async function callWorkflow(alias: string, input: unknown) {
-  const wf = registry[alias];
-  if (!wf) throw new Error(`workflow "${alias}" not available`);
-  const res = await fetch(wf.url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-hatch-secret': wf.secret,
-    },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`workflow ${alias} failed: ${res.status}`);
-  return (await res.json()) as { runId: string; status: string };
-}
-```
-
-The call is asynchronous: it enqueues a run and returns its id/status (it does
-not wait for the workflow to finish). The injected secret stays server-side —
-never forward it to the frontend.
-
-## Deploy & iterate
-
-1. For a new app, settle the name + slug with the user before `create_app`:
-   `list_apps` first to match their style, then ask the name and the slug as two
-   separate `ask` calls (name first, slug derived from it). Both the name and
-   slug are editable later (slug from the manage page). For an existing app,
-   `checkout_app`.
-2. Read the files, then edit proto → backend → app → widgets, keeping the
-   manifest in sync.
-3. Commit local source changes with git.
-4. `deploy_app` (with a required `message` describing the change) to build and
-   go live. On failure, read the build output, fix the source, commit, and
-   deploy again.
-5. Tell the user what you built and that they can open it from the Apps page
-   or pin its widget on the Dashboard.
+Use `get_app` to inspect successfully deployed versions and `rollback_app` with
+the selected version. Rollback changes platform `master`, not an existing Agent
+worktree. Refresh its checkout and rebase before making further changes.
+Rollback restores code but never runs a Data Table down migration.

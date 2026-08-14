@@ -41,6 +41,58 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('verified discrete footprints');
   });
 
+  it('defines the prepared App source and deploy validation contract', () => {
+    const prompt = buildSystemPrompt(appUrl);
+
+    expect(prompt).toContain('.hatch/                 # platform-owned SDK');
+    expect(prompt).toContain('reserved case-insensitively');
+    expect(prompt).toContain('root\n  `.npmrc` in any casing');
+    expect(prompt).toContain(
+      '`deno.jsonc`,\n  `tsconfig.json`, or `jsconfig.json`',
+    );
+    expect(prompt).toContain('`"type": "module"`');
+    expect(prompt).toContain('`compilerOptions.strict` to\n  `true`');
+    expect(prompt).toContain(
+      '`imports`, `scopes`, `importMap`, or `workspace`',
+    );
+    expect(prompt).toContain('Every relative TypeScript import');
+    expect(prompt).toContain('explicit `.ts` or `.tsx` extension');
+    expect(prompt).toContain(
+      'deno install --package-json --node-modules-dir=auto --lock=deno.lock',
+    );
+    expect(prompt).toContain('buf generate --template .hatch/buf.gen.yaml');
+    for (const command of ['deno run', 'deno test', 'deno cache']) {
+      expect(prompt).toContain(`\`${command}\``);
+    }
+    expect(prompt).toMatch(
+      /Every `deno run`.*--config=deno\.json.*--no-remote.*--node-modules-dir=auto.*--import-map=\.hatch\/import-map\.json.*--lock=deno\.lock.*--frozen/s,
+    );
+    expect(prompt).toContain(
+      'deno check --config=deno.json --no-remote --node-modules-dir=auto',
+    );
+    expect(prompt).toContain('--import-map=.hatch/import-map.json');
+    expect(prompt).toMatch(/`deploy_app` repeats this source check/);
+    expect(prompt).not.toContain('Before committing, run `buf generate`');
+    expect(prompt).not.toContain('node_modules/@hatch');
+    expect(prompt).not.toContain('validate_app');
+    expect(prompt).not.toContain('sloppy-imports');
+    expect(prompt).toContain('`allowScripts` empty');
+    expect(prompt).toContain(
+      'App preparation and deploy reject\n  lifecycle approvals',
+    );
+  });
+
+  it('keeps Data Table clients on public SDK types', () => {
+    const prompt = buildSystemPrompt(appUrl);
+
+    expect(prompt).toContain('createDataClient<typeof schema>');
+    expect(prompt).toContain('import `JsonValue` from');
+    expect(prompt).toContain('.hatch/sdk/@hatch/data/package.json');
+    expect(prompt).toMatch(/deleting the\s+generic, copying SDK types/);
+    expect(prompt).toContain('using `any`');
+    expect(prompt).toContain('adding casts');
+  });
+
   it('keeps existing checkout synchronization non-destructive', () => {
     const prompt = buildSystemPrompt(appUrl);
 

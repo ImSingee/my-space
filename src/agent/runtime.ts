@@ -22,6 +22,7 @@ import { prepareAgentSessionSandbox } from './shell-sandbox';
 import { loadAgentSkills } from './skills';
 import { buildSystemPrompt } from './system-prompt';
 import { createTools, type AskBridge, type EnvBridge } from './tools';
+import { isCommandResultDetails } from './tools/command';
 import type { StreamDetailsSelector } from './tools/shared';
 
 /** Keep streamed tool output small; the full result is persisted on `done`. */
@@ -174,6 +175,22 @@ export async function runAgentTurn(
     thinkingLevel: picked.model.reasoning ? 'medium' : 'off',
   });
 
+  // A shell process exiting non-zero is an executed command with useful
+  // stdout/stderr/details, not an ExecutionEnv transport failure. Mark it as a
+  // failed tool result here so the transcript and UI keep that diagnostic
+  // payload while giving the model the correct failure signal.
+  const removeCommandResultHook = harness.on('tool_result', (event) => {
+    if (
+      event.toolName === 'run_command' &&
+      !event.isError &&
+      isCommandResultDetails(event.details) &&
+      event.details.exitCode !== 0
+    ) {
+      return { isError: true };
+    }
+    return undefined;
+  });
+
   const onAbort = () => {
     // Swallow abort rejections: a rejected abort() would otherwise become a
     // process-level unhandledRejection that can crash the server.
@@ -249,7 +266,7 @@ export async function runAgentTurn(
       case 'tool_execution_end': {
         const details = extractToolDetails(
           event.result,
-          event.isError ? undefined : streamDetailsByName.get(event.toolName),
+          streamDetailsByName.get(event.toolName),
         );
         emit({
           type: 'tool_end',
@@ -331,6 +348,7 @@ export async function runAgentTurn(
     };
   } finally {
     unsubscribe();
+    removeCommandResultHook();
     signal.removeEventListener('abort', onAbort);
   }
 }

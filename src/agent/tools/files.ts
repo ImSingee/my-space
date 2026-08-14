@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
+import { isAppManagedPathSegment } from '~/app-managed-path';
 import { isEditFileDetails } from '../edit-file-details';
 import { isWriteFileDetails } from '../write-file-details';
 import { generateEditFileDetails } from './edit-diff';
@@ -17,6 +18,26 @@ function isInsidePath(root: string, target: string): boolean {
 
 function toWorkspacePath(root: string, target: string): string {
   return path.relative(root, target).split(path.sep).join('/');
+}
+
+function assertNotPlatformManagedPath(
+  workspaceRoot: string,
+  target: string,
+): void {
+  const relative = path.relative(workspaceRoot, target);
+  if (
+    relative === '' ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return;
+  }
+  if (relative.split(path.sep).some(isAppManagedPathSegment)) {
+    throw new Error(
+      `${toWorkspacePath(workspaceRoot, target)} is inside the platform-owned .hatch directory.`,
+    );
+  }
 }
 
 function countOccurrences(content: string, needle: string): number {
@@ -92,6 +113,21 @@ async function canonicalReadOnlyRoots(
   );
 }
 
+async function canonicalReadableTarget(
+  env: ExecutionEnv,
+  inputPath: string,
+  expectedKind: 'file' | 'directory',
+  signal?: AbortSignal,
+): Promise<string> {
+  const result = await env.canonicalPath(inputPath, signal);
+  if (!result.ok && result.error.code === 'not_found') {
+    throw new Error(
+      `${expectedKind === 'file' ? 'File' : 'Directory'} not found: ${inputPath}`,
+    );
+  }
+  return unwrap(result);
+}
+
 async function resolveReadablePath(
   env: ExecutionEnv,
   inputPath: string,
@@ -101,7 +137,7 @@ async function resolveReadablePath(
 ): Promise<ResolvedPath> {
   const [workspaceRoot, canonicalPath, extraRoots] = await Promise.all([
     canonicalWorkspaceRoot(env, signal),
-    unwrap(await env.canonicalPath(inputPath, signal)),
+    canonicalReadableTarget(env, inputPath, expectedKind, signal),
     canonicalReadOnlyRoots(env, readOnlyRoots, signal),
   ]);
   const containingRoot = [workspaceRoot, ...extraRoots].find((root) =>
@@ -134,10 +170,13 @@ async function resolveWorkspaceTextFile(
   inputPath: string,
   signal?: AbortSignal,
 ): Promise<{ workspacePath: string; canonicalPath: string }> {
-  const [root, canonicalPath] = await Promise.all([
+  const [root, addressedRoot, absolutePath] = await Promise.all([
     canonicalWorkspaceRoot(env, signal),
-    unwrap(await env.canonicalPath(inputPath, signal)),
+    env.absolutePath('.', signal).then(unwrap),
+    env.absolutePath(inputPath, signal).then(unwrap),
   ]);
+  assertNotPlatformManagedPath(addressedRoot, absolutePath);
+  const canonicalPath = unwrap(await env.canonicalPath(absolutePath, signal));
   if (!isInsidePath(root, canonicalPath)) {
     throw new Error(`${inputPath} is outside the workspace.`);
   }
@@ -160,9 +199,15 @@ async function resolveWritableTextFile(
   const addressedRoot = unwrap(await env.absolutePath('.', signal));
   const absolutePath = unwrap(await env.absolutePath(inputPath, signal));
 
+  // Check the path the caller addressed before resolving symlinks. Otherwise
+  // `app/.hatch -> ../ordinary-directory` would canonicalize to an ordinary
+  // workspace path and bypass the managed-path guard for an existing file.
+  assertNotPlatformManagedPath(addressedRoot, absolutePath);
+
   const exists = unwrap(await env.exists(absolutePath, signal));
   if (exists) {
     const existing = await resolveWorkspaceTextFile(env, absolutePath, signal);
+    assertNotPlatformManagedPath(root, existing.canonicalPath);
     return { workspacePath: existing.workspacePath };
   }
 
@@ -181,8 +226,14 @@ async function resolveWritableTextFile(
   if (!isInsidePath(root, canonicalParent)) {
     throw new Error(`${inputPath} is outside the workspace.`);
   }
+  const canonicalTarget = path.resolve(
+    canonicalParent,
+    path.relative(parent, absolutePath),
+  );
+  assertNotPlatformManagedPath(root, canonicalTarget);
 
   if (isInsidePath(root, absolutePath)) {
+    assertNotPlatformManagedPath(root, absolutePath);
     return { workspacePath: toWorkspacePath(root, absolutePath) };
   }
   if (isInsidePath(addressedRoot, absolutePath)) {
@@ -334,6 +385,8 @@ export function createFileTools(
     }),
     execute: async (_id, params, signal) => {
       const resolved = await resolveWorkspaceTextFile(env, params.path, signal);
+      const root = await canonicalWorkspaceRoot(env, signal);
+      assertNotPlatformManagedPath(root, resolved.canonicalPath);
       const content = unwrap(
         await env.readTextFile(resolved.canonicalPath, signal),
       );

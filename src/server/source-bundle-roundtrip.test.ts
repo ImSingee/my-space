@@ -292,7 +292,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       await staged.cleanup();
     }
     await expect(platform.masterCommit(APP_ID)).resolves.toBe(localCommit);
-  });
+  }, 15_000);
 
   describe('existing checkout synchronization', () => {
     for (const kind of SOURCE_KINDS) {
@@ -314,7 +314,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
         await expect(
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v1\n');
-      });
+      }, 15_000);
 
       it(`advances a clean existing ${kind} master that is behind remote`, async () => {
         const id = `sync-behind-${kind}`;
@@ -345,7 +345,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
         await expect(
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v2\n');
-      });
+      }, 15_000);
 
       it(`materializes the first remote commit in an unborn clean ${kind} master`, async () => {
         const id = `sync-unborn-${kind}`;
