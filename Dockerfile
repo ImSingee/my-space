@@ -5,10 +5,8 @@ FROM denoland/deno:bin-2.8.3 AS deno
 
 # --- Base image with pnpm ----------------------------------------------------
 FROM node:24-slim AS base
-ENV PNPM_HOME=/pnpm
-ENV PATH="${PNPM_HOME}:${PATH}"
 WORKDIR /app
-RUN corepack enable
+RUN npm install --global pnpm@10.12.2
 
 # --- Dependencies ------------------------------------------------------------
 # Install ALL deps (including dev) and DO run install scripts: the platform
