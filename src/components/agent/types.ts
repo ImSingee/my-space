@@ -194,7 +194,10 @@ export function toolInputDetails(
   if (name === 'run_command' && typeof args.command === 'string') {
     return [{ label: 'Command', value: args.command }];
   }
-  if (name === 'edit_file' && typeof args.path === 'string') {
+  if (
+    (name === 'read_file' || name === 'edit_file') &&
+    typeof args.path === 'string'
+  ) {
     return [{ label: 'File path', value: args.path }];
   }
   if (name === 'web_search') {

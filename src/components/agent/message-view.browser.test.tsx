@@ -118,6 +118,15 @@ function runCommandCall(id: string, command: string): ToolCallBlock {
   };
 }
 
+function readFileCall(id: string, path: string): ToolCallBlock {
+  return {
+    type: 'toolCall',
+    id,
+    name: 'read_file',
+    arguments: { path },
+  };
+}
+
 function writeFileCall(
   id: string,
   path: string,
@@ -143,6 +152,12 @@ const longCommand = [
   'EOF',
   '',
 ].join('\n');
+
+const longReadPath = [
+  'apps/customer-support/src/features',
+  'notification-preferences-and-delivery-channels',
+  `${'read-target-'.repeat(16)}settings.ts`,
+].join('/');
 
 const longWritePathSuffix = [
   'apps/customer-support/src/features',
@@ -620,6 +635,95 @@ test('reveals a completed live command even when it produced no output', async (
   await expect
     .element(screen.getByRole('region', { name: 'Output' }))
     .toHaveTextContent('(no output)');
+});
+
+test('reveals a persisted read path without overflowing a narrow message', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [readFileCall('read-persisted', longReadPath)],
+    },
+    {
+      width: 320,
+      toolResults: new Map([
+        [
+          'read-persisted',
+          {
+            role: 'toolResult',
+            toolName: 'read_file',
+            content: [{ type: 'text', text: 'export const value = true;\n' }],
+          },
+        ],
+      ]),
+    },
+  );
+
+  await screen.getByRole('button', { name: /Read file/ }).click();
+  const pathRegion = screen.getByRole('region', { name: 'File path' });
+  const path = pathRegion.element().lastElementChild as HTMLElement;
+  await expect.element(pathRegion).toBeVisible();
+  expect(path.textContent).toBe(longReadPath);
+  expect(getComputedStyle(path).overflowWrap).toBe('anywhere');
+  expect(path.scrollWidth).toBeLessThanOrEqual(path.clientWidth);
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toHaveTextContent('export const value = true;');
+
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('preserves a live read path through completion', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'read-live',
+          name: 'read_file',
+          args: { path: longReadPath, offset: 20, limit: 100 },
+          done: false,
+          output: 'partial contents',
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  const runningPath = screen.getByRole('region', { name: 'File path' });
+  await expect.element(runningPath).toBeVisible();
+  expect(runningPath.element().lastElementChild?.textContent).toBe(
+    longReadPath,
+  );
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toHaveTextContent('partial contents');
+
+  await screen.rerender(
+    <MantineProvider>
+      <StreamingToolStep
+        tool={{
+          id: 'read-live',
+          name: 'read_file',
+          args: { path: longReadPath, offset: 20, limit: 100 },
+          done: true,
+          output: 'final contents',
+        }}
+      />
+    </MantineProvider>,
+  );
+
+  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  const toggle = screen.getByRole('button', { name: /Read file/ });
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+
+  const completedPath = screen.getByRole('region', { name: 'File path' });
+  await expect.element(completedPath).toBeVisible();
+  expect(completedPath.element().lastElementChild?.textContent).toBe(
+    longReadPath,
+  );
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toHaveTextContent('final contents');
 });
 
 test('reveals a successful persisted write without overflowing a narrow message', async () => {

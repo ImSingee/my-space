@@ -52,13 +52,25 @@ describe('toolInputDetails', () => {
     ]);
   });
 
-  it('keeps existing command and edit inputs as single sections', () => {
+  it('keeps command, read, and edit inputs as single sections', () => {
     expect(toolInputDetails('run_command', { command: 'pnpm test' })).toEqual([
       { label: 'Command', value: 'pnpm test' },
     ]);
+    expect(
+      toolInputDetails('read_file', {
+        path: 'src/app.ts',
+        offset: 20,
+        limit: 100,
+      }),
+    ).toEqual([{ label: 'File path', value: 'src/app.ts' }]);
     expect(toolInputDetails('edit_file', { path: 'src/app.ts' })).toEqual([
       { label: 'File path', value: 'src/app.ts' },
     ]);
+  });
+
+  it('omits a read file path when it is missing or invalid', () => {
+    expect(toolInputDetails('read_file', {})).toBeUndefined();
+    expect(toolInputDetails('read_file', { path: 42 })).toBeUndefined();
   });
 
   it('exposes complete web search and fetch inputs', () => {
