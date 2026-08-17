@@ -9,7 +9,7 @@
  * agent's shell.
  *
  * Layout under the runner's data dir (HATCH_DATA_DIR):
- *   agents/<sessionId>/work/apps/<id>/             ← app worktree
+ *   agents/<sessionId>/work/apps/<slug-or-id>/     ← default app worktree
  *   agents/<sessionId>/work/workflows/<id>/        ← workflow worktree
  *   agents/<sessionId>/work/attachments/<id>/...   ← downloaded attachments
  *   agents/<sessionId>/bundles/<kind>-<id>.bundle  ← origin bundle (hidden)

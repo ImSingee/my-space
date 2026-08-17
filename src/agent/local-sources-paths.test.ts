@@ -459,9 +459,82 @@ describe('runner source paths', () => {
     ).resolves.toBe(false);
   });
 
-  it('reports the created app id, path, and SDK materialization stage', async () => {
+  it('uses the app slug for the default create path', async () => {
+    const sessionId = 'create-default-slug-path';
+    const appId = '01createappwithgeneratedid';
+    const slug = 'readable-app';
+    const createApp = vi.fn<PlatformClient['createApp']>(async (input) => ({
+      id: appId,
+      slug: input.slug.trim(),
+      name: input.name,
+      generation: GENERATION,
+      files: [],
+    }));
+    const tools = createAppTools({
+      sessionId,
+      platform: { createApp } as unknown as PlatformClient,
+      materializeSdk: vi.fn<() => Promise<void>>(async () => undefined),
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
+    });
+    const create = tools.find((candidate) => candidate.name === 'create_app');
+    if (!create) throw new Error('Missing create_app tool.');
+
+    const result = await create.execute('create-default-slug-path', {
+      slug,
+      name: 'Readable App',
+    });
+    const expectedPath = agentAppWorkDir(sessionId, slug);
+
+    expect(toolText(result)).toContain(`Source is at ${expectedPath}.`);
+    expect(toolText(result)).toContain(
+      'Use this exact source path for deploy_app',
+    );
+    expect(result.details).toMatchObject({
+      id: appId,
+      slug,
+      path: `apps/${slug}`,
+      absolutePath: expectedPath,
+    });
+    await expect(exists(path.join(expectedPath, '.git'))).resolves.toBe(true);
+    await expect(exists(agentAppWorkDir(sessionId, appId))).resolves.toBe(
+      false,
+    );
+  });
+
+  it('rejects an occupied default slug path before creating the app', async () => {
+    const sessionId = 'create-default-slug-conflict';
+    const slug = 'occupied-app';
+    const expectedPath = agentAppWorkDir(sessionId, slug);
+    await mkdir(expectedPath, { recursive: true });
+    await writeFile(path.join(expectedPath, 'keep.txt'), 'existing\n');
+    const createApp = vi.fn<PlatformClient['createApp']>();
+    const tools = createAppTools({
+      sessionId,
+      platform: { createApp } as unknown as PlatformClient,
+      materializeSdk: vi.fn<() => Promise<void>>(async () => undefined),
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
+    });
+    const create = tools.find((candidate) => candidate.name === 'create_app');
+    if (!create) throw new Error('Missing create_app tool.');
+
+    await expect(
+      create.execute('create-default-slug-conflict', {
+        slug,
+        name: 'Occupied App',
+      }),
+    ).rejects.toThrow(
+      `Workspace path already exists and is not empty: apps/${slug}`,
+    );
+    expect(createApp).not.toHaveBeenCalled();
+    await expect(
+      readFile(path.join(expectedPath, 'keep.txt'), 'utf8'),
+    ).resolves.toBe('existing\n');
+  });
+
+  it('reports the created app slug path and SDK materialization stage', async () => {
     const sessionId = 'create-sdk-materialization-failure';
     const appId = 'created-sdk-failure';
+    const slug = 'broken-sdk';
     const prepareWorktree = vi.fn<() => Promise<void>>(async () => undefined);
     const createApp = vi.fn<PlatformClient['createApp']>(async (input) => ({
       id: appId,
@@ -480,11 +553,11 @@ describe('runner source paths', () => {
     });
     const create = tools.find((candidate) => candidate.name === 'create_app');
     if (!create) throw new Error('Missing create_app tool.');
-    const expectedPath = agentAppWorkDir(sessionId, appId);
+    const expectedPath = agentAppWorkDir(sessionId, slug);
 
     await expect(
       create.execute('create-sdk-failure', {
-        slug: 'broken-sdk',
+        slug,
         name: 'Broken SDK',
       }),
     ).rejects.toThrow(
@@ -495,6 +568,9 @@ describe('runner source paths', () => {
     expect(createApp).toHaveBeenCalledOnce();
     expect(prepareWorktree).not.toHaveBeenCalled();
     await expect(exists(path.join(expectedPath, '.git'))).resolves.toBe(true);
+    await expect(exists(agentAppWorkDir(sessionId, appId))).resolves.toBe(
+      false,
+    );
   });
 
   it('reports the checked-out app id, path, and exact preparation stage', async () => {

@@ -320,7 +320,7 @@ export function createAppTools(options: {
           minLength: 1,
           description:
             'Absolute path inside this Agent workdir, or a path relative to ' +
-            'it. Defaults to apps/<generated-app-id>.',
+            'it. Defaults to apps/<slug>.',
         }),
       ),
     }),
@@ -329,12 +329,13 @@ export function createAppTools(options: {
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          const { target_path: targetPath, ...input } = params;
-          if (targetPath !== undefined) {
-            // Keep validation and local initialization under one session lock so
-            // parallel create calls cannot both reserve the same target.
-            await assertWorkspacePathAvailable(sessionId, targetPath);
-          }
+          const { target_path: requestedTargetPath, ...input } = params;
+          const targetPath =
+            requestedTargetPath ??
+            agentAppWorkDir(sessionId, input.slug.trim());
+          // Keep validation and local initialization under one session lock so
+          // parallel create calls cannot both reserve the same target.
+          await assertWorkspacePathAvailable(sessionId, targetPath);
           const res = await platform.createApp(input);
           const checkout = await initNewWorktree(
             sessionId,
@@ -366,9 +367,10 @@ export function createAppTools(options: {
               `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
                 `Source is at ${checkout.absolutePath}.`,
               'Preparation is ready: dependencies, Connect stubs, and the Hatch ' +
-                'SDK are available. Use the id for checkout_app/deploy_app. Read ' +
-                'and edit the authored files, run the checks described by the ' +
-                'building-apps Skill, then commit before calling deploy_app.',
+                'SDK are available. Use this exact source path for deploy_app; ' +
+                'identify the app by id or slug. Read and edit the authored ' +
+                'files, run the checks described by the building-apps Skill, ' +
+                'then commit before calling deploy_app.',
             ].join('\n'),
             {
               id: res.id,
