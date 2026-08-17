@@ -420,7 +420,9 @@ export function createFileTools(
     }),
     execute: async (_id, params, signal) => {
       const writable = await resolveWritableTextFile(env, params.path, signal);
-      unwrap(await env.writeFile(params.path, params.content, signal));
+      unwrap(
+        await env.writeFile(writable.canonicalPath, params.content, signal),
+      );
       return text(
         `Wrote ${writable.workspacePath} (${params.content.length} chars).`,
         {
