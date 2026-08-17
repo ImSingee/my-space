@@ -15,12 +15,83 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
+import { ClientOnly } from '@tanstack/react-router';
 import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { openTextPromptModal } from '~components/system/text-prompt-modal';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
-import { deleteSession, renameSession } from '~server/agent-sessions';
+import {
+  deleteSession,
+  renameSession,
+  type SessionSummary,
+} from '~server/agent-sessions';
 import classes from './chat.module.css';
+import { groupSessionsByDate } from './session-groups';
+import { useLocalCalendarNow } from './use-local-calendar-now';
+
+function SessionRow({
+  session,
+  selected,
+  onSelect,
+  onRename,
+  onDelete,
+}: {
+  session: SessionSummary;
+  selected: string | null;
+  onSelect: (id: string) => void;
+  onRename: (session: SessionSummary) => void;
+  onDelete: (id: string, title: string) => void;
+}) {
+  return (
+    <Group
+      justify="space-between"
+      wrap="nowrap"
+      gap="xs"
+      className={
+        session.id === selected
+          ? classes.sessionItemActive
+          : classes.sessionItem
+      }
+    >
+      <UnstyledButton
+        className={classes.sessionItemLabel}
+        onClick={() => onSelect(session.id)}
+      >
+        <Text size="sm" truncate>
+          {session.title}
+        </Text>
+      </UnstyledButton>
+      <Menu position="bottom-end" withArrow shadow="md" width={160}>
+        <Menu.Target>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            className={classes.sessionAction}
+            aria-label="Chat options"
+          >
+            <IconDots size={15} stroke={1.7} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item
+            leftSection={<IconPencil size={15} stroke={1.7} />}
+            onClick={() => onRename(session)}
+          >
+            Rename
+          </Menu.Item>
+          <Menu.Item
+            color="red"
+            leftSection={<IconTrash size={15} stroke={1.7} />}
+            onClick={() => onDelete(session.id, session.title)}
+          >
+            Delete
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+    </Group>
+  );
+}
 
 export function SessionsPanel({
   selected,
@@ -31,6 +102,8 @@ export function SessionsPanel({
 }) {
   const qc = useQueryClient();
   const { data: sessions } = useSuspenseQuery(sessionsQueryOptions);
+  const calendarNow = useLocalCalendarNow();
+  const groups = groupSessionsByDate(sessions, calendarNow);
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
@@ -79,6 +152,17 @@ export function SessionsPanel({
       onConfirm: () => remove.mutate(id),
     });
 
+  const renderSession = (session: SessionSummary) => (
+    <SessionRow
+      key={session.id}
+      session={session}
+      selected={selected}
+      onSelect={onSelect}
+      onRename={openRename}
+      onDelete={confirmDelete}
+    />
+  );
+
   return (
     <Box className={classes.sessions}>
       <Box className={classes.sessionsHead}>
@@ -96,62 +180,24 @@ export function SessionsPanel({
         type="scroll"
         scrollbarSize={6}
       >
-        <Stack gap={2}>
+        <Stack gap="sm">
           {sessions.length === 0 ? (
             <Text size="sm" c="dimmed" ta="center" py="md">
               No chats yet.
             </Text>
           ) : (
-            sessions.map((s) => (
-              <Group
-                key={s.id}
-                justify="space-between"
-                wrap="nowrap"
-                gap="xs"
-                className={
-                  s.id === selected
-                    ? classes.sessionItemActive
-                    : classes.sessionItem
-                }
-              >
-                <UnstyledButton
-                  className={classes.sessionItemLabel}
-                  onClick={() => onSelect(s.id)}
-                >
-                  <Text size="sm" truncate>
-                    {s.title}
+            <ClientOnly
+              fallback={<Stack gap={2}>{sessions.map(renderSession)}</Stack>}
+            >
+              {groups.map((group) => (
+                <Box component="section" key={group.key}>
+                  <Text component="h2" className={classes.sessionGroupTitle}>
+                    {group.label}
                   </Text>
-                </UnstyledButton>
-                <Menu position="bottom-end" withArrow shadow="md" width={160}>
-                  <Menu.Target>
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      size="sm"
-                      className={classes.sessionAction}
-                      aria-label="Chat options"
-                    >
-                      <IconDots size={15} stroke={1.7} />
-                    </ActionIcon>
-                  </Menu.Target>
-                  <Menu.Dropdown>
-                    <Menu.Item
-                      leftSection={<IconPencil size={15} stroke={1.7} />}
-                      onClick={() => openRename(s)}
-                    >
-                      Rename
-                    </Menu.Item>
-                    <Menu.Item
-                      color="red"
-                      leftSection={<IconTrash size={15} stroke={1.7} />}
-                      onClick={() => confirmDelete(s.id, s.title)}
-                    >
-                      Delete
-                    </Menu.Item>
-                  </Menu.Dropdown>
-                </Menu>
-              </Group>
-            ))
+                  <Stack gap={2}>{group.sessions.map(renderSession)}</Stack>
+                </Box>
+              ))}
+            </ClientOnly>
           )}
         </Stack>
       </ScrollArea>
