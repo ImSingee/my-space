@@ -1,6 +1,7 @@
 /** Server functions for app management (list/detail, deployments, ops, KV). */
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { db } from '~/db';
 // Type-only: a value import of `schema` used in exported type annotations
 // would survive the client transform and drag postgres-js into the browser
@@ -81,7 +82,9 @@ export type AppDetail = {
 
 export const getAppBySlug = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((slug: string) => idSchema.parse(slug))
+  .validator((slug: string) =>
+    z.string().min(1).max(APP_SLUG_MAX_LENGTH).parse(slug),
+  )
   .handler(async ({ data: slug }): Promise<AppDetail | null> => {
     // Project to a display view: the raw row carries secrets/internal columns
     // (webhookSecret, repoPath, raw manifest) the app detail/manage pages never
@@ -182,7 +185,12 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
 export const setAppSlugFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((input: { id: string; slug: string }) =>
-    z.object({ id: idSchema, slug: z.string().max(200) }).parse(input),
+    z
+      .object({
+        id: idSchema,
+        slug: z.string().max(APP_SLUG_MAX_LENGTH),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
     const { renameAppSlug } = await import('./apps/manage');

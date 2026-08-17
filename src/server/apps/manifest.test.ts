@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
+  isValidAppSlug,
   type NormalizedManifest,
   normalizeManifest,
   parseSourceManifest,
@@ -7,6 +9,29 @@ import {
   snapToSupportedSize,
   sourceManifestSchema,
 } from './manifest';
+
+describe('App identity limits', () => {
+  it('accepts Unicode App names and slugs at the 64-character boundary', () => {
+    const name = '😀'.repeat(APP_NAME_MAX_LENGTH);
+    const slug = `a${'b'.repeat(APP_SLUG_MAX_LENGTH - 1)}`;
+
+    expect(
+      parseSourceManifest({ id: 'demo', name, capabilities: {} }).name,
+    ).toBe(name);
+    expect(isValidAppSlug(slug)).toBe(true);
+  });
+
+  it('rejects App names and slugs above the 64-character boundary', () => {
+    expect(() =>
+      parseSourceManifest({
+        id: 'demo',
+        name: '😀'.repeat(APP_NAME_MAX_LENGTH + 1),
+        capabilities: {},
+      }),
+    ).toThrow(/64/);
+    expect(isValidAppSlug(`a${'b'.repeat(APP_SLUG_MAX_LENGTH)}`)).toBe(false);
+  });
+});
 
 describe('backend manifest', () => {
   const source = (backend: Record<string, unknown>) => ({

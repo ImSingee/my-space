@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { APP_NAME_MAX_LENGTH } from '~/app-identity';
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
@@ -260,6 +261,7 @@ describe('App Data lifecycle recovery', () => {
   });
 
   it('retains an unresolved activation fence when rollback recovery fails', async () => {
+    const historicalName = '😀'.repeat(APP_NAME_MAX_LENGTH);
     mocks.findApp.mockResolvedValue({
       id: APP_ID,
       name: 'Example',
@@ -280,7 +282,7 @@ describe('App Data lifecycle recovery', () => {
       status: 'deployed',
       sourceTag: 'deploy/v1',
       manifestNormalized: {
-        name: 'Example',
+        name: historicalName,
         description: '',
         capabilities: { dataTable: true, backend: false },
         backendMode: 'serverless',
@@ -300,6 +302,7 @@ describe('App Data lifecycle recovery', () => {
       (update) => update.currentDeploymentId === TARGET_DEPLOYMENT_ID,
     );
     expect(activationUpdate).toMatchObject({
+      name: historicalName,
       dataSchemaHash: 'last-known-hash',
       dataActivationId: 'pending-deployment',
     });
@@ -459,6 +462,42 @@ describe('App Data lifecycle recovery', () => {
     );
     expect(mocks.fsRm).not.toHaveBeenCalled();
     expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized historical App name before rollback side effects', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      capabilities: { dataTable: false, backend: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: '😀'.repeat(APP_NAME_MAX_LENGTH + 1),
+        capabilities: { dataTable: false, backend: false },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: null,
+    });
+
+    await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).rejects.toThrow(
+      `name exceeds ${APP_NAME_MAX_LENGTH} characters`,
+    );
+
+    expect(mocks.fsRm).not.toHaveBeenCalled();
+    expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+    expect(mocks.updates).toEqual([]);
     expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
   });
 

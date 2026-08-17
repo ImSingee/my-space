@@ -7,6 +7,11 @@
  */
 import { z } from 'zod';
 import { isAppManagedPathSegment } from '~/app-managed-path';
+import {
+  APP_NAME_MAX_LENGTH,
+  APP_SLUG_MAX_LENGTH,
+  isAppNameWithinMaxLength,
+} from '~/app-identity';
 
 /**
  * Reject manifest-provided paths that would escape the app source tree once
@@ -417,7 +422,7 @@ export function isValidAppId(id: string): boolean {
 
 /** True when `slug` is a valid, human-facing app URL slug. */
 export function isValidAppSlug(slug: string): boolean {
-  return APP_SLUG_RE.test(slug);
+  return slug.length <= APP_SLUG_MAX_LENGTH && APP_SLUG_RE.test(slug);
 }
 
 export const sourceManifestSchema = z
@@ -429,7 +434,12 @@ export const sourceManifestSchema = z
         APP_ID_RE,
         'id must be lowercase letters, digits, and hyphens (a ULID or kebab slug)',
       ),
-    name: z.string().min(1),
+    name: z
+      .string()
+      .min(1)
+      .refine(isAppNameWithinMaxLength, {
+        message: `name must be at most ${APP_NAME_MAX_LENGTH} characters`,
+      }),
     description: z.string().default(''),
     version: z.number().int().min(1).default(1),
     capabilities: capabilitiesSchema,

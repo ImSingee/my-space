@@ -9,6 +9,11 @@
  * excepted) so the Runner bundle never pulls in platform-only code.
  */
 import { z } from 'zod';
+import {
+  APP_NAME_MAX_LENGTH,
+  APP_SLUG_MAX_LENGTH,
+  isAppNameWithinMaxLength,
+} from '~/app-identity';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
 import { isReservedEnvKey } from './env-keys';
@@ -469,8 +474,13 @@ export type ScaffoldFile = z.infer<typeof scaffoldFileSchema>;
 /** ================== internal REST payloads ================== */
 
 export const createAppRequestSchema = z.object({
-  slug: z.string().min(1),
-  name: z.string().min(1),
+  slug: z.string().min(1).max(APP_SLUG_MAX_LENGTH),
+  name: z
+    .string()
+    .min(1)
+    .refine(isAppNameWithinMaxLength, {
+      message: `App name must be at most ${APP_NAME_MAX_LENGTH} characters.`,
+    }),
   description: z.string().optional(),
   pin: z.boolean().optional(),
 });

@@ -7,6 +7,7 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
   AppPreparationError,
   prepareAppWorktree,
@@ -292,13 +293,17 @@ export function createAppTools(options: {
     executionMode: 'sequential',
     parameters: Type.Object({
       slug: Type.String({
+        maxLength: APP_SLUG_MAX_LENGTH,
         description:
           'kebab-case URL slug, e.g. "todo" or "habit-tracker". Used in the ' +
           'human-facing /app/<slug> URL. It can be ' +
           'changed later from the manage page, so it is not permanent; ' +
           'technical APIs use the immutable app id.',
       }),
-      name: Type.String({ description: 'Human-readable name.' }),
+      name: Type.String({
+        maxLength: APP_NAME_MAX_LENGTH,
+        description: 'Human-readable name.',
+      }),
       description: Type.Optional(
         Type.String({ description: 'One-line description.' }),
       ),
