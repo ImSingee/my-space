@@ -1,8 +1,10 @@
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   rm,
   stat,
   symlink,
@@ -17,11 +19,21 @@ process.env.HATCH_DATA_DIR = root;
 
 const { agentWorkDir } = await import('./paths');
 const { prepareAgentSessionSandbox } = await import('./shell-sandbox');
-const { SessionExecutionEnv } = await import('./sandboxed-file-io');
+const { createFileTools } = await import('./tools/files');
+const { SessionExecutionEnv, writeAgentWorkspaceFile } =
+  await import('./sandboxed-file-io');
 
 function createEnv(sessionId: string) {
   prepareAgentSessionSandbox(sessionId);
   return new SessionExecutionEnv({ sessionId, shellEnv: {} });
+}
+
+function writeFileTool(env: Parameters<typeof createFileTools>[0]) {
+  const tool = createFileTools(env).find(
+    (candidate) => candidate.name === 'write_file',
+  );
+  if (!tool) throw new Error('Missing write_file tool.');
+  return tool;
 }
 
 afterAll(async () => {
@@ -155,6 +167,112 @@ describe('SessionExecutionEnv', () => {
     await expect(readFile(path.join(env.cwd, 'never.txt'))).rejects.toThrow(
       /ENOENT|no such file/,
     );
+  });
+
+  it('writes through an in-workspace file symlink without replacing it', async () => {
+    const env = createEnv('file-env-write-tool-symlink');
+    const target = path.join(env.cwd, 'target.txt');
+    const link = path.join(env.cwd, 'link.txt');
+    await writeFile(target, 'old');
+    await symlink('target.txt', link);
+
+    const result = await writeFileTool(env).execute('write-through-link', {
+      path: 'link.txt',
+      content: 'new',
+    });
+
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    await expect(readlink(link)).resolves.toBe('target.txt');
+    await expect(readFile(target, 'utf8')).resolves.toBe('new');
+    expect(result.details).toEqual({
+      path: 'target.txt',
+      relativePath: 'target.txt',
+      absolutePath: target,
+    });
+  });
+
+  it('rejects write_file symlinks that resolve outside the workspace', async () => {
+    const env = createEnv('file-env-write-tool-external-link');
+    const outside = path.join(root, 'write-tool-external-target.txt');
+    const link = path.join(env.cwd, 'external-link.txt');
+    await writeFile(outside, 'secret');
+    await symlink(outside, link);
+
+    await expect(
+      writeFileTool(env).execute('write-external-link', {
+        path: 'external-link.txt',
+        content: 'changed',
+      }),
+    ).rejects.toThrow(/outside|boundary/);
+
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    await expect(readlink(link)).resolves.toBe(outside);
+    await expect(readFile(outside, 'utf8')).resolves.toBe('secret');
+  });
+
+  it('keeps the resolved write target when the addressed link is swapped', async () => {
+    const sessionId = 'file-env-write-tool-link-race';
+    let link = '';
+    const outside = path.join(root, 'write-tool-race-target.txt');
+    let delegatedPath: string | undefined;
+    class LinkSwapExecutionEnv extends SessionExecutionEnv {
+      override async writeFile(
+        input: string,
+        content: string | Uint8Array,
+        signal?: AbortSignal,
+      ) {
+        delegatedPath = input;
+        await rm(link);
+        await symlink(outside, link);
+        return super.writeFile(input, content, signal);
+      }
+    }
+    const env = new LinkSwapExecutionEnv({ sessionId, shellEnv: {} });
+    const target = path.join(env.cwd, 'target.txt');
+    link = path.join(env.cwd, 'link.txt');
+    await writeFile(target, 'old');
+    await writeFile(outside, 'secret');
+    await symlink('target.txt', link);
+
+    const result = await writeFileTool(env).execute('write-link-race', {
+      path: 'link.txt',
+      content: 'new',
+    });
+
+    expect(delegatedPath).toBe(target);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    await expect(readlink(link)).resolves.toBe(outside);
+    await expect(readFile(target, 'utf8')).resolves.toBe('new');
+    await expect(readFile(outside, 'utf8')).resolves.toBe('secret');
+    expect(result.details).toEqual({
+      path: 'target.txt',
+      relativePath: 'target.txt',
+      absolutePath: target,
+    });
+  });
+
+  it('does not follow a final symlink installed after staging a write', async () => {
+    const sessionId = 'file-env-final-link-race';
+    const env = createEnv(sessionId);
+    const target = path.join(env.cwd, 'target.txt');
+    const outside = path.join(root, 'final-link-race-target.txt');
+    await writeFile(target, 'old');
+    await writeFile(outside, 'secret');
+
+    await writeAgentWorkspaceFile(
+      sessionId,
+      target,
+      'new',
+      undefined,
+      async () => {
+        await rm(target);
+        await symlink(outside, target);
+      },
+    );
+
+    expect((await lstat(target)).isFile()).toBe(true);
+    await expect(readFile(target, 'utf8')).resolves.toBe('new');
+    await expect(readFile(outside, 'utf8')).resolves.toBe('secret');
   });
 
   it('cannot follow a symlink into another session or a host file', async () => {
