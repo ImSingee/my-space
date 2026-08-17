@@ -2,7 +2,11 @@
 import { inArray } from 'drizzle-orm';
 import { db, schema, type DB } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
-import { type NormalizedManifest, projectAppManifestUrls } from './manifest';
+import {
+  isValidAppSlug,
+  type NormalizedManifest,
+  projectAppManifestUrls,
+} from './manifest';
 
 /**
  * Resolve an internal Agent handle that may be either an app's immutable `id`
@@ -24,6 +28,7 @@ export async function resolveAppId(idOrSlug: string): Promise<string | null> {
 
 /** Resolve an app's current public slug to its immutable internal id. */
 export async function appIdForSlug(slug: string): Promise<string | null> {
+  if (!isValidAppSlug(slug)) return null;
   const app = await db.query.apps.findFirst({
     where: (s, { eq }) => eq(s.slug, slug),
     columns: { id: true },

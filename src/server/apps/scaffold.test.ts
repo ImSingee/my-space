@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 
 const mocks = vi.hoisted(() => ({
   ensureAppRepo: vi.fn<(id: string) => Promise<string>>(
@@ -69,6 +70,41 @@ describe('renderTemplate', () => {
 });
 
 describe('createApp', () => {
+  it.each([
+    {
+      input: {
+        slug: `a${'b'.repeat(APP_SLUG_MAX_LENGTH)}`,
+        name: 'Valid name',
+      },
+      message: `slug must be at most ${APP_SLUG_MAX_LENGTH} characters`,
+    },
+    {
+      input: {
+        slug: 'valid-slug',
+        name: '😀'.repeat(APP_NAME_MAX_LENGTH + 1),
+      },
+      message: `name must be at most ${APP_NAME_MAX_LENGTH} characters`,
+    },
+  ])(
+    'rejects an oversized identity before creating repository or database state',
+    async ({ input, message }) => {
+      await expect(createApp(input)).rejects.toThrow(message);
+
+      expect(mocks.ensureAppRepo).not.toHaveBeenCalled();
+      await expect(db.query.apps.findMany()).resolves.toEqual([]);
+      await expect(db.query.sidebarItems.findMany()).resolves.toEqual([]);
+    },
+  );
+
+  it('counts astral Unicode names as one character per code point', async () => {
+    const name = '😀'.repeat(APP_NAME_MAX_LENGTH);
+
+    const result = await createApp({ slug: 'unicode-name', name, pin: false });
+
+    expect(result.name).toBe(name);
+    await expect(db.query.apps.findFirst()).resolves.toMatchObject({ name });
+  });
+
   it('returns the default scaffold without assigning draft capabilities', async () => {
     const result = await createApp({
       slug: 'hello-world',

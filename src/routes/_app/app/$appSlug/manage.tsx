@@ -38,6 +38,7 @@ import {
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { Page } from '~components/app-shell/page';
 import { ApiPanel } from '~components/apps/api-panel';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -359,6 +360,7 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
           <TextInput
             ref={inputRef}
             value={draft}
+            maxLength={APP_SLUG_MAX_LENGTH}
             onChange={(e) => setDraft(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') submit();

@@ -5,6 +5,11 @@ import { ulid } from 'ulid';
 import { TEMPLATES_DIR } from '~agent/paths';
 import type { ScaffoldFile } from '~agent/protocol';
 import { isAppManagedPathSegment } from '~/app-managed-path';
+import {
+  APP_NAME_MAX_LENGTH,
+  APP_SLUG_MAX_LENGTH,
+  isAppNameWithinMaxLength,
+} from '~/app-identity';
 import { db, schema } from '~/db';
 import { slugConflictExists } from './access';
 import { ensureAppRepo } from './git';
@@ -114,11 +119,19 @@ export async function createApp(
   input: CreateAppInput,
 ): Promise<CreateAppResult> {
   const slug = input.slug.trim();
+  if (slug.length > APP_SLUG_MAX_LENGTH) {
+    throw new Error(`slug must be at most ${APP_SLUG_MAX_LENGTH} characters.`);
+  }
   if (!isValidAppSlug(slug)) {
     throw new Error(
       'slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
         'starting with a letter).',
     );
+  }
+
+  const name = input.name.trim() || slug;
+  if (!isAppNameWithinMaxLength(name)) {
+    throw new Error(`name must be at most ${APP_NAME_MAX_LENGTH} characters.`);
   }
 
   if (await slugConflictExists(slug)) {
@@ -131,7 +144,6 @@ export async function createApp(
   const id = ulid().toLowerCase();
   const repoPath = await ensureAppRepo(id);
 
-  const name = input.name.trim() || slug;
   const description = (input.description ?? '').trim();
 
   const files = await renderTemplate(

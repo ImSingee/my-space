@@ -16,6 +16,11 @@ import {
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
+import {
+  APP_NAME_MAX_LENGTH,
+  APP_SLUG_MAX_LENGTH,
+  isAppNameWithinMaxLength,
+} from '~/app-identity';
 import { publishPlatformEvent } from '~server/platform-events';
 import { buildMatchesDeployment } from './build-identity';
 import { appDeployLock } from './deploy';
@@ -192,6 +197,9 @@ export async function renameAppSlug(
   rawSlug: string,
 ): Promise<{ slug: string }> {
   const slug = rawSlug.trim();
+  if (slug.length > APP_SLUG_MAX_LENGTH) {
+    throw new Error(`Slug must be at most ${APP_SLUG_MAX_LENGTH} characters.`);
+  }
   if (!isValidAppSlug(slug)) {
     throw new Error(
       'Slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
@@ -279,6 +287,13 @@ async function rollbackAppInner(
   }
   const sourceTag = deployment.sourceTag;
   const manifest = deployment.manifestNormalized as NormalizedManifest | null;
+  const restoredName = manifest?.name ?? app.name;
+  if (!isAppNameWithinMaxLength(restoredName)) {
+    throw new Error(
+      `Deployment v${deployment.version} cannot be restored because its App ` +
+        `name exceeds ${APP_NAME_MAX_LENGTH} characters.`,
+    );
+  }
   let latestDataSchemaHash = app.dataSchemaHash ?? null;
   // A pending activation may represent a migration whose COMMIT acknowledgement
   // was lost. Clear that fence only after taking the migration barrier and
@@ -338,7 +353,7 @@ async function rollbackAppInner(
         status: 'deployed',
         currentDeploymentId: deployment.id,
         currentSourceCommit: sourceCommit,
-        name: manifest?.name ?? app.name,
+        name: restoredName,
         // Restore the rolled-back version's full metadata too. Otherwise the row
         // keeps the newer deployment's capabilities/backendMode/description — e.g.
         // the cron scheduler reads app.capabilities.cron and would skip jobs the

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
+import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
+  createAppRequestSchema,
   deploySourceRequestSchema,
   isSafeRelativePath,
   parseHubMessage,
@@ -11,6 +13,36 @@ import {
   queryAppKvRequestSchema,
   scaffoldFileSchema,
 } from './protocol';
+
+describe('App creation payload', () => {
+  it('accepts Unicode names and slugs at the 64-character boundary', () => {
+    const name = '😀'.repeat(APP_NAME_MAX_LENGTH);
+    const slug = `a${'b'.repeat(APP_SLUG_MAX_LENGTH - 1)}`;
+
+    expect(createAppRequestSchema.parse({ name, slug })).toMatchObject({
+      name,
+      slug,
+    });
+  });
+
+  it('rejects names and slugs above the 64-character boundary', () => {
+    const validName = '😀'.repeat(APP_NAME_MAX_LENGTH);
+    const validSlug = `a${'b'.repeat(APP_SLUG_MAX_LENGTH - 1)}`;
+
+    expect(
+      createAppRequestSchema.safeParse({
+        name: `${validName}😀`,
+        slug: validSlug,
+      }).success,
+    ).toBe(false);
+    expect(
+      createAppRequestSchema.safeParse({
+        name: validName,
+        slug: `${validSlug}b`,
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('runner -> platform messages', () => {
   it('uses protocol v7 for tool-start path details', () => {

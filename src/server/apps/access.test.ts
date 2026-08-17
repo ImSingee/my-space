@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 
 vi.mock('~/db', async () => {
   const { createTestDb } = await import('~/db/test-db');
@@ -37,6 +38,12 @@ describe('appIdForSlug', () => {
 
   it('returns null for an unknown slug', async () => {
     await expect(appIdForSlug('missing')).resolves.toBeNull();
+  });
+
+  it('rejects a slug above the 64-character boundary', async () => {
+    await expect(
+      appIdForSlug(`a${'b'.repeat(APP_SLUG_MAX_LENGTH)}`),
+    ).resolves.toBeNull();
   });
 });
 
