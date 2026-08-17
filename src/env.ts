@@ -91,11 +91,7 @@ function resolvePlatformEnv(): PlatformEnv {
 
   const configuredAgentRunnerToken = process.env.AGENT_RUNNER_TOKEN?.trim();
   const production = process.env.NODE_ENV === 'production';
-  if (
-    production &&
-    (!configuredAgentRunnerToken ||
-      configuredAgentRunnerToken === DEV_AGENT_RUNNER_TOKEN)
-  ) {
+  if (production && !configuredAgentRunnerToken) {
     throw new Error('AGENT_RUNNER_TOKEN is required in production.');
   }
   const agentRunnerToken = configuredAgentRunnerToken || DEV_AGENT_RUNNER_TOKEN;
