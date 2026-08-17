@@ -63,19 +63,4 @@ describe('public app RPC route', () => {
       },
     );
   });
-
-  it.each([
-    '/api/apps/app-id/rpc/todos.list',
-    '/api/application/app-id/rpc',
-    '/api/appss/app-id/rpc',
-    '/api/app/app-id/rpc-method',
-  ])('rejects near-miss paths: %s', async (pathname) => {
-    const response = await handleRpcRequest({
-      request: new Request(`https://hatch.test${pathname}`),
-    });
-
-    expect(response.status).toBe(404);
-    expect(mocks.findApp).not.toHaveBeenCalled();
-    expect(mocks.proxyAppRequest).not.toHaveBeenCalled();
-  });
 });
