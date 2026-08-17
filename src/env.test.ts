@@ -140,17 +140,41 @@ describe('getPlatformEnv', () => {
     });
   });
 
-  it.each([undefined, '', '   ', 'hatch-dev-runner-token'])(
-    'disables the runner endpoint in production for token %s',
+  it.each([undefined, '', '   '])(
+    'requires AGENT_RUNNER_TOKEN in production when it is %s',
     async (token) => {
       vi.stubEnv('SECRET', 'platform-secret');
       vi.stubEnv('NODE_ENV', 'production');
       vi.stubEnv('AGENT_RUNNER_TOKEN', token);
       const { getPlatformEnv } = await import('./env');
 
-      expect(getPlatformEnv().agentRunnerToken).toBeNull();
+      expect(() => getPlatformEnv()).toThrow(
+        'AGENT_RUNNER_TOKEN is required in production.',
+      );
     },
   );
+
+  it('accepts an explicitly configured development token in production', async () => {
+    vi.stubEnv('SECRET', 'platform-secret');
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('AGENT_RUNNER_TOKEN', 'hatch-dev-runner-token');
+    const { getPlatformEnv } = await import('./env');
+
+    expect(getPlatformEnv().agentRunnerToken).toBe('hatch-dev-runner-token');
+  });
+
+  it('does not cache a failed production runner token resolution', async () => {
+    vi.stubEnv('SECRET', 'platform-secret');
+    vi.stubEnv('NODE_ENV', 'production');
+    const { getPlatformEnv } = await import('./env');
+
+    expect(() => getPlatformEnv()).toThrow(
+      'AGENT_RUNNER_TOKEN is required in production.',
+    );
+
+    vi.stubEnv('AGENT_RUNNER_TOKEN', 'runner-token');
+    expect(getPlatformEnv().agentRunnerToken).toBe('runner-token');
+  });
 
   it('returns one frozen snapshot and ignores later environment changes', async () => {
     vi.stubEnv('SECRET', 'first-secret');

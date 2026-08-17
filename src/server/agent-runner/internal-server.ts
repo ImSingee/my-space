@@ -26,11 +26,8 @@ function bearerToken(header: string | undefined): string | null {
   return match ? match[1].trim() : null;
 }
 
-export function createInternalHttpHandler(
-  token: string | null,
-): http.RequestListener {
+export function createInternalHttpHandler(token: string): http.RequestListener {
   const authorized = (req: http.IncomingMessage): boolean =>
-    Boolean(token) &&
     secretsMatch(bearerToken(req.headers.authorization), token);
 
   return (req, res) => {
@@ -52,13 +49,6 @@ export function startAgentInternalServer(): void {
     agentInternalHost,
     agentInternalPort,
   } = getPlatformEnv();
-  if (!token) {
-    console.warn(
-      '[agent-internal] AGENT_RUNNER_TOKEN is not set; the Agent Runner ' +
-        'REST/WS endpoints are disabled.',
-    );
-    return;
-  }
 
   const authorized = (req: http.IncomingMessage): boolean =>
     secretsMatch(bearerToken(req.headers.authorization), token);

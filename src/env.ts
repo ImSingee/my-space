@@ -18,8 +18,8 @@ export type PlatformEnv = Readonly<{
   secret: string;
   /** Better Auth key, falling back to `secret` when not configured separately. */
   betterAuthSecret: string;
-  /** Shared Runner bearer token, or null when the production endpoint is disabled. */
-  agentRunnerToken: string | null;
+  /** Shared Runner bearer token. */
+  agentRunnerToken: string;
   agentInternalHost: string;
   agentInternalPort: number;
 }>;
@@ -91,12 +91,10 @@ function resolvePlatformEnv(): PlatformEnv {
 
   const configuredAgentRunnerToken = process.env.AGENT_RUNNER_TOKEN?.trim();
   const production = process.env.NODE_ENV === 'production';
-  const agentRunnerToken = production
-    ? configuredAgentRunnerToken &&
-      configuredAgentRunnerToken !== DEV_AGENT_RUNNER_TOKEN
-      ? configuredAgentRunnerToken
-      : null
-    : configuredAgentRunnerToken || DEV_AGENT_RUNNER_TOKEN;
+  if (production && !configuredAgentRunnerToken) {
+    throw new Error('AGENT_RUNNER_TOKEN is required in production.');
+  }
+  const agentRunnerToken = configuredAgentRunnerToken || DEV_AGENT_RUNNER_TOKEN;
 
   return Object.freeze({
     appUrl,
