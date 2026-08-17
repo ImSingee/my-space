@@ -44,6 +44,7 @@ export type DeploymentLike = {
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  rollbackBlockedReason?: string | null;
   sourceCommit: string | null;
   sourceTag: string | null;
   hasArtifact: boolean;
@@ -139,6 +140,7 @@ function DeploymentItem({
 }) {
   const [open, handlers] = useDisclosure(false);
   const hasLog = Boolean(deployment.error) || deployment.hasBuildLog;
+  const rollbackReasonId = `rollback-reason-${deployment.id}`;
   const artifactNode =
     deployment.status === 'deployed' ? renderArtifact(deployment) : null;
 
@@ -166,18 +168,35 @@ function DeploymentItem({
             {formatRelative(deployment.createdAt)}
           </Text>
         </Group>
-        {deployment.canRollback ? (
+        {deployment.canRollback || deployment.rollbackBlockedReason ? (
           <Button
             size="compact-sm"
             variant="default"
             leftSection={<IconRestore size={14} />}
-            loading={rolling}
-            onClick={() => onRollback(deployment.id)}
+            loading={deployment.canRollback && rolling}
+            disabled={!deployment.canRollback}
+            aria-describedby={
+              deployment.rollbackBlockedReason ? rollbackReasonId : undefined
+            }
+            onClick={() => {
+              if (deployment.canRollback) onRollback(deployment.id);
+            }}
           >
             Restore
           </Button>
         ) : null}
       </Group>
+
+      {deployment.rollbackBlockedReason ? (
+        <Text
+          id={rollbackReasonId}
+          size="xs"
+          c="dimmed"
+          style={{ maxWidth: '70ch' }}
+        >
+          {deployment.rollbackBlockedReason}
+        </Text>
+      ) : null}
 
       {deployment.sourceCommit ||
       deployment.sourceTag ||

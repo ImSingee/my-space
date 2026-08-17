@@ -112,6 +112,10 @@ gen/                    # generated RPC code
 - The backend is a bundled Deno Connect server. Put runtime read-only files in
   \`backend/assets/\` and read them through \`HATCH_ASSETS_DIR\`. Do not rely on
   source-relative files remaining after bundling.
+- A successful deploy with \`capabilities.database\` provisions the App's own
+  Postgres database. The backend receives \`DATABASE_URL\` only while that
+  capability is enabled. \`query_app_db\` accesses an already-provisioned or
+  retained database; it never provisions or recreates one.
 - For mutable files, enable both backend and storage. Hatch injects one private
   writable \`STORAGE_DIR\` into the backend; it is not exposed through a
   frontend/widget HTTP API. Files survive restarts, deploys, rollbacks, and a
@@ -127,9 +131,11 @@ gen/                    # generated RPC code
   \`@hatch/data\`, and do not hide SDK-resolution or type errors by deleting the
   generic, copying SDK types, using \`any\`, or adding casts. The authoritative
   declaration entry is the \`exports\` map in
-  \`.hatch/sdk/@hatch/data/package.json\`. After a Data Table-capable deploy,
-  use \`query_app_data_table\`: inspect an unknown schema first, prefer its
-  structured \`query\` and \`mutate\` actions. Its \`raw_sql\` action is a
+  \`.hatch/sdk/@hatch/data/package.json\`. While the current deployment has the
+  Data Table capability enabled, use \`query_app_data_table\`: inspect an unknown
+  schema first, prefer its structured \`query\` and \`mutate\` actions. Disabling
+  the capability retains its database but blocks App, Agent, and Realtime access
+  until a successful Data Table-capable deploy. Its \`raw_sql\` action is a
   dangerous last resort for joins, aggregates, or complex repair those actions
   cannot express. Raw SQL may modify rows only in existing \`data\` tables.
   Never use it for DDL, TRUNCATE, maintenance, transaction control, permissions,
@@ -165,8 +171,14 @@ gen/                    # generated RPC code
 5. Call \`deploy_app\` with the exact source path and a concise required release
    message. If deployment fails, fix the source, recheck, commit, and retry.
    Confirm the resulting state with \`get_app\`.
-6. If deploy reports that \`master\` advanced, refresh the checkout's origin,
+6. For a database-capable App, use \`query_app_db\` only after that successful
+   deploy to verify or initialize its schema.
+7. If deploy reports that \`master\` advanced, refresh the checkout's origin,
    fetch and rebase onto \`origin/master\`, resolve conflicts, and retry.
+8. If \`get_app\` says rollback is blocked because the App database or Data Table
+   database was permanently deleted, fetch origin with tags, restore the reported
+   source tag tree onto current master, commit it as a new descendant, and deploy
+   that new release. Do not detach or rewind master.
 
 # Workflow contract
 

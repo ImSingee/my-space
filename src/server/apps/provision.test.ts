@@ -5,6 +5,7 @@ const STORED_PASSWORD = '0123456789abcdef'.repeat(4);
 
 const state = vi.hoisted(() => ({
   appExists: true,
+  dbName: 'app_demo_app' as string | null,
   storedCiphertext: null as string | null,
   roleExists: true,
   databaseExists: true,
@@ -13,6 +14,8 @@ const state = vi.hoisted(() => ({
   failUnsafeContaining: null as string | null,
   passwordWrites: 0,
   lockCalls: 0,
+  lifecycleLockCalls: 0,
+  lifecycleUnlockCalls: 0,
   transactionTail: Promise.resolve(),
 }));
 
@@ -21,7 +24,10 @@ vi.mock('~/db', async () => {
 
   const findApp = async () =>
     state.appExists
-      ? { dbPasswordCiphertext: state.storedCiphertext }
+      ? {
+          dbName: state.dbName,
+          dbPasswordCiphertext: state.storedCiphertext,
+        }
       : undefined;
 
   const tx = {
@@ -86,6 +92,14 @@ vi.mock('postgres', () => {
       (parts: TemplateStringsArray) => Promise<{ exists: number }[]>
     >(async (parts) => {
       const statement = parts.join('?');
+      if (statement.includes('pg_advisory_lock')) {
+        state.lifecycleLockCalls += 1;
+        return [];
+      }
+      if (statement.includes('pg_advisory_unlock')) {
+        state.lifecycleUnlockCalls += 1;
+        return [];
+      }
       if (statement.includes('from pg_roles')) {
         return state.roleExists ? [{ exists: 1 }] : [];
       }
@@ -116,8 +130,16 @@ vi.mock('postgres', () => {
         if (statement.startsWith('create database')) {
           state.databaseExists = true;
         }
+        if (statement.startsWith('drop database')) {
+          state.databaseExists = false;
+        }
+        if (statement.startsWith('drop role')) {
+          state.roleExists = false;
+        }
       }),
-      end: vi.fn<() => Promise<void>>(async () => {}),
+      end: vi.fn<(_options?: { timeout: number }) => Promise<void>>(
+        async () => {},
+      ),
     });
   }
 
@@ -125,7 +147,14 @@ vi.mock('postgres', () => {
 });
 
 const postgres = (await import('postgres')).default;
-const { appDatabaseUrl, ensureAppDatabase } = await import('./provision');
+const {
+  appDatabaseUrl,
+  beginAppDatabaseDeployment,
+  dropAppDatabase,
+  ensureAppDatabase,
+  resolveAppDatabaseUrl,
+  withAppDatabaseLifecycle,
+} = await import('./provision');
 const { decryptAppDbPassword, encryptAppDbPassword } =
   await import('./db-password');
 
@@ -140,6 +169,7 @@ beforeEach(() => {
   vi.stubEnv('BETTER_AUTH_SECRET', 'auth-secret');
 
   state.appExists = true;
+  state.dbName = 'app_demo_app';
   state.storedCiphertext = null;
   state.roleExists = true;
   state.databaseExists = true;
@@ -148,6 +178,8 @@ beforeEach(() => {
   state.failUnsafeContaining = null;
   state.passwordWrites = 0;
   state.lockCalls = 0;
+  state.lifecycleLockCalls = 0;
+  state.lifecycleUnlockCalls = 0;
   state.transactionTail = Promise.resolve();
 });
 
@@ -181,6 +213,8 @@ describe('ensureAppDatabase', () => {
     ).toBe(password);
     expect(state.passwordWrites).toBe(1);
     expect(state.lockCalls).toBe(1);
+    expect(state.lifecycleLockCalls).toBe(1);
+    expect(state.lifecycleUnlockCalls).toBe(1);
   });
 
   it('creates a new role and database with a random stored password', async () => {
@@ -261,7 +295,98 @@ describe('ensureAppDatabase', () => {
       'App "missing" not found.',
     );
 
-    expect(postgres).not.toHaveBeenCalled();
+    expect(postgres).toHaveBeenCalledOnce();
+    expect(state.lifecycleLockCalls).toBe(1);
+    expect(state.lifecycleUnlockCalls).toBe(1);
     expect(state.statements).toEqual([]);
+  });
+});
+
+describe('resolveAppDatabaseUrl', () => {
+  it('resolves an encrypted registered credential without provisioning DDL', async () => {
+    state.storedCiphertext = encryptAppDbPassword('demo-app', STORED_PASSWORD);
+
+    const url = await resolveAppDatabaseUrl('demo-app');
+
+    expect(new URL(url).password).toBe(STORED_PASSWORD);
+    expect(state.statements).toEqual([]);
+    expect(state.passwordWrites).toBe(0);
+    expect(state.lockCalls).toBe(0);
+  });
+
+  it('adapts a legacy registered database only when both resources exist', async () => {
+    const url = await resolveAppDatabaseUrl('demo-app');
+
+    expect(new URL(url).password).toMatch(/^[0-9a-f]{64}$/);
+    expect(state.passwordWrites).toBe(1);
+    expect(state.statements).not.toContainEqual(
+      expect.stringContaining('create database'),
+    );
+    expect(state.statements).not.toContainEqual(
+      expect.stringContaining('create role'),
+    );
+  });
+
+  it('never recreates missing resources while resolving a retained database', async () => {
+    state.roleExists = false;
+
+    await expect(resolveAppDatabaseUrl('demo-app')).rejects.toThrow(
+      'App database is not provisioned',
+    );
+
+    expect(state.statements).toEqual([]);
+    expect(state.passwordWrites).toBe(0);
+  });
+
+  it('rejects an app whose database registration was cleared', async () => {
+    state.dbName = null;
+
+    await expect(resolveAppDatabaseUrl('demo-app')).rejects.toThrow(
+      'App database is not provisioned',
+    );
+
+    expect(state.statements).toEqual([]);
+  });
+});
+
+describe('database deployment lifecycle', () => {
+  it('does not open or provision a database for a disabled deployment', async () => {
+    await expect(
+      beginAppDatabaseDeployment('demo-app', false),
+    ).resolves.toMatchObject({ dbName: undefined });
+
+    expect(postgres).not.toHaveBeenCalled();
+    expect(state.passwordWrites).toBe(0);
+  });
+
+  it('holds the lifecycle lock until the deployment lease is released', async () => {
+    const lease = await beginAppDatabaseDeployment('demo-app', true);
+    let secondEntered = false;
+    const waiting = withAppDatabaseLifecycle('demo-app', async () => {
+      secondEntered = true;
+    });
+
+    await Promise.resolve();
+    expect(lease.dbName).toBe('app_demo_app');
+    expect(secondEntered).toBe(false);
+
+    await lease.release();
+    await waiting;
+    expect(secondEntered).toBe(true);
+    expect(state.lifecycleLockCalls).toBe(2);
+    expect(state.lifecycleUnlockCalls).toBe(2);
+  });
+
+  it('releases the lifecycle lock after strict role cleanup fails', async () => {
+    state.failUnsafeContaining = 'drop role';
+
+    await expect(dropAppDatabase('demo-app')).rejects.toThrow(
+      'Injected SQL failure',
+    );
+
+    expect(state.databaseExists).toBe(false);
+    expect(state.roleExists).toBe(true);
+    expect(state.lifecycleLockCalls).toBe(1);
+    expect(state.lifecycleUnlockCalls).toBe(1);
   });
 });

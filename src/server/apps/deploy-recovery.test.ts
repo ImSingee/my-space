@@ -42,6 +42,13 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (id: string, sourceDir: string, version: number) => Promise<unknown>
     >(),
+  beginAppDatabaseDeployment:
+    vi.fn<
+      (
+        id: string,
+        enabled: boolean,
+      ) => Promise<{ dbName: string | undefined; release(): Promise<void> }>
+    >(),
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -227,8 +234,7 @@ vi.mock('./git', () => ({
   publishDeploymentSource: mocks.publishDeploymentSource,
 }));
 vi.mock('./provision', () => ({
-  appDbName: (id: string) => `app_${id}`,
-  ensureAppDatabase: vi.fn<(id: string) => Promise<string>>(),
+  beginAppDatabaseDeployment: mocks.beginAppDatabaseDeployment,
 }));
 vi.mock('./runtime', () => ({
   ensureAppRunning: mocks.ensureAppRunning,
@@ -369,6 +375,17 @@ async function stageFrontendBuild(
   };
 }
 
+async function stageDatabaseBuild(
+  id: string,
+  options: unknown,
+): Promise<unknown> {
+  const build = (await stageFrontendBuild(id, options)) as {
+    source: { capabilities: { database: boolean } };
+  };
+  build.source.capabilities.database = true;
+  return build;
+}
+
 async function arrangeSupersededPendingArtifact(id: string): Promise<{
   app: Row;
   pendingArtifact: string;
@@ -428,6 +445,12 @@ describe('App deployment activation recovery', () => {
       commit: 'source-commit',
       repoPath: 'apps/example',
     });
+    mocks.beginAppDatabaseDeployment.mockImplementation(
+      async (id, enabled) => ({
+        dbName: enabled ? `app_${id}` : undefined,
+        release: async () => {},
+      }),
+    );
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await fs.rm(mocks.root, { recursive: true, force: true });
   });
@@ -466,6 +489,62 @@ describe('App deployment activation recovery', () => {
       appId: id,
       deploymentRevision: result.deploymentId,
     });
+  });
+
+  it('holds and releases database provisioning through activation', async () => {
+    const id = 'database-deploy';
+    const release = vi.fn<() => Promise<void>>(async () => {});
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+      dbName: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageDatabaseBuild);
+    mocks.beginAppDatabaseDeployment.mockResolvedValueOnce({
+      dbName: `app_${id}`,
+      release,
+    });
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+
+    await deployApp(id, {
+      message: 'Database deployment',
+      sourceDir: '/source',
+    });
+
+    expect(mocks.beginAppDatabaseDeployment).toHaveBeenCalledWith(id, true);
+    expect(app.dbName).toBe(`app_${id}`);
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('does not restore a cleared registration from a database-free build snapshot', async () => {
+    const id = 'database-disabled';
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+      dbName: `app_${id}`,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+    mocks.beginAppDatabaseDeployment.mockImplementationOnce(async () => {
+      app.dbName = null;
+      return { dbName: undefined, release: async () => {} };
+    });
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+
+    await deployApp(id, {
+      message: 'Database-free deployment',
+      sourceDir: '/source',
+    });
+
+    expect(mocks.beginAppDatabaseDeployment).toHaveBeenCalledWith(id, false);
+    expect(app.dbName).toBeNull();
   });
 
   it('does not publish an activation event when a normal build fails', async () => {
@@ -1022,6 +1101,102 @@ describe('App deployment activation recovery', () => {
       manifest: null,
       backendMode: null,
       dataDbName: `data_${id}`,
+      dataActivationId: null,
+    });
+  });
+
+  it('retains Data state when a successful release disables the capability', async () => {
+    const id = 'disable-retained-data';
+    const app = appState(id, {
+      status: 'deployed',
+      currentDeploymentId: 'deployment-current',
+      capabilities: { backend: false, dataTable: true },
+      dataDbName: `data_${id}`,
+      dataSchemaHash: 'retained-schema-hash',
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id, {
+        dataSchemaHash: 'retained-schema-hash',
+      }),
+    );
+    await writeBuild(
+      `${mocks.root}/live/${id}`,
+      'deployment-current',
+      'current deployment',
+    );
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+
+    const result = await deployApp(id, {
+      message: 'Disable Data Tables',
+      sourceDir: '/source',
+    });
+
+    expect(mocks.applyDataMigration).not.toHaveBeenCalled();
+    expect(app).toMatchObject({
+      status: 'deployed',
+      currentDeploymentId: result.deploymentId,
+      capabilities: expect.objectContaining({ dataTable: false }),
+      dataDbName: `data_${id}`,
+      dataSchemaHash: 'retained-schema-hash',
+      dataActivationId: null,
+    });
+  });
+
+  it('provisions fresh Data state when re-enabled after permanent deletion', async () => {
+    const id = 're-enable-deleted-data';
+    const app = appState(id, {
+      status: 'deployed',
+      currentDeploymentId: 'deployment-current',
+      capabilities: { backend: false, dataTable: false },
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.deployments.set(
+      'deployment-current',
+      deploymentState('deployment-current', id),
+    );
+    await writeBuild(
+      `${mocks.root}/live/${id}`,
+      'deployment-current',
+      'current deployment',
+    );
+    mocks.buildApp.mockImplementationOnce(stageDataTableBuild);
+    mocks.applyDataMigration.mockResolvedValueOnce({
+      hash: 'fresh-schema-hash',
+      schema: { version: 1, tables: {} },
+      plan: {
+        fromHash: null,
+        toHash: 'fresh-schema-hash',
+        steps: [],
+        destructive: false,
+        approvalToken: 'fresh-approval-token',
+      },
+      applied: true,
+    });
+
+    const result = await deployApp(id, {
+      message: 'Re-enable Data Tables',
+      sourceDir: '/source',
+    });
+
+    expect(mocks.applyDataMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id,
+        deploymentId: result.deploymentId,
+        schema: { version: 1, tables: {} },
+      }),
+    );
+    expect(app).toMatchObject({
+      status: 'deployed',
+      currentDeploymentId: result.deploymentId,
+      capabilities: expect.objectContaining({ dataTable: true }),
+      dataDbName: `data_${id}`,
+      dataSchemaHash: 'fresh-schema-hash',
       dataActivationId: null,
     });
   });

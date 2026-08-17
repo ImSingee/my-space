@@ -354,8 +354,10 @@ exit 0
   }
 
   /**
-   * Export the canonical master branch as a git bundle for the Agent Runner
-   * to clone/fetch from. Returns null when the repo has no commits yet.
+   * Export canonical master plus platform-owned deployment tags as a git bundle
+   * for the Agent Runner. Tags keep historical source recoverable after an App
+   * database deletion blocks direct rollback; checkout still lands on master.
+   * Returns null when the repo has no commits yet.
    */
   async function exportMasterBundle(id: string): Promise<Buffer | null> {
     const repoDir = await ensureRepo(id);
@@ -371,6 +373,7 @@ exit 0
         'create',
         bundleFile,
         SOURCE_BRANCH,
+        '--tags',
       ]);
       return await readFile(bundleFile);
     } finally {

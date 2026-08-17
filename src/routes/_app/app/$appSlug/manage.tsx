@@ -262,11 +262,7 @@ function AppDetailPage() {
 
         <Divider />
 
-        <OperationsPanel
-          appId={app.id}
-          dbName={app.dbName ?? null}
-          dbEnabled={Boolean(capabilities?.database) || Boolean(app.dbName)}
-        />
+        <OperationsPanel appId={app.id} />
 
         {capabilities?.backend ? (
           <>

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PlatformClient } from '../platform-client';
 import { buildSystemPrompt } from '../system-prompt';
+import type { AppDetail } from '../../server/apps/inspect';
 import { createAppTools } from './apps';
 
 function toolText(result: { content: { type: string; text?: string }[] }) {
@@ -18,7 +19,65 @@ function queryDataTableTool(platform: PlatformClient) {
   return query;
 }
 
+function getAppTool(platform: PlatformClient) {
+  const getApp = createAppTools({ platform }).find(
+    (tool) => tool.name === 'get_app',
+  );
+  if (!getApp) throw new Error('Missing get_app tool.');
+  return getApp;
+}
+
 describe('query_app_data_table', () => {
+  it('reports a disabled retained Data Table without enabling access', async () => {
+    const detail: AppDetail = {
+      id: 'demo-app',
+      slug: 'demo',
+      name: 'Demo',
+      description: null,
+      status: 'deployed',
+      backendMode: null,
+      dbName: null,
+      dataDbName: 'hatch_data_demo',
+      currentVersion: 2,
+      currentDeploymentId: 'deployment-v2',
+      currentSourceCommit: 'source-v2',
+      capabilities: [],
+      createdAt: '2026-08-14T00:00:00.000Z',
+      updatedAt: '2026-08-14T00:00:00.000Z',
+      manifest: null,
+      ops: {
+        backend: { capable: false, mode: null, running: false },
+        cron: { enabled: false, jobs: [] },
+        webhook: {
+          enabled: false,
+          url: null,
+          hasSecret: false,
+          auth: 'platform',
+        },
+        storage: { enabled: false },
+        kv: { enabled: false, url: null, entryCount: 0 },
+        dataTable: {
+          enabled: false,
+          url: null,
+          dbName: 'hatch_data_demo',
+          schemaHash: '1234567890abcdef',
+        },
+      },
+      deployments: [],
+    };
+    const getApp = getAppTool({
+      getApp: vi.fn<PlatformClient['getApp']>(async () => detail),
+    } as unknown as PlatformClient);
+
+    const result = await getApp.execute('get-retained-data', {
+      id: 'demo-app',
+    });
+
+    expect(toolText(result)).toContain(
+      'Data Tables: hatch_data_demo (disabled, retained; 1234567890)',
+    );
+  });
+
   it('exposes an Anthropic-compatible object root and bounded integers', () => {
     const query = queryDataTableTool({} as PlatformClient);
     const schema = query.parameters as {

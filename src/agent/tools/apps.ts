@@ -137,6 +137,20 @@ export function createAppTools(options: {
       const detail = await platform.getApp(params.id);
       if (!detail) throw new Error(`App "${params.id}" not found.`);
       const m = detail.manifest;
+      const databaseEnabled = detail.capabilities.includes('database');
+      const databaseStatus = detail.dbName
+        ? `${detail.dbName} (${databaseEnabled ? 'enabled' : 'disabled, retained'})`
+        : databaseEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
+      const dataTableEnabled = detail.capabilities.includes('dataTable');
+      const dataTableStatus = detail.ops.dataTable.dbName
+        ? `${detail.ops.dataTable.dbName} (${
+            dataTableEnabled ? 'enabled' : 'disabled, retained'
+          }; ${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+        : dataTableEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
       const lines: (string | null)[] = [
         `${detail.name} (slug: ${detail.slug}, id: ${detail.id}) — ${detail.status}` +
           (detail.currentVersion != null
@@ -150,11 +164,8 @@ export function createAppTools(options: {
               }`
             : 'none'
         }`,
-        `Database: ${detail.dbName ?? 'not provisioned'}`,
-        detail.ops.dataTable.enabled
-          ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +
-            `(${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
-          : null,
+        `Database: ${databaseStatus}`,
+        `Data Tables: ${dataTableStatus}`,
         detail.ops.storage.enabled
           ? 'Persistent storage: enabled (backend STORAGE_DIR)'
           : null,
@@ -184,16 +195,22 @@ export function createAppTools(options: {
           : null,
         '',
         'Deployments (newest first):',
-        ...detail.deployments
-          .slice(0, 10)
-          .map(
-            (d) =>
-              `  v${d.version} — ${d.status}${d.isCurrent ? ' (current)' : ''}${
-                d.canRollback ? ' [rollbackable]' : ''
-              }${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${
-                d.createdAt
-              }`,
-          ),
+        ...detail.deployments.slice(0, 10).flatMap((d) => {
+          const refs = [
+            d.sourceTag ? `tag: ${d.sourceTag}` : null,
+            d.sourceCommit ? `commit: ${d.sourceCommit}` : null,
+          ].filter((value): value is string => Boolean(value));
+          return [
+            `  v${d.version} — ${d.status}${d.isCurrent ? ' (current)' : ''}${
+              d.canRollback ? ' [rollbackable]' : ''
+            }${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''}${
+              refs.length > 0 ? ` · ${refs.join(' · ')}` : ''
+            } · ${d.createdAt}`,
+            d.rollbackBlockedReason
+              ? `    Restore blocked: ${d.rollbackBlockedReason}`
+              : null,
+          ];
+        }),
       ];
       return text(lines.filter((l) => l !== null).join('\n'), detail);
     },
@@ -473,7 +490,10 @@ export function createAppTools(options: {
       "version's artifact and moves the app repo master branch to its " +
       'deployment tag commit. Pass the version number shown by get_app ' +
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
-      'restored.',
+      'restored. A version that depends on an App database or Data Table ' +
+      'database cannot be restored after that resource was permanently deleted. ' +
+      'In that case, use its get_app source tag to restore the tag tree onto ' +
+      'current master, commit, and deploy it as a new release.',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to rollback.' }),
       version: Type.Number({
@@ -502,8 +522,11 @@ export function createAppTools(options: {
     name: 'query_app_db',
     label: 'Query app DB',
     description:
-      "Run SQL against an app's own Postgres database (provisioned on first " +
-      'use). Use to create tables and inspect data. Returns up to 100 rows.',
+      "Run SQL against an app's already-provisioned Postgres database. This " +
+      'tool never provisions or recreates a database; deploy a version with ' +
+      'capabilities.database enabled first. A retained database remains ' +
+      'queryable after the capability is disabled until the user deletes it. ' +
+      'Returns up to 100 rows.',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug.' }),
       sql: Type.String({ description: 'SQL statement to execute.' }),

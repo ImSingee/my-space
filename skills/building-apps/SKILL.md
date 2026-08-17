@@ -277,19 +277,25 @@ preview without changing data. Obtain explicit user approval, then retry with
 `allow_destructive_data_migration: true` and the exact returned approval token.
 Tokens are bound to one preview and must not be reused after source changes.
 
-After the first Data Table-capable deploy, use `query_app_data_table` to inspect
-and manage live data. Inspect an unknown schema first, then prefer structured
-`query` and atomic `mutate` operations. The `raw_sql` action is a dangerous last
-resort for joins, aggregates, or complex data repair that structured actions
-cannot express. Raw SQL may query or modify rows in existing `data` tables, but
-it must not perform DDL, `TRUNCATE`, maintenance, transaction control,
-permission, role, database, or `_hatch` operations. The platform does not
-enforce that SQL rule, so the Agent must obey it. Schema changes always go
+While the current deployment has Data Tables enabled, use
+`query_app_data_table` to inspect and manage live data. Inspect an unknown
+schema first, then prefer structured `query` and atomic `mutate` operations.
+Disabling the capability retains its managed database and schema but blocks App,
+Agent, and Realtime access. The user may permanently delete the retained Data
+Table data from Operations; a later Data Table-capable release then provisions
+an empty database and applies its schema. The `raw_sql` action is a dangerous
+last resort for joins, aggregates, or complex data repair that structured
+actions cannot express. Raw SQL may query or modify rows in existing `data`
+tables, but it must not perform DDL, `TRUNCATE`, maintenance, transaction
+control, permission, role, database, or `_hatch` operations. The platform does
+not enforce that SQL rule, so the Agent must obey it. Schema changes always go
 through `data/schema.ts` and `deploy_app`.
 
-For arbitrary SQL, joins, aggregates, or ORM control, enable `database`, use
-`query_app_db` while developing, and create tables idempotently on backend
-startup. Each App database is isolated.
+For arbitrary SQL, joins, aggregates, or ORM control, enable `database` and
+deploy successfully before the first `query_app_db` call. The query tool never
+provisions or recreates a database. It can query a retained database after the
+capability is disabled until the user permanently deletes it. Create tables
+idempotently on backend startup. Each App database is isolated.
 
 ## KV secrets
 
@@ -319,3 +325,11 @@ Use `get_app` to inspect successfully deployed versions and `rollback_app` with
 the selected version. Rollback changes platform `master`, not an existing Agent
 worktree. Refresh its checkout and rebase before making further changes.
 Rollback restores code but never runs a Data Table down migration.
+
+A version requiring Database or Data Tables cannot be rolled back after a
+required database was permanently deleted. `get_app` reports the blocked reason
+and source tag. Start from a clean checkout of current master, run
+`git fetch origin master --tags`, then
+`git restore --source=<sourceTag> --staged --worktree .`. Review and commit the
+restored tree on master, then deploy it as a new release. Do not detach or rewind
+master; the new commit must preserve the fast-forward deploy contract.

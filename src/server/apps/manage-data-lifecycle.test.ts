@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   closeDataRealtime: vi.fn<() => Promise<void>>(),
   dropAppDataDatabase: vi.fn<() => Promise<void>>(),
   dropAppDatabase: vi.fn<() => Promise<void>>(),
+  withAppDatabaseLifecycle:
+    vi.fn<<T>(id: string, run: () => Promise<T>) => Promise<T>>(),
   stopApp: vi.fn<(id: string) => void>(),
   reloadScheduler: vi.fn<() => Promise<void>>(),
   moveMasterToDeploymentTag: vi.fn<() => Promise<string>>(),
@@ -124,7 +126,10 @@ vi.mock('./manifest', () => ({
   isValidAppId: () => true,
   isValidAppSlug: () => true,
 }));
-vi.mock('./provision', () => ({ dropAppDatabase: mocks.dropAppDatabase }));
+vi.mock('./provision', () => ({
+  dropAppDatabase: mocks.dropAppDatabase,
+  withAppDatabaseLifecycle: mocks.withAppDatabaseLifecycle,
+}));
 vi.mock('./data-table/provision', () => ({
   dropAppDataDatabase: mocks.dropAppDataDatabase,
   withAppDataCutoverLock: async (_id: string, run: () => Promise<unknown>) => {
@@ -201,6 +206,10 @@ describe('App Data lifecycle recovery', () => {
       mocks.events.push('drop-data-db');
     });
     mocks.dropAppDatabase.mockResolvedValue();
+    mocks.withAppDatabaseLifecycle.mockImplementation(async (_id, run) => {
+      mocks.events.push('database-lock');
+      return run();
+    });
     mocks.reloadScheduler.mockResolvedValue();
     mocks.moveMasterToDeploymentTag.mockResolvedValue('source-commit-v1');
     mocks.buildMatchesDeployment.mockResolvedValue(true);
@@ -217,6 +226,7 @@ describe('App Data lifecycle recovery', () => {
       id: APP_ID,
       currentDeploymentId: CURRENT_DEPLOYMENT_ID,
       dataDbName: 'data-example',
+      dataDbPasswordCiphertext: 'encrypted-password',
       dataSchemaHash: 'last-known-hash',
       dataActivationId: 'pending-deployment',
     });
@@ -259,6 +269,305 @@ describe('App Data lifecycle recovery', () => {
     expect(mocks.currentDataSchema).not.toHaveBeenCalled();
   });
 
+  it('marks a database-dependent rollback unavailable after permanent deletion', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      dbName: null,
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+      capabilities: { database: false, dataTable: false },
+    });
+    mocks.findDeployments.mockResolvedValue([
+      {
+        id: CURRENT_DEPLOYMENT_ID,
+        version: 2,
+        status: 'deployed',
+        message: 'Current',
+        error: null,
+        createdAt: new Date('2026-07-24T00:00:00Z'),
+        sourceCommit: 'source-v2',
+        sourceTag: 'deploy/v2',
+        artifactPath: '/workspace/artifacts/example/deployment-v2',
+        buildLog: null,
+        dataSchemaHash: null,
+        manifestNormalized: {
+          capabilities: { database: false, dataTable: false },
+        },
+      },
+      {
+        id: TARGET_DEPLOYMENT_ID,
+        version: 1,
+        status: 'deployed',
+        message: 'Previous',
+        error: null,
+        createdAt: new Date('2026-07-23T00:00:00Z'),
+        sourceCommit: 'source-v1',
+        sourceTag: 'deploy/v1',
+        artifactPath: '/workspace/artifacts/example/deployment-v1',
+        buildLog: null,
+        dataSchemaHash: null,
+        manifestNormalized: {
+          capabilities: { database: true, dataTable: false },
+        },
+      },
+    ]);
+
+    const deployments = await listDeployments(APP_ID);
+
+    expect(
+      deployments.find((row) => row.id === TARGET_DEPLOYMENT_ID),
+    ).toMatchObject({
+      canRollback: false,
+      rollbackBlockedReason: expect.stringContaining(
+        'database was permanently deleted',
+      ),
+    });
+  });
+
+  it('blocks only Data Table-dependent deployments after Data deletion', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      dbName: null,
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+      capabilities: { database: false, dataTable: false },
+    });
+    mocks.findDeployments.mockResolvedValue([
+      {
+        id: CURRENT_DEPLOYMENT_ID,
+        version: 3,
+        status: 'deployed',
+        message: 'Current',
+        error: null,
+        createdAt: new Date('2026-07-24T00:00:00Z'),
+        sourceCommit: 'source-v3',
+        sourceTag: 'deploy/v3',
+        artifactPath: '/workspace/artifacts/example/deployment-v3',
+        buildLog: null,
+        dataSchemaHash: null,
+        manifestNormalized: {
+          capabilities: { database: false, dataTable: false },
+        },
+      },
+      {
+        id: TARGET_DEPLOYMENT_ID,
+        version: 2,
+        status: 'deployed',
+        message: 'Data Tables',
+        error: null,
+        createdAt: new Date('2026-07-23T00:00:00Z'),
+        sourceCommit: 'source-v2',
+        sourceTag: 'deploy/v2',
+        artifactPath: '/workspace/artifacts/example/deployment-v2',
+        buildLog: null,
+        dataSchemaHash: 'schema-v2',
+        manifestNormalized: {
+          capabilities: { database: false, dataTable: true },
+        },
+      },
+      {
+        id: 'deployment-v1-no-data',
+        version: 1,
+        status: 'deployed',
+        message: 'No Data Tables',
+        error: null,
+        createdAt: new Date('2026-07-22T00:00:00Z'),
+        sourceCommit: 'source-v1',
+        sourceTag: 'deploy/v1',
+        artifactPath: '/workspace/artifacts/example/deployment-v1-no-data',
+        buildLog: null,
+        dataSchemaHash: null,
+        manifestNormalized: {
+          capabilities: { database: false, dataTable: false },
+        },
+      },
+    ]);
+
+    const deployments = await listDeployments(APP_ID);
+
+    expect(
+      deployments.find((row) => row.id === TARGET_DEPLOYMENT_ID),
+    ).toMatchObject({
+      canRollback: false,
+      rollbackBlockedReason: expect.stringContaining(
+        'Data Table database was permanently deleted',
+      ),
+    });
+    expect(
+      deployments.find((row) => row.id === 'deployment-v1-no-data'),
+    ).toMatchObject({ canRollback: true, rollbackBlockedReason: null });
+  });
+
+  it('rejects a database-dependent rollback after permanent deletion', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      capabilities: { database: false, dataTable: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dbName: null,
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: 'Example',
+        capabilities: { database: true, dataTable: false },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: null,
+    });
+
+    await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).rejects.toThrow(
+      'database was permanently deleted',
+    );
+
+    expect(mocks.withAppDatabaseLifecycle).not.toHaveBeenCalled();
+    expect(mocks.fsRm).not.toHaveBeenCalled();
+    expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Data Table-dependent rollback after permanent deletion', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      capabilities: { database: false, dataTable: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dbName: null,
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: 'Example',
+        capabilities: { database: false, dataTable: true },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: 'schema-v1',
+    });
+
+    await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).rejects.toThrow(
+      'Data Table database was permanently deleted',
+    );
+
+    expect(mocks.recoverCurrentDataSchema).not.toHaveBeenCalled();
+    expect(mocks.fsRm).not.toHaveBeenCalled();
+    expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+  });
+
+  it('rechecks registration after waiting for the database lifecycle lock', async () => {
+    const initialApp = {
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      capabilities: { database: true, dataTable: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dbName: 'app_example',
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    };
+    mocks.findApp
+      .mockResolvedValueOnce(initialApp)
+      .mockResolvedValueOnce({ ...initialApp, dbName: null });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: 'Example',
+        capabilities: { database: true, dataTable: false },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: null,
+    });
+
+    await expect(
+      rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining('database was permanently deleted'),
+    });
+
+    expect(mocks.withAppDatabaseLifecycle).toHaveBeenCalledOnce();
+    expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+    expect(mocks.fsRm).not.toHaveBeenCalled();
+  });
+
+  it('rechecks Data Table registration inside the rollback transaction', async () => {
+    const initialApp = {
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      capabilities: { database: false, dataTable: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dbName: null,
+      dataDbName: 'hatch_data_example',
+      dataDbPasswordCiphertext: 'encrypted-password',
+      dataSchemaHash: 'schema-v2',
+      dataActivationId: null,
+    };
+    mocks.findApp.mockResolvedValueOnce(initialApp).mockResolvedValueOnce({
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      dbName: null,
+      dataDbName: null,
+      dataDbPasswordCiphertext: null,
+    });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: 'Example',
+        capabilities: { database: false, dataTable: true },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: 'schema-v1',
+    });
+    mocks.recoverCurrentDataSchema.mockResolvedValue({ hash: 'schema-v2' });
+
+    await expect(
+      rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining(
+        'Data Table database was permanently deleted',
+      ),
+    });
+
+    expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+    expect(mocks.fsRm).not.toHaveBeenCalled();
+  });
+
   it('retains an unresolved activation fence when rollback recovery fails', async () => {
     mocks.findApp.mockResolvedValue({
       id: APP_ID,
@@ -270,6 +579,7 @@ describe('App Data lifecycle recovery', () => {
       backendMode: 'serverless',
       manifest: {},
       dataDbName: 'data-example',
+      dataDbPasswordCiphertext: 'encrypted-password',
       dataSchemaHash: 'last-known-hash',
       dataActivationId: 'pending-deployment',
     });
@@ -332,6 +642,7 @@ describe('App Data lifecycle recovery', () => {
       backendMode: 'long-running',
       manifest: { name: 'Current deployment' },
       dataDbName: 'data-example',
+      dataDbPasswordCiphertext: 'encrypted-password',
       dataSchemaHash: 'last-known-hash',
       dataActivationId: 'pending-deployment',
     });
@@ -389,6 +700,7 @@ describe('App Data lifecycle recovery', () => {
       backendMode: 'serverless',
       manifest: {},
       dataDbName: 'data-example',
+      dataDbPasswordCiphertext: 'encrypted-password',
       dataSchemaHash: 'last-known-hash',
       dataActivationId: 'pending-deployment',
     });
@@ -471,6 +783,7 @@ describe('App Data lifecycle recovery', () => {
       capabilities: { dataTable: false, backend: false },
       backendMode: 'serverless',
       manifest: {},
+      dbName: 'app_example',
       dataDbName: null,
       dataSchemaHash: null,
       dataActivationId: null,
@@ -483,7 +796,11 @@ describe('App Data lifecycle recovery', () => {
       sourceTag: 'deploy/v1',
       manifestNormalized: {
         name: 'Example',
-        capabilities: { dataTable: false, backend: false },
+        capabilities: {
+          database: true,
+          dataTable: false,
+          backend: false,
+        },
         backendMode: 'serverless',
       },
       dataSchemaHash: null,
@@ -495,6 +812,7 @@ describe('App Data lifecycle recovery', () => {
     });
 
     expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+    expect(mocks.events).toEqual(['app-lock', 'cutover-lock', 'database-lock']);
   });
 
   it('serializes archive behind deploy and Data cutover locks', async () => {
@@ -504,6 +822,7 @@ describe('App Data lifecycle recovery', () => {
       currentDeploymentId: CURRENT_DEPLOYMENT_ID,
       capabilities: { dataTable: true },
       dataDbName: 'data-example',
+      dataDbPasswordCiphertext: 'encrypted-password',
     });
 
     await expect(setAppArchived(APP_ID, true)).resolves.toEqual({
@@ -524,6 +843,7 @@ describe('App Data lifecycle recovery', () => {
     mocks.findApp.mockResolvedValue({
       capabilities: { dataTable: false },
       dataDbName: 'data-example',
+      dataDbPasswordCiphertext: 'encrypted-password',
       dataSchemaHash: null,
       dataActivationId: null,
     });
@@ -560,7 +880,6 @@ describe('App Data lifecycle recovery', () => {
       'app-lock',
       'cutover-lock',
       'close-realtime',
-      'migration-barrier',
       'drop-data-db',
     ]);
     expect(mocks.dropAppDataDatabase).toHaveBeenCalledOnce();
