@@ -627,6 +627,36 @@ async function assertOwnedWorktree(
   }
 }
 
+/**
+ * Check a reconnect fallback's proposed identity without deriving an id from
+ * Agent-writable Git config. The caller supplies the directory basename as the
+ * legacy id candidate; the origin must independently match that id's
+ * Runner-owned bundle path.
+ */
+export async function sourceWorktreeMatchesIdentity(
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+  sourcePath: string,
+): Promise<boolean> {
+  if (!isSafeEntityId(id)) return false;
+  try {
+    const resolved = await resolveAgentWorkspacePath(sessionId, sourcePath);
+    await assertOwnedWorktree(
+      sessionId,
+      resolved.absolutePath,
+      bundleFile(sessionId, kind, id),
+      id,
+      kind,
+    );
+    return true;
+  } catch {
+    // Ambiguous or unreadable unindexed worktrees are preserved rather than
+    // claimed under a guessed id and then removed as stale during reconnect.
+    return false;
+  }
+}
+
 async function assertWorkspaceGeneration(
   sessionId: string,
   worktree: string,
