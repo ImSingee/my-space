@@ -112,6 +112,9 @@ test('marks an update and remounts the iframe only after reload', async () => {
   const reload = screen.getByRole('button', {
     name: 'Update available — reload app',
   });
+  await expect
+    .element(screen.getByRole('status'))
+    .toHaveTextContent('Update available');
   await expect.element(reload).toBeVisible();
   expect(screen.container.querySelector('iframe')).toBe(originalFrame);
 
@@ -130,6 +133,7 @@ test('marks an update and remounts the iframe only after reload', async () => {
   await expect
     .element(screen.getByRole('button', { name: 'Reload app' }))
     .toBeVisible();
+  expect(screen.container.querySelector('output')).toBeNull();
 });
 
 test('offers reload for a first deployment and opens its frontend', async () => {
