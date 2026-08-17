@@ -78,7 +78,6 @@ describe('Agent skills', () => {
       'references/frontend-widgets.md',
       'references/backend-integrations.md',
       'references/data-storage.md',
-      'references/userscripts.md',
     ]) {
       expect(skill.content).toContain(`](${reference})`);
     }

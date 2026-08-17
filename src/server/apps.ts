@@ -8,10 +8,10 @@ import { db } from '~/db';
 // bundle (crashing hydration with "Buffer is not defined").
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { normalizedManifestFor } from './apps/access';
-import type {
-  NormalizedManifest,
-  UserscriptRunAt,
-  WebhookAuth,
+import {
+  projectAppCapabilities,
+  type NormalizedManifest,
+  type WebhookAuth,
 } from './apps/manifest';
 import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
@@ -61,6 +61,7 @@ export const listApps = createServerFn({ method: 'GET' })
     });
     return rows.map((r) => ({
       ...r,
+      capabilities: projectAppCapabilities(r.capabilities),
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     }));
@@ -111,6 +112,7 @@ export const getAppBySlug = createServerFn({ method: 'GET' })
     const { currentDeploymentId, ...detail } = row;
     return {
       ...detail,
+      capabilities: projectAppCapabilities(detail.capabilities),
       deploymentRevision: currentDeploymentId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -466,64 +468,4 @@ export const mutateAppDataTableFn = createServerFn({ method: 'POST' })
     await requireDataTableApp(data.id);
     const { mutateDataTable } = await import('./apps/data-table/service');
     return mutateDataTable(data.id, data.mutation);
-  });
-
-/** ================== userscripts (manage UI) ================== */
-
-/** One installable Tampermonkey script for the manage page's Browser scripts panel. */
-export type UserscriptInstallLink = {
-  id: string;
-  name: string;
-  matches: string[];
-  grants: string[];
-  connects: string[];
-  runAt: UserscriptRunAt | null;
-  noframes: boolean;
-  description: string | null;
-  /**
-   * Tokenized `.user.js` download path (relative). The manage UI prepends
-   * `window.location.origin` for the copy/install action. Carries the app-level
-   * secret, so it's only ever returned to an authenticated manage request.
-   */
-  url: string;
-};
-
-export const listUserscriptInstallLinksFn = createServerFn({ method: 'GET' })
-  .middleware([authMiddleware])
-  .validator((id: string) => idSchema.parse(id))
-  .handler(async ({ data: id }): Promise<UserscriptInstallLink[]> => {
-    const app = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
-      columns: {
-        status: true,
-        capabilities: true,
-        currentDeploymentId: true,
-        userscriptSecret: true,
-      },
-    });
-    // Only a live, non-archived, userscripts-capable app with a minted token has
-    // installable links. Anything else yields an empty list so the panel hides.
-    if (
-      !app ||
-      app.status === 'archived' ||
-      !app.currentDeploymentId ||
-      !app.capabilities?.userscripts ||
-      !app.userscriptSecret
-    ) {
-      return [];
-    }
-    const manifest = await normalizedManifestFor(id);
-    const scripts = manifest?.userscripts ?? [];
-    const token = encodeURIComponent(app.userscriptSecret);
-    return scripts.map((s) => ({
-      id: s.id,
-      name: s.name,
-      matches: s.matches,
-      grants: s.grants,
-      connects: s.connects,
-      runAt: s.runAt ?? null,
-      noframes: s.noframes,
-      description: s.description ?? null,
-      url: `${s.url}?token=${token}`,
-    }));
   });

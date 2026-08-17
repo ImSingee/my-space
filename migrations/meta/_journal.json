@@ -50,6 +50,13 @@
       "when": 1786702438403,
       "tag": "0006_groovy_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786998478091,
+      "tag": "0007_remove_userscripts",
+      "breakpoints": true
     }
   ]
 }

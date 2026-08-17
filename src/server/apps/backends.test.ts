@@ -45,7 +45,6 @@ const BACKEND_CAPS = {
   cron: false,
   webhook: false,
   kv: false,
-  userscripts: false,
 };
 
 async function seedApp(

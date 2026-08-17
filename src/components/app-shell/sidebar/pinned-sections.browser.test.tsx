@@ -24,7 +24,6 @@ type AppFixture = {
     cron: boolean;
     webhook: boolean;
     kv: boolean;
-    userscripts: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -108,7 +107,6 @@ const capabilities = {
   cron: false,
   webhook: false,
   kv: false,
-  userscripts: false,
 };
 
 function app(id: string, slug = `slug-${id}`): AppFixture {

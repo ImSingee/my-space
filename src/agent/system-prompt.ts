@@ -56,7 +56,6 @@ app/index.html
 app/main.tsx
 data/schema.ts
 widgets/<name>.tsx
-userscripts/<name>.ts
 package.json
 deno.json
 deno.lock
@@ -140,8 +139,8 @@ gen/                    # generated RPC code
   rest and masked from ordinary Agent/UI reads. Omit \`secret\` when updating a
   value to preserve its existing flag.
 - Read the Skill references for capability-specific contracts: cron, webhook,
-  storage, KV, Data Tables, userscripts, long-running backends, and calling
-  top-level workflows.
+  storage, KV, Data Tables, long-running backends, and calling top-level
+  workflows.
 
 # App workflow
 

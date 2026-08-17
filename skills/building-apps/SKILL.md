@@ -1,6 +1,6 @@
 ---
 name: building-apps
-description: Design, build, validate, and deploy Hatch Apps with React frontends, Connect/Deno backends, widgets, managed Data Tables, storage, integrations, and userscripts. Use whenever creating, modifying, debugging, or deploying an App.
+description: Design, build, validate, and deploy Hatch Apps with React frontends, Connect/Deno backends, widgets, managed Data Tables, storage, and integrations. Use whenever creating, modifying, debugging, or deploying an App.
 ---
 
 # Build a Hatch App
@@ -23,7 +23,7 @@ workflow in order and load only the capability references needed for the task.
    existing target or choose a different `target_path`; use `force: true` only
    when discarding that target is intended.
 3. Read the actual source tree before editing. Keep `manifest.json`, proto,
-   backend, frontend, widgets, userscripts, and capabilities synchronized.
+   backend, frontend, widgets, and capabilities synchronized.
 4. If dependencies changed, update the lockfile with the Deno command below.
    Generate RPC code, run the source check, and run relevant tests.
 5. In the returned worktree, inspect `git status`, stage only intended authored
@@ -50,7 +50,6 @@ app/index.html         SPA host
 app/main.tsx           React SPA entry
 data/schema.ts         managed Data Table schema
 widgets/counter.tsx    default demo widget
-userscripts/*.ts       optional Tampermonkey entries
 package.json           npm dependencies resolved by Deno
 deno.json              compiler and lifecycle-script deny policy
 deno.lock              committed dependency lock
@@ -128,8 +127,7 @@ manifest is:
     "webhook": false,
     "storage": false,
     "kv": false,
-    "dataTable": false,
-    "userscripts": false
+    "dataTable": false
   },
   "backendMode": "serverless",
   "rpc": {
@@ -204,9 +202,9 @@ deno check --config=deno.json --no-remote --node-modules-dir=auto \
   app/main.tsx backend/main.ts widgets/counter.tsx data/schema.ts
 ```
 
-Adjust the final entry list to the manifest; include userscript entries and omit
-disabled or absent entries. Run relevant tests after the check. Do not use a
-different import map for local checks.
+Adjust the final entry list to the manifest and omit disabled or absent entries.
+Run relevant tests after the check. Do not use a different import map for local
+checks.
 
 Every other Deno command that resolves App TypeScript must use the same SDK,
 node-modules, and frozen-lock contract. For example:
@@ -310,8 +308,6 @@ Read only the reference relevant to the requested capability:
   cron authentication, webhooks, long-running mode, and workflow calls.
 - [Data and storage](references/data-storage.md): Postgres, Storage, KV, runtime
   assets, and Data Table query/mutation details.
-- [Userscripts](references/userscripts.md): Tampermonkey manifest fields,
-  metadata ownership, bundling, and cross-origin calls.
 
 ## Rollback
 

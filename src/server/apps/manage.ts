@@ -1,7 +1,7 @@
 /** Server-only: app lifecycle management — archive, rollback, delete. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import {
   deploymentBuildDir,
   appBuildDir,
@@ -367,11 +367,6 @@ async function rollbackAppInner(
         // restore code whose forward-only Data schema differs. Clear a failed
         // deployment's fence only after its migration outcome was resolved.
         dataActivationId: dataMigrationResolved ? null : app.dataActivationId,
-        // Rollback must also bump the served userscript `@version`: Tampermonkey
-        // only fetches when the remote version INCREASES, so re-serving the old
-        // deployment's number (v3 → v2) would read as "older" and installed
-        // scripts would never receive the rolled-back code.
-        userscriptRevision: sql`${schema.apps.userscriptRevision} + 1`,
       })
       .where(eq(schema.apps.id, id));
   });

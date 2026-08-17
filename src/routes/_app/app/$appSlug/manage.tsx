@@ -42,7 +42,6 @@ import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { Page } from '~components/app-shell/page';
 import { ApiPanel } from '~components/apps/api-panel';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { BrowserScriptsPanel } from '~components/apps/browser-scripts-panel';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
 import { Field } from '~components/system/field';
@@ -273,13 +272,6 @@ function AppDetailPage() {
           <>
             <Divider />
             <ApiPanel appId={app.id} />
-          </>
-        ) : null}
-
-        {capabilities?.userscripts ? (
-          <>
-            <Divider />
-            <BrowserScriptsPanel appId={app.id} />
           </>
         ) : null}
 

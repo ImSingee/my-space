@@ -26,7 +26,6 @@ const KV_CAPABILITIES = {
   webhook: false,
   storage: false,
   kv: true,
-  userscripts: false,
 };
 
 function signedRequest(

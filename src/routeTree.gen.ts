@@ -51,7 +51,6 @@ import { Route as ApiAppAppIdAppSplatRouteImport } from './routes/api/app/$appId
 import { Route as ApiAppAppIdDataSplatRouteImport } from './routes/api/app/$appId/data/$'
 import { Route as ApiAppAppIdKvSplatRouteImport } from './routes/api/app/$appId/kv/$'
 import { Route as ApiAppAppIdRpcSplatRouteImport } from './routes/api/app/$appId/rpc/$'
-import { Route as ApiAppAppIdUserscriptsScriptIdRouteImport } from './routes/api/app/$appId/userscripts/$scriptId'
 import { Route as ApiAppAppIdWidgetWidgetIdRouteImport } from './routes/api/app/$appId/widget/$widgetId'
 import { Route as ApiAgentSessionsSessionIdAttachmentsAttachmentIdRouteImport } from './routes/api/agent/sessions/$sessionId/attachments/$attachmentId'
 
@@ -271,12 +270,6 @@ const ApiAppAppIdRpcSplatRoute = ApiAppAppIdRpcSplatRouteImport.update({
   path: '/api/app/$appId/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAppAppIdUserscriptsScriptIdRoute =
-  ApiAppAppIdUserscriptsScriptIdRouteImport.update({
-    id: '/api/app/$appId/userscripts/$scriptId',
-    path: '/api/app/$appId/userscripts/$scriptId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ApiAppAppIdWidgetWidgetIdRoute =
   ApiAppAppIdWidgetWidgetIdRouteImport.update({
     id: '/api/app/$appId/widget/$widgetId',
@@ -331,7 +324,6 @@ export interface FileRoutesByFullPath {
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
   '/api/app/$appId/kv/$': typeof ApiAppAppIdKvSplatRoute
   '/api/app/$appId/rpc/$': typeof ApiAppAppIdRpcSplatRoute
-  '/api/app/$appId/userscripts/$scriptId': typeof ApiAppAppIdUserscriptsScriptIdRoute
   '/api/app/$appId/widget/$widgetId': typeof ApiAppAppIdWidgetWidgetIdRoute
   '/workflows/$workflowId/executions/': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
   '/api/agent/sessions/$sessionId/attachments/$attachmentId': typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
@@ -375,7 +367,6 @@ export interface FileRoutesByTo {
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
   '/api/app/$appId/kv/$': typeof ApiAppAppIdKvSplatRoute
   '/api/app/$appId/rpc/$': typeof ApiAppAppIdRpcSplatRoute
-  '/api/app/$appId/userscripts/$scriptId': typeof ApiAppAppIdUserscriptsScriptIdRoute
   '/api/app/$appId/widget/$widgetId': typeof ApiAppAppIdWidgetWidgetIdRoute
   '/workflows/$workflowId/executions': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
   '/api/agent/sessions/$sessionId/attachments/$attachmentId': typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
@@ -423,7 +414,6 @@ export interface FileRoutesById {
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
   '/api/app/$appId/kv/$': typeof ApiAppAppIdKvSplatRoute
   '/api/app/$appId/rpc/$': typeof ApiAppAppIdRpcSplatRoute
-  '/api/app/$appId/userscripts/$scriptId': typeof ApiAppAppIdUserscriptsScriptIdRoute
   '/api/app/$appId/widget/$widgetId': typeof ApiAppAppIdWidgetWidgetIdRoute
   '/_app/workflows/$workflowId/executions/': typeof AppWorkflowsWorkflowIdExecutionsIndexRoute
   '/api/agent/sessions/$sessionId/attachments/$attachmentId': typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
@@ -471,7 +461,6 @@ export interface FileRouteTypes {
     | '/api/app/$appId/data/$'
     | '/api/app/$appId/kv/$'
     | '/api/app/$appId/rpc/$'
-    | '/api/app/$appId/userscripts/$scriptId'
     | '/api/app/$appId/widget/$widgetId'
     | '/workflows/$workflowId/executions/'
     | '/api/agent/sessions/$sessionId/attachments/$attachmentId'
@@ -515,7 +504,6 @@ export interface FileRouteTypes {
     | '/api/app/$appId/data/$'
     | '/api/app/$appId/kv/$'
     | '/api/app/$appId/rpc/$'
-    | '/api/app/$appId/userscripts/$scriptId'
     | '/api/app/$appId/widget/$widgetId'
     | '/workflows/$workflowId/executions'
     | '/api/agent/sessions/$sessionId/attachments/$attachmentId'
@@ -562,7 +550,6 @@ export interface FileRouteTypes {
     | '/api/app/$appId/data/$'
     | '/api/app/$appId/kv/$'
     | '/api/app/$appId/rpc/$'
-    | '/api/app/$appId/userscripts/$scriptId'
     | '/api/app/$appId/widget/$widgetId'
     | '/_app/workflows/$workflowId/executions/'
     | '/api/agent/sessions/$sessionId/attachments/$attachmentId'
@@ -586,7 +573,6 @@ export interface RootRouteChildren {
   ApiAppAppIdDataSplatRoute: typeof ApiAppAppIdDataSplatRoute
   ApiAppAppIdKvSplatRoute: typeof ApiAppAppIdKvSplatRoute
   ApiAppAppIdRpcSplatRoute: typeof ApiAppAppIdRpcSplatRoute
-  ApiAppAppIdUserscriptsScriptIdRoute: typeof ApiAppAppIdUserscriptsScriptIdRoute
   ApiAppAppIdWidgetWidgetIdRoute: typeof ApiAppAppIdWidgetWidgetIdRoute
   ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute: typeof ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute
 }
@@ -887,13 +873,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppAppIdRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/app/$appId/userscripts/$scriptId': {
-      id: '/api/app/$appId/userscripts/$scriptId'
-      path: '/api/app/$appId/userscripts/$scriptId'
-      fullPath: '/api/app/$appId/userscripts/$scriptId'
-      preLoaderRoute: typeof ApiAppAppIdUserscriptsScriptIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/app/$appId/widget/$widgetId': {
       id: '/api/app/$appId/widget/$widgetId'
       path: '/api/app/$appId/widget/$widgetId'
@@ -1019,7 +998,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAppAppIdDataSplatRoute: ApiAppAppIdDataSplatRoute,
   ApiAppAppIdKvSplatRoute: ApiAppAppIdKvSplatRoute,
   ApiAppAppIdRpcSplatRoute: ApiAppAppIdRpcSplatRoute,
-  ApiAppAppIdUserscriptsScriptIdRoute: ApiAppAppIdUserscriptsScriptIdRoute,
   ApiAppAppIdWidgetWidgetIdRoute: ApiAppAppIdWidgetWidgetIdRoute,
   ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute:
     ApiAgentSessionsSessionIdAttachmentsAttachmentIdRoute,
