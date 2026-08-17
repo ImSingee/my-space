@@ -1,9 +1,9 @@
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Group,
-  Indicator,
   Loader,
   Menu,
   Stack,
@@ -236,25 +236,29 @@ export function AppView() {
         <Group gap={4} wrap="nowrap">
           {canOpen || updateAvailable ? (
             <>
-              <Tooltip label={reloadLabel} withArrow>
-                <Indicator
-                  color="ember"
-                  size={8}
-                  offset={5}
-                  withBorder
-                  inline
-                  disabled={!updateAvailable}
+              {updateAvailable ? (
+                <Badge
+                  component="output"
+                  className={classes.updateBadge}
+                  color="ember.7"
+                  variant="filled"
+                  size="lg"
+                  radius="sm"
+                  tt="none"
                 >
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    aria-label={reloadLabel}
-                    loading={reloading}
-                    onClick={reload}
-                  >
-                    <IconRefresh size={18} stroke={1.7} />
-                  </ActionIcon>
-                </Indicator>
+                  Update available
+                </Badge>
+              ) : null}
+              <Tooltip label={reloadLabel} withArrow>
+                <ActionIcon
+                  variant={updateAvailable ? 'light' : 'subtle'}
+                  color={updateAvailable ? 'ember' : 'gray'}
+                  aria-label={reloadLabel}
+                  loading={reloading}
+                  onClick={reload}
+                >
+                  <IconRefresh size={18} stroke={1.7} />
+                </ActionIcon>
               </Tooltip>
               {canOpen ? (
                 <Tooltip label="Open in new tab" withArrow>

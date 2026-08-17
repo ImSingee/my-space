@@ -14,6 +14,22 @@
   border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
+.updateBadge {
+  animation: update-badge-in var(--transition-base) both;
+}
+
+@keyframes update-badge-in {
+  from {
+    opacity: 0;
+    transform: translateX(4px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .frameWrap {
   position: relative;
   flex: 1;
@@ -42,4 +58,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .updateBadge {
+    animation: none;
+  }
 }
