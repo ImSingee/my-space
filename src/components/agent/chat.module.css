@@ -429,6 +429,15 @@ button.stepHeader:hover {
   padding: var(--mantine-spacing-xs);
 }
 
+.sessionGroupTitle {
+  margin: 0 0 var(--mantine-spacing-4xs);
+  padding-inline: 10px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--mantine-color-dimmed);
+}
+
 .sessionItem {
   display: flex;
   align-items: center;
