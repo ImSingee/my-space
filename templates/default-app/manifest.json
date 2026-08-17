@@ -12,8 +12,7 @@
     "cron": false,
     "webhook": false,
     "kv": false,
-    "dataTable": true,
-    "userscripts": false
+    "dataTable": true
   },
   "backendMode": "serverless",
   "rpc": {

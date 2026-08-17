@@ -648,7 +648,6 @@ describe('buildApp source validation', () => {
           frontend: true,
           backend: true,
           widgets: true,
-          userscripts: true,
           dataTable: true,
         },
         app: {
@@ -664,21 +663,12 @@ describe('buildApp source validation', () => {
             entry: 'widgets/counter.ts',
           },
         ],
-        userscripts: [
-          {
-            id: 'watch',
-            name: 'Watch',
-            entry: 'userscripts/watch.ts',
-            matches: ['https://example.com/*'],
-          },
-        ],
       },
       {
         'app/main.ts': 'const appValue: string = 1;\n',
         'app/index.html': '<html><body></body></html>',
         'backend/main.ts': 'const backendValue: string = 1;\n',
         'widgets/counter.ts': 'const widgetValue: string = 1;\n',
-        'userscripts/watch.ts': 'const userscriptValue: string = 1;\n',
         'data/schema.ts':
           'const schemaValue: string = 1;\n' +
           'export default { descriptor: {} };\n',
@@ -698,7 +688,6 @@ describe('buildApp source validation', () => {
       'app/main.ts',
       'backend/main.ts',
       'widgets/counter.ts',
-      'userscripts/watch.ts',
       'data/schema.ts',
     ]) {
       expect(message).toContain(entry);
@@ -898,118 +887,6 @@ describe('buildApp fixed browser configuration', () => {
     await expect(fs.access(outputDir)).rejects.toMatchObject({
       code: 'ENOENT',
     });
-  });
-});
-
-describe('buildApp userscripts', () => {
-  it('uses the fixed React automatic JSX runtime when bundling userscripts', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { userscripts: true },
-        userscripts: [
-          {
-            id: 'watch',
-            name: 'Watch',
-            entry: 'userscripts/watch.tsx',
-            matches: ['https://example.com/*'],
-          },
-        ],
-      },
-      {
-        'userscripts/watch.tsx':
-          'const view = <div data-marker="fixed-react-jsx-marker" />;\n' +
-          'document.body.dataset.view = JSON.stringify(view);\n',
-      },
-    );
-    await useDefaultDependencyFiles(sourceDir);
-
-    await buildApp('demo', { sourceDir, outputDir });
-
-    const bundled = await fs.readFile(
-      path.join(outputDir, 'userscripts', 'watch.js'),
-      'utf8',
-    );
-    expect(bundled).toContain('fixed-react-jsx-marker');
-  }, 15_000);
-
-  it('bundles each userscript to userscripts/<id>.js and normalizes metadata', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { userscripts: true },
-        userscripts: [
-          {
-            id: 'watch',
-            name: 'Watch',
-            entry: 'userscripts/watch.ts',
-            matches: ['https://example.com/*'],
-            grants: ['GM_setValue'],
-          },
-        ],
-      },
-      {
-        'userscripts/watch.ts':
-          "const marker = 'hatch-userscript-marker';\ndocument.title = marker;\n",
-      },
-    );
-
-    const result = await buildApp('demo', { sourceDir, outputDir });
-
-    const bundled = await fs.readFile(
-      path.join(outputDir, 'userscripts', 'watch.js'),
-      'utf8',
-    );
-    expect(bundled).toContain('hatch-userscript-marker');
-    // IIFE output must not carry ESM syntax (Tampermonkey injects a classic script).
-    expect(bundled).not.toMatch(/^\s*export\s/m);
-
-    expect(result.normalized.userscripts).toEqual([
-      {
-        id: 'watch',
-        name: 'Watch',
-        url: '/api/app/demo/userscripts/watch.user.js',
-        matches: ['https://example.com/*'],
-        grants: ['GM_setValue'],
-        connects: [],
-        noframes: false,
-        extraMetadata: {},
-      },
-    ]);
-
-    // The normalized manifest is persisted alongside the bundle.
-    const persisted = JSON.parse(
-      await fs.readFile(
-        path.join(outputDir, 'manifest.normalized.json'),
-        'utf8',
-      ),
-    );
-    expect(persisted.userscripts).toHaveLength(1);
-  });
-
-  it('fails the build when a declared userscript entry is missing', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { userscripts: true },
-        userscripts: [
-          {
-            id: 'watch',
-            name: 'Watch',
-            entry: 'userscripts/missing.ts',
-            matches: ['https://example.com/*'],
-          },
-        ],
-      },
-      {},
-    );
-
-    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
-      /userscript entry not found/,
-    );
   });
 });
 

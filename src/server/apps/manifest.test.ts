@@ -126,6 +126,21 @@ describe('app capabilities manifest', () => {
     expect(normalized).not.toHaveProperty('storage');
   });
 
+  it('accepts and strips the retired userscripts: false field', () => {
+    const parsed = parseSourceManifest(manifest({ userscripts: false }));
+    const normalized = normalizeManifest(parsed);
+
+    expect(parsed.capabilities).not.toHaveProperty('userscripts');
+    expect(normalized.capabilities).not.toHaveProperty('userscripts');
+    expect(normalized).not.toHaveProperty('userscripts');
+  });
+
+  it('rejects the retired userscripts capability when enabled', () => {
+    expect(() => parseSourceManifest(manifest({ userscripts: true }))).toThrow(
+      /userscripts/,
+    );
+  });
+
   it('requires both the backend capability and backend entry for storage', () => {
     expect(() =>
       parseSourceManifest({
@@ -184,8 +199,9 @@ describe('app route manifest', () => {
         app: { entry: 'app/main.tsx' },
       }),
     );
-    const stored: NormalizedManifest = {
+    const stored = {
       ...normalized,
+      capabilities: { ...normalized.capabilities, userscripts: true },
       app: { url: '/api/apps/legacy-id/app/', routes: [] },
       widgets: [
         {
@@ -215,6 +231,11 @@ describe('app route manifest', () => {
       kv: { url: '/api/apps/legacy-id/kv' },
       dataTable: { url: '/api/apps/legacy-id/data' },
       webhook: { url: '/api/hooks/01internalid', auth: 'platform' },
+    } as NormalizedManifest & {
+      capabilities: NormalizedManifest['capabilities'] & {
+        userscripts: boolean;
+      };
+      userscripts: unknown[];
     };
     const before = structuredClone(stored);
 
@@ -228,9 +249,8 @@ describe('app route manifest', () => {
     expect(projected.widgets[0]?.url).toBe(
       '/api/app/01authoritativeid/widget/summary',
     );
-    expect(projected.userscripts?.[0]?.url).toBe(
-      '/api/app/01authoritativeid/userscripts/watch.user.js',
-    );
+    expect(projected).not.toHaveProperty('userscripts');
+    expect(projected.capabilities).not.toHaveProperty('userscripts');
     expect(projected.rpc?.url).toBe('/api/app/01authoritativeid/rpc');
     expect(projected.kv?.url).toBe('/api/app/01authoritativeid/kv');
     expect(projected.dataTable?.url).toBe('/api/app/01authoritativeid/data');
@@ -405,161 +425,5 @@ describe('normalizeManifest widgets', () => {
     const w = normalize({ defaultSize: { w: 4, h: 3 } });
     expect(w.supportedSizes).toEqual([]);
     expect(w.defaultSize).toEqual({ w: 4, h: 3 });
-  });
-});
-
-describe('userscripts manifest', () => {
-  const withScripts = (
-    scripts: Record<string, unknown>[],
-    capabilityOn = true,
-  ) => ({
-    id: 'demo',
-    name: 'Demo',
-    capabilities: { userscripts: capabilityOn },
-    userscripts: scripts,
-  });
-
-  const baseScript = {
-    id: 'watch',
-    name: 'Watch',
-    entry: 'userscripts/watch.ts',
-    matches: ['https://example.com/*'],
-  };
-
-  it('accepts a valid declaration and normalizes it', () => {
-    const normalized = normalizeManifest(
-      parseSourceManifest(
-        withScripts([
-          {
-            ...baseScript,
-            description: 'Watches',
-            grants: ['GM_setValue', 'GM_getValue'],
-            connects: ['api.example.com'],
-            runAt: 'document-idle',
-            noframes: true,
-            extraMetadata: { require: 'https://cdn/x.js' },
-          },
-        ]),
-      ),
-    );
-    expect(normalized.userscripts).toEqual([
-      {
-        id: 'watch',
-        name: 'Watch',
-        url: '/api/app/demo/userscripts/watch.user.js',
-        matches: ['https://example.com/*'],
-        description: 'Watches',
-        grants: ['GM_setValue', 'GM_getValue'],
-        connects: ['api.example.com'],
-        runAt: 'document-idle',
-        noframes: true,
-        extraMetadata: { require: 'https://cdn/x.js' },
-      },
-    ]);
-  });
-
-  it('omits userscripts from the normalized manifest when capability is off', () => {
-    const normalized = normalizeManifest(
-      parseSourceManifest(withScripts([baseScript], false)),
-    );
-    expect(normalized.userscripts).toBeUndefined();
-  });
-
-  it('rejects an enabled capability with no scripts', () => {
-    expect(() => parseSourceManifest(withScripts([]))).toThrow(
-      /no userscripts are declared/,
-    );
-  });
-
-  it('rejects an unsafe entry path', () => {
-    expect(() =>
-      parseSourceManifest(
-        withScripts([{ ...baseScript, entry: '../../secret.ts' }]),
-      ),
-    ).toThrow(/relative path inside the app source/);
-  });
-
-  it('rejects an id with path separators', () => {
-    expect(() =>
-      parseSourceManifest(withScripts([{ ...baseScript, id: 'a/b' }])),
-    ).toThrow(/userscript id must contain/);
-  });
-
-  it('rejects a script with no match patterns', () => {
-    expect(() =>
-      parseSourceManifest(withScripts([{ ...baseScript, matches: [] }])),
-    ).toThrow(/at least one match/);
-  });
-
-  it('rejects line breaks in metadata (injection guard)', () => {
-    expect(() =>
-      parseSourceManifest(
-        withScripts([
-          { ...baseScript, name: 'Watch\n// @grant GM_deleteValue' },
-        ]),
-      ),
-    ).toThrow(/must not contain line breaks/);
-    expect(() =>
-      parseSourceManifest(
-        withScripts([{ ...baseScript, matches: ['https://x/*\n// @run-at'] }]),
-      ),
-    ).toThrow(/must not contain line breaks/);
-  });
-
-  it('rejects mixing "none" with other grants', () => {
-    expect(() =>
-      parseSourceManifest(
-        withScripts([{ ...baseScript, grants: ['none', 'GM_setValue'] }]),
-      ),
-    ).toThrow(/cannot be combined with other grants/);
-  });
-
-  it('accepts a sole "none" grant', () => {
-    const normalized = normalizeManifest(
-      parseSourceManifest(withScripts([{ ...baseScript, grants: ['none'] }])),
-    );
-    expect(normalized.userscripts?.[0]?.grants).toEqual(['none']);
-  });
-
-  it('rejects platform-owned keys in extraMetadata', () => {
-    // `include`/`exclude`/`exclude-match` change which pages the script runs
-    // on, so they must go through the structured `matches` field — otherwise a
-    // manifest could widen its scope beyond what the manage UI displays.
-    for (const key of [
-      'name',
-      'version',
-      'match',
-      'downloadURL',
-      'grant',
-      'include',
-      'exclude',
-      'exclude-match',
-      'Include',
-    ]) {
-      expect(() =>
-        parseSourceManifest(
-          withScripts([{ ...baseScript, extraMetadata: { [key]: 'x' } }]),
-        ),
-      ).toThrow(/platform-managed key/);
-    }
-  });
-
-  it('rejects duplicate script ids', () => {
-    expect(() =>
-      parseSourceManifest(withScripts([baseScript, { ...baseScript }])),
-    ).toThrow(/duplicate userscript id/);
-  });
-
-  it('defaults optional fields (empty grants/connects, noframes false)', () => {
-    const normalized = normalizeManifest(
-      parseSourceManifest(withScripts([baseScript])),
-    );
-    const script = normalized.userscripts?.[0];
-    expect(script?.grants).toEqual([]);
-    expect(script?.connects).toEqual([]);
-    expect(script?.noframes).toBe(false);
-    expect(script?.runAt).toBeUndefined();
-    expect(script?.description).toBeUndefined();
-    expect(script?.extraMetadata).toEqual({});
   });
 });

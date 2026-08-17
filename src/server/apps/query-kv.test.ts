@@ -27,7 +27,6 @@ const KV_CAPABILITIES = {
   cron: false,
   webhook: false,
   kv: true,
-  userscripts: false,
 };
 
 async function seedApp(

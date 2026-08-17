@@ -98,7 +98,6 @@ vi.mock('~/db', () => ({
     apps: {
       id: 'apps.id',
       status: 'apps.status',
-      userscriptRevision: 'apps.userscript_revision',
       createdAt: 'apps.created_at',
     },
   },

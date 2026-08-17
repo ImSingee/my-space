@@ -121,7 +121,6 @@ describe('normalizedManifestFor', () => {
           cron: false,
           webhook: false,
           kv: false,
-          userscripts: false,
         },
       })
       .where(eq(schema.apps.id, '01immutableid'));

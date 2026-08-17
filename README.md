@@ -42,9 +42,6 @@ wished existed, built for an audience of one: you.
   app: trigger it on a schedule, from a webhook, or manually with an
   auto-generated form, and audit every run step by step — status, duration,
   and logs included.
-- **Browser scripts.** Apps can publish Tampermonkey userscripts that extend
-  other websites with your own logic. Install them from a private link that
-  auto-updates every time you redeploy.
 - **Key-value storage and secrets.** Apps get a built-in key-value store for
   tokens and config. Newly created or overwritten secret values are encrypted
   at rest and stay masked in the UI.
@@ -115,8 +112,6 @@ and recreate the Agent Runner (`docker compose up -d --force-recreate agent`).
 - "Make a bookmarks app with a webhook so I can save links from my phone."
 - "Create a workflow that pulls my RSS feeds every morning and files new
   items into my reading app."
-- "Publish a userscript that adds keyboard shortcuts to my favorite forum and
-  logs what I read into an app."
 
 ## License
 

@@ -61,7 +61,6 @@ const frontendCapabilities = {
   webhook: false,
   kv: false,
   dataTable: false,
-  userscripts: false,
 };
 
 function app(overrides: Partial<AppDetail> = {}): AppDetail {

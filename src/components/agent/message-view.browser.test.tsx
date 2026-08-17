@@ -69,7 +69,6 @@ const capabilities = (frontend: boolean) => ({
   cron: false,
   webhook: false,
   kv: false,
-  userscripts: false,
 });
 
 function appFixture(
