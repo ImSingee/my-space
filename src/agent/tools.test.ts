@@ -188,6 +188,21 @@ describe('agent file tools', () => {
     expect(textOf(second)).toBe('remaining');
   });
 
+  it('rejects an offset inside a Unicode surrogate pair', async () => {
+    const { getTool } = await setup({ 'unicode.txt': '😀remaining' });
+
+    await expect(
+      getTool('read_file').execute('read', {
+        path: 'unicode.txt',
+        offset: 1,
+        limit: 1,
+      }),
+    ).rejects.toThrow(
+      'Invalid offset 1: it falls inside a UTF-16 surrogate pair. ' +
+        'Use offset=0 or offset=2.',
+    );
+  });
+
   it('supports custom read windows and reports the next offset', async () => {
     const { root, getTool } = await setup({
       'digits.txt': '0123456789',
