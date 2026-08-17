@@ -92,7 +92,7 @@ describe('managed Data Table schema SDK', () => {
       limit: 25,
     };
     const client = createDataClient<typeof schema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
     const validQuery = () => client.query(query);
@@ -180,14 +180,14 @@ describe('managed Data Table SDK deployment binding', () => {
     );
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
 
     await client.query({ table: 'todos' });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://hatch.test/api/apps/example/data/query',
+      'https://hatch.test/api/app/example/data/query',
       expect.objectContaining({
         headers: expect.objectContaining({
           [DATA_DEPLOYMENT_HEADER]: 'deployment-v2',
@@ -202,7 +202,7 @@ describe('managed Data Table SDK deployment binding', () => {
     );
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
 
@@ -239,7 +239,7 @@ describe('managed Data Table SDK deployment binding', () => {
     );
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<typeof schema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
 
@@ -270,15 +270,15 @@ describe('managed Data Table SDK deployment binding', () => {
 
   it('isolates framework caches by endpoint and deployment', () => {
     const first = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/first/data/',
+      baseUrl: 'https://hatch.test/api/app/first/data/',
       deploymentId: 'deployment-v1',
     });
     const second = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/second/data',
+      baseUrl: 'https://hatch.test/api/app/second/data',
       deploymentId: 'deployment-v1',
     });
     const redeployed = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/first/data',
+      baseUrl: 'https://hatch.test/api/app/first/data',
       deploymentId: 'deployment-v2',
     });
 
@@ -286,7 +286,7 @@ describe('managed Data Table SDK deployment binding', () => {
     expect(first.cacheNamespace).not.toBe(redeployed.cacheNamespace);
     expect(first.cacheNamespace).toBe(
       createDataClient<DataSchema>({
-        baseUrl: 'https://hatch.test/api/apps/first/data',
+        baseUrl: 'https://hatch.test/api/app/first/data',
         deploymentId: 'deployment-v1',
       }).cacheNamespace,
     );
@@ -304,13 +304,13 @@ describe('managed Data Table SDK deployment binding', () => {
       },
     });
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
     });
 
     await client.query({ table: 'todos' });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://hatch.test/api/apps/example/data/query',
+      'https://hatch.test/api/app/example/data/query',
       expect.objectContaining({
         headers: expect.objectContaining({
           [DATA_DEPLOYMENT_HEADER]: 'deployment-backend',
@@ -335,7 +335,7 @@ describe('managed Data Table SDK deployment binding', () => {
     });
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
     const stop = client.watch({ table: 'todos' }, () => {});
@@ -365,7 +365,7 @@ describe('managed Data Table SDK deployment binding', () => {
     });
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
     const listener = vi.fn<(result: unknown) => void>();
@@ -393,7 +393,7 @@ describe('managed Data Table SDK deployment binding', () => {
     );
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v1',
     });
     const onError = vi.fn<(error: unknown) => void>();
@@ -422,7 +422,7 @@ describe('managed Data Table SDK deployment binding', () => {
     );
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v1',
     });
     const onError = vi.fn<(error: unknown) => void>();
@@ -446,7 +446,7 @@ describe('managed Data Table SDK deployment binding', () => {
       ),
     );
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
 
@@ -469,7 +469,7 @@ describe('managed Data Table SDK deployment binding', () => {
     });
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
     const stop = client.watch({ table: 'todos' }, () => {});
@@ -519,7 +519,7 @@ describe('managed Data Table SDK deployment binding', () => {
     });
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
     const listener = vi.fn<(result: unknown) => void>();
@@ -559,7 +559,7 @@ describe('managed Data Table SDK deployment binding', () => {
     });
     vi.stubGlobal('fetch', fetch);
     const client = createDataClient<DataSchema>({
-      baseUrl: 'https://hatch.test/api/apps/example/data',
+      baseUrl: 'https://hatch.test/api/app/example/data',
       deploymentId: 'deployment-v2',
     });
 

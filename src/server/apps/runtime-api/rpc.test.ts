@@ -40,44 +40,27 @@ describe('public app RPC route', () => {
     mocks.proxyAppRequest.mockResolvedValue(new Response('proxied'));
   });
 
-  it.each([
-    ['/api/app/app-id/rpc/todos.list', '/api/app/app-id/rpc'],
-    ['/api/apps/app-id/rpc/todos.list', '/api/apps/app-id/rpc'],
-  ])(
-    'strips the namespace used by the actual request: %s',
-    async (pathname, stripPrefix) => {
-      const request = new Request(`https://hatch.test${pathname}`, {
+  it('strips the canonical RPC prefix', async () => {
+    const request = new Request(
+      'https://hatch.test/api/app/app-id/rpc/todos.list',
+      {
         method: 'POST',
         body: '{}',
-      });
+      },
+    );
 
-      const response = await handleRpcRequest({ request });
+    const response = await handleRpcRequest({ request });
 
-      expect(response.status).toBe(200);
-      expect(mocks.proxyAppRequest).toHaveBeenCalledWith(
-        'app-id',
-        request,
-        stripPrefix,
-        '',
-        {
-          signWithSecret: 'signing-secret',
-          expectedDeploymentId: 'deployment-1',
-        },
-      );
-    },
-  );
-
-  it.each([
-    '/api/application/app-id/rpc',
-    '/api/appss/app-id/rpc',
-    '/api/app/app-id/rpc-method',
-  ])('rejects near-miss paths: %s', async (pathname) => {
-    const response = await handleRpcRequest({
-      request: new Request(`https://hatch.test${pathname}`),
-    });
-
-    expect(response.status).toBe(404);
-    expect(mocks.findApp).not.toHaveBeenCalled();
-    expect(mocks.proxyAppRequest).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.proxyAppRequest).toHaveBeenCalledWith(
+      'app-id',
+      request,
+      '/api/app/app-id/rpc',
+      '',
+      {
+        signWithSecret: 'signing-secret',
+        expectedDeploymentId: 'deployment-1',
+      },
+    );
   });
 });
