@@ -9,7 +9,7 @@
  * agent's shell.
  *
  * Layout under the runner's data dir (HATCH_DATA_DIR):
- *   agents/<sessionId>/work/apps/<id>/             ← app worktree
+ *   agents/<sessionId>/work/apps/<slug-or-id>/     ← default app worktree
  *   agents/<sessionId>/work/workflows/<id>/        ← workflow worktree
  *   agents/<sessionId>/work/attachments/<id>/...   ← downloaded attachments
  *   agents/<sessionId>/bundles/<kind>-<id>.bundle  ← origin bundle (hidden)
@@ -624,6 +624,36 @@ async function assertOwnedWorktree(
       `Workspace path is not a checkout of ${kind} "${id}" ` +
         `(expected origin ${bundle}, found ${origin ?? 'no origin'}).`,
     );
+  }
+}
+
+/**
+ * Check a reconnect fallback's proposed identity without deriving an id from
+ * Agent-writable Git config. The caller supplies the directory basename as the
+ * legacy id candidate; the origin must independently match that id's
+ * Runner-owned bundle path.
+ */
+export async function sourceWorktreeMatchesIdentity(
+  sessionId: string,
+  kind: SourceKind,
+  id: string,
+  sourcePath: string,
+): Promise<boolean> {
+  if (!isSafeEntityId(id)) return false;
+  try {
+    const resolved = await resolveAgentWorkspacePath(sessionId, sourcePath);
+    await assertOwnedWorktree(
+      sessionId,
+      resolved.absolutePath,
+      bundleFile(sessionId, kind, id),
+      id,
+      kind,
+    );
+    return true;
+  } catch {
+    // Ambiguous or unreadable unindexed worktrees are preserved rather than
+    // claimed under a guessed id and then removed as stale during reconnect.
+    return false;
   }
 }
 

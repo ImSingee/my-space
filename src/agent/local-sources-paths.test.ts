@@ -459,9 +459,82 @@ describe('runner source paths', () => {
     ).resolves.toBe(false);
   });
 
-  it('reports the created app id, path, and SDK materialization stage', async () => {
+  it('uses the app slug for the default create path', async () => {
+    const sessionId = 'create-default-slug-path';
+    const appId = '01createappwithgeneratedid';
+    const slug = 'readable-app';
+    const createApp = vi.fn<PlatformClient['createApp']>(async (input) => ({
+      id: appId,
+      slug: input.slug.trim(),
+      name: input.name,
+      generation: GENERATION,
+      files: [],
+    }));
+    const tools = createAppTools({
+      sessionId,
+      platform: { createApp } as unknown as PlatformClient,
+      materializeSdk: vi.fn<() => Promise<void>>(async () => undefined),
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
+    });
+    const create = tools.find((candidate) => candidate.name === 'create_app');
+    if (!create) throw new Error('Missing create_app tool.');
+
+    const result = await create.execute('create-default-slug-path', {
+      slug,
+      name: 'Readable App',
+    });
+    const expectedPath = agentAppWorkDir(sessionId, slug);
+
+    expect(toolText(result)).toContain(`Source is at ${expectedPath}.`);
+    expect(toolText(result)).toContain(
+      'Use this exact source path for deploy_app',
+    );
+    expect(result.details).toMatchObject({
+      id: appId,
+      slug,
+      path: `apps/${slug}`,
+      absolutePath: expectedPath,
+    });
+    await expect(exists(path.join(expectedPath, '.git'))).resolves.toBe(true);
+    await expect(exists(agentAppWorkDir(sessionId, appId))).resolves.toBe(
+      false,
+    );
+  });
+
+  it('rejects an occupied default slug path before creating the app', async () => {
+    const sessionId = 'create-default-slug-conflict';
+    const slug = 'occupied-app';
+    const expectedPath = agentAppWorkDir(sessionId, slug);
+    await mkdir(expectedPath, { recursive: true });
+    await writeFile(path.join(expectedPath, 'keep.txt'), 'existing\n');
+    const createApp = vi.fn<PlatformClient['createApp']>();
+    const tools = createAppTools({
+      sessionId,
+      platform: { createApp } as unknown as PlatformClient,
+      materializeSdk: vi.fn<() => Promise<void>>(async () => undefined),
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
+    });
+    const create = tools.find((candidate) => candidate.name === 'create_app');
+    if (!create) throw new Error('Missing create_app tool.');
+
+    await expect(
+      create.execute('create-default-slug-conflict', {
+        slug,
+        name: 'Occupied App',
+      }),
+    ).rejects.toThrow(
+      `Workspace path already exists and is not empty: apps/${slug}`,
+    );
+    expect(createApp).not.toHaveBeenCalled();
+    await expect(
+      readFile(path.join(expectedPath, 'keep.txt'), 'utf8'),
+    ).resolves.toBe('existing\n');
+  });
+
+  it('reports the created app slug path and SDK materialization stage', async () => {
     const sessionId = 'create-sdk-materialization-failure';
     const appId = 'created-sdk-failure';
+    const slug = 'broken-sdk';
     const prepareWorktree = vi.fn<() => Promise<void>>(async () => undefined);
     const createApp = vi.fn<PlatformClient['createApp']>(async (input) => ({
       id: appId,
@@ -480,11 +553,11 @@ describe('runner source paths', () => {
     });
     const create = tools.find((candidate) => candidate.name === 'create_app');
     if (!create) throw new Error('Missing create_app tool.');
-    const expectedPath = agentAppWorkDir(sessionId, appId);
+    const expectedPath = agentAppWorkDir(sessionId, slug);
 
     await expect(
       create.execute('create-sdk-failure', {
-        slug: 'broken-sdk',
+        slug,
         name: 'Broken SDK',
       }),
     ).rejects.toThrow(
@@ -495,6 +568,9 @@ describe('runner source paths', () => {
     expect(createApp).toHaveBeenCalledOnce();
     expect(prepareWorktree).not.toHaveBeenCalled();
     await expect(exists(path.join(expectedPath, '.git'))).resolves.toBe(true);
+    await expect(exists(agentAppWorkDir(sessionId, appId))).resolves.toBe(
+      false,
+    );
   });
 
   it('reports the checked-out app id, path, and exact preparation stage', async () => {
@@ -1180,9 +1256,13 @@ describe('runner workspace cleanup', () => {
       GENERATION,
       () => Promise.resolve(),
     );
-    await mkdir(agentWorkflowWorkDir(sessionId, 'unindexed-workflow'), {
-      recursive: true,
-    });
+    const unindexed = await initNewWorktree(
+      sessionId,
+      'workflow',
+      'unindexed-workflow',
+      GENERATION,
+      () => Promise.resolve(),
+    );
 
     const stored = JSON.parse(
       await readFile(agentWorkspaceIndexPath(sessionId), 'utf8'),
@@ -1193,6 +1273,19 @@ describe('runner workspace cleanup', () => {
       generation: GENERATION,
       absolutePath: indexed.absolutePath,
     });
+    await writeFile(
+      agentWorkspaceIndexPath(sessionId),
+      JSON.stringify({
+        entries: [
+          {
+            kind: 'app',
+            id: 'indexed-app',
+            generation: GENERATION,
+            absolutePath: indexed.absolutePath,
+          },
+        ],
+      }),
+    );
 
     const snapshot = await inspectLocalWorkspaces();
     const sources = snapshot.sources.filter(
@@ -1220,6 +1313,7 @@ describe('runner workspace cleanup', () => {
       id: 'indexed-app',
       generation: null,
     });
+    await expect(exists(unindexed.absolutePath)).resolves.toBe(true);
 
     await writeFile(
       agentWorkspaceIndexPath(sessionId),
@@ -1235,6 +1329,65 @@ describe('runner workspace cleanup', () => {
     );
     await expect(listIndexedWorkspaces(sessionId)).resolves.toEqual([]);
   });
+
+  it('reports an indexed slug-path checkout only under its immutable id', async () => {
+    const sessionId = 'indexed-slug-path';
+    const appId = '01immutableappid';
+    const slug = 'readable-slug';
+    await initNewWorktree(
+      sessionId,
+      'app',
+      appId,
+      GENERATION,
+      () => Promise.resolve(),
+      agentAppWorkDir(sessionId, slug),
+    );
+
+    const snapshot = await inspectLocalWorkspaces();
+    const sources = snapshot.sources.filter(
+      (source) => source.sessionId === sessionId,
+    );
+    expect(sources).toEqual([
+      {
+        sessionId,
+        kind: 'app',
+        id: appId,
+        generation: GENERATION,
+      },
+    ]);
+  });
+
+  it.each(['missing', 'invalid'] as const)(
+    'preserves an unindexed slug-path checkout when its index is %s',
+    async (indexState) => {
+      const sessionId = `unindexed-slug-path-${indexState}`;
+      const checkout = await initNewWorktree(
+        sessionId,
+        'app',
+        '01unindexedappid',
+        GENERATION,
+        () => Promise.resolve(),
+        agentAppWorkDir(sessionId, 'readable-slug'),
+      );
+      if (indexState === 'missing') {
+        await rm(agentWorkspaceIndexPath(sessionId), { force: true });
+      } else {
+        await writeFile(agentWorkspaceIndexPath(sessionId), 'not json');
+      }
+      await expect(listIndexedWorkspaces(sessionId)).resolves.toEqual([]);
+
+      const snapshot = await inspectLocalWorkspaces();
+      const sources = snapshot.sources.filter(
+        (source) => source.sessionId === sessionId,
+      );
+      expect(sources).toEqual([]);
+      await reconcileLocalWorkspaces({
+        staleSessionIds: [],
+        staleSources: sources,
+      });
+      await expect(exists(checkout.absolutePath)).resolves.toBe(true);
+    },
+  );
 
   it('removes all indexed paths for one entity without touching the other kind', async () => {
     const sessionId = 'entity-cleanup';

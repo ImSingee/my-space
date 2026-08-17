@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   removeSourceWorkspaces,
   removeSourceWorkspacesUnderBarrier,
+  sourceWorktreeMatchesIdentity,
   type SourceKind,
   type SourceWorkspaceBarrier,
 } from '~agent/local-sources';
@@ -77,49 +78,45 @@ export async function inspectLocalWorkspaces(): Promise<{
         claim,
       );
     }
-    for (const id of defaultApps) {
-      if (!isSafeEntityId(id)) continue;
-      const absolutePath = path.resolve(agentWorkDir(sessionId), 'apps', id);
-      if (
-        indexed.some(
-          (entry) =>
-            entry.kind === 'app' &&
-            entry.id === id &&
-            path.resolve(entry.absolutePath) === absolutePath,
-        )
-      ) {
-        continue;
+    const defaultWorkspaces: [SourceKind, string[]][] = [
+      ['app', defaultApps],
+      ['workflow', defaultWorkflows],
+    ];
+    for (const [kind, ids] of defaultWorkspaces) {
+      const namespace = kind === 'app' ? 'apps' : 'workflows';
+      for (const id of ids) {
+        if (!isSafeEntityId(id)) continue;
+        const absolutePath = path.resolve(
+          agentWorkDir(sessionId),
+          namespace,
+          id,
+        );
+        if (
+          indexed.some(
+            (entry) =>
+              entry.kind === kind &&
+              path.resolve(entry.absolutePath) === absolutePath,
+          )
+        ) {
+          continue;
+        }
+        if (
+          !(await sourceWorktreeMatchesIdentity(
+            sessionId,
+            kind,
+            id,
+            absolutePath,
+          ))
+        ) {
+          continue;
+        }
+        claims.set(`${sessionId}:${kind}:${id}:unknown`, {
+          sessionId,
+          kind,
+          id,
+          generation: null,
+        });
       }
-      claims.set(`${sessionId}:app:${id}:unknown`, {
-        sessionId,
-        kind: 'app',
-        id,
-        generation: null,
-      });
-    }
-    for (const id of defaultWorkflows) {
-      if (!isSafeEntityId(id)) continue;
-      const absolutePath = path.resolve(
-        agentWorkDir(sessionId),
-        'workflows',
-        id,
-      );
-      if (
-        indexed.some(
-          (entry) =>
-            entry.kind === 'workflow' &&
-            entry.id === id &&
-            path.resolve(entry.absolutePath) === absolutePath,
-        )
-      ) {
-        continue;
-      }
-      claims.set(`${sessionId}:workflow:${id}:unknown`, {
-        sessionId,
-        kind: 'workflow',
-        id,
-        generation: null,
-      });
     }
   }
   return { sessionIds, sources: [...claims.values()] };
