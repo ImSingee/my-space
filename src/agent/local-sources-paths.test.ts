@@ -19,9 +19,6 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { PlatformClient } from './platform-client';
 
 const run = promisify(execFile);
-const GENERATION = '2026-07-12T00:00:00.000Z';
-const OLD_GENERATION = '2026-07-11T00:00:00.000Z';
-const NEW_GENERATION = '2026-07-12T01:00:00.000Z';
 const root = await realpath(
   await mkdtemp(path.join(tmpdir(), 'hatch-source-paths-')),
 );
@@ -31,24 +28,18 @@ await chmod(root, 0o711);
 process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 
 const {
-  acquireSourceWorkspaceBarrier,
   assertWorktreeAvailable,
   bundleWorktreeForDeploy,
   checkoutFromBundle,
   initNewWorktree,
-  removeSourceWorkspaces,
-  withSourceWorkspaceLock,
 } = await import('./local-sources');
 const {
   AGENTS_DIR,
   agentAppWorkDir,
   agentHomeDir,
   agentSessionDir,
-  agentWorkflowWorkDir,
-  agentWorkspaceIndexPath,
   agentWorkDir,
 } = await import('./paths');
-const { listIndexedWorkspaces } = await import('./workspace-index');
 const {
   prepareAgentSessionSandbox,
   sandboxSpawn,
@@ -57,11 +48,6 @@ const {
 } = await import('./shell-sandbox');
 const { createAppTools } = await import('./tools/apps');
 const { createWorkflowTools } = await import('./tools/workflows');
-const {
-  inspectLocalWorkspaces,
-  reconcileLocalWorkspaces,
-  removeSessionWorkspace,
-} = await import('../runner/workspace-cleanup');
 
 async function exists(target: string): Promise<boolean> {
   try {
@@ -123,6 +109,12 @@ function toolText(result: {
   return result.content.map((part) => part.text ?? '').join('');
 }
 
+function appDetail(id: string, slug = id) {
+  return { id, slug } as NonNullable<
+    Awaited<ReturnType<PlatformClient['getApp']>>
+  >;
+}
+
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
@@ -136,7 +128,6 @@ describe('runner source paths', () => {
         sourceSession,
         'app',
         'linux-owner-source',
-        GENERATION,
         async (worktree) => {
           await mkdir(path.join(worktree, 'scaffold', 'nested'), {
             recursive: true,
@@ -180,7 +171,6 @@ describe('runner source paths', () => {
         sourceSession,
         'app',
         'linux-owner-source',
-        GENERATION,
         source.absolutePath,
       );
 
@@ -190,7 +180,6 @@ describe('runner source paths', () => {
         'app',
         {
           id: 'linux-owner-target',
-          generation: GENERATION,
           masterCommit: head,
           bundleBase64: bundle.bundleBase64,
         },
@@ -254,16 +243,10 @@ describe('runner source paths', () => {
       assertWorktreeAvailable(sessionId, 'app', 'escape', '../outside'),
     ).rejects.toThrow(/inside the Agent workdir/);
     await expect(
-      bundleWorktreeForDeploy(sessionId, 'app', 'escape', GENERATION, ''),
+      bundleWorktreeForDeploy(sessionId, 'app', 'escape', ''),
     ).rejects.toThrow('Workspace path is required.');
     await expect(
-      bundleWorktreeForDeploy(
-        sessionId,
-        'app',
-        'escape',
-        GENERATION,
-        '../outside',
-      ),
+      bundleWorktreeForDeploy(sessionId, 'app', 'escape', '../outside'),
     ).rejects.toThrow(/inside the Agent workdir/);
     await expect(
       assertWorktreeAvailable(
@@ -282,13 +265,12 @@ describe('runner source paths', () => {
     ).rejects.toThrow(/escapes the Agent workdir through a symlink/);
   });
 
-  it('rejects a worktree nested inside another registered checkout', async () => {
+  it('rejects a worktree nested inside another Git checkout', async () => {
     const sessionId = 'path-overlap';
     const outer = await initNewWorktree(
       sessionId,
       'app',
       'outer-app',
-      GENERATION,
       () => Promise.resolve(),
       'custom/outer',
     );
@@ -299,11 +281,10 @@ describe('runner source paths', () => {
         sessionId,
         'workflow',
         'inner-workflow',
-        GENERATION,
         () => Promise.resolve(),
         nested,
       ),
-    ).rejects.toThrow(/overlaps the registered app/);
+    ).rejects.toThrow(/nested inside another Git checkout/);
     await expect(exists(nested)).resolves.toBe(false);
   });
 
@@ -317,7 +298,6 @@ describe('runner source paths', () => {
         id: `created-${sequence}`,
         slug: input.slug,
         name: input.name,
-        generation: GENERATION,
         files: [],
       };
     });
@@ -366,13 +346,118 @@ describe('runner source paths', () => {
     ).resolves.toBe(false);
   });
 
+  it('creates an app under apps/<slug> by default', async () => {
+    const sessionId = 'create-default-slug';
+    const tools = createAppTools({
+      sessionId,
+      platform: {
+        createApp: vi.fn<PlatformClient['createApp']>(async (input) => ({
+          id: 'immutable-app-id',
+          slug: input.slug,
+          name: input.name,
+          files: [],
+        })),
+      } as unknown as PlatformClient,
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
+    });
+    const create = tools.find((candidate) => candidate.name === 'create_app');
+    if (!create) throw new Error('Missing create_app tool.');
+
+    const result = await create.execute('create-default', {
+      slug: 'human-slug',
+      name: 'Human Slug',
+    });
+
+    expect(result.details).toMatchObject({
+      id: 'immutable-app-id',
+      path: 'apps/human-slug',
+      absolutePath: agentAppWorkDir(sessionId, 'human-slug'),
+    });
+    await expect(
+      git(
+        agentAppWorkDir(sessionId, 'human-slug'),
+        'remote',
+        'get-url',
+        'origin',
+      ),
+    ).resolves.toContain('app-immutable-app-id.bundle');
+  });
+
+  it('separates fresh app clones from existing checkout updates', async () => {
+    const sessionId = 'checkout-app-modes';
+    const getApp = vi.fn<PlatformClient['getApp']>(async () =>
+      appDetail('immutable-app-id', 'human-slug'),
+    );
+    const getAppSource = vi.fn<PlatformClient['getAppSource']>(async () => ({
+      id: 'immutable-app-id',
+      masterCommit: null,
+      bundleBase64: null,
+    }));
+    const tools = createAppTools({
+      sessionId,
+      platform: { getApp, getAppSource } as unknown as PlatformClient,
+      prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
+    });
+    const checkout = tools.find((tool) => tool.name === 'checkout_app');
+    if (!checkout) throw new Error('Missing checkout_app tool.');
+    expect((checkout.parameters as { required?: string[] }).required).toEqual(
+      expect.arrayContaining(['id', 'clone']),
+    );
+
+    await expect(
+      checkout.execute('update-without-path', {
+        id: 'immutable-app-id',
+        clone: false,
+      }),
+    ).rejects.toThrow('source_path is required when clone is false');
+    expect(getApp).not.toHaveBeenCalled();
+
+    await expect(
+      checkout.execute('update-with-force', {
+        id: 'immutable-app-id',
+        clone: false,
+        source_path: 'custom/missing',
+        force: true,
+      }),
+    ).rejects.toThrow('force is only valid when clone is true');
+    expect(getAppSource).not.toHaveBeenCalled();
+
+    await expect(
+      checkout.execute('update-missing-path', {
+        id: 'immutable-app-id',
+        clone: false,
+        source_path: 'custom/missing',
+      }),
+    ).rejects.toThrow(/does not exist/);
+    await expect(
+      exists(path.join(agentWorkDir(sessionId), 'custom/missing')),
+    ).resolves.toBe(false);
+    expect(getApp).not.toHaveBeenCalled();
+
+    const cloned = await checkout.execute('clone-default', {
+      id: 'immutable-app-id',
+      clone: true,
+    });
+    expect(cloned.details).toMatchObject({
+      id: 'immutable-app-id',
+      path: 'apps/human-slug',
+      absolutePath: agentAppWorkDir(sessionId, 'human-slug'),
+    });
+    expect(getApp).toHaveBeenCalledOnce();
+    await expect(
+      checkout.execute('clone-existing', {
+        id: 'immutable-app-id',
+        clone: true,
+      }),
+    ).rejects.toThrow(/already exists/);
+  });
+
   it('reports synchronized existing app and workflow checkouts', async () => {
     const sourceSessionId = 'checkout-tools-sync-source';
     const sourceWorktree = await initNewWorktree(
       sourceSessionId,
       'app',
       'source-repo',
-      GENERATION,
       () => Promise.resolve(),
     );
     const masterCommit = await commitFile(sourceWorktree.absolutePath);
@@ -380,12 +465,10 @@ describe('runner source paths', () => {
       sourceSessionId,
       'app',
       'source-repo',
-      GENERATION,
       sourceWorktree.absolutePath,
     );
     const source = (id: string) => ({
       id,
-      generation: GENERATION,
       masterCommit,
       bundleBase64: bundle.bundleBase64,
     });
@@ -393,6 +476,9 @@ describe('runner source paths', () => {
     const appTools = createAppTools({
       sessionId,
       platform: {
+        getApp: vi.fn<PlatformClient['getApp']>(async () =>
+          appDetail('app-id', 'app-slug'),
+        ),
         getAppSource: vi.fn<PlatformClient['getAppSource']>(async () =>
           source('app-id'),
         ),
@@ -415,7 +501,8 @@ describe('runner source paths', () => {
 
     const firstApp = await app.execute('app-first', {
       id: 'app-id',
-      target_path: 'custom/sync-app',
+      clone: true,
+      source_path: 'custom/sync-app',
     });
     expect(toolText(firstApp)).not.toContain('lifecycle scripts');
     const appWorktree = path.join(agentWorkDir(sessionId), 'custom/sync-app');
@@ -447,7 +534,8 @@ describe('runner source paths', () => {
     );
     const synchronizedApp = await app.execute('app-sync', {
       id: 'app-id',
-      target_path: 'custom/sync-app',
+      clone: false,
+      source_path: 'custom/sync-app',
     });
     expect(toolText(synchronizedApp)).toContain(
       'Synchronized existing checkout',
@@ -492,13 +580,12 @@ describe('runner source paths', () => {
     });
   }, 15_000);
 
-  it('force replaces one exact indexed target without touching other checkouts', async () => {
+  it('force replaces only the exact target and preserves unrelated checkout state', async () => {
     const sessionId = 'force-index-owner';
     const replaced = await initNewWorktree(
       sessionId,
       'app',
       'old-app',
-      GENERATION,
       () => Promise.resolve(),
       'custom/shared',
     );
@@ -506,7 +593,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'old-app',
-      GENERATION,
       () => Promise.resolve(),
       'custom/other',
     );
@@ -516,7 +602,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'old-app',
-      GENERATION,
       untouched.absolutePath,
     );
     const sharedBundlePath = path.join(
@@ -534,7 +619,6 @@ describe('runner source paths', () => {
       'workflow',
       {
         id: 'new-workflow',
-        generation: NEW_GENERATION,
         masterCommit: null,
         bundleBase64: null,
       },
@@ -549,37 +633,45 @@ describe('runner source paths', () => {
       readFile(path.join(untouched.absolutePath, 'keep.txt'), 'utf8'),
     ).resolves.toBe('keep');
     await expect(exists(sharedBundlePath)).resolves.toBe(true);
-    expect(await listIndexedWorkspaces(sessionId)).toEqual(
-      expect.arrayContaining([
-        {
-          kind: 'app',
-          id: 'old-app',
-          generation: GENERATION,
-          absolutePath: untouched.absolutePath,
-        },
-        {
-          kind: 'workflow',
-          id: 'new-workflow',
-          generation: NEW_GENERATION,
-          absolutePath: workflow.absolutePath,
-        },
-      ]),
+  });
+
+  it('refuses to force replace a directory containing another checkout', async () => {
+    const sessionId = 'force-nested-checkout';
+    const nested = await initNewWorktree(
+      sessionId,
+      'app',
+      'nested-app',
+      () => Promise.resolve(),
+      'custom/group/app-a',
     );
-    expect(await listIndexedWorkspaces(sessionId)).not.toContainEqual(
-      expect.objectContaining({
-        kind: 'app',
-        absolutePath: replaced.absolutePath,
-      }),
+    await writeFile(path.join(nested.absolutePath, 'keep.txt'), 'keep');
+
+    await expect(
+      checkoutFromBundle(
+        sessionId,
+        'workflow',
+        {
+          id: 'replacement',
+          masterCommit: null,
+          bundleBase64: null,
+        },
+        { targetPath: 'custom/group', force: true, mode: 'clone' },
+      ),
+    ).rejects.toThrow(/contains the nested Git checkout.*custom\/group\/app-a/);
+    await expect(
+      readFile(path.join(nested.absolutePath, 'keep.txt'), 'utf8'),
+    ).resolves.toBe('keep');
+    await expect(exists(path.join(nested.absolutePath, '.git'))).resolves.toBe(
+      true,
     );
   });
 
-  it('removes the displaced owner bundle only after its last checkout is replaced', async () => {
+  it('keeps an entity bundle when its checkout path is replaced', async () => {
     const sessionId = 'force-displaced-owner-bundle';
     const onlyCheckout = await initNewWorktree(
       sessionId,
       'app',
       'old-app',
-      GENERATION,
       () => Promise.resolve(),
       'custom/shared',
     );
@@ -588,7 +680,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'old-app',
-      GENERATION,
       onlyCheckout.absolutePath,
     );
     const oldBundlePath = path.join(
@@ -606,80 +697,13 @@ describe('runner source paths', () => {
       'workflow',
       {
         id: 'new-workflow',
-        generation: NEW_GENERATION,
         masterCommit: null,
         bundleBase64: null,
       },
       { targetPath: onlyCheckout.absolutePath, force: true },
     );
 
-    await expect(exists(oldBundlePath)).resolves.toBe(false);
-  });
-
-  it('keeps the displaced owner bundle for an unindexed default checkout', async () => {
-    const sessionId = 'force-unindexed-default-bundle';
-    const defaultCheckout = await initNewWorktree(
-      sessionId,
-      'app',
-      'old-app',
-      GENERATION,
-      () => Promise.resolve(),
-    );
-    const replacedCheckout = await initNewWorktree(
-      sessionId,
-      'app',
-      'old-app',
-      GENERATION,
-      () => Promise.resolve(),
-      'custom/shared',
-    );
-    await commitFile(defaultCheckout.absolutePath, 'keep.txt', 'keep');
-    const oldBundle = await bundleWorktreeForDeploy(
-      sessionId,
-      'app',
-      'old-app',
-      GENERATION,
-      defaultCheckout.absolutePath,
-    );
-    const oldBundlePath = path.join(
-      agentSessionDir(sessionId),
-      'bundles',
-      'app-old-app.bundle',
-    );
-    await writeFile(
-      oldBundlePath,
-      Buffer.from(oldBundle.bundleBase64, 'base64'),
-    );
-    await writeFile(
-      agentWorkspaceIndexPath(sessionId),
-      JSON.stringify({
-        entries: (await listIndexedWorkspaces(sessionId)).filter(
-          (entry) =>
-            path.resolve(entry.absolutePath) ===
-            path.resolve(replacedCheckout.absolutePath),
-        ),
-      }),
-    );
-
-    await checkoutFromBundle(
-      sessionId,
-      'workflow',
-      {
-        id: 'new-workflow',
-        generation: NEW_GENERATION,
-        masterCommit: null,
-        bundleBase64: null,
-      },
-      { targetPath: replacedCheckout.absolutePath, force: true },
-    );
-
     await expect(exists(oldBundlePath)).resolves.toBe(true);
-    await expect(
-      readFile(path.join(defaultCheckout.absolutePath, 'keep.txt'), 'utf8'),
-    ).resolves.toBe('keep');
-    await expect(
-      git(defaultCheckout.absolutePath, 'fetch', 'origin', 'master'),
-    ).resolves.toBe('');
   });
 
   it('completes force checkout when the old target needs permission repair for cleanup', async () => {
@@ -695,7 +719,6 @@ describe('runner source paths', () => {
       'app',
       {
         id: 'replacement',
-        generation: GENERATION,
         masterCommit: null,
         bundleBase64: null,
       },
@@ -717,7 +740,6 @@ describe('runner source paths', () => {
     await writeFile(fileTarget, 'keep');
     const emptySource = {
       id: 'entry-app',
-      generation: GENERATION,
       masterCommit: null,
       bundleBase64: null,
     };
@@ -760,7 +782,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'existing-app',
-      GENERATION,
       () => Promise.resolve(),
       'custom/replace-me',
     );
@@ -770,7 +791,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'source-app',
-      GENERATION,
       () => Promise.resolve(),
       'custom/source',
     );
@@ -779,7 +799,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'source-app',
-      GENERATION,
       source.absolutePath,
     );
 
@@ -789,7 +808,6 @@ describe('runner source paths', () => {
         'workflow',
         {
           id: 'replacement',
-          generation: NEW_GENERATION,
           masterCommit: '0000000000000000000000000000000000000000',
           bundleBase64: bundle.bundleBase64,
         },
@@ -799,39 +817,24 @@ describe('runner source paths', () => {
     await expect(
       readFile(path.join(existing.absolutePath, 'keep.txt'), 'utf8'),
     ).resolves.toBe('keep');
-    await expect(listIndexedWorkspaces(sessionId)).resolves.toContainEqual({
-      kind: 'app',
-      id: 'existing-app',
-      generation: GENERATION,
-      absolutePath: existing.absolutePath,
-    });
   });
 
   it('requires a matching origin, a clean worktree, and at least one commit', async () => {
     const sessionId = 'deploy-validation';
-    const empty = await initNewWorktree(
-      sessionId,
-      'app',
-      'empty-app',
-      GENERATION,
-      () => Promise.resolve(),
+    const empty = await initNewWorktree(sessionId, 'app', 'empty-app', () =>
+      Promise.resolve(),
     );
     await expect(
       bundleWorktreeForDeploy(
         sessionId,
         'app',
         'empty-app',
-        GENERATION,
         empty.absolutePath,
       ),
     ).rejects.toThrow(/no commits yet/);
 
-    const dirty = await initNewWorktree(
-      sessionId,
-      'app',
-      'dirty-app',
-      GENERATION,
-      () => Promise.resolve(),
+    const dirty = await initNewWorktree(sessionId, 'app', 'dirty-app', () =>
+      Promise.resolve(),
     );
     await commitFile(dirty.absolutePath);
     await writeFile(path.join(dirty.absolutePath, 'source.txt'), 'dirty\n');
@@ -840,7 +843,6 @@ describe('runner source paths', () => {
         sessionId,
         'app',
         'dirty-app',
-        GENERATION,
         dirty.absolutePath,
       ),
     ).rejects.toThrow(/worktree is dirty/);
@@ -853,23 +855,11 @@ describe('runner source paths', () => {
     await git(foreign, 'config', 'user.email', 'test@example.test');
     await commitFile(foreign);
     await expect(
-      bundleWorktreeForDeploy(
-        sessionId,
-        'app',
-        'foreign-app',
-        GENERATION,
-        foreign,
-      ),
+      bundleWorktreeForDeploy(sessionId, 'app', 'foreign-app', foreign),
     ).rejects.toThrow(/found no origin/);
     await git(foreign, 'remote', 'add', 'origin', path.join(root, 'other.git'));
     await expect(
-      bundleWorktreeForDeploy(
-        sessionId,
-        'app',
-        'foreign-app',
-        GENERATION,
-        foreign,
-      ),
+      bundleWorktreeForDeploy(sessionId, 'app', 'foreign-app', foreign),
     ).rejects.toThrow(/expected origin/);
   });
 
@@ -879,7 +869,6 @@ describe('runner source paths', () => {
       sessionId,
       'app',
       'legacy-app',
-      GENERATION,
       () => Promise.resolve(),
       'legacy-app',
     );
@@ -894,497 +883,11 @@ describe('runner source paths', () => {
         sessionId,
         'app',
         'legacy-app',
-        GENERATION,
         legacy.absolutePath,
       ),
     ).resolves.toMatchObject({ headCommit: head });
     expect(legacy.absolutePath).toBe(
       path.join(agentWorkDir(sessionId), 'legacy-app'),
     );
-  });
-});
-
-describe('runner workspace cleanup', () => {
-  it('rejects a session segment that resolves to the Agent root', async () => {
-    await expect(removeSessionWorkspace('.')).rejects.toThrow(
-      'Invalid session id.',
-    );
-  });
-
-  it('rejects unsafe ids from a modified workspace index', async () => {
-    const sessionId = 'unsafe-index';
-    const victim = path.join(
-      AGENTS_DIR,
-      'other-session',
-      'bundles',
-      'app-real.bundle',
-    );
-    await mkdir(path.dirname(victim), { recursive: true });
-    await writeFile(victim, 'keep');
-    await mkdir(agentWorkDir(sessionId), { recursive: true });
-    const unsafeId = 'x/../../../other-session/bundles/app-real';
-    await writeFile(
-      agentWorkspaceIndexPath(sessionId),
-      JSON.stringify({
-        entries: [
-          {
-            kind: 'app',
-            id: unsafeId,
-            absolutePath: path.join(agentWorkDir(sessionId), 'unused'),
-          },
-        ],
-      }),
-    );
-
-    await expect(listIndexedWorkspaces(sessionId)).resolves.toEqual([]);
-    await expect(
-      removeSourceWorkspaces(sessionId, 'app', unsafeId, GENERATION),
-    ).rejects.toThrow('Invalid app id.');
-    await expect(readFile(victim, 'utf8')).resolves.toBe('keep');
-  });
-
-  it('persists indexed generations and keeps them in the hello snapshot', async () => {
-    const sessionId = 'generation-index';
-    const indexed = await initNewWorktree(
-      sessionId,
-      'app',
-      'indexed-app',
-      GENERATION,
-      () => Promise.resolve(),
-    );
-    await mkdir(agentWorkflowWorkDir(sessionId, 'unindexed-workflow'), {
-      recursive: true,
-    });
-
-    const stored = JSON.parse(
-      await readFile(agentWorkspaceIndexPath(sessionId), 'utf8'),
-    ) as { entries: unknown[] };
-    expect(stored.entries).toContainEqual({
-      kind: 'app',
-      id: 'indexed-app',
-      generation: GENERATION,
-      absolutePath: indexed.absolutePath,
-    });
-
-    const snapshot = await inspectLocalWorkspaces();
-    const sources = snapshot.sources.filter(
-      (source) => source.sessionId === sessionId,
-    );
-    expect(sources).toEqual(
-      expect.arrayContaining([
-        {
-          sessionId,
-          kind: 'app',
-          id: 'indexed-app',
-          generation: GENERATION,
-        },
-        {
-          sessionId,
-          kind: 'workflow',
-          id: 'unindexed-workflow',
-          generation: null,
-        },
-      ]),
-    );
-    expect(sources).not.toContainEqual({
-      sessionId,
-      kind: 'app',
-      id: 'indexed-app',
-      generation: null,
-    });
-
-    await writeFile(
-      agentWorkspaceIndexPath(sessionId),
-      JSON.stringify({
-        entries: [
-          {
-            kind: 'app',
-            id: 'indexed-app',
-            absolutePath: indexed.absolutePath,
-          },
-        ],
-      }),
-    );
-    await expect(listIndexedWorkspaces(sessionId)).resolves.toEqual([]);
-  });
-
-  it('removes all indexed paths for one entity without touching the other kind', async () => {
-    const sessionId = 'entity-cleanup';
-    const app = await initNewWorktree(
-      sessionId,
-      'app',
-      'same-id',
-      GENERATION,
-      () => Promise.resolve(),
-    );
-    const head = await commitFile(app.absolutePath);
-    const bundle = await bundleWorktreeForDeploy(
-      sessionId,
-      'app',
-      'same-id',
-      GENERATION,
-      app.absolutePath,
-    );
-    const custom = await checkoutFromBundle(
-      sessionId,
-      'app',
-      {
-        id: 'same-id',
-        generation: GENERATION,
-        masterCommit: head,
-        bundleBase64: bundle.bundleBase64,
-      },
-      { targetPath: 'custom/same-id' },
-    );
-    const workflow = await initNewWorktree(
-      sessionId,
-      'workflow',
-      'same-id',
-      GENERATION,
-      () => Promise.resolve(),
-    );
-
-    await expect(
-      removeSourceWorkspaces(sessionId, 'app', 'same-id', GENERATION),
-    ).resolves.toBe(2);
-    await expect(exists(app.absolutePath)).resolves.toBe(false);
-    await expect(exists(custom.absolutePath)).resolves.toBe(false);
-    await expect(exists(workflow.absolutePath)).resolves.toBe(true);
-    expect(await listIndexedWorkspaces(sessionId)).toEqual([
-      {
-        kind: 'workflow',
-        id: 'same-id',
-        generation: GENERATION,
-        absolutePath: workflow.absolutePath,
-      },
-    ]);
-  });
-
-  it('preserves a nested checkout recorded by an older overlapping index', async () => {
-    const sessionId = 'overlap-cleanup';
-    const outer = await initNewWorktree(
-      sessionId,
-      'app',
-      'outer-app',
-      GENERATION,
-      () => Promise.resolve(),
-      'custom/outer',
-    );
-    await writeFile(path.join(outer.absolutePath, 'outer.txt'), 'outer');
-    const inner = path.join(outer.absolutePath, 'inner');
-    await mkdir(inner, { recursive: true });
-    await writeFile(path.join(inner, 'keep.txt'), 'inner');
-    await writeFile(
-      agentWorkspaceIndexPath(sessionId),
-      JSON.stringify({
-        entries: [
-          {
-            kind: 'app',
-            id: 'outer-app',
-            generation: GENERATION,
-            absolutePath: outer.absolutePath,
-          },
-          {
-            kind: 'workflow',
-            id: 'inner-workflow',
-            generation: GENERATION,
-            absolutePath: inner,
-          },
-        ],
-      }),
-    );
-
-    await expect(
-      removeSourceWorkspaces(sessionId, 'app', 'outer-app', GENERATION),
-    ).resolves.toBe(1);
-    await expect(exists(path.join(outer.absolutePath, '.git'))).resolves.toBe(
-      false,
-    );
-    await expect(
-      exists(path.join(outer.absolutePath, 'outer.txt')),
-    ).resolves.toBe(false);
-    await expect(readFile(path.join(inner, 'keep.txt'), 'utf8')).resolves.toBe(
-      'inner',
-    );
-    expect(await listIndexedWorkspaces(sessionId)).toEqual([
-      {
-        kind: 'workflow',
-        id: 'inner-workflow',
-        generation: GENERATION,
-        absolutePath: inner,
-      },
-    ]);
-  });
-
-  it('preserves a replacement checkout and bundle after delayed old-generation cleanup', async () => {
-    const sessionId = 'delayed-generation-cleanup';
-    const old = await initNewWorktree(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-      () => Promise.resolve(),
-    );
-    const head = await commitFile(old.absolutePath);
-    const deploy = await bundleWorktreeForDeploy(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-      old.absolutePath,
-    );
-    await removeSourceWorkspaces(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-    );
-
-    const replacement = await checkoutFromBundle(sessionId, 'workflow', {
-      id: 'reused-id',
-      generation: NEW_GENERATION,
-      masterCommit: head,
-      bundleBase64: deploy.bundleBase64,
-    });
-    const bundle = path.join(
-      agentSessionDir(sessionId),
-      'bundles',
-      'workflow-reused-id.bundle',
-    );
-
-    await expect(
-      removeSourceWorkspaces(
-        sessionId,
-        'workflow',
-        'reused-id',
-        OLD_GENERATION,
-      ),
-    ).resolves.toBe(0);
-    await expect(exists(replacement.absolutePath)).resolves.toBe(true);
-    await expect(readFile(bundle)).resolves.not.toHaveLength(0);
-    await expect(listIndexedWorkspaces(sessionId)).resolves.toContainEqual({
-      kind: 'workflow',
-      id: 'reused-id',
-      generation: NEW_GENERATION,
-      absolutePath: replacement.absolutePath,
-    });
-  });
-
-  it('drops an old shared bundle when a reused id is created again', async () => {
-    const sessionId = 'reused-generation-create';
-    const old = await initNewWorktree(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-      () => Promise.resolve(),
-      'custom/old',
-    );
-    await commitFile(old.absolutePath);
-    const deploy = await bundleWorktreeForDeploy(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-      old.absolutePath,
-    );
-    const bundle = path.join(
-      agentSessionDir(sessionId),
-      'bundles',
-      'workflow-reused-id.bundle',
-    );
-    await writeFile(bundle, Buffer.from(deploy.bundleBase64, 'base64'));
-
-    await initNewWorktree(
-      sessionId,
-      'workflow',
-      'reused-id',
-      NEW_GENERATION,
-      () => Promise.resolve(),
-      'custom/replacement',
-    );
-
-    await expect(exists(bundle)).resolves.toBe(false);
-    await expect(exists(old.absolutePath)).resolves.toBe(true);
-  });
-
-  it('does not deploy an indexed checkout from an older entity generation', async () => {
-    const sessionId = 'stale-generation-deploy';
-    const old = await initNewWorktree(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-      () => Promise.resolve(),
-    );
-    await commitFile(old.absolutePath);
-
-    await expect(
-      bundleWorktreeForDeploy(
-        sessionId,
-        'workflow',
-        'reused-id',
-        NEW_GENERATION,
-        old.absolutePath,
-      ),
-    ).rejects.toThrow(/previous incarnation/);
-
-    await reconcileLocalWorkspaces({
-      staleSessionIds: [],
-      staleSources: [
-        {
-          sessionId,
-          kind: 'workflow',
-          id: 'reused-id',
-          generation: OLD_GENERATION,
-        },
-      ],
-    });
-    await expect(exists(old.absolutePath)).resolves.toBe(false);
-    await expect(
-      bundleWorktreeForDeploy(
-        sessionId,
-        'workflow',
-        'reused-id',
-        NEW_GENERATION,
-        old.absolutePath,
-      ),
-    ).rejects.toThrow(/not checked out/);
-  });
-
-  it('reconciles stale sessions and deleted default entities after reconnect', async () => {
-    const staleSession = 'stale-session';
-    const activeSession = 'active-session';
-    await mkdir(agentWorkDir(staleSession), { recursive: true });
-    await mkdir(agentHomeDir(staleSession), { recursive: true });
-    const staleApp = await initNewWorktree(
-      activeSession,
-      'app',
-      'deleted-app',
-      GENERATION,
-      () => Promise.resolve(),
-    );
-    const currentWorkflow = await initNewWorktree(
-      activeSession,
-      'workflow',
-      'current-workflow',
-      GENERATION,
-      () => Promise.resolve(),
-    );
-
-    await reconcileLocalWorkspaces({
-      staleSessionIds: [staleSession],
-      staleSources: [
-        {
-          sessionId: activeSession,
-          kind: 'app',
-          id: 'deleted-app',
-          generation: GENERATION,
-        },
-      ],
-    });
-
-    await expect(exists(agentSessionDir(staleSession))).resolves.toBe(false);
-    await expect(exists(agentHomeDir(staleSession))).resolves.toBe(false);
-    await expect(exists(staleApp.absolutePath)).resolves.toBe(false);
-    await expect(exists(currentWorkflow.absolutePath)).resolves.toBe(true);
-    await removeSessionWorkspace(activeSession);
-    await expect(exists(agentSessionDir(activeSession))).resolves.toBe(false);
-    await expect(exists(agentHomeDir(activeSession))).resolves.toBe(false);
-  });
-
-  it('ignores non-entity grouping directories in the hello snapshot', async () => {
-    const sessionId = 'grouping-directory';
-    const nested = await initNewWorktree(
-      sessionId,
-      'app',
-      'nested-app',
-      GENERATION,
-      () => Promise.resolve(),
-      'apps/team_one/nested-app',
-    );
-
-    const snapshot = await inspectLocalWorkspaces();
-    expect(snapshot.sources).toContainEqual({
-      sessionId,
-      kind: 'app',
-      id: 'nested-app',
-      generation: GENERATION,
-    });
-    expect(snapshot.sources).not.toContainEqual({
-      sessionId,
-      kind: 'app',
-      id: 'team_one',
-      generation: null,
-    });
-    await expect(
-      reconcileLocalWorkspaces({ staleSessionIds: [], staleSources: [] }),
-    ).resolves.toBeUndefined();
-    await expect(exists(nested.absolutePath)).resolves.toBe(true);
-  });
-
-  it('blocks a replacement checkout until stale snapshot cleanup completes', async () => {
-    const sessionId = 'reused-workflow-barrier';
-    const old = await initNewWorktree(
-      sessionId,
-      'workflow',
-      'reused-id',
-      OLD_GENERATION,
-      () => Promise.resolve(),
-    );
-    const barrier = await acquireSourceWorkspaceBarrier();
-    try {
-      const snapshot = await inspectLocalWorkspaces();
-      const staleSources = snapshot.sources.filter(
-        (source) => source.sessionId === sessionId && source.id === 'reused-id',
-      );
-      await rm(old.absolutePath, { recursive: true, force: true });
-      let replacementStarted = false;
-      const replacement = withSourceWorkspaceLock(sessionId, async () => {
-        replacementStarted = true;
-        return checkoutFromBundle(sessionId, 'workflow', {
-          id: 'reused-id',
-          generation: NEW_GENERATION,
-          masterCommit: null,
-          bundleBase64: null,
-        });
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(replacementStarted).toBe(false);
-      await reconcileLocalWorkspaces(
-        { staleSessionIds: [], staleSources },
-        barrier,
-      );
-      barrier.release();
-
-      const current = await replacement;
-      expect(replacementStarted).toBe(true);
-      await expect(exists(current.absolutePath)).resolves.toBe(true);
-    } finally {
-      barrier.release();
-    }
-  });
-
-  it('cancels a source mutation waiting behind the reconnect barrier', async () => {
-    const barrier = await acquireSourceWorkspaceBarrier();
-    try {
-      const controller = new AbortController();
-      let started = false;
-      const waiting = withSourceWorkspaceLock(
-        'cancelled-source-operation',
-        () => {
-          started = true;
-          return Promise.resolve();
-        },
-        controller.signal,
-      );
-      controller.abort();
-
-      await expect(waiting).rejects.toThrow(/aborted/);
-      expect(started).toBe(false);
-    } finally {
-      barrier.release();
-    }
   });
 });

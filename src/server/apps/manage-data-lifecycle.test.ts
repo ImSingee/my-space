@@ -30,10 +30,6 @@ const mocks = vi.hoisted(() => ({
   reloadScheduler: vi.fn<() => Promise<void>>(),
   moveMasterToDeploymentTag: vi.fn<() => Promise<string>>(),
   publishPlatformEvent: vi.fn<(event: unknown) => void>(),
-  broadcastCleanup:
-    vi.fn<
-      (scope: 'app' | 'workflow', id: string, generation: string) => void
-    >(),
   fsAccess: vi.fn<() => Promise<void>>(),
   fsRm: vi.fn<
     (
@@ -66,10 +62,6 @@ vi.mock('drizzle-orm', () => ({
   ),
 }));
 vi.mock('~agent/paths', () => ({
-  AGENTS_DIR: '/workspace/agents',
-  agentAppWorkDir: (session: string, id: string) =>
-    `/workspace/agents/${session}/apps/${id}`,
-  agentWorkDir: (session: string) => `/workspace/agents/${session}`,
   appArtifactsDir: (id: string) => `/workspace/artifacts/${id}`,
   appBuildDir: (id: string) => `/workspace/build/${id}`,
   appRepoDir: (id: string) => `/workspace/repos/${id}`,
@@ -116,9 +108,6 @@ vi.mock('./build-identity', () => ({
 }));
 vi.mock('./git', () => ({
   moveMasterToDeploymentTag: mocks.moveMasterToDeploymentTag,
-  worktreeOrigin: vi.fn<(worktree: string) => Promise<string | null>>(
-    async () => null,
-  ),
 }));
 vi.mock('./manifest', () => ({
   isValidAppId: () => true,
@@ -151,10 +140,6 @@ vi.mock('./scheduler', () => ({ reloadScheduler: mocks.reloadScheduler }));
 vi.mock('~server/platform-events', () => ({
   publishPlatformEvent: mocks.publishPlatformEvent,
 }));
-vi.mock('../agent-runner/hub', () => ({
-  broadcastEntityWorkspaceCleanup: mocks.broadcastCleanup,
-}));
-
 import {
   deleteApp,
   listDeployments,
@@ -605,7 +590,7 @@ describe('App Data lifecycle recovery', () => {
     expect(mocks.deleteRow).toHaveBeenCalledOnce();
   });
 
-  it('deletes an App without connecting to an unused managed Data DB', async () => {
+  it('deletes Platform state without touching conversation workspaces', async () => {
     mocks.findApp.mockResolvedValue({
       capabilities: { dataTable: false },
       dataDbName: null,
@@ -624,5 +609,10 @@ describe('App Data lifecycle recovery', () => {
       recursive: true,
       force: true,
     });
+    expect(
+      mocks.fsRm.mock.calls.some(([target]) =>
+        String(target).startsWith('/workspace/agents/'),
+      ),
+    ).toBe(false);
   });
 });

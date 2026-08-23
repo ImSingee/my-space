@@ -13,7 +13,6 @@
  *   agents/<sessionId>/work/workflows/<id>/        ← workflow worktree
  *   agents/<sessionId>/work/attachments/<id>/...   ← downloaded attachments
  *   agents/<sessionId>/bundles/<kind>-<id>.bundle  ← origin bundle (hidden)
- *   agents/<sessionId>/workspace-index.json         ← runner-private path index
  */
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
@@ -48,13 +47,6 @@ import {
 } from './shell-sandbox';
 import {
   isWorkspacePathInside,
-  listIndexedWorkspaces,
-  registerWorkspace,
-  removeIndexedWorkspaces,
-  type WorkspaceIndexEntry,
-  workspacePathsOverlap,
-} from './workspace-index';
-import {
   resolveAgentWorkspacePath,
   type AgentWorkspacePath,
 } from './workspace-paths';
@@ -87,141 +79,37 @@ export type LocalCheckout = {
 export type CheckoutFromBundleOptions = {
   targetPath?: string;
   force?: boolean;
+  /** Defaults to the legacy create-or-update behavior used by workflows. */
+  mode?: 'clone' | 'update' | 'upsert';
   materializer?: WorktreeMaterializer;
 };
 
 const workspaceMutationChains = new Map<string, Promise<unknown>>();
 
-type SourceGateWaiter = {
-  mode: 'read' | 'write';
-  resolve: (release: () => void) => void;
-  signal?: AbortSignal;
-  onAbort?: () => void;
-};
-
-const sourceGateQueue: SourceGateWaiter[] = [];
-let sourceGateReaders = 0;
-let sourceGateWriter = false;
-const sourceBarrierToken = Symbol('source-workspace-barrier');
-let activeSourceBarrier: symbol | null = null;
-
-export type SourceWorkspaceBarrier = {
-  readonly [sourceBarrierToken]: symbol;
-  release(): void;
-};
-
-function drainSourceGate(): void {
-  if (sourceGateWriter || sourceGateReaders > 0) return;
-  const first = sourceGateQueue[0];
-  if (!first) return;
-
-  if (first.mode === 'write') {
-    sourceGateQueue.shift();
-    if (first.signal && first.onAbort) {
-      first.signal.removeEventListener('abort', first.onAbort);
-    }
-    sourceGateWriter = true;
-    let released = false;
-    first.resolve(() => {
-      if (released) return;
-      released = true;
-      sourceGateWriter = false;
-      drainSourceGate();
-    });
-    return;
-  }
-
-  while (sourceGateQueue[0]?.mode === 'read') {
-    const reader = sourceGateQueue.shift()!;
-    if (reader.signal && reader.onAbort) {
-      reader.signal.removeEventListener('abort', reader.onAbort);
-    }
-    sourceGateReaders += 1;
-    let released = false;
-    reader.resolve(() => {
-      if (released) return;
-      released = true;
-      sourceGateReaders -= 1;
-      drainSourceGate();
-    });
-  }
-}
-
-function acquireSourceGate(
-  mode: 'read' | 'write',
-  signal?: AbortSignal,
-): Promise<() => void> {
-  if (signal?.aborted) {
-    return Promise.reject(new Error('Source workspace operation was aborted.'));
-  }
-  return new Promise((resolve, reject) => {
-    const waiter: SourceGateWaiter = { mode, resolve, signal };
-    if (signal) {
-      waiter.onAbort = () => {
-        const index = sourceGateQueue.indexOf(waiter);
-        if (index < 0) return;
-        sourceGateQueue.splice(index, 1);
-        reject(new Error('Source workspace operation was aborted.'));
-        drainSourceGate();
-      };
-      signal.addEventListener('abort', waiter.onAbort, { once: true });
-    }
-    sourceGateQueue.push(waiter);
-    drainSourceGate();
-  });
-}
-
-export async function acquireSourceWorkspaceBarrier(): Promise<SourceWorkspaceBarrier> {
-  const releaseGate = await acquireSourceGate('write');
-  const token = Symbol('source-workspace-barrier-owner');
-  activeSourceBarrier = token;
-  let released = false;
-  return {
-    [sourceBarrierToken]: token,
-    release: () => {
-      if (released) return;
-      released = true;
-      if (activeSourceBarrier === token) activeSourceBarrier = null;
-      releaseGate();
-    },
-  };
-}
-
-function assertActiveSourceBarrier(barrier: SourceWorkspaceBarrier): void {
-  if (activeSourceBarrier !== barrier[sourceBarrierToken]) {
-    throw new Error('Source workspace barrier is not active.');
-  }
-}
-
-export async function withSourceWorkspaceLock<T>(
+export function withSourceWorkspaceLock<T>(
   sessionId: string,
   task: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  const releaseGate = await acquireSourceGate('read', signal);
-  try {
-    const tail = workspaceMutationChains.get(sessionId) ?? Promise.resolve();
-    const runTask = () => {
-      if (signal?.aborted) {
-        throw new Error('Source workspace operation was aborted.');
-      }
-      return task();
-    };
-    const result = tail.then(runTask, runTask);
-    const settled = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    workspaceMutationChains.set(sessionId, settled);
-    void settled.then(() => {
-      if (workspaceMutationChains.get(sessionId) === settled) {
-        workspaceMutationChains.delete(sessionId);
-      }
-    });
-    return await result;
-  } finally {
-    releaseGate();
-  }
+  const tail = workspaceMutationChains.get(sessionId) ?? Promise.resolve();
+  const runTask = () => {
+    if (signal?.aborted) {
+      throw new Error('Source workspace operation was aborted.');
+    }
+    return task();
+  };
+  const result = tail.then(runTask, runTask);
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  workspaceMutationChains.set(sessionId, settled);
+  void settled.then(() => {
+    if (workspaceMutationChains.get(sessionId) === settled) {
+      workspaceMutationChains.delete(sessionId);
+    }
+  });
+  return result;
 }
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string };
@@ -376,128 +264,6 @@ async function ensureBundleDirectory(
   setRunnerOwned([directory]);
 }
 
-/** Remove one stale app/workflow incarnation from this session. */
-export function removeSourceWorkspaces(
-  sessionId: string,
-  kind: SourceKind,
-  id: string,
-  generation: string | null,
-): Promise<number> {
-  return withSourceWorkspaceLock(sessionId, () =>
-    removeSourceWorkspacesUnlocked(sessionId, kind, id, generation),
-  );
-}
-
-/** Remove a stale hello-time source while the runner holds the exclusive gate. */
-export function removeSourceWorkspacesUnderBarrier(
-  barrier: SourceWorkspaceBarrier,
-  sessionId: string,
-  kind: SourceKind,
-  id: string,
-  generation: string | null,
-): Promise<number> {
-  assertActiveSourceBarrier(barrier);
-  return removeSourceWorkspacesUnlocked(sessionId, kind, id, generation);
-}
-
-async function removeSourceWorkspacesUnlocked(
-  sessionId: string,
-  kind: SourceKind,
-  id: string,
-  generation: string | null,
-): Promise<number> {
-  const bundle = bundleFile(sessionId, kind, id);
-  const allIndexed = await listIndexedWorkspaces(sessionId);
-  const indexed = allIndexed.filter(
-    (entry) =>
-      entry.kind === kind &&
-      entry.id === id &&
-      generation !== null &&
-      entry.generation === generation,
-  );
-  const remainingIndexed = allIndexed.filter(
-    (entry) =>
-      !(
-        entry.kind === kind &&
-        entry.id === id &&
-        generation !== null &&
-        entry.generation === generation
-      ),
-  );
-  const fallbackCandidates = [
-    defaultWorktreeDir(sessionId, kind, id),
-    path.resolve(agentWorkDir(sessionId), id),
-  ].filter(
-    (candidate) =>
-      !allIndexed.some(
-        (entry) => path.resolve(entry.absolutePath) === path.resolve(candidate),
-      ),
-  );
-  const candidates = new Set([
-    ...fallbackCandidates,
-    ...indexed.map((entry) => entry.absolutePath),
-  ]);
-  const removed = new Set<string>();
-  for (const candidate of candidates) {
-    let resolved: AgentWorkspacePath;
-    try {
-      resolved = await resolveAgentWorkspacePath(sessionId, candidate);
-    } catch {
-      continue;
-    }
-    if (!(await pathExists(path.join(resolved.absolutePath, '.git')))) continue;
-    const origin = await worktreeOrigin(sessionId, resolved.absolutePath);
-    if (!origin || path.resolve(origin) !== path.resolve(bundle)) continue;
-    const protectedPaths = remainingIndexed.map((entry) =>
-      path.resolve(entry.absolutePath),
-    );
-    if (
-      await removeTreePreservingPaths(resolved.absolutePath, protectedPaths)
-    ) {
-      removed.add(path.resolve(resolved.absolutePath));
-    }
-  }
-  if (generation !== null) {
-    // Paths whose origin changed are deliberately left on disk, but this stale
-    // incarnation must no longer be authoritative in the private index.
-    await removeIndexedWorkspaces(
-      sessionId,
-      (entry) =>
-        entry.kind === kind &&
-        entry.id === id &&
-        entry.generation === generation,
-    );
-  }
-  const hasOtherGeneration = remainingIndexed.some(
-    (entry) => entry.kind === kind && entry.id === id,
-  );
-  if (!hasOtherGeneration) await rm(bundle, { force: true });
-  return removed.size;
-}
-
-async function removeTreePreservingPaths(
-  target: string,
-  protectedPaths: string[],
-): Promise<boolean> {
-  const absolute = path.resolve(target);
-  if (
-    protectedPaths.some((candidate) => path.resolve(candidate) === absolute)
-  ) {
-    return false;
-  }
-  const nested = protectedPaths.filter((candidate) =>
-    isWorkspacePathInside(absolute, candidate),
-  );
-  if (nested.length === 0) {
-    await rm(absolute, { recursive: true, force: true });
-    return true;
-  }
-  for (const name of await readdir(absolute)) {
-    await removeTreePreservingPaths(path.join(absolute, name), nested);
-  }
-  return true;
-}
-
 function defaultWorktreeDir(
   sessionId: string,
   kind: SourceKind,
@@ -520,14 +286,10 @@ function resolveWorktree(
   );
 }
 
-async function assertWorkspaceDoesNotOverlap(
+async function assertWorkspacePathAllowed(
   sessionId: string,
   worktree: string,
-  options: {
-    allowedExact?: { kind: SourceKind; id: string };
-    allowAnyExact?: boolean;
-  } = {},
-): Promise<WorkspaceIndexEntry | undefined> {
+): Promise<void> {
   const target = path.resolve(worktree);
   const root = agentWorkDir(sessionId);
   const reservedRoots = [
@@ -546,23 +308,6 @@ async function assertWorkspaceDoesNotOverlap(
     );
   }
 
-  const entries = await listIndexedWorkspaces(sessionId);
-  const conflict = entries.find((entry) => {
-    const samePath = path.resolve(entry.absolutePath) === target;
-    const exactAllowed =
-      samePath &&
-      (options.allowAnyExact ||
-        (options.allowedExact?.kind === entry.kind &&
-          options.allowedExact.id === entry.id));
-    return !exactAllowed && workspacePathsOverlap(entry.absolutePath, target);
-  });
-  if (conflict) {
-    throw new Error(
-      `Workspace path ${target} overlaps the registered ${conflict.kind} ` +
-        `"${conflict.id}" checkout at ${conflict.absolutePath}.`,
-    );
-  }
-
   let parent = path.dirname(target);
   while (isWorkspacePathInside(root, parent) && parent !== root) {
     if (await pathExists(path.join(parent, '.git'))) {
@@ -572,7 +317,80 @@ async function assertWorkspaceDoesNotOverlap(
     }
     parent = path.dirname(parent);
   }
-  return entries.find((entry) => path.resolve(entry.absolutePath) === target);
+}
+
+async function findNestedGitCheckout(root: string): Promise<string | null> {
+  let rootStats;
+  try {
+    rootStats = await lstat(root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) return null;
+
+  async function visit(
+    directory: string,
+    inspectDirectoryItself: boolean,
+  ): Promise<string | null> {
+    let originalMode: number | null = null;
+    let entries;
+    try {
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EACCES') throw error;
+        const stats = await lstat(directory);
+        originalMode = stats.mode & 0o777;
+        await chmod(directory, originalMode | 0o500);
+        entries = await readdir(directory, { withFileTypes: true });
+      }
+
+      if (
+        inspectDirectoryItself &&
+        entries.some((entry) => entry.name === '.git')
+      ) {
+        return directory;
+      }
+      for (const entry of entries) {
+        if (entry.name === '.git' || entry.isSymbolicLink()) continue;
+        const child = path.join(directory, entry.name);
+        let stats;
+        try {
+          stats = await lstat(child);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        if (!stats.isDirectory() || stats.isSymbolicLink()) continue;
+        const nested = await visit(child, true);
+        if (nested) return nested;
+      }
+      return null;
+    } finally {
+      if (originalMode !== null) await chmod(directory, originalMode);
+    }
+  }
+
+  return visit(root, false);
+}
+
+async function assertReplacementContainsNoNestedCheckout(
+  replacementBackup: string,
+  target: AgentWorkspacePath,
+): Promise<void> {
+  const nested = await findNestedGitCheckout(replacementBackup);
+  if (!nested) return;
+  const nestedRelativePath = path
+    .relative(replacementBackup, nested)
+    .split(path.sep)
+    .join('/');
+  const nestedDisplayPath = `${target.path}/${nestedRelativePath}`;
+  throw new Error(
+    `Refusing to replace checkout target "${target.path}" because it contains ` +
+      `the nested Git checkout "${nestedDisplayPath}". Target the exact ` +
+      'checkout you intend to replace; nested local work was preserved.',
+  );
 }
 
 async function describeCheckout(
@@ -625,26 +443,6 @@ async function assertOwnedWorktree(
         `(expected origin ${bundle}, found ${origin ?? 'no origin'}).`,
     );
   }
-}
-
-async function assertWorkspaceGeneration(
-  sessionId: string,
-  worktree: string,
-  kind: SourceKind,
-  id: string,
-  generation: string,
-): Promise<void> {
-  const exact = (await listIndexedWorkspaces(sessionId)).find(
-    (entry) =>
-      entry.kind === kind &&
-      entry.id === id &&
-      path.resolve(entry.absolutePath) === path.resolve(worktree),
-  );
-  if (!exact || exact.generation === generation) return;
-  throw new Error(
-    `The worktree at ${worktree} belongs to a previous incarnation of ${kind} ` +
-      `"${id}". Remove that exact path and run checkout again.`,
-  );
 }
 
 type PreparedCheckout = {
@@ -826,39 +624,10 @@ async function isCurrentOwnedWorktree(
 ): Promise<boolean> {
   try {
     await assertOwnedWorktree(sessionId, worktree, bundle, source.id, kind);
-    await assertWorkspaceGeneration(
-      sessionId,
-      worktree,
-      kind,
-      source.id,
-      source.generation,
-    );
     return true;
   } catch {
     return false;
   }
-}
-
-async function hasOtherOwnedDefaultCheckout(
-  sessionId: string,
-  owner: WorkspaceIndexEntry,
-  excludedPath: string,
-): Promise<boolean> {
-  let defaultPath: string;
-  try {
-    defaultPath = (await resolveWorktree(sessionId, owner.kind, owner.id))
-      .absolutePath;
-  } catch {
-    return false;
-  }
-  if (path.resolve(defaultPath) === path.resolve(excludedPath)) return false;
-  if (!(await pathExists(path.join(defaultPath, '.git')))) return false;
-  const origin = await worktreeOrigin(sessionId, defaultPath);
-  return (
-    origin !== null &&
-    path.resolve(origin) ===
-      path.resolve(bundleFile(sessionId, owner.kind, owner.id))
-  );
 }
 
 function checkoutConflictMessage(
@@ -869,19 +638,20 @@ function checkoutConflictMessage(
 ): string {
   const tool = `checkout_${kind}`;
   const overwrite =
-    `retry ${tool} with the same target_path and force: true to permanently ` +
+    `retry ${tool} as a fresh checkout at the same path with force: true to ` +
+    'permanently ' +
     'discard that path and create a fresh checkout.';
   if (!originRefreshed) {
     return (
       `Checkout target "${resolved.path}" already exists. Nothing was ` +
-      `changed. Reuse it, choose a different target_path, or ${overwrite}`
+      `changed. Reuse it, choose a different path, or ${overwrite}`
     );
   }
   if (!source.bundleBase64) {
     return (
       `Checkout target "${resolved.path}" already exists. The worktree was ` +
       'not overwritten; platform master is currently empty. ' +
-      `Choose another target_path, or ${overwrite}`
+      `Choose another path, or ${overwrite}`
     );
   }
   return (
@@ -902,8 +672,19 @@ function checkoutSynchronizationConflictMessage(
     'local master has commits ahead of or diverged from platform master. Its ' +
     'origin/master was refreshed, but local master and the worktree were not ' +
     'changed. Rebase or merge the local commits onto origin/master, or retry ' +
-    `${tool} with the same target_path and force: true to permanently discard ` +
-    'that path and create a fresh checkout.'
+    `${tool} as a fresh checkout at the same path with force: true to ` +
+    'permanently discard that path.'
+  );
+}
+
+function cloneTargetExistsMessage(
+  kind: SourceKind,
+  resolved: AgentWorkspacePath,
+): string {
+  return (
+    `Cannot clone ${kind} into "${resolved.path}" because that path already ` +
+    'exists. Update the existing checkout with its exact path, choose a new ' +
+    'path, or use force: true to permanently replace that exact target.'
   );
 }
 
@@ -1014,16 +795,6 @@ async function synchronizeExistingCheckout(
         'and retry checkout.',
     );
   }
-  await registerWorkspace(
-    sessionId,
-    {
-      kind,
-      id: source.id,
-      generation: source.generation,
-      absolutePath: worktree,
-    },
-    { replaceExactPath: true },
-  );
   return checkout;
 }
 
@@ -1035,6 +806,15 @@ export async function checkoutFromBundle(
   options: CheckoutFromBundleOptions = {},
 ): Promise<LocalCheckout> {
   const { id } = source;
+  const mode = options.mode ?? 'upsert';
+  if (mode === 'update' && !options.targetPath) {
+    throw new Error(
+      'An explicit source path is required to update a checkout.',
+    );
+  }
+  if (mode === 'update' && options.force) {
+    throw new Error('force cannot be used when updating an existing checkout.');
+  }
   const resolved = await resolveWorktree(
     sessionId,
     kind,
@@ -1042,24 +822,33 @@ export async function checkoutFromBundle(
     options.targetPath,
   );
   const worktree = resolved.absolutePath;
-  const previousOwner = await assertWorkspaceDoesNotOverlap(
-    sessionId,
-    worktree,
-    {
-      allowAnyExact: true,
-    },
-  );
+  await assertWorkspacePathAllowed(sessionId, worktree);
   const bundle = bundleFile(sessionId, kind, id);
   const worktreeExists = await pathEntryExists(worktree);
   const force = options.force ?? false;
-  if (worktreeExists && !force) {
-    const owned = await isCurrentOwnedWorktree(
-      sessionId,
-      worktree,
-      bundle,
-      source,
-      kind,
+  if (!worktreeExists && mode === 'update') {
+    throw new Error(
+      `Cannot update checkout "${resolved.path}" because it does not exist. ` +
+        'Clone the app first or provide the path of an existing checkout.',
     );
+  }
+  if (worktreeExists && mode === 'clone' && !force) {
+    throw new Error(cloneTargetExistsMessage(kind, resolved));
+  }
+  if (worktreeExists && !force) {
+    let owned: boolean;
+    if (mode === 'update') {
+      await assertOwnedWorktree(sessionId, worktree, bundle, source.id, kind);
+      owned = true;
+    } else {
+      owned = await isCurrentOwnedWorktree(
+        sessionId,
+        worktree,
+        bundle,
+        source,
+        kind,
+      );
+    }
     if (owned) {
       await ensureBundleDirectory(sessionId, bundle);
       const prepared = await prepareCheckout(sessionId, source, bundle);
@@ -1086,36 +875,9 @@ export async function checkoutFromBundle(
   setAgentOwned([agentWorkDir(sessionId)], sessionId);
   const worktreeBackup = path.join(prepared.root, 'previous-worktree');
   const bundleBackup = path.join(prepared.root, 'previous.bundle');
-  const previousOwnerBundleBackup = path.join(
-    prepared.root,
-    'previous-owner.bundle',
-  );
   const hadBundle = await pathEntryExists(bundle);
-  const previousOwnerHasOtherCheckouts = previousOwner
-    ? (await listIndexedWorkspaces(sessionId)).some(
-        (entry) =>
-          entry.kind === previousOwner.kind &&
-          entry.id === previousOwner.id &&
-          path.resolve(entry.absolutePath) !== path.resolve(worktree),
-      )
-    : false;
-  const previousOwnerHasDefaultCheckout =
-    previousOwner && !previousOwnerHasOtherCheckouts
-      ? await hasOtherOwnedDefaultCheckout(sessionId, previousOwner, worktree)
-      : false;
-  const previousOwnerBundle =
-    previousOwner &&
-    !previousOwnerHasOtherCheckouts &&
-    !previousOwnerHasDefaultCheckout &&
-    (previousOwner.kind !== kind || previousOwner.id !== id)
-      ? bundleFile(sessionId, previousOwner.kind, previousOwner.id)
-      : null;
-  const hadPreviousOwnerBundle = previousOwnerBundle
-    ? await pathEntryExists(previousOwnerBundle)
-    : false;
   let movedWorktree = false;
   let movedBundle = false;
-  let movedPreviousOwnerBundle = false;
   let installedWorktree = false;
   let installedBundle = false;
   let preservePreparedRoot = false;
@@ -1123,14 +885,11 @@ export async function checkoutFromBundle(
     if (worktreeExists) {
       await rename(worktree, worktreeBackup);
       movedWorktree = true;
+      await assertReplacementContainsNoNestedCheckout(worktreeBackup, resolved);
     }
     if (hadBundle) {
       await rename(bundle, bundleBackup);
       movedBundle = true;
-    }
-    if (previousOwnerBundle && hadPreviousOwnerBundle) {
-      await rename(previousOwnerBundle, previousOwnerBundleBackup);
-      movedPreviousOwnerBundle = true;
     }
     if (prepared.bundle) {
       await rename(prepared.bundle, bundle);
@@ -1150,16 +909,6 @@ export async function checkoutFromBundle(
       source.masterCommit,
       worktreeExists,
     );
-    await registerWorkspace(
-      sessionId,
-      {
-        kind,
-        id,
-        generation: source.generation,
-        absolutePath: worktree,
-      },
-      { replaceExactPath: true },
-    );
     return checkout;
   } catch (error) {
     const rollbackErrors: unknown[] = [];
@@ -1177,17 +926,6 @@ export async function checkoutFromBundle(
       if (installedBundle) await rm(bundle, { force: true });
       if (movedBundle && (await pathEntryExists(bundleBackup))) {
         await rename(bundleBackup, bundle);
-      }
-    } catch (rollbackError) {
-      rollbackErrors.push(rollbackError);
-    }
-    try {
-      if (
-        previousOwnerBundle &&
-        movedPreviousOwnerBundle &&
-        (await pathEntryExists(previousOwnerBundleBackup))
-      ) {
-        await rename(previousOwnerBundleBackup, previousOwnerBundle);
       }
     } catch (rollbackError) {
       rollbackErrors.push(rollbackError);
@@ -1214,8 +952,8 @@ export async function checkoutFromBundle(
  * (otherwise the create would leave an orphan draft row behind and retrying
  * the same id would hit "already exists" on the platform side).
  *
- * The directory may also be an old or manually relocated checkout that was not
- * registered when an entity was deleted; tell the Agent how to resolve it.
+ * The directory may also be an old or manually relocated checkout left in the
+ * conversation after an entity was deleted; tell the Agent how to resolve it.
  */
 export async function assertWorktreeAvailable(
   sessionId: string,
@@ -1240,7 +978,7 @@ async function assertResolvedWorktreeAvailable(
   sessionId: string,
   resolved: AgentWorkspacePath,
 ): Promise<AgentWorkspacePath> {
-  await assertWorkspaceDoesNotOverlap(sessionId, resolved.absolutePath);
+  await assertWorkspacePathAllowed(sessionId, resolved.absolutePath);
   if (await pathExists(resolved.absolutePath)) {
     const entries = await readdir(resolved.absolutePath);
     if (entries.length === 0) return resolved;
@@ -1260,7 +998,6 @@ export async function initNewWorktree(
   sessionId: string,
   kind: SourceKind,
   id: string,
-  generation: string,
   writeFiles: (root: string) => Promise<void>,
   targetPath?: string,
   materializer?: WorktreeMaterializer,
@@ -1296,12 +1033,6 @@ export async function initNewWorktree(
   await writeFiles(worktree);
   await materializeWorktree(worktree, materializer);
   setAgentOwned([worktree], sessionId);
-  await registerWorkspace(sessionId, {
-    kind,
-    id,
-    generation,
-    absolutePath: worktree,
-  });
   return describeCheckout(sessionId, kind, id, worktree, null);
 }
 
@@ -1314,14 +1045,11 @@ export async function bundleWorktreeForDeploy(
   sessionId: string,
   kind: SourceKind,
   id: string,
-  generation: string,
   sourcePath: string,
 ): Promise<{ bundleBase64: string; headCommit: string }> {
   const worktree = (await resolveWorktree(sessionId, kind, id, sourcePath))
     .absolutePath;
-  await assertWorkspaceDoesNotOverlap(sessionId, worktree, {
-    allowedExact: { kind, id },
-  });
+  await assertWorkspacePathAllowed(sessionId, worktree);
   const bundle = bundleFile(sessionId, kind, id);
   if (!(await pathExists(worktree))) {
     throw new Error(
@@ -1329,7 +1057,6 @@ export async function bundleWorktreeForDeploy(
     );
   }
   await assertOwnedWorktree(sessionId, worktree, bundle, id, kind);
-  await assertWorkspaceGeneration(sessionId, worktree, kind, id, generation);
 
   const status = await worktreeStatus(sessionId, worktree);
   if (status) {
@@ -1360,12 +1087,6 @@ export async function bundleWorktreeForDeploy(
       cwd: worktree,
     });
     const data = await readFile(out);
-    await registerWorkspace(sessionId, {
-      kind,
-      id,
-      generation,
-      absolutePath: worktree,
-    });
     return { bundleBase64: data.toString('base64'), headCommit };
   } finally {
     await rm(tmp, { recursive: true, force: true });

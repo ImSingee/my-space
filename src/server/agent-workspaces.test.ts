@@ -7,9 +7,6 @@ vi.mock('~/db', async () => {
 
 const { db, schema } = await import('~/db');
 const { reconcileRunnerWorkspaces } = await import('./agent-workspaces');
-const APP_GENERATION = '2026-07-12T00:00:00.000Z';
-const WORKFLOW_GENERATION = '2026-07-12T01:00:00.000Z';
-const OLD_GENERATION = '2026-07-11T00:00:00.000Z';
 
 beforeEach(async () => {
   await db.delete(schema.agentRuns);
@@ -19,87 +16,19 @@ beforeEach(async () => {
 });
 
 describe('runner workspace reconciliation', () => {
-  it('checks only the hello-time claims and ignores sources in stale sessions', async () => {
+  it('returns deleted sessions as stale without inspecting their contents', async () => {
     await db
       .insert(schema.agentSessions)
       .values({ id: 'active-session', title: 'Active' });
-    await db.insert(schema.apps).values({
-      id: 'current-app',
-      slug: 'current-app',
-      name: 'Current app',
-      createdAt: new Date(APP_GENERATION),
-    });
-    await db.insert(schema.workflows).values({
-      id: 'current-workflow',
-      name: 'Current workflow',
-      createdAt: new Date(WORKFLOW_GENERATION),
-    });
 
     await expect(
-      reconcileRunnerWorkspaces('runner-a', {
-        sessionIds: ['active-session', 'deleted-session'],
-        sources: [
-          {
-            sessionId: 'active-session',
-            kind: 'app',
-            id: 'current-app',
-            generation: APP_GENERATION,
-          },
-          {
-            sessionId: 'active-session',
-            kind: 'app',
-            id: 'current-app',
-            generation: null,
-          },
-          {
-            sessionId: 'active-session',
-            kind: 'app',
-            id: 'deleted-app',
-            generation: OLD_GENERATION,
-          },
-          {
-            sessionId: 'active-session',
-            kind: 'workflow',
-            id: 'current-workflow',
-            generation: WORKFLOW_GENERATION,
-          },
-          {
-            sessionId: 'active-session',
-            kind: 'workflow',
-            id: 'current-workflow',
-            generation: OLD_GENERATION,
-          },
-          {
-            sessionId: 'deleted-session',
-            kind: 'workflow',
-            id: 'deleted-workflow',
-            generation: OLD_GENERATION,
-          },
-        ],
-      }),
+      reconcileRunnerWorkspaces('runner-a', [
+        'active-session',
+        'deleted-session',
+      ]),
     ).resolves.toEqual({
       ownedSessionIds: ['active-session'],
       staleSessionIds: ['deleted-session'],
-      staleSources: [
-        {
-          sessionId: 'active-session',
-          kind: 'app',
-          id: 'current-app',
-          generation: null,
-        },
-        {
-          sessionId: 'active-session',
-          kind: 'app',
-          id: 'deleted-app',
-          generation: OLD_GENERATION,
-        },
-        {
-          sessionId: 'active-session',
-          kind: 'workflow',
-          id: 'current-workflow',
-          generation: OLD_GENERATION,
-        },
-      ],
     });
   });
 
@@ -127,19 +56,15 @@ describe('runner workspace reconciliation', () => {
     ]);
 
     await expect(
-      reconcileRunnerWorkspaces('runner-a', {
-        sessionIds: [
-          'owned-here',
-          'unowned',
-          'owned-elsewhere',
-          'deleted-session',
-        ],
-        sources: [],
-      }),
+      reconcileRunnerWorkspaces('runner-a', [
+        'owned-here',
+        'unowned',
+        'owned-elsewhere',
+        'deleted-session',
+      ]),
     ).resolves.toEqual({
       ownedSessionIds: ['owned-here', 'unowned'],
       staleSessionIds: ['deleted-session'],
-      staleSources: [],
     });
 
     const sessions = await db.query.agentSessions.findMany();
@@ -173,24 +98,16 @@ describe('runner workspace reconciliation', () => {
     });
 
     await expect(
-      reconcileRunnerWorkspaces('runner-b', {
-        sessionIds: ['active-unowned'],
-        sources: [],
-      }),
+      reconcileRunnerWorkspaces('runner-b', ['active-unowned']),
     ).resolves.toEqual({
       ownedSessionIds: [],
       staleSessionIds: [],
-      staleSources: [],
     });
     await expect(
-      reconcileRunnerWorkspaces('runner-a', {
-        sessionIds: ['active-unowned'],
-        sources: [],
-      }),
+      reconcileRunnerWorkspaces('runner-a', ['active-unowned']),
     ).resolves.toEqual({
       ownedSessionIds: ['active-unowned'],
       staleSessionIds: [],
-      staleSources: [],
     });
 
     const session = await db.query.agentSessions.findFirst({
@@ -215,14 +132,10 @@ describe('runner workspace reconciliation', () => {
     });
 
     await expect(
-      reconcileRunnerWorkspaces('runner-a', {
-        sessionIds: ['awaiting-dispatch'],
-        sources: [],
-      }),
+      reconcileRunnerWorkspaces('runner-a', ['awaiting-dispatch']),
     ).resolves.toEqual({
       ownedSessionIds: [],
       staleSessionIds: [],
-      staleSources: [],
     });
 
     const session = await db.query.agentSessions.findFirst({

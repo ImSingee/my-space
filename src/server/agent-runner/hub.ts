@@ -111,16 +111,6 @@ export function broadcastSessionWorkspaceCleanup(sessionId: string): void {
   }
 }
 
-export function broadcastEntityWorkspaceCleanup(
-  scope: 'app' | 'workflow',
-  id: string,
-  generation: string,
-): void {
-  for (const conn of hubState().runners.values()) {
-    send(conn, { type: 'workspace.cleanup', scope, id, generation });
-  }
-}
-
 /** One connected runner as exposed to the status page (no socket internals). */
 export type ConnectedRunnerInfo = {
   runnerId: string;
@@ -599,10 +589,10 @@ async function registerRunner(
 
     const { reconcileRunnerWorkspaces } =
       await import('~server/agent-workspaces');
-    workspace = await reconcileRunnerWorkspaces(hello.runnerId, {
-      sessionIds: hello.workspaceSessionIds,
-      sources: hello.workspaceSources,
-    });
+    workspace = await reconcileRunnerWorkspaces(
+      hello.runnerId,
+      hello.workspaceSessionIds,
+    );
     conn.workspaceSessionIds = new Set(workspace.ownedSessionIds);
   } catch (error) {
     if (state.runners.get(hello.runnerId) === conn) {
@@ -630,7 +620,6 @@ async function registerRunner(
       resumedRunIds: resumed,
       staleRunIds: stale,
       staleWorkspaceSessionIds: workspace.staleSessionIds,
-      staleWorkspaceSources: workspace.staleSources,
     })
   ) {
     if (state.runners.get(hello.runnerId) === conn) {

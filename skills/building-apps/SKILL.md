@@ -18,10 +18,13 @@ workflow in order and load only the capability references needed for the task.
    The slug is the human-facing `/app/<slug>` segment. Hatch generates a
    separate immutable id for the repository, data relations, and technical
    `/api/app/<id>/...` URLs.
-2. For an existing App, inspect it with `list_apps` and `get_app`, then call
-   `checkout_app`. The returned absolute source path is authoritative. Reuse an
-   existing target or choose a different `target_path`; use `force: true` only
-   when discarding that target is intended.
+2. For an existing App, inspect it with `list_apps` and `get_app`. If this
+   conversation does not have a checkout yet, call `checkout_app` with
+   `clone: true`; it clones into `source_path` or defaults to `apps/<slug>`.
+   To update an existing checkout, call `checkout_app` with `clone: false` and
+   its exact `source_path`. Update mode never creates a missing path. Use
+   `force: true` only with `clone: true` when intentionally discarding the
+   current contents of that exact target.
 3. Read the actual source tree before editing. Keep `manifest.json`, proto,
    backend, frontend, widgets, and capabilities synchronized.
 4. If dependencies changed, update the lockfile with the Deno command below.

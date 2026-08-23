@@ -113,7 +113,7 @@ export const TOOL_LABELS: Record<string, string> = {
   download_attachment: 'Download attachment',
   list_apps: 'List apps',
   get_app: 'Get app',
-  checkout_app: 'Checkout app',
+  checkout_app: 'Clone or update app',
   create_app: 'Create app',
   deploy_app: 'Deploy app',
   rollback_app: 'Rollback app',

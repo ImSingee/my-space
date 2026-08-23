@@ -250,14 +250,12 @@ async function handleApps(
 
   if (action === 'source' && method === 'GET') {
     const id = await resolveApp(handle);
-    const generation = await requireAppGeneration(id);
     const { appMasterCommit, exportAppMasterBundle } =
       await import('~server/apps/git');
     const commit = await appMasterCommit(id);
     const bundle = await exportAppMasterBundle(id);
     const payload: SourceBundleResponse = {
       id,
-      generation,
       masterCommit: commit,
       bundleBase64: bundle ? bundle.toString('base64') : null,
     };
@@ -404,14 +402,13 @@ async function handleWorkflows(
   }
 
   if (action === 'source' && method === 'GET') {
-    const { generation } = await requireWorkflow(id);
+    await requireWorkflow(id);
     const { workflowMasterCommit, exportWorkflowMasterBundle } =
       await import('~server/workflows/git');
     const commit = await workflowMasterCommit(id);
     const bundle = await exportWorkflowMasterBundle(id);
     const payload: SourceBundleResponse = {
       id,
-      generation,
       masterCommit: commit,
       bundleBase64: bundle ? bundle.toString('base64') : null,
     };

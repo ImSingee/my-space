@@ -20,7 +20,7 @@ import { isReservedEnvKey } from './env-keys';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -199,15 +199,6 @@ export type RunModelConfig = z.infer<typeof runModelConfigSchema>;
 
 /** ================== runner -> platform messages ================== */
 
-export const workspaceSourceClaimSchema = z.object({
-  sessionId: z.string().min(1),
-  kind: z.enum(['app', 'workflow']),
-  id: z.string().min(1),
-  /** Entity creation token; null only for an unindexed compatibility path. */
-  generation: z.string().min(1).nullable(),
-});
-export type WorkspaceSourceClaim = z.infer<typeof workspaceSourceClaimSchema>;
-
 export const runnerHelloSchema = z.object({
   type: z.literal('runner.hello'),
   runnerId: z.string().min(1),
@@ -216,8 +207,6 @@ export const runnerHelloSchema = z.object({
   activeRunIds: z.array(z.string()),
   /** Session directories currently persisted in this runner's data root. */
   workspaceSessionIds: z.array(z.string()),
-  /** Source workspaces present when this hello snapshot was captured. */
-  workspaceSources: z.array(workspaceSourceClaimSchema),
 });
 
 export const runnerReadySchema = z.object({
@@ -310,8 +299,6 @@ export const hubHelloAckSchema = z.object({
   staleRunIds: z.array(z.string()),
   /** Local session roots whose Platform sessions were deleted while offline. */
   staleWorkspaceSessionIds: z.array(z.string()),
-  /** Hello-time source claims whose entity/generation is no longer current. */
-  staleWorkspaceSources: z.array(workspaceSourceClaimSchema),
 });
 
 export const hubReadyAckSchema = z.object({
@@ -412,25 +399,11 @@ export const runFinishAckSchema = z.object({
   runId: z.string().min(1),
 });
 
-export const workspaceCleanupSchema = z.discriminatedUnion('scope', [
-  z.object({
-    type: z.literal('workspace.cleanup'),
-    scope: z.literal('session'),
-    sessionId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal('workspace.cleanup'),
-    scope: z.literal('app'),
-    id: z.string().min(1),
-    generation: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal('workspace.cleanup'),
-    scope: z.literal('workflow'),
-    id: z.string().min(1),
-    generation: z.string().min(1),
-  }),
-]);
+export const workspaceCleanupSchema = z.object({
+  type: z.literal('workspace.cleanup'),
+  scope: z.literal('session'),
+  sessionId: z.string().min(1),
+});
 
 export const hubMessageSchema = z.union([
   hubHelloAckSchema,
@@ -767,8 +740,6 @@ export type QueryAppDataTableResponse =
 /** Response of GET .../source: the canonical repo master as a git bundle. */
 export type SourceBundleResponse = {
   id: string;
-  /** Immutable creation token for this incarnation of the entity. */
-  generation: string;
   masterCommit: string | null;
   /** Null when the repo has no commits yet (nothing to bundle). */
   bundleBase64: string | null;

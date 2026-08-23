@@ -10,9 +10,6 @@ import {
   appVersionsDir,
   appArtifactsDir,
   appRepoDir,
-  agentAppWorkDir,
-  agentWorkDir,
-  AGENTS_DIR,
   deploymentArtifactDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
@@ -24,7 +21,7 @@ import {
 import { publishPlatformEvent } from '~server/platform-events';
 import { buildMatchesDeployment } from './build-identity';
 import { appDeployLock } from './deploy';
-import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
+import { moveMasterToDeploymentTag } from './git';
 import {
   type NormalizedManifest,
   isValidAppId,
@@ -482,21 +479,8 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
   } catch {
     /* best-effort */
   }
-  const { broadcastEntityWorkspaceCleanup } =
-    await import('../agent-runner/hub');
   // Cascades to deployments, dashboard widgets, and sidebar items.
-  const [deleted] = await db
-    .delete(schema.apps)
-    .where(eq(schema.apps.id, id))
-    .returning({ createdAt: schema.apps.createdAt });
-  if (deleted) {
-    broadcastEntityWorkspaceCleanup('app', id, deleted.createdAt.toISOString());
-  }
-
-  // Remove agent worktrees before the bare repo: deleteAgentWorktrees() scopes
-  // each checkout to this app via its git origin, which must still resolve
-  // against the not-yet-deleted repo or a stale worktree would be left behind.
-  await deleteAgentWorktrees(id);
+  await db.delete(schema.apps).where(eq(schema.apps.id, id));
   await Promise.all([
     fs.rm(appSrcDir(id), { recursive: true, force: true }),
     fs.rm(appBuildDir(id), { recursive: true, force: true }),
@@ -508,31 +492,4 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
   // Cancel any scheduled cron jobs for the removed app.
   await reloadScheduler();
   return { ok: true };
-}
-
-async function deleteAgentWorktrees(id: string): Promise<void> {
-  if (!(await pathExists(AGENTS_DIR))) return;
-  const sessions = await fs.readdir(AGENTS_DIR, { withFileTypes: true });
-  const repoDir = appRepoDir(id);
-  await Promise.all(
-    sessions
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const candidates = [
-          agentAppWorkDir(entry.name, id),
-          // Compatibility cleanup only. Old root-level worktrees are never
-          // scanned or migrated during normal source operations.
-          path.resolve(agentWorkDir(entry.name), id),
-        ];
-        await Promise.all(
-          candidates.map(async (worktree) => {
-            if (!(await pathExists(worktree))) return;
-            const origin = await worktreeOrigin(worktree);
-            if (!origin || path.resolve(origin) !== path.resolve(repoDir))
-              return;
-            await fs.rm(worktree, { recursive: true, force: true });
-          }),
-        );
-      }),
-  );
 }

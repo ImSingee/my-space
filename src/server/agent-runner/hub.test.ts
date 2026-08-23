@@ -1,13 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
-import {
-  PROTOCOL_VERSION,
-  type RunStartPayload,
-  type WorkspaceSourceClaim,
-} from '~agent/protocol';
-
-const GENERATION = '2026-07-12T00:00:00.000Z';
+import { PROTOCOL_VERSION, type RunStartPayload } from '~agent/protocol';
 
 // The hub reaches into the run control plane on hello (reconcile) and ping
 // (lease renewal); these tests only exercise connection bookkeeping, so stub
@@ -44,10 +38,9 @@ vi.mock('~server/agent-workspaces', () => {
   type Workspaces = typeof import('~server/agent-workspaces');
   return {
     reconcileRunnerWorkspaces: vi.fn<Workspaces['reconcileRunnerWorkspaces']>(
-      async (_runnerId, input) => ({
-        ownedSessionIds: input.sessionIds,
+      async (_runnerId, sessionIds) => ({
+        ownedSessionIds: sessionIds,
         staleSessionIds: [],
-        staleSources: [],
       }),
     ),
   };
@@ -56,7 +49,6 @@ vi.mock('~server/agent-workspaces', () => {
 const agentRuns = await import('~server/agent-runs');
 const agentWorkspaces = await import('~server/agent-workspaces');
 const {
-  broadcastEntityWorkspaceCleanup,
   broadcastSessionWorkspaceCleanup,
   connectedRunnerCount,
   handleRunnerSocket,
@@ -95,7 +87,6 @@ async function connectRunner(
   runnerId: string,
   activeRunIds: string[] = [],
   workspaceSessionIds: string[] = [],
-  workspaceSources: WorkspaceSourceClaim[] = [],
 ) {
   const socket = new FakeSocket();
   handleRunnerSocket(socket.asWebSocket());
@@ -107,7 +98,6 @@ async function connectRunner(
       protocolVersion: PROTOCOL_VERSION,
       activeRunIds,
       workspaceSessionIds,
-      workspaceSources,
     }),
   );
   await vi.waitFor(() =>
@@ -139,10 +129,9 @@ beforeEach(() => {
   });
   vi.mocked(agentRuns.completeRunFromRunner).mockResolvedValue(null);
   vi.mocked(agentWorkspaces.reconcileRunnerWorkspaces).mockImplementation(
-    async (_runnerId, input) => ({
-      ownedSessionIds: input.sessionIds,
+    async (_runnerId, sessionIds) => ({
+      ownedSessionIds: sessionIds,
       staleSessionIds: [],
-      staleSources: [],
     }),
   );
   // Fake only Date so lastSeen deltas are deterministic; timers stay real
@@ -411,7 +400,6 @@ describe('runner connection snapshot', () => {
         protocolVersion: PROTOCOL_VERSION - 1,
         activeRunIds: [],
         workspaceSessionIds: [],
-        workspaceSources: [],
       }),
     );
 
@@ -508,57 +496,23 @@ describe('runner connection snapshot', () => {
     vi.mocked(agentWorkspaces.reconcileRunnerWorkspaces).mockResolvedValueOnce({
       ownedSessionIds: ['active-session'],
       staleSessionIds: ['deleted-session'],
-      staleSources: [
-        {
-          sessionId: 'active-session',
-          kind: 'app',
-          id: 'deleted-app',
-          generation: GENERATION,
-        },
-      ],
     });
 
     const socket = await connectRunner(
       'runner-a',
       [],
       ['active-session', 'deleted-session'],
-      [
-        {
-          sessionId: 'active-session',
-          kind: 'app',
-          id: 'deleted-app',
-          generation: GENERATION,
-        },
-      ],
     );
 
     expect(agentWorkspaces.reconcileRunnerWorkspaces).toHaveBeenCalledWith(
       'runner-a',
-      {
-        sessionIds: ['active-session', 'deleted-session'],
-        sources: [
-          {
-            sessionId: 'active-session',
-            kind: 'app',
-            id: 'deleted-app',
-            generation: GENERATION,
-          },
-        ],
-      },
+      ['active-session', 'deleted-session'],
     );
     expect(socket.sent).toContainEqual({
       type: 'hub.hello_ack',
       resumedRunIds: [],
       staleRunIds: [],
       staleWorkspaceSessionIds: ['deleted-session'],
-      staleWorkspaceSources: [
-        {
-          sessionId: 'active-session',
-          kind: 'app',
-          id: 'deleted-app',
-          generation: GENERATION,
-        },
-      ],
     });
   });
 
@@ -567,7 +521,6 @@ describe('runner connection snapshot', () => {
       | ((value: {
           ownedSessionIds: string[];
           staleSessionIds: string[];
-          staleSources: [];
         }) => void)
       | undefined;
     vi.mocked(agentWorkspaces.reconcileRunnerWorkspaces).mockImplementationOnce(
@@ -586,7 +539,6 @@ describe('runner connection snapshot', () => {
         protocolVersion: PROTOCOL_VERSION,
         activeRunIds: [],
         workspaceSessionIds: ['deleted-session'],
-        workspaceSources: [],
       }),
     );
     await vi.waitFor(() =>
@@ -604,7 +556,6 @@ describe('runner connection snapshot', () => {
     finish?.({
       ownedSessionIds: [],
       staleSessionIds: ['deleted-session'],
-      staleSources: [],
     });
     await vi.waitFor(() =>
       expect(
@@ -615,13 +566,11 @@ describe('runner connection snapshot', () => {
     await vi.waitFor(() => expect(connectedRunnerCount()).toBe(1));
   });
 
-  it('broadcasts session and entity cleanup to every online runner', async () => {
+  it('broadcasts session cleanup to every online runner', async () => {
     const first = await connectRunner('runner-a');
     const second = await connectRunner('runner-b');
 
     broadcastSessionWorkspaceCleanup('session-a');
-    broadcastEntityWorkspaceCleanup('app', 'app-a', GENERATION);
-    broadcastEntityWorkspaceCleanup('workflow', 'workflow-a', GENERATION);
 
     for (const socket of [first, second]) {
       expect(socket.sent).toEqual(
@@ -630,18 +579,6 @@ describe('runner connection snapshot', () => {
             type: 'workspace.cleanup',
             scope: 'session',
             sessionId: 'session-a',
-          },
-          {
-            type: 'workspace.cleanup',
-            scope: 'app',
-            id: 'app-a',
-            generation: GENERATION,
-          },
-          {
-            type: 'workspace.cleanup',
-            scope: 'workflow',
-            id: 'workflow-a',
-            generation: GENERATION,
           },
         ]),
       );

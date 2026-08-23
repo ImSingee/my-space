@@ -158,10 +158,6 @@ export function agentAttachmentStorePath(
   return path.resolve(agentAttachmentStoreDir(sessionId), attachmentId);
 }
 
-export function agentWorkspaceIndexPath(sessionId: string): string {
-  return path.resolve(agentSessionDir(sessionId), 'workspace-index.json');
-}
-
 export function appDeployCheckoutDir(id: string): string {
   return path.resolve(CHECKOUTS_DIR, id, 'deploy');
 }

@@ -27,7 +27,6 @@ export type CreateWorkflowInput = {
 
 export type CreateWorkflowResult = {
   id: string;
-  generation: string;
   name: string;
   /** Rendered template for the caller to write into its own worktree. */
   files: ScaffoldFile[];
@@ -92,12 +91,11 @@ export async function createWorkflow(
       repoPath,
       pinned: input.pin ?? true,
     })
-    .returning({ createdAt: schema.workflows.createdAt });
+    .returning({ id: schema.workflows.id });
   if (!created) throw new Error('Failed to create workflow.');
 
   return {
     id,
-    generation: created.createdAt.toISOString(),
     name,
     files,
   };

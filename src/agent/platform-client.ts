@@ -25,7 +25,6 @@ import type {
 
 export type CreateAppResult = {
   id: string;
-  generation: string;
   slug: string;
   name: string;
   /** Rendered scaffold template for the runner to write into its worktree. */
@@ -34,7 +33,6 @@ export type CreateAppResult = {
 
 export type CreateWorkflowResult = {
   id: string;
-  generation: string;
   name: string;
   files: ScaffoldFile[];
 };

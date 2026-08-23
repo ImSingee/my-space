@@ -1,44 +1,18 @@
 /** Platform-side reconciliation snapshot for runner-local Agent workspaces. */
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db, schema } from '~/db';
-import type { WorkspaceSourceClaim } from '~agent/protocol';
 
 export async function reconcileRunnerWorkspaces(
   runnerId: string,
-  input: {
-    sessionIds: string[];
-    sources: WorkspaceSourceClaim[];
-  },
+  sessionIds: string[],
 ): Promise<{
   ownedSessionIds: string[];
   staleSessionIds: string[];
-  staleSources: WorkspaceSourceClaim[];
 }> {
-  const claimedSessions = [...new Set(input.sessionIds)];
-  const sourceClaims = new Map<string, WorkspaceSourceClaim>();
-  for (const source of input.sources) {
-    sourceClaims.set(
-      `${source.sessionId}:${source.kind}:${source.id}:${source.generation ?? 'unknown'}`,
-      source,
-    );
-  }
-  const appIds = [
-    ...new Set(
-      [...sourceClaims.values()]
-        .filter((source) => source.kind === 'app')
-        .map((source) => source.id),
-    ),
-  ];
-  const workflowIds = [
-    ...new Set(
-      [...sourceClaims.values()]
-        .filter((source) => source.kind === 'workflow')
-        .map((source) => source.id),
-    ),
-  ];
-  const [existingSessions, apps, workflows] = await Promise.all([
+  const claimedSessions = [...new Set(sessionIds)];
+  const existingSessions =
     claimedSessions.length > 0
-      ? db
+      ? await db
           .select({
             id: schema.agentSessions.id,
             workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
@@ -46,23 +20,7 @@ export async function reconcileRunnerWorkspaces(
           })
           .from(schema.agentSessions)
           .where(inArray(schema.agentSessions.id, claimedSessions))
-      : [],
-    appIds.length > 0
-      ? db
-          .select({ id: schema.apps.id, createdAt: schema.apps.createdAt })
-          .from(schema.apps)
-          .where(inArray(schema.apps.id, appIds))
-      : [],
-    workflowIds.length > 0
-      ? db
-          .select({
-            id: schema.workflows.id,
-            createdAt: schema.workflows.createdAt,
-          })
-          .from(schema.workflows)
-          .where(inArray(schema.workflows.id, workflowIds))
-      : [],
-  ]);
+      : [];
   const validSessionIds = new Set<string>();
   const staleSessionIds = new Set(
     claimedSessions.filter(
@@ -152,21 +110,8 @@ export async function reconcileRunnerWorkspaces(
   // missing/offline local volume must fail closed rather than silently move a
   // session whose `.env` and worktree exist only on the recorded runner.
 
-  const existingApps = new Map(
-    apps.map((row) => [row.id, row.createdAt.toISOString()]),
-  );
-  const existingWorkflows = new Map(
-    workflows.map((row) => [row.id, row.createdAt.toISOString()]),
-  );
   return {
     ownedSessionIds: [...validSessionIds],
     staleSessionIds: [...staleSessionIds],
-    staleSources: [...sourceClaims.values()].filter(
-      (source) =>
-        validSessionIds.has(source.sessionId) &&
-        (source.kind === 'app'
-          ? existingApps.get(source.id) !== source.generation
-          : existingWorkflows.get(source.id) !== source.generation),
-    ),
   };
 }

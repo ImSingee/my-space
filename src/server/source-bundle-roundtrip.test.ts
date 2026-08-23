@@ -26,8 +26,6 @@ const root = await mkdtemp(path.join(tmpdir(), 'hatch-bundle-rt-'));
 // Per-session Linux UIDs need to traverse the fixture root to reach their
 // private runner-data worktrees. Keep it non-listable and non-writable.
 await chmod(root, 0o711);
-const GENERATION = '2026-07-12T00:00:00.000Z';
-const NEXT_GENERATION = '2026-07-12T01:00:00.000Z';
 process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 
 // Import after HATCH_DATA_DIR is set (module-level path constants).
@@ -42,8 +40,6 @@ const platform = createGitSource({
   deployTool: 'deploy_app',
   repoDir: (id) => path.join(root, 'repos', `${id}.git`),
   deployCheckoutDir: (id) => path.join(root, 'checkouts', id),
-  agentCheckoutDir: (sessionId, id) =>
-    path.join(root, 'server-agents', sessionId, id),
 });
 
 function run(cmd: string, args: string[], cwd: string): Promise<string> {
@@ -95,7 +91,6 @@ type SourceKind = (typeof SOURCE_KINDS)[number];
 
 type TestSource = {
   id: string;
-  generation: string;
   masterCommit: string | null;
   bundleBase64: string | null;
 };
@@ -135,7 +130,6 @@ async function exportSource(id: string): Promise<TestSource> {
   ]);
   return {
     id,
-    generation: GENERATION,
     masterCommit,
     bundleBase64: bundle?.toString('base64') ?? null,
   };
@@ -160,7 +154,6 @@ async function publishAgentChange(options: {
     sessionId,
     kind,
     source.id,
-    source.generation,
     checkout.absolutePath,
   );
   const staged = await platform.stageBundleCheckout(
@@ -245,7 +238,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     expect(exported).not.toBeNull();
     const checkout = await checkoutFromBundle(SESSION, 'app', {
       id: APP_ID,
-      generation: GENERATION,
       masterCommit: seedCommit,
       bundleBase64: exported!.toString('base64'),
     });
@@ -269,7 +261,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       SESSION,
       'app',
       APP_ID,
-      GENERATION,
       checkout.absolutePath,
     );
     expect(deploy.headCommit).toBe(localCommit);
@@ -356,7 +347,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
         const sessionId = `${id}-session`;
         const emptySource: TestSource = {
           id,
-          generation: GENERATION,
           masterCommit: null,
           bundleBase64: null,
         };
@@ -514,7 +504,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     const master = await platform.masterCommit(APP_ID);
     const stale = await checkoutFromBundle('rt-stale', 'app', {
       id: APP_ID,
-      generation: GENERATION,
       masterCommit: master,
       bundleBase64: exported!.toString('base64'),
     });
@@ -524,14 +513,12 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       'rt-stale',
       'app',
       APP_ID,
-      GENERATION,
       stale.absolutePath,
     );
 
     // …but master advances first (another deploy wins the race). ------------
     const winner = await checkoutFromBundle('rt-winner', 'app', {
       id: APP_ID,
-      generation: GENERATION,
       masterCommit: master,
       bundleBase64: exported!.toString('base64'),
     });
@@ -541,7 +528,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       'rt-winner',
       'app',
       APP_ID,
-      GENERATION,
       winner.absolutePath,
     );
     const stagedWinner = await platform.stageBundleCheckout(
@@ -569,50 +555,56 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     }
   });
 
-  it('requires force to replace a previous generation with an empty repo', async () => {
-    const sessionId = 'rt-recreated';
-    const exported = await platform.exportMasterBundle(APP_ID);
-    const master = await platform.masterCommit(APP_ID);
-    const old = await checkoutFromBundle(sessionId, 'app', {
-      id: APP_ID,
-      generation: GENERATION,
-      masterCommit: master,
-      bundleBase64: exported!.toString('base64'),
+  it('deploys an explicit old checkout after the same id is recreated', async () => {
+    const id = 'rt-recreated-deploy';
+    await seedPlatformSource(id, 'old source\n');
+    const source = await exportSource(id);
+    const sessionId = `${id}-session`;
+    const oldCheckout = await checkoutFromBundle(sessionId, 'app', source);
+    await writeFile(
+      path.join(oldCheckout.absolutePath, 'README.md'),
+      'restored source\n',
+    );
+    const restoredCommit = await commitAll(
+      oldCheckout.absolutePath,
+      'restore old checkout',
+      sessionId,
+    );
+
+    // Entity deletion removes only Platform-owned source. The conversation
+    // checkout remains, and a same-id recreation starts with an empty repo.
+    await rm(path.join(root, 'repos', `${id}.git`), {
+      recursive: true,
+      force: true,
     });
-
-    await expect(
-      checkoutFromBundle(sessionId, 'app', {
-        id: APP_ID,
-        generation: NEXT_GENERATION,
-        masterCommit: null,
-        bundleBase64: null,
-      }),
-    ).rejects.toThrow(/already exists.*Nothing was changed/);
-
-    const replacement = await checkoutFromBundle(
+    const upload = await bundleWorktreeForDeploy(
       sessionId,
       'app',
-      {
-        id: APP_ID,
-        generation: NEXT_GENERATION,
-        masterCommit: null,
-        bundleBase64: null,
-      },
-      { force: true },
+      id,
+      oldCheckout.absolutePath,
     );
-    expect(replacement.replacedExisting).toBe(true);
-    expect(replacement.synchronizedExisting).toBe(false);
-    expect(replacement.headCommit).toBeNull();
-    await expect(
-      readFile(path.join(old.absolutePath, 'README.md'), 'utf8'),
-    ).rejects.toThrow(/ENOENT/);
+    const staged = await platform.stageBundleCheckout(
+      id,
+      Buffer.from(upload.bundleBase64, 'base64'),
+    );
+    try {
+      const published = await platform.publishDeploymentSource(
+        id,
+        staged.dir,
+        1,
+      );
+      expect(published.commit).toBe(restoredCommit);
+    } finally {
+      await staged.cleanup();
+    }
+    await expect(platform.masterCommit(id)).resolves.toBe(restoredCommit);
   });
 
   for (const kind of ['app'] as const) {
     it(`requires force to discard local ${kind} work against an empty remote`, async () => {
       const sessionId = `rt-empty-remote-${kind}`;
       const id = `empty-remote-${kind}`;
-      const fresh = await initNewWorktree(sessionId, kind, id, GENERATION, () =>
+      const fresh = await initNewWorktree(sessionId, kind, id, () =>
         Promise.resolve(),
       );
       await writeFile(path.join(fresh.absolutePath, 'a.txt'), 'work\n');
@@ -623,7 +615,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       );
       const emptySource: TestSource = {
         id,
-        generation: GENERATION,
         masterCommit: null,
         bundleBase64: null,
       };
@@ -674,7 +665,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       APP_ID,
     );
     await expect(
-      bundleWorktreeForDeploy(SESSION, 'app', APP_ID, GENERATION, sourcePath),
+      bundleWorktreeForDeploy(SESSION, 'app', APP_ID, sourcePath),
     ).rejects.toThrow(/dirty/);
     await rm(path.join(sourcePath, 'x'));
 
@@ -683,7 +674,6 @@ describe('git bundle round-trip (platform <-> runner)', () => {
         SESSION,
         'app',
         'never-checked-out',
-        GENERATION,
         path.join(
           root,
           'runner-data',
