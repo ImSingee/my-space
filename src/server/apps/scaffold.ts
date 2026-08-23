@@ -102,7 +102,6 @@ export type CreateAppInput = {
 
 export type CreateAppResult = {
   id: string;
-  generation: string;
   slug: string;
   name: string;
   /** Rendered template for the caller to write into its own worktree. */
@@ -174,7 +173,7 @@ export async function createApp(
       status: 'draft',
       repoPath,
     })
-    .returning({ createdAt: schema.apps.createdAt });
+    .returning({ id: schema.apps.id });
   if (!created) throw new Error('Failed to create app.');
 
   // Pinning is independent of deploy-time capabilities. A draft has none yet;
@@ -195,7 +194,6 @@ export async function createApp(
 
   return {
     id,
-    generation: created.createdAt.toISOString(),
     slug,
     name,
     files,

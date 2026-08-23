@@ -152,8 +152,11 @@ gen/                    # generated RPC code
    generates a separate immutable id for the repository, data relations, and
    technical \`/api/app/<id>/...\` URLs. Pin user-facing Apps; leave
    backend/widget-only Apps unpinned.
-2. For an existing App, inspect it with \`list_apps\` / \`get_app\`, then call
-   \`checkout_app\`. Use its returned source path; do not infer one.
+2. For an existing App with no checkout in this conversation, inspect it with
+   \`list_apps\` / \`get_app\`, then call \`checkout_app\` with \`clone: true\`.
+   To refresh a checkout already present in this conversation, call it with
+   \`clone: false\` and its exact \`source_path\`; update mode never creates a
+   missing checkout. Use the returned source path; do not infer one.
 3. Read the actual tree before editing. The default demo widget is
    \`widgets/counter.tsx\`. Keep manifest, proto, backend, frontend, widgets, and
    capabilities consistent.

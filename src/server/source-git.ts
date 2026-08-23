@@ -1,11 +1,10 @@
 /**
  * Server-only: shared Git-backed source storage engine.
  *
- * Apps and workflows store source identically -- a bare repo per entity,
- * namespaced Agent worktrees under each chat session, deploy tags owned by the
- * platform. This
- * module implements that engine once; `apps/git.ts` and `workflows/git.ts` are
- * thin instantiations that plug in their own paths and wording.
+ * Apps and workflows store canonical source identically: a bare repo per
+ * entity, deploy tags owned by the Platform, and temporary deploy checkouts.
+ * Conversation worktrees live on the Runner and reach this storage only via
+ * source bundles.
  */
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
@@ -19,11 +18,6 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { agentWorkDir } from '~agent/paths';
-import {
-  materializeWorktree,
-  type WorktreeMaterializer,
-} from '~agent/worktree-materializer';
 
 export const SOURCE_BRANCH = 'master';
 export const DEPLOY_TAG_PREFIX = 'deploy/';
@@ -32,16 +26,6 @@ type CommandResult = {
   exitCode: number;
   stdout: string;
   stderr: string;
-};
-
-export type SourceCheckout = {
-  id: string;
-  path: string;
-  absolutePath: string;
-  dirty: boolean;
-  headCommit: string | null;
-  remoteCommit: string | null;
-  status: string;
 };
 
 export type PublishedSource = {
@@ -57,8 +41,6 @@ export type GitSourceConfig = {
   deployTool: string;
   repoDir: (id: string) => string;
   deployCheckoutDir: (id: string) => string;
-  agentCheckoutDir: (sessionId: string, id: string) => string;
-  agentCheckoutMaterializer?: WorktreeMaterializer;
 };
 
 async function pathExists(p: string): Promise<boolean> {
@@ -133,16 +115,6 @@ async function worktreeStatus(worktree: string): Promise<string> {
   return result.stdout.trim();
 }
 
-/** Remote `origin` URL of a worktree, or null when unset. */
-export async function worktreeOrigin(worktree: string): Promise<string | null> {
-  const result = await runGit(['remote', 'get-url', 'origin'], {
-    cwd: worktree,
-    allowFailure: true,
-  });
-  if (result.exitCode !== 0) return null;
-  return result.stdout.trim();
-}
-
 export function createGitSource(cfg: GitSourceConfig) {
   async function installServerHooks(repoDir: string): Promise<void> {
     const hook = path.join(repoDir, 'hooks', 'pre-receive');
@@ -189,73 +161,6 @@ exit 0
 
   async function masterCommit(id: string): Promise<string | null> {
     return refCommit(cfg.repoDir(id), `refs/heads/${SOURCE_BRANCH}`);
-  }
-
-  async function describeCheckout(
-    sessionId: string,
-    id: string,
-    worktree: string,
-  ): Promise<SourceCheckout> {
-    const [status, headCommit, remoteCommit] = await Promise.all([
-      worktreeStatus(worktree),
-      worktreeHead(worktree),
-      masterCommit(id),
-    ]);
-    return {
-      id,
-      path: path
-        .relative(agentWorkDir(sessionId), worktree)
-        .split(path.sep)
-        .join('/'),
-      absolutePath: worktree,
-      dirty: status.length > 0,
-      headCommit,
-      remoteCommit,
-      status,
-    };
-  }
-
-  async function checkoutForAgent(
-    sessionId: string,
-    id: string,
-  ): Promise<SourceCheckout> {
-    const repoDir = await ensureRepo(id);
-    const worktree = cfg.agentCheckoutDir(sessionId, id);
-    const gitDir = path.join(worktree, '.git');
-
-    if (await pathExists(worktree)) {
-      if (!(await pathExists(gitDir))) {
-        throw new Error(
-          `Agent worktree exists but is not a Git checkout: ${worktree}`,
-        );
-      }
-      // Never reuse a custom/stale checkout from another repository.
-      const origin = await worktreeOrigin(worktree);
-      if (!origin || path.resolve(origin) !== path.resolve(repoDir)) {
-        throw new Error(
-          `Agent worktree is not a checkout of ${cfg.noun} "${id}" ` +
-            `(expected origin ${repoDir}, found ${origin ?? 'no origin'}).`,
-        );
-      }
-      await setLocalGitIdentity(worktree);
-      await materializeWorktree(worktree, cfg.agentCheckoutMaterializer);
-      return describeCheckout(sessionId, id, worktree);
-    }
-
-    await mkdir(path.dirname(worktree), { recursive: true });
-    const master = await masterCommit(id);
-    if (master) {
-      await runGit(['clone', repoDir, worktree]);
-    } else {
-      await mkdir(worktree, { recursive: true });
-      await runGit(['init', '--initial-branch', SOURCE_BRANCH], {
-        cwd: worktree,
-      });
-      await runGit(['remote', 'add', 'origin', repoDir], { cwd: worktree });
-    }
-    await setLocalGitIdentity(worktree);
-    await materializeWorktree(worktree, cfg.agentCheckoutMaterializer);
-    return describeCheckout(sessionId, id, worktree);
   }
 
   async function prepareDeployCheckout(id: string): Promise<string> {
@@ -446,7 +351,6 @@ exit 0
   return {
     ensureRepo,
     masterCommit,
-    checkoutForAgent,
     prepareDeployCheckout,
     assertDeployableWorktree,
     publishDeploymentSource,

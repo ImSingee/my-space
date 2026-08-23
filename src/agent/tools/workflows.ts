@@ -221,7 +221,6 @@ export function createWorkflowTools(options: {
             sessionId,
             'workflow',
             res.id,
-            res.generation,
             (root) => writeScaffoldFiles(root, res.files),
             targetPath,
           );
@@ -281,7 +280,6 @@ export function createWorkflowTools(options: {
             sessionId,
             'workflow',
             detail.id,
-            detail.createdAt,
             params.source_path,
           );
           const res = await platform.deployWorkflow(detail.id, {

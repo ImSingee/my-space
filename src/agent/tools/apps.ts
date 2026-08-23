@@ -202,50 +202,72 @@ export function createAppTools(options: {
 
   const checkoutAppTool = tool({
     name: 'checkout_app',
-    label: 'Checkout app',
+    label: 'Clone or update app',
     description:
-      "Checkout an app's Git repo into this chat's persistent worktree. " +
-      'Use before reading or editing an existing app. An existing target is ' +
-      'synchronized only when it is the same owned checkout, clean, on master, ' +
-      'and remote master is a fast-forward; otherwise it fails unless force is ' +
-      'true. Before returning, it reproduces frozen dependencies, generates ' +
-      'Connect stubs, and materializes the platform-owned Hatch SDK. App ' +
-      'dependencies that require npm lifecycle scripts are rejected.',
+      "Clone an app's Git repo into this conversation, or update an existing " +
+      'checkout in place. Set clone: true to create a fresh checkout at ' +
+      'source_path or apps/<slug>. Set clone: false and provide source_path to ' +
+      'update that exact checkout; update never creates or replaces a path. ' +
+      'Before returning, it reproduces frozen dependencies, generates Connect ' +
+      'stubs, and materializes the platform-owned Hatch SDK. App dependencies ' +
+      'that require npm lifecycle scripts are rejected.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to checkout.' }),
-      target_path: Type.Optional(
+      clone: Type.Boolean({
+        description:
+          'True to create a fresh checkout; false to update the existing ' +
+          'checkout at source_path.',
+      }),
+      source_path: Type.Optional(
         Type.String({
           minLength: 1,
           description:
             'Absolute path inside this Agent workdir, or a path relative to ' +
-            'it. Defaults to apps/<app-id>.',
+            'it. Required when clone is false. When clone is true, defaults ' +
+            'to apps/<slug>.',
         }),
       ),
       force: Type.Optional(
         Type.Boolean({
           description:
-            'Replace an existing target_path with a fresh checkout. Defaults ' +
-            'to false. This permanently discards all local work at that path.',
+            'Only valid when clone is true. Replace an existing source_path ' +
+            'with a fresh checkout. Defaults to false and permanently ' +
+            'discards local work at that exact path.',
         }),
       ),
     }),
     execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
+      if (!params.clone && !params.source_path) {
+        throw new Error('source_path is required when clone is false.');
+      }
+      if (!params.clone && params.force) {
+        throw new Error('force is only valid when clone is true.');
+      }
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          const source = await platform.getAppSource(params.id);
+          let sourcePath = params.source_path;
+          let sourceHandle = params.id;
+          if (!sourcePath) {
+            const detail = await platform.getApp(params.id);
+            if (!detail) throw new Error(`App "${params.id}" not found.`);
+            sourceHandle = detail.id;
+            sourcePath = agentAppWorkDir(sessionId, detail.slug);
+          }
+          const source = await platform.getAppSource(sourceHandle);
           const resolved = await resolveAgentWorkspacePath(
             sessionId,
-            params.target_path ?? agentAppWorkDir(sessionId, source.id),
+            sourcePath,
           );
           let checkout: LocalCheckout;
           try {
             checkout = await checkoutFromBundle(sessionId, 'app', source, {
-              targetPath: params.target_path,
-              force: params.force ?? false,
+              targetPath: sourcePath,
+              force: params.clone ? (params.force ?? false) : false,
+              mode: params.clone ? 'clone' : 'update',
               materializer: sdkMaterializer,
             });
           } catch (error) {
@@ -320,7 +342,7 @@ export function createAppTools(options: {
           minLength: 1,
           description:
             'Absolute path inside this Agent workdir, or a path relative to ' +
-            'it. Defaults to apps/<generated-app-id>.',
+            'it. Defaults to apps/<slug>.',
         }),
       ),
     }),
@@ -329,18 +351,18 @@ export function createAppTools(options: {
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          const { target_path: targetPath, ...input } = params;
-          if (targetPath !== undefined) {
-            // Keep validation and local initialization under one session lock so
-            // parallel create calls cannot both reserve the same target.
-            await assertWorkspacePathAvailable(sessionId, targetPath);
-          }
+          const { target_path: requestedTargetPath, ...input } = params;
+          const targetPath =
+            requestedTargetPath ??
+            agentAppWorkDir(sessionId, input.slug.trim());
+          // Keep validation and local initialization under one session lock so
+          // parallel create calls cannot both reserve the same target.
+          await assertWorkspacePathAvailable(sessionId, targetPath);
           const res = await platform.createApp(input);
           const checkout = await initNewWorktree(
             sessionId,
             'app',
             res.id,
-            res.generation,
             (root) => writeScaffoldFiles(root, res.files),
             targetPath,
           );
@@ -366,9 +388,12 @@ export function createAppTools(options: {
               `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
                 `Source is at ${checkout.absolutePath}.`,
               'Preparation is ready: dependencies, Connect stubs, and the Hatch ' +
-                'SDK are available. Use the id for checkout_app/deploy_app. Read ' +
-                'and edit the authored files, run the checks described by the ' +
-                'building-apps Skill, then commit before calling deploy_app.',
+                'SDK are available. Continue using this checkout; do not clone ' +
+                'it again. Read and edit the authored files, run the checks ' +
+                'described by the building-apps Skill, then commit and call ' +
+                `deploy_app with id "${res.id}" and source_path ` +
+                `"${checkout.absolutePath}". To refresh it later, call ` +
+                'checkout_app with clone: false and the same source_path.',
             ].join('\n'),
             {
               id: res.id,
@@ -439,7 +464,6 @@ export function createAppTools(options: {
             sessionId,
             'app',
             detail.id,
-            detail.createdAt,
             params.source_path,
           );
           const res = await platform.deployApp(detail.id, {
@@ -494,10 +518,10 @@ export function createAppTools(options: {
             ? 'Warning: the managed Data Table schema was not rolled back and differs from this code version. '
             : '') +
           'Existing Agent worktrees were not changed. Re-run checkout_app with ' +
-          'the same target_path. It synchronizes only when remote master ' +
-          'fast-forwards a clean local master; ahead or diverged work is ' +
-          'preserved. Fetch/rebase to retain that work, or use force: true only ' +
-          'when discarding and replacing the checkout is intended.',
+          'clone: false and the same source_path. It synchronizes only when ' +
+          'remote master fast-forwards a clean local master; ahead or diverged ' +
+          'work is preserved. To discard it, make a separate clone: true call ' +
+          'with the same source_path and force: true.',
         res,
       );
     },

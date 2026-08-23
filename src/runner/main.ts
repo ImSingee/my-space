@@ -23,18 +23,13 @@ import {
   type HubMessage,
   type RunnerMessage,
 } from '~agent/protocol';
-import {
-  acquireSourceWorkspaceBarrier,
-  type SourceWorkspaceBarrier,
-} from '~agent/local-sources';
+import { withSourceWorkspaceLock } from '~agent/local-sources';
 import { initializeAgentSandbox } from '~agent/shell-sandbox';
 import { getAgentRunnerEnv } from '~env';
 import { RunnerExecutor } from './executor';
 import { createPlatformRestClient } from './platform-rest';
 import {
-  inspectLocalWorkspaces,
-  reconcileLocalWorkspaces,
-  removeEntityWorkspaces,
+  listLocalWorkspaceSessionIds,
   removeSessionWorkspace,
 } from './workspace-cleanup';
 
@@ -55,14 +50,6 @@ let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let offlineAbortTimer: ReturnType<typeof setTimeout> | undefined;
 let shuttingDown = false;
 let pendingResumedRunIds: string[] = [];
-const registrationBarriers = new WeakMap<WebSocket, SourceWorkspaceBarrier>();
-
-function releaseRegistrationBarrier(socket: WebSocket): void {
-  const barrier = registrationBarriers.get(socket);
-  if (!barrier) return;
-  registrationBarriers.delete(socket);
-  barrier.release();
-}
 
 function send(message: RunnerMessage): boolean {
   if (!ws || ws.readyState !== WebSocket.OPEN || !helloAcked) return false;
@@ -123,29 +110,22 @@ function handleHubMessage(message: HubMessage): void {
   switch (message.type) {
     case 'hub.hello_ack': {
       const socket = ws;
-      const barrier = socket ? registrationBarriers.get(socket) : undefined;
-      if (!socket || !barrier) {
-        socket?.close(1011, 'Missing workspace reconciliation barrier.');
-        return;
-      }
+      if (!socket) return;
       pendingResumedRunIds = message.resumedRunIds;
       for (const runId of message.staleRunIds) {
         executor.abortStale(runId);
       }
       void (async () => {
         await Promise.all(
-          message.staleWorkspaceSessionIds.map((sessionId) =>
-            executor.abortSession(sessionId),
+          [...new Set(message.staleWorkspaceSessionIds)].map(
+            async (sessionId) => {
+              await executor.abortSession(sessionId);
+              await withSourceWorkspaceLock(sessionId, () =>
+                removeSessionWorkspace(sessionId),
+              );
+            },
           ),
         );
-        await reconcileLocalWorkspaces(
-          {
-            staleSessionIds: message.staleWorkspaceSessionIds,
-            staleSources: message.staleWorkspaceSources,
-          },
-          barrier,
-        );
-        releaseRegistrationBarrier(socket);
         if (!socket || ws !== socket || socket.readyState !== WebSocket.OPEN) {
           return;
         }
@@ -153,10 +133,12 @@ function handleHubMessage(message: HubMessage): void {
           JSON.stringify({ type: 'runner.ready' } satisfies RunnerMessage),
         );
       })().catch((error) => {
-        releaseRegistrationBarrier(socket);
-        console.error('[runner] workspace reconciliation failed:', error);
+        console.error(
+          '[runner] session workspace reconciliation failed:',
+          error,
+        );
         if (socket && ws === socket) {
-          socket.close(1011, 'Workspace reconciliation failed.');
+          socket.close(1011, 'Session workspace reconciliation failed.');
         }
       });
       return;
@@ -223,22 +205,16 @@ function handleHubMessage(message: HubMessage): void {
       return;
     }
     case 'workspace.cleanup': {
-      if (message.scope === 'session') {
-        void executor
-          .abortSession(message.sessionId)
-          .then(() => removeSessionWorkspace(message.sessionId))
-          .catch((error) => {
-            console.error('[runner] session workspace cleanup failed:', error);
-          });
-      } else {
-        void removeEntityWorkspaces(
-          message.scope,
-          message.id,
-          message.generation,
-        ).catch((error) => {
-          console.error('[runner] entity workspace cleanup failed:', error);
+      void executor
+        .abortSession(message.sessionId)
+        .then(() =>
+          withSourceWorkspaceLock(message.sessionId, () =>
+            removeSessionWorkspace(message.sessionId),
+          ),
+        )
+        .catch((error) => {
+          console.error('[runner] session workspace cleanup failed:', error);
         });
-      }
       return;
     }
   }
@@ -255,13 +231,7 @@ function connect(): void {
   socket.on('open', () => {
     // hello bypasses send() (helloAcked is still false by design).
     void (async () => {
-      const barrier = await acquireSourceWorkspaceBarrier();
-      if (socket.readyState !== WebSocket.OPEN) {
-        barrier.release();
-        return;
-      }
-      registrationBarriers.set(socket, barrier);
-      const workspace = await inspectLocalWorkspaces();
+      const workspaceSessionIds = await listLocalWorkspaceSessionIds();
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(
           JSON.stringify({
@@ -269,15 +239,13 @@ function connect(): void {
             runnerId: config.runnerId,
             protocolVersion: PROTOCOL_VERSION,
             activeRunIds: executor.activeRunIds(),
-            workspaceSessionIds: workspace.sessionIds,
-            workspaceSources: workspace.sources,
+            workspaceSessionIds,
           } satisfies RunnerMessage),
         );
       }
     })().catch((error) => {
-      releaseRegistrationBarrier(socket);
-      console.error('[runner] could not inspect local workspaces:', error);
-      socket.close(1011, 'Workspace inspection failed.');
+      console.error('[runner] could not inspect local sessions:', error);
+      socket.close(1011, 'Session inspection failed.');
     });
   });
 
@@ -296,7 +264,6 @@ function connect(): void {
   });
 
   socket.on('close', (code, reason) => {
-    releaseRegistrationBarrier(socket);
     if (ws !== socket) return;
     ws = null;
     helloAcked = false;

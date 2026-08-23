@@ -45,8 +45,8 @@ describe('App creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v7 for tool-start path details', () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+  it('uses protocol v8 for session-only workspace reconciliation', () => {
+    expect(PROTOCOL_VERSION).toBe(8);
   });
 
   it('parses runner.hello', () => {
@@ -56,26 +56,10 @@ describe('runner -> platform messages', () => {
       protocolVersion: 1,
       activeRunIds: ['a', 'b'],
       workspaceSessionIds: ['s1'],
-      workspaceSources: [
-        {
-          sessionId: 's1',
-          kind: 'app',
-          id: 'app-a',
-          generation: '2026-07-12T00:00:00.000Z',
-        },
-      ],
     });
     if (message.type !== 'runner.hello') throw new Error('wrong type');
     expect(message.activeRunIds).toEqual(['a', 'b']);
     expect(message.workspaceSessionIds).toEqual(['s1']);
-    expect(message.workspaceSources).toEqual([
-      {
-        sessionId: 's1',
-        kind: 'app',
-        id: 'app-a',
-        generation: '2026-07-12T00:00:00.000Z',
-      },
-    ]);
   });
 
   it('parses runner.ready', () => {
@@ -462,20 +446,24 @@ describe('platform -> runner messages', () => {
     expect(() => parseHubMessage({ type: 'runner.ping' })).toThrow(ZodError);
   });
 
-  it('requires the deleted entity generation for source cleanup', () => {
+  it('accepts only whole-session workspace cleanup', () => {
     expect(
       parseHubMessage({
         type: 'workspace.cleanup',
-        scope: 'workflow',
-        id: 'workflow-a',
-        generation: '2026-07-12T00:00:00.000Z',
+        scope: 'session',
+        sessionId: 'session-a',
       }),
-    ).toMatchObject({ generation: '2026-07-12T00:00:00.000Z' });
+    ).toEqual({
+      type: 'workspace.cleanup',
+      scope: 'session',
+      sessionId: 'session-a',
+    });
     expect(() =>
       parseHubMessage({
         type: 'workspace.cleanup',
         scope: 'workflow',
         id: 'workflow-a',
+        generation: '2026-07-12T00:00:00.000Z',
       }),
     ).toThrow(ZodError);
   });

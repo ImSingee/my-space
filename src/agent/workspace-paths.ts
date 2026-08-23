@@ -12,8 +12,11 @@ export type AgentWorkspacePath = {
   rootAbsolutePath: string;
 };
 
-function isInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
+export function isWorkspacePathInside(
+  parent: string,
+  candidate: string,
+): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
   return (
     relative === '' ||
     (!relative.startsWith('..') && !path.isAbsolute(relative))
@@ -52,8 +55,8 @@ export async function resolveAgentWorkspacePath(
   // prefixes. On macOS either `/var/...` or its `/private/var/...` real path may
   // be supplied, so accept lexical containment against either root spelling.
   if (
-    !isInside(path.resolve(root), lexicalTarget) &&
-    !isInside(canonicalRoot, lexicalTarget)
+    !isWorkspacePathInside(path.resolve(root), lexicalTarget) &&
+    !isWorkspacePathInside(canonicalRoot, lexicalTarget)
   ) {
     throw new Error(`Path must be inside the Agent workdir: ${input}`);
   }
@@ -64,7 +67,7 @@ export async function resolveAgentWorkspacePath(
     existing = parent;
   }
   const canonicalExisting = await realpath(existing);
-  if (!isInside(canonicalRoot, canonicalExisting)) {
+  if (!isWorkspacePathInside(canonicalRoot, canonicalExisting)) {
     throw new Error(
       `Path escapes the Agent workdir through a symlink: ${input}`,
     );
@@ -75,7 +78,7 @@ export async function resolveAgentWorkspacePath(
     path.relative(existing, lexicalTarget),
   );
   if (
-    !isInside(canonicalRoot, canonicalTarget) ||
+    !isWorkspacePathInside(canonicalRoot, canonicalTarget) ||
     canonicalTarget === canonicalRoot
   ) {
     throw new Error(`Path must be inside the Agent workdir: ${input}`);

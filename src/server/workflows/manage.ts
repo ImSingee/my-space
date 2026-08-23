@@ -1,11 +1,7 @@
 /** Server-only: workflow lifecycle management + run inspection views. */
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
-  AGENTS_DIR,
-  agentWorkflowWorkDir,
-  agentWorkDir,
   workflowArtifactsDir,
   workflowCurrentDir,
   workflowDeploymentArtifactDir,
@@ -21,7 +17,7 @@ import type {
   WorkflowTrigger,
 } from '~/db/schema';
 import { workflowDeployLock } from './deploy';
-import { moveMasterToDeploymentTag, worktreeOrigin } from './git';
+import { moveMasterToDeploymentTag } from './git';
 import { isValidWorkflowId } from './manifest';
 import { reloadWorkflowScheduler } from './scheduler';
 
@@ -216,7 +212,7 @@ export async function rollbackWorkflowToVersion(
   return rollbackWorkflow(id, deployment.id);
 }
 
-/** Permanently delete a workflow: rows, artifacts, repo, and worktrees. */
+/** Permanently delete a workflow's Platform-owned state. */
 export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   // The id flows into `fs.rm(..., { force: true })` on several per-workflow
   // dirs (whose helpers `path.resolve`), so reject anything that isn't a valid
@@ -230,24 +226,8 @@ export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   // strand an orphaned Deno child that keeps causing side effects.
   const { killActiveWorkflowRuns } = await import('./execute');
   await killActiveWorkflowRuns(id);
-  const { broadcastEntityWorkspaceCleanup } =
-    await import('../agent-runner/hub');
   // Cascades to deployments, runs, and run steps.
-  const [deleted] = await db
-    .delete(schema.workflows)
-    .where(eq(schema.workflows.id, id))
-    .returning({ createdAt: schema.workflows.createdAt });
-  if (deleted) {
-    broadcastEntityWorkspaceCleanup(
-      'workflow',
-      id,
-      deleted.createdAt.toISOString(),
-    );
-  }
-  // Remove agent worktrees before the bare repo: deleteAgentWorktrees() scopes
-  // each checkout to this workflow via its git origin, which must still resolve
-  // against the not-yet-deleted repo or a stale worktree would be left behind.
-  await deleteAgentWorktrees(id);
+  await db.delete(schema.workflows).where(eq(schema.workflows.id, id));
   await Promise.all([
     // Legacy live-bundle dir: older deploys mirrored the artifact into
     // workflow-current/<id>. Nothing writes or reads it anymore, but sweep it
@@ -258,33 +238,6 @@ export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   ]);
   await reloadWorkflowScheduler();
   return { ok: true };
-}
-
-async function deleteAgentWorktrees(id: string): Promise<void> {
-  if (!(await pathExists(AGENTS_DIR))) return;
-  const sessions = await fs.readdir(AGENTS_DIR, { withFileTypes: true });
-  const repoDir = workflowRepoDir(id);
-  await Promise.all(
-    sessions
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const candidates = [
-          agentWorkflowWorkDir(entry.name, id),
-          // Compatibility cleanup only. Old root-level worktrees are never
-          // scanned or migrated during normal source operations.
-          path.resolve(agentWorkDir(entry.name), id),
-        ];
-        await Promise.all(
-          candidates.map(async (worktree) => {
-            if (!(await pathExists(worktree))) return;
-            const origin = await worktreeOrigin(worktree);
-            if (!origin || path.resolve(origin) !== path.resolve(repoDir))
-              return;
-            await fs.rm(worktree, { recursive: true, force: true });
-          }),
-        );
-      }),
-  );
 }
 
 /* ------------------------------- run views -------------------------------- */
