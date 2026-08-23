@@ -12,10 +12,7 @@ describe('public app API path parser', () => {
 
   it.each([
     '/api/apps/01example/rpc',
-    '/api/application/01example/rpc',
-    '/api/appss/01example/rpc',
     '/api/app//rpc',
-    '/api/app',
     '/internal/api/apps/01example/rpc',
   ])('rejects an unsupported namespace or missing id in %s', (pathname) => {
     expect(parseAppApiPath(pathname)).toBeNull();

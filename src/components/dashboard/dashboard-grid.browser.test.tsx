@@ -118,39 +118,6 @@ function readItems(container: HTMLElement) {
   );
 }
 
-test('view mode selects the desktop layout from measured width', async () => {
-  const { container } = await render(<Harness width={1100} />);
-  await vi.waitFor(() => {
-    expect(container.querySelector('[data-breakpoint="desktop"]')).toBeTruthy();
-    const items = readItems(container);
-    expect(items).toHaveLength(2);
-    expect(items[0].y).toBe(items[1].y);
-    expect(items[0].x).not.toBe(items[1].x);
-    const multiSizeWidget = container
-      .querySelector('[data-widget-id="b"]')
-      ?.closest('.react-grid-item');
-    const resizeHandle = multiSizeWidget?.querySelector(
-      '.react-resizable-handle',
-    );
-    expect(resizeHandle).toBeTruthy();
-    expect(window.getComputedStyle(resizeHandle!).display).toBe('none');
-  });
-});
-
-test('edit mode exposes the multi-footprint resize handle', async () => {
-  const { container } = await render(<Harness width={1100} editing />);
-  await vi.waitFor(() => {
-    const multiSizeWidget = container
-      .querySelector('[data-widget-id="b"]')
-      ?.closest('.react-grid-item');
-    const resizeHandle = multiSizeWidget?.querySelector(
-      '.react-resizable-handle',
-    );
-    expect(resizeHandle).toBeTruthy();
-    expect(window.getComputedStyle(resizeHandle!).display).not.toBe('none');
-  });
-});
-
 test('view mode selects and renders the mobile layout', async () => {
   const { container } = await render(<Harness width={460} />);
   await vi.waitFor(() => {

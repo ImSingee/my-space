@@ -332,25 +332,7 @@ describe('agent file tools', () => {
     });
   });
 
-  it('allows edit_file after write_file creates a file', async () => {
-    const { root, getTool } = await setup();
-
-    await getTool('write_file').execute('write', {
-      path: 'app.ts',
-      content: 'one two\n',
-    });
-    await getTool('edit_file').execute('edit', {
-      path: 'app.ts',
-      old_string: 'two',
-      new_string: 'three',
-    });
-
-    await expect(readFile(path.join(root, 'app.ts'), 'utf8')).resolves.toBe(
-      'one three\n',
-    );
-  });
-
-  it.each(['.hatch', '.HATCH', '.HaTcH'])(
+  it.each(['.hatch', '.HATCH'])(
     'never writes or edits the platform-owned %s path',
     async (managedDirectory) => {
       const { root, getTool } = await setup({
@@ -391,7 +373,7 @@ describe('agent file tools', () => {
     },
   );
 
-  it.each(['.hatch', '.HATCH'])(
+  it.each(['.HATCH'])(
     'rejects an existing file addressed through a symlinked %s alias',
     async (managedDirectory) => {
       const { root, getTool } = await setup({

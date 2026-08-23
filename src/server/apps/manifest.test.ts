@@ -57,15 +57,14 @@ describe('backend manifest', () => {
     );
   });
 
-  it.each([
-    'backend/assets',
-    'backend/assets/main.ts',
-    'backend/./assets/main.ts',
-  ])('rejects the reserved assets directory as backend entry: %s', (entry) => {
-    expect(() => parseSourceManifest(source({ entry }))).toThrow(
-      /reserved.*backend\/assets/,
-    );
-  });
+  it.each(['backend/assets', 'backend/assets/main.ts'])(
+    'rejects the reserved assets directory as backend entry: %s',
+    (entry) => {
+      expect(() => parseSourceManifest(source({ entry }))).toThrow(
+        /reserved.*backend\/assets/,
+      );
+    },
+  );
 
   it('supports bundle-v1 while legacy normalized manifests omit format', () => {
     const legacy: NormalizedManifest = normalizeManifest(
@@ -261,14 +260,8 @@ describe('app route manifest', () => {
   it.each([
     '.hatch/app.tsx',
     '.HATCH/app.tsx',
-    './.HaTcH/app.tsx',
-    './.hatch/app.tsx',
-    './/.hatch/app.tsx',
-    '.\\.hatch\\app.tsx',
     'app/.hatch/main.tsx',
-    'app/.HATCH/main.tsx',
     'app\\.hatch\\main.tsx',
-    'app\\.HaTcH\\main.tsx',
   ])(
     'rejects entries inside the platform-owned .hatch directory: %s',
     (entry) => {

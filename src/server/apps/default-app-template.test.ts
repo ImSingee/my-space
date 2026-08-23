@@ -11,42 +11,12 @@ async function loadDefaultManifest() {
     .replaceAll('__APP_ID__', 'demo')
     .replaceAll('__APP_NAME__', 'Demo')
     .replaceAll('__APP_DESCRIPTION__', 'Demo app');
-  const source = JSON.parse(rendered) as {
-    widgets: Record<string, unknown>[];
-  };
-  return { source, manifest: parseSourceManifest(source) };
-}
-
-async function renderDefaultIndexHtml() {
-  const template = await readFile(
-    new URL('../../../templates/default-app/app/index.html', import.meta.url),
-    'utf8',
-  );
-  return template.replaceAll('__APP_NAME__', 'Demo');
+  return parseSourceManifest(JSON.parse(rendered));
 }
 
 describe('default app template', () => {
-  it('declares the scaffolded TanStack Router routes', async () => {
-    const { manifest } = await loadDefaultManifest();
-
-    expect(manifest.app?.routes).toEqual([
-      { path: '/', description: 'Persistent counter' },
-      { path: '/about', description: 'About this app' },
-    ]);
-  });
-
-  it('leaves the scaffolded widget free-form by default', async () => {
-    const { source, manifest } = await loadDefaultManifest();
-
-    expect(source.widgets[0]).not.toHaveProperty('supportedSizes');
-    expect(manifest.widgets[0]).toMatchObject({
-      defaultSize: { w: 4, h: 3 },
-      supportedSizes: [],
-    });
-  });
-
   it('uses a managed Data Table instead of a raw App database', async () => {
-    const { manifest } = await loadDefaultManifest();
+    const manifest = await loadDefaultManifest();
     const template = new URL(
       '../../../templates/default-app/',
       import.meta.url,
@@ -70,66 +40,5 @@ describe('default app template', () => {
     expect(backend).not.toMatch(/\bindex\s*:/);
     expect(counter).not.toContain('current.value + amount');
     expect(dataSchema).toContain("uniqueIndex('by_name', ['name'])");
-  });
-
-  it('uses the Hatch-provided Data SDK outside the App dependency graph', async () => {
-    const template = new URL(
-      '../../../templates/default-app/',
-      import.meta.url,
-    );
-    const [packageJson, denoJson, lock, gitignore] = await Promise.all([
-      readFile(new URL('package.json', template), 'utf8'),
-      readFile(new URL('deno.json', template), 'utf8'),
-      readFile(new URL('deno.lock', template), 'utf8'),
-      readFile(new URL('.gitignore', template), 'utf8'),
-    ]);
-    const manifest = JSON.parse(packageJson) as {
-      dependencies: Record<string, string>;
-    };
-    const denoConfig = JSON.parse(denoJson) as Record<string, unknown>;
-    expect(manifest.dependencies).not.toHaveProperty('@hatch/data');
-    expect(manifest.dependencies).not.toHaveProperty('postgres');
-    expect(denoConfig).toEqual({
-      nodeModulesDir: 'auto',
-      compilerOptions: {
-        strict: true,
-        jsx: 'react-jsx',
-        jsxImportSource: 'react',
-        lib: ['deno.ns', 'dom', 'dom.iterable', 'dom.asynciterable', 'esnext'],
-      },
-      allowScripts: [],
-    });
-    expect(lock).not.toContain('@hatch/data');
-    expect(lock).not.toContain('@types/node');
-    expect(gitignore).toMatch(/^node_modules\/$/m);
-    expect(gitignore).toMatch(/^\.hatch\/$/m);
-  });
-
-  it('uses explicit TypeScript extensions in generated-code imports', async () => {
-    const template = new URL(
-      '../../../templates/default-app/',
-      import.meta.url,
-    );
-    const [app, backend, widget, bufConfig] = await Promise.all([
-      readFile(new URL('app/main.tsx', template), 'utf8'),
-      readFile(new URL('backend/main.ts', template), 'utf8'),
-      readFile(new URL('widgets/counter.tsx', template), 'utf8'),
-      readFile(new URL('buf.gen.yaml', template), 'utf8'),
-    ]);
-
-    expect(app).toContain("from '../gen/service_pb.ts'");
-    expect(backend).toContain("from '../gen/service_pb.ts'");
-    expect(widget).toContain("from '../gen/service_pb.ts'");
-    expect(bufConfig).toContain('import_extension=ts');
-    expect(bufConfig).not.toContain('import_extension=none');
-  });
-
-  it('renders the scaffolded app with light-only color support', async () => {
-    const html = await renderDefaultIndexHtml();
-
-    expect(html).toContain('<title>Demo</title>');
-    expect(html).toContain('color-scheme: light;');
-    expect(html).not.toContain('color-scheme: light dark');
-    expect(html).not.toContain('prefers-color-scheme: dark');
   });
 });

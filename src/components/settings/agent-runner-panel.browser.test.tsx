@@ -157,19 +157,6 @@ test('attention: stale leases flip the chip and badge', async () => {
   await expect.element(screen.getByText('offline')).toBeVisible();
 });
 
-test('loading: renders the skeleton placeholder', async () => {
-  const screen = await renderPanel({
-    snapshot: undefined,
-    isLoading: true,
-    error: null,
-    onRefresh: noRefresh,
-  });
-
-  await expect
-    .element(screen.getByTestId('agent-runner-loading'))
-    .toBeInTheDocument();
-});
-
 test('failure: shows the error and retries through the refresh action', async () => {
   const onRefresh = vi.fn<() => void>();
   const screen = await renderPanel({

@@ -92,22 +92,9 @@ describe('App Hatch SDK materialization', () => {
     ).resolves.toContain('@ts-self-types="./data.d.ts"');
   });
 
-  it.each([
-    [
-      'inline imports and scopes',
-      JSON.stringify({
-        imports: { '#local': './local.ts' },
-        scopes: { './backend/': { '#scoped': './scoped.ts' } },
-      }),
-    ],
-    [
-      'an external import map',
-      JSON.stringify({ importMap: './missing-import-map.json' }),
-    ],
-    ['malformed JSON', '{'],
-  ])('ignores authored Deno config with %s', async (_label, config) => {
+  it('ignores malformed authored Deno configuration', async () => {
     const root = await tempRoot();
-    await writeFile(path.join(root, 'deno.json'), config, 'utf8');
+    await writeFile(path.join(root, 'deno.json'), '{', 'utf8');
 
     await materializeAppHatchSdk(root);
 

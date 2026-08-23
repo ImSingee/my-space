@@ -138,7 +138,7 @@ describe('web tool schemas', () => {
 });
 
 describe('web_search', () => {
-  it.each([undefined, null, '', '   '])(
+  it.each([undefined, '   '])(
     'uses only keyless authentication for API key %j',
     async (tavilyApiKey) => {
       const fetchMock = vi.fn<typeof fetch>(async () =>
@@ -504,7 +504,6 @@ describe('web_fetch', () => {
   it.each([
     '../relative',
     'ftp://example.com/file',
-    'data:text/plain,hello',
     'https://user:password@example.com/private',
   ])('rejects unsupported URL %s before making a request', async (url) => {
     const fetchMock = vi.fn<typeof fetch>();

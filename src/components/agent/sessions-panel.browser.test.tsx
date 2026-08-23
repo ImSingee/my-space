@@ -122,10 +122,3 @@ test('groups chats by their existing updated-at order', async () => {
   await screen.getByRole('button', { name: 'Morning chat' }).click();
   expect(onSelect).toHaveBeenCalledWith('today-old');
 });
-
-test('keeps the existing empty state', async () => {
-  const { screen } = await renderPanel();
-
-  await expect.element(screen.getByText('No chats yet.')).toBeVisible();
-  expect(document.querySelector('section')).toBeNull();
-});

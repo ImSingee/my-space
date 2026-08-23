@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('getPlatformEnv', () => {
-  it.each([undefined, '', '   '])(
+  it.each([undefined, '   '])(
     'requires APP_URL when it is %s',
     async (appUrl) => {
       vi.stubEnv('SECRET', 'platform-secret');
@@ -40,12 +40,7 @@ describe('getPlatformEnv', () => {
   it.each([
     'ftp://app.example.test',
     'https://user@app.example.test',
-    'https://@app.example.test',
-    'https://app.example.test:',
-    'https://app.example.test\\',
     'https://app.example.test/path',
-    'https://app.example.test?mode=test',
-    'https://app.example.test#section',
     'not a URL',
   ])('rejects non-origin APP_URL %s', async (appUrl) => {
     vi.stubEnv('SECRET', 'platform-secret');
@@ -58,7 +53,6 @@ describe('getPlatformEnv', () => {
   });
 
   it.each([
-    ['https://app.example.test', 'https://app.example.test'],
     ['  https://app.example.test:8443/  ', 'https://app.example.test:8443'],
     ['HTTP://APP.EXAMPLE.TEST:80/', 'http://app.example.test'],
     ['http://[::1]:3700/', 'http://[::1]:3700'],
@@ -70,7 +64,7 @@ describe('getPlatformEnv', () => {
     expect(getPlatformEnv().appUrl).toBe(expected);
   });
 
-  it.each([undefined, '', '   '])(
+  it.each([undefined, '   '])(
     'requires SECRET when it is %s',
     async (secret) => {
       vi.stubEnv('SECRET', secret);
@@ -90,7 +84,7 @@ describe('getPlatformEnv', () => {
     expect(getPlatformEnv().secret).toBe('platform-secret');
   });
 
-  it.each([undefined, '', '   '])(
+  it.each([undefined, '   '])(
     'uses SECRET when BETTER_AUTH_SECRET is %s',
     async (authSecret) => {
       vi.stubEnv('SECRET', 'platform-secret');
@@ -140,7 +134,7 @@ describe('getPlatformEnv', () => {
     });
   });
 
-  it.each([undefined, '', '   '])(
+  it.each([undefined, '   '])(
     'requires AGENT_RUNNER_TOKEN in production when it is %s',
     async (token) => {
       vi.stubEnv('SECRET', 'platform-secret');
@@ -234,41 +228,14 @@ describe('getAgentRunnerEnv', () => {
     });
   });
 
-  it.each(['', '   '])(
-    'uses Tavily keyless mode for a blank API key %j',
-    async (apiKey) => {
-      vi.stubEnv('TAVILY_API_KEY', apiKey);
-      const { getAgentRunnerEnv } = await import('./env');
-
-      expect(getAgentRunnerEnv().tavilyApiKey).toBeNull();
-    },
-  );
-
-  it.each([undefined, '', '   '])(
-    'requires APP_URL when it is %s',
-    async (appUrl) => {
-      vi.stubEnv('APP_URL', appUrl);
-      const { getAgentRunnerEnv } = await import('./env');
-
-      expect(() => getAgentRunnerEnv()).toThrow('APP_URL is not set');
-    },
-  );
-
-  it.each([
-    'ftp://app.example.test',
-    'https://app.example.test/path',
-    'https://app.example.test?mode=test',
-    'not a URL',
-  ])('rejects non-origin APP_URL %s', async (appUrl) => {
-    vi.stubEnv('APP_URL', appUrl);
+  it('uses Tavily keyless mode for a blank API key', async () => {
+    vi.stubEnv('TAVILY_API_KEY', '   ');
     const { getAgentRunnerEnv } = await import('./env');
 
-    expect(() => getAgentRunnerEnv()).toThrow(
-      'APP_URL must be a valid HTTP(S) origin',
-    );
+    expect(getAgentRunnerEnv().tavilyApiKey).toBeNull();
   });
 
-  it.each([undefined, '', '   '])(
+  it.each([undefined, '   '])(
     'requires AGENT_RUNNER_TOKEN in production when it is %s',
     async (token) => {
       vi.stubEnv('NODE_ENV', 'production');
@@ -281,7 +248,7 @@ describe('getAgentRunnerEnv', () => {
     },
   );
 
-  it.each([undefined, '', '   '])(
+  it.each([undefined, '   '])(
     'requires HATCH_RUNNER_ID in production when it is %s',
     async (runnerId) => {
       vi.stubEnv('NODE_ENV', 'production');

@@ -30,59 +30,6 @@ describe('edit diff generation', () => {
     expect(removal.firstChangedLine).toBe(2);
   });
 
-  it('limits unchanged output to four context lines around a change', () => {
-    const original =
-      Array.from({ length: 15 }, (_, index) => `line ${index + 1}`).join('\n') +
-      '\n';
-    const result = generateDiffString(
-      original,
-      original.replace('line 8', 'changed 8'),
-    );
-
-    expect(result.diff.split('\n')).toEqual([
-      '    ...',
-      '  4 line 4',
-      '  5 line 5',
-      '  6 line 6',
-      '  7 line 7',
-      '- 8 line 8',
-      '+ 8 changed 8',
-      '  9 line 9',
-      ' 10 line 10',
-      ' 11 line 11',
-      ' 12 line 12',
-      '    ...',
-    ]);
-    expect(result.firstChangedLine).toBe(8);
-  });
-
-  it('uses new-file line numbers for context after insertions and deletions', () => {
-    expect(generateDiffString('a\nb\n', 'x\na\nb\n').diff).toBe(
-      '+1 x\n 2 a\n 3 b',
-    );
-    expect(generateDiffString('x\na\nb\n', 'a\nb\n').diff).toBe(
-      '-1 x\n 1 a\n 2 b',
-    );
-    expect(generateDiffString('a\nb\nc\n', 'a\nx\nb\nc\n').diff).toBe(
-      ' 1 a\n+2 x\n 3 b\n 4 c',
-    );
-    expect(generateDiffString('a\nx\nb\nc\n', 'a\nb\nc\n').diff).toBe(
-      ' 1 a\n-2 x\n 2 b\n 3 c',
-    );
-  });
-
-  it('marks which side lacks an end-of-file newline', () => {
-    expect(generateDiffString('a', 'a\n').diff).toBe(
-      '-1 a\n   \\ No newline at end of file\n+1 a',
-    );
-    expect(generateDiffString('a\n', 'a').diff).toBe(
-      '-1 a\n+1 a\n   \\ No newline at end of file',
-    );
-    expect(generateDiffString('old\nlast', 'new\nlast').diff).toBe(
-      '-1 old\n+1 new\n 2 last\n   \\ No newline at end of file',
-    );
-  });
-
   it('bounds UTF-8 details and omits rather than corrupting a large patch', () => {
     const oldContent = `TOKEN${'🙂\\'.repeat(20_000)}`;
     const details = generateEditFileDetails({

@@ -34,6 +34,15 @@ Browser Mode notes:
 - Setup file: `vitest.browser.setup.ts`
 - If Chromium is missing locally, install it with `pnpm exec playwright install chromium`
 
+### Test retention policy
+
+Tests fall into two categories:
+
+1. **Verification tests** are temporary tests used during development to confirm implementation details, investigate logic, or answer a narrow question. They may be written while working, but must be removed before the final submission.
+2. **Durable tests** protect overall or subsystem behavior, public contracts, security and data boundaries, migration compatibility, concurrency and recovery behavior, or reproduce a specific defect. Only durable tests should be committed.
+
+Tests that only exercise helper internals, exact copy or DOM structure, framework wiring, or equivalent input permutations should not be retained long term. Before finalizing a change, audit every new or modified test and remove verification-only coverage.
+
 Before declaring any Agent task complete, re-run `pnpm check:types` and `pnpm format` and ensure both commands pass cleanly.
 
 ## Oxlint

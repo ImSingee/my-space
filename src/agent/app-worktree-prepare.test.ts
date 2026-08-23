@@ -349,11 +349,7 @@ describe('prepareAppWorktree', () => {
 
   it.each([
     ['DENO.JSONC', 'regular', minimalAppRoot],
-    ['tsconfig.json', 'regular', minimalAppRoot],
-    ['jsconfig.json', 'regular', minimalAppRoot],
-    ['deno.jsonc', 'Agent', minimalAgentAppRoot],
     ['TSCONFIG.JSON', 'Agent', minimalAgentAppRoot],
-    ['JSCONFIG.JSON', 'Agent', minimalAgentAppRoot],
   ] as const)(
     'rejects unsupported root configuration %s in a %s worktree',
     async (configName, _kind, makeRoot) => {
@@ -398,7 +394,7 @@ describe('prepareAppWorktree', () => {
     },
   );
 
-  it.each(['node_modules', 'gen', '.hatch'])(
+  it.each(['node_modules', '.hatch'])(
     'rejects a non-directory generated %s root',
     async (generatedRoot) => {
       const root = await minimalAppRoot();

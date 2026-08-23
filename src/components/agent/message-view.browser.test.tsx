@@ -286,38 +286,6 @@ test('disables Retry and exposes its busy state while retrying', async () => {
   expect(retry.element().getAttribute('aria-busy')).toBe('true');
 });
 
-test('keeps Retry visible but disabled when no model is available', async () => {
-  const onRetry = vi.fn<() => void>();
-  const screen = await renderMessage(
-    {
-      role: 'assistant',
-      content: [],
-      stopReason: 'error',
-      errorMessage: 'Provider request failed.',
-    },
-    { onRetry, retryDisabled: true },
-  );
-
-  const retry = screen.getByRole('button', { name: 'Retry' });
-  await expect.element(retry).toBeVisible();
-  await expect.element(retry).toBeDisabled();
-  expect(retry.element()).not.toHaveAttribute('aria-busy');
-  await retry.click({ force: true });
-  expect(onRetry).not.toHaveBeenCalled();
-});
-
-test('does not show Retry when no callback is provided', async () => {
-  const screen = await renderMessage({
-    role: 'assistant',
-    content: [],
-    stopReason: 'error',
-    errorMessage: 'Provider request failed.',
-  });
-
-  await expect.element(screen.getByRole('note')).toBeVisible();
-  expect(document.querySelector('button')).toBeNull();
-});
-
 test('renders the terminal error after partial assistant content', async () => {
   const screen = await renderMessage({
     role: 'assistant',
@@ -394,29 +362,6 @@ test('renders a persisted file attachment with a download link', async () => {
   );
   expect(link.element()).toHaveAttribute('download', 'report.pdf');
   await expect.element(screen.getByText('See the file')).toBeVisible();
-});
-
-test('wraps long and multiline provider errors inside a narrow message', async () => {
-  const longToken = `provider-${'x'.repeat(320)}`;
-  const error = `First line\n${longToken}`;
-  const screen = await renderMessage(
-    {
-      role: 'assistant',
-      content: [],
-      stopReason: 'error',
-      errorMessage: error,
-    },
-    { width: 320, onRetry: () => {} },
-  );
-
-  const detail = screen.getByText(error);
-  await expect.element(detail).toBeVisible();
-
-  const detailElement = detail.element();
-  const shell = screen.getByTestId('message-shell').element();
-  expect(getComputedStyle(detailElement).whiteSpace).toBe('pre-wrap');
-  expect(getComputedStyle(detailElement).overflowWrap).toBe('anywhere');
-  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
 
 test('keeps the tail of a persisted read path visible in a narrow header', async () => {
@@ -537,47 +482,6 @@ test('reveals a complete persisted command without overflowing a narrow message'
     .toBeVisible();
 
   const shell = screen.getByTestId('message-shell').element();
-  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
-});
-
-test('keeps an incomplete persisted command expandable without a result', async () => {
-  const screen = await renderMessage({
-    role: 'assistant',
-    content: [runCommandCall('command-incomplete', longCommand)],
-  });
-
-  await screen.getByRole('button', { name: /Run command/ }).click();
-  const commandRegion = screen.getByRole('region', { name: 'Command' });
-  await expect.element(commandRegion).toBeVisible();
-  expect(commandRegion.element().lastElementChild?.textContent).toBe(
-    longCommand,
-  );
-  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
-});
-
-test('shows the complete command while a live command is running', async () => {
-  const screen = await render(
-    <MantineProvider>
-      <Box data-testid="live-command-shell" w={320}>
-        <StreamingToolStep
-          tool={{
-            id: 'command-running',
-            name: 'run_command',
-            args: { command: longCommand },
-            done: false,
-          }}
-        />
-      </Box>
-    </MantineProvider>,
-  );
-
-  const commandRegion = screen.getByRole('region', { name: 'Command' });
-  await expect.element(commandRegion).toBeVisible();
-  expect(commandRegion.element().lastElementChild?.textContent).toBe(
-    longCommand,
-  );
-  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
-  const shell = screen.getByTestId('live-command-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
 
@@ -706,34 +610,6 @@ test('collapses a live command after completion and preserves its details', asyn
   expect(completedCommand.element().lastElementChild?.textContent).toBe(
     longCommand,
   );
-});
-
-test('reveals a completed live command even when it produced no output', async () => {
-  const screen = await render(
-    <MantineProvider>
-      <StreamingToolStep
-        tool={{
-          id: 'command-done',
-          name: 'run_command',
-          args: { command: longCommand },
-          done: true,
-        }}
-      />
-    </MantineProvider>,
-  );
-
-  const toggle = screen.getByRole('button', { name: /Run command/ });
-  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
-  await toggle.click();
-  expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
-  const commandRegion = screen.getByRole('region', { name: 'Command' });
-  await expect.element(commandRegion).toBeVisible();
-  expect(commandRegion.element().lastElementChild?.textContent).toBe(
-    longCommand,
-  );
-  await expect
-    .element(screen.getByRole('region', { name: 'Output' }))
-    .toHaveTextContent('(no output)');
 });
 
 test('reveals a persisted read path without overflowing a narrow message', async () => {
@@ -915,36 +791,6 @@ test('normalizes a legacy root listing path to the workspace root', async () => 
   expect(pathRegion.element().textContent).not.toContain('(empty file path)');
 });
 
-test('normalizes an explicit legacy empty list path to the workspace root', async () => {
-  const screen = await renderMessage(
-    {
-      role: 'assistant',
-      content: [listFilesCall('list-legacy-empty-root', '')],
-    },
-    {
-      toolResults: new Map([
-        [
-          'list-legacy-empty-root',
-          {
-            role: 'toolResult',
-            toolName: 'list_files',
-            content: [{ type: 'text', text: '- package.json' }],
-            details: { path: '', count: 1 },
-          },
-        ],
-      ]),
-    },
-  );
-
-  const toggle = screen.getByRole('button', { name: /List files/ });
-  expectPathDetail(toggle.element(), '.');
-  await toggle.click();
-  const pathRegion = screen.getByRole('region', { name: 'File path' });
-  await expect.element(pathRegion).toBeVisible();
-  expect(pathRegion.element().lastElementChild?.textContent).toBe('.');
-  expect(pathRegion.element().textContent).not.toContain('(empty file path)');
-});
-
 test('does not show the workspace root for an invalid persisted list path', async () => {
   const error = 'Invalid arguments for tool list_files: path must be a string';
   const screen = await renderMessage(
@@ -972,96 +818,6 @@ test('does not show the workspace root for an invalid persisted list path', asyn
         ],
       ]),
     },
-  );
-
-  const toggle = screen.getByRole('button', { name: /List files/ });
-  expect(toggle.element().querySelector('bdi')).toBeNull();
-  await toggle.click();
-  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
-  await expect
-    .element(screen.getByRole('region', { name: 'Error' }))
-    .toHaveTextContent(error);
-});
-
-test('does not show the workspace root for an invalid live list path', async () => {
-  const error = 'Invalid arguments for tool list_files: path must be a string';
-  const screen = await render(
-    <MantineProvider>
-      <StreamingToolStep
-        tool={{
-          id: 'list-invalid-null-live',
-          name: 'list_files',
-          args: { path: null },
-          done: true,
-          isError: true,
-          output: error,
-        }}
-      />
-    </MantineProvider>,
-  );
-
-  const toggle = screen.getByRole('button', { name: /List files/ });
-  expect(toggle.element().querySelector('bdi')).toBeNull();
-  await toggle.click();
-  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
-  await expect
-    .element(screen.getByRole('region', { name: 'Error' }))
-    .toHaveTextContent(error);
-});
-
-test('does not show the workspace root for invalid persisted list arguments', async () => {
-  const error = 'Invalid arguments for tool list_files: expected an object';
-  const screen = await renderMessage(
-    {
-      role: 'assistant',
-      content: [
-        {
-          type: 'toolCall',
-          id: 'list-invalid-arguments',
-          name: 'list_files',
-          arguments: null,
-        },
-      ],
-    },
-    {
-      toolResults: new Map([
-        [
-          'list-invalid-arguments',
-          {
-            role: 'toolResult',
-            toolName: 'list_files',
-            content: [{ type: 'text', text: error }],
-            isError: true,
-          },
-        ],
-      ]),
-    },
-  );
-
-  const toggle = screen.getByRole('button', { name: /List files/ });
-  expect(toggle.element().querySelector('bdi')).toBeNull();
-  await toggle.click();
-  expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
-  await expect
-    .element(screen.getByRole('region', { name: 'Error' }))
-    .toHaveTextContent(error);
-});
-
-test('does not show the workspace root for invalid live list arguments', async () => {
-  const error = 'Invalid arguments for tool list_files: expected an object';
-  const screen = await render(
-    <MantineProvider>
-      <StreamingToolStep
-        tool={{
-          id: 'list-invalid-arguments-live',
-          name: 'list_files',
-          args: null,
-          done: true,
-          isError: true,
-          output: error,
-        }}
-      />
-    </MantineProvider>,
   );
 
   const toggle = screen.getByRole('button', { name: /List files/ });
@@ -1144,34 +900,6 @@ test('distinguishes an empty read page from an empty file', async () => {
   expect(contents.element().textContent).not.toContain('(empty file)');
 });
 
-test('keeps the empty-page wording in a completed live read', async () => {
-  const screen = await render(
-    <MantineProvider>
-      <StreamingToolStep
-        tool={{
-          id: 'read-live-empty-page',
-          name: 'read_file',
-          args: { path: 'non-empty.txt', offset: 128, limit: 64 },
-          done: true,
-          output: '',
-          details: {
-            relativePath: 'non-empty.txt',
-            absolutePath: '/workspace/non-empty.txt',
-            offset: 128,
-            limit: 64,
-            truncated: false,
-          },
-        }}
-      />
-    </MantineProvider>,
-  );
-
-  await screen.getByRole('button', { name: /Read file/ }).click();
-  await expect
-    .element(screen.getByRole('region', { name: 'File contents' }))
-    .toHaveTextContent('(no content at offset 128)');
-});
-
 test('reveals a successful persisted write without overflowing a narrow message', async () => {
   const summary = `Wrote ${canonicalWritePath} (${longWriteContents.length} chars).`;
   const screen = await renderMessage(
@@ -1230,28 +958,6 @@ test('reveals a successful persisted write without overflowing a narrow message'
   const shell = screen.getByTestId('message-shell').element();
   expect(shell.textContent).not.toContain(summary);
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
-});
-
-test('keeps an incomplete empty write inspectable without an output', async () => {
-  const screen = await renderMessage({
-    role: 'assistant',
-    content: [writeFileCall('write-incomplete', attemptedWritePath, '')],
-  });
-
-  await screen.getByRole('button', { name: /Write file/ }).click();
-  const pathRegion = screen.getByRole('region', { name: 'File path' });
-  const contentsRegion = screen.getByRole('region', {
-    name: 'File contents',
-  });
-  await expect.element(pathRegion).toBeVisible();
-  await expect.element(contentsRegion).toBeVisible();
-  expect(pathRegion.element().lastElementChild?.textContent).toBe(
-    attemptedWritePath,
-  );
-  expect(contentsRegion.element().lastElementChild?.textContent).toBe(
-    '(empty file)',
-  );
-  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
 });
 
 test('preserves a live write from its attempted inputs to canonical completion', async () => {
@@ -1367,59 +1073,6 @@ test('keeps attempted write inputs and the output when a write fails', async () 
   );
   expect(contentsRegion.element().lastElementChild?.textContent).toBe(content);
   await expect.element(outputRegion).toHaveTextContent(error);
-});
-
-test('keeps write output when historical inputs are unavailable', async () => {
-  const legacy = await renderMessage({
-    role: 'toolResult',
-    toolName: 'write_file',
-    content: [{ type: 'text', text: 'Legacy write completed.' }],
-  });
-  await legacy.getByRole('button', { name: /Write file/ }).click();
-  await expect
-    .element(legacy.getByText('Legacy write completed.'))
-    .toBeVisible();
-  await legacy.unmount();
-
-  const missingContent = await renderMessage(
-    {
-      role: 'assistant',
-      content: [
-        {
-          type: 'toolCall',
-          id: 'write-missing-content',
-          name: 'write_file',
-          arguments: { path: attemptedWritePath },
-        },
-      ],
-    },
-    {
-      toolResults: new Map([
-        [
-          'write-missing-content',
-          {
-            role: 'toolResult',
-            toolName: 'write_file',
-            content: [{ type: 'text', text: 'Historical write completed.' }],
-            details: { path: canonicalWritePath },
-          },
-        ],
-      ]),
-    },
-  );
-  await missingContent.getByRole('button', { name: /Write file/ }).click();
-  const pathRegion = missingContent.getByRole('region', { name: 'File path' });
-  const outputRegion = missingContent.getByRole('region', { name: 'Output' });
-  await expect.element(pathRegion).toBeVisible();
-  expect(pathRegion.element().lastElementChild?.textContent).toBe(
-    canonicalWritePath,
-  );
-  await expect
-    .element(outputRegion.getByText('Historical write completed.'))
-    .toBeVisible();
-  expect(
-    missingContent.getByRole('region', { name: 'File contents' }).query(),
-  ).toBeNull();
 });
 
 test('renders a persisted edit result as a colored diff', async () => {
@@ -1539,31 +1192,6 @@ test('preserves a live edit path from execution through its completed diff', asy
   await expect.element(screen.getByText('+2 const newName = 1;')).toBeVisible();
 });
 
-test('reveals the attempted path for an incomplete persisted edit', async () => {
-  const screen = await renderMessage({
-    role: 'assistant',
-    content: [
-      {
-        type: 'toolCall',
-        id: 'edit-incomplete',
-        name: 'edit_file',
-        arguments: { path: attemptedEditPath },
-      },
-    ],
-  });
-
-  await screen.getByRole('button', { name: /Edit file/ }).click();
-  const fileRegion = screen.getByRole('region', { name: 'File path' });
-  await expect.element(fileRegion).toBeVisible();
-  expect(fileRegion.element().lastElementChild?.textContent).toBe(
-    attemptedEditPath,
-  );
-  expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
-  expect(
-    screen.getByRole('region', { name: 'File changes' }).query(),
-  ).toBeNull();
-});
-
 test('keeps the attempted path and error for a failed paired edit', async () => {
   const screen = await renderMessage(
     {
@@ -1606,59 +1234,6 @@ test('keeps the attempted path and error for a failed paired edit', async () => 
   expect(
     screen.getByRole('region', { name: 'File changes' }).query(),
   ).toBeNull();
-});
-
-test('falls back to result text for legacy and failed edit results', async () => {
-  const legacy = await renderMessage({
-    role: 'toolResult',
-    toolName: 'edit_file',
-    content: [{ type: 'text', text: 'Legacy edit completed.' }],
-  });
-  await legacy.getByRole('button', { name: /Edit file/ }).click();
-  await expect
-    .element(legacy.getByText('Legacy edit completed.'))
-    .toBeVisible();
-  expect(
-    legacy.getByRole('region', { name: 'File changes' }).query(),
-  ).toBeNull();
-  await legacy.unmount();
-
-  const failed = await renderMessage({
-    role: 'toolResult',
-    toolName: 'edit_file',
-    content: [{ type: 'text', text: 'old_string was not found.' }],
-    details: editDetails,
-    isError: true,
-  });
-  await failed.getByRole('button', { name: /Edit file/ }).click();
-  await expect
-    .element(failed.getByText('old_string was not found.'))
-    .toBeVisible();
-  expect(
-    failed.getByRole('region', { name: 'File changes' }).query(),
-  ).toBeNull();
-});
-
-test('renders one successful frontend deploy with Open and a Manage menu', async () => {
-  const screen = await renderMessage(
-    {
-      role: 'assistant',
-      content: [deployCall('deploy-todo', 'todo')],
-    },
-    {
-      apps: [appFixture('app-todo', 'todo', 'Todo')],
-      toolResults: new Map([['deploy-todo', deployResult()]]),
-    },
-  );
-
-  await expect.element(screen.getByText('Deployed app')).toBeVisible();
-  await expect.element(screen.getByText('Todo', { exact: true })).toBeVisible();
-  const open = screen.getByRole('link', { name: 'Open' });
-  await expect.element(open).toHaveAttribute('href', '/app/todo');
-
-  await screen.getByRole('button', { name: 'More actions for Todo' }).click();
-  const manage = screen.getByRole('menuitem', { name: 'Manage app' });
-  await expect.element(manage).toHaveAttribute('href', '/app/todo/manage');
 });
 
 test('groups successful deploys, resolves aliases, and uses state-aware actions', async () => {

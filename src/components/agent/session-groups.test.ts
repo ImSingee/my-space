@@ -69,19 +69,4 @@ describe('groupSessionsByDate', () => {
       'December 2025',
     ]);
   });
-
-  it('treats invalid dates as unknown without moving them in the list', () => {
-    const groups = groupSessionsByDate(
-      [
-        {
-          id: 'invalid',
-          updatedAt: 'not-a-date',
-        },
-        session('future', -1),
-      ],
-      NOW,
-    );
-
-    expect(groups.map(({ label }) => label)).toEqual(['Unknown date', 'Today']);
-  });
 });

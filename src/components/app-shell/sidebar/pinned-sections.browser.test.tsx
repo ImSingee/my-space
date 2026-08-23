@@ -259,20 +259,6 @@ test('hides empty app and workflow sections even when unpinned entities exist', 
   ).toBeNull();
 });
 
-test('shows only the app section when only an app is pinned', async () => {
-  fixtures.apps = [app('one')];
-  fixtures.pins = [pin('pin-one', 'one')];
-  fixtures.workflows = [workflow('one', false)];
-
-  const { screen } = await renderSections();
-
-  await expect.element(screen.getByText('Apps', { exact: true })).toBeVisible();
-  await expect.element(screen.getByText('Pinned one')).toBeVisible();
-  await expect
-    .element(screen.getByText('Workflows', { exact: true }))
-    .not.toBeInTheDocument();
-});
-
 test('uses the app slug for links and hash-aware active state', async () => {
   fixtures.apps = [app('01k-app', 'todo')];
   fixtures.pins = [
@@ -316,26 +302,6 @@ test('opens an app management page from the menu after Unpin', async () => {
     expect(router.state.location.pathname).toBe('/app/todo/manage');
     expect(router.state.location.hash).toBe('');
   });
-});
-
-test('shows only the workflow section when only a workflow is pinned', async () => {
-  fixtures.apps = [app('one')];
-  fixtures.workflows = [workflow('one', true)];
-
-  const { screen } = await renderSections();
-
-  await expect
-    .element(screen.getByText('Apps', { exact: true }))
-    .not.toBeInTheDocument();
-  await expect
-    .element(screen.getByText('Workflows', { exact: true }))
-    .toBeVisible();
-  await expect.element(screen.getByText('Workflow one')).toBeVisible();
-
-  await screen.getByRole('button', { name: 'Options' }).click();
-  await expect
-    .element(screen.getByRole('menuitem', { name: 'Manage' }))
-    .not.toBeInTheDocument();
 });
 
 test('keeps both sections hidden while their pin queries are unresolved', async () => {

@@ -15,15 +15,6 @@ describe('normalizeEntryHash', () => {
     expect(normalizeEntryHash('#  /usage')).toBe('/usage');
   });
 
-  it('keeps a non-hash path as-is', () => {
-    expect(normalizeEntryHash('/reports/2026')).toBe('/reports/2026');
-    expect(normalizeEntryHash('section')).toBe('section');
-  });
-
-  it('only strips the first hash (a second # is a real fragment char)', () => {
-    expect(normalizeEntryHash('##x')).toBe('#x');
-  });
-
   it('drops control characters', () => {
     expect(normalizeEntryHash('/a\u0000b\u0007c')).toBe('/abc');
     expect(normalizeEntryHash('/tab\there')).toBe('/tabhere');

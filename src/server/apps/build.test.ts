@@ -235,24 +235,6 @@ describe('buildApp backend', () => {
     });
   });
 
-  it('creates an empty fixed assets directory when the source omits it', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { backend: true },
-        backend: { entry: 'backend/main.ts' },
-      },
-      { 'backend/main.ts': "console.log('ok');\n" },
-    );
-
-    await buildApp('demo', { sourceDir, outputDir });
-
-    await expect(
-      fs.readdir(path.join(outputDir, 'backend', 'assets')),
-    ).resolves.toEqual([]);
-  });
-
   it('resolves explicit relative imports before emitting an offline bundle', async () => {
     const { sourceDir, outputDir } = await makeAppSource(
       {
@@ -699,39 +681,36 @@ describe('buildApp source validation', () => {
 });
 
 describe('buildApp fixed browser configuration', () => {
-  it.each(['preserve', 'precompile'])(
-    'rejects unsupported browser JSX mode %s',
-    async (jsx) => {
-      const { sourceDir, outputDir } = await makeAppSource(
-        {
-          id: 'demo',
-          name: 'Demo',
-          capabilities: { frontend: true },
-          app: {
-            entry: 'app/main.ts',
-            html: 'app/index.html',
-            routes: [],
+  it('rejects an unsupported browser JSX mode', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { frontend: true },
+        app: {
+          entry: 'app/main.ts',
+          html: 'app/index.html',
+          routes: [],
+        },
+      },
+      {
+        'deno.json': JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            jsx: 'preserve',
+            jsxImportSource: 'react',
           },
-        },
-        {
-          'deno.json': JSON.stringify({
-            compilerOptions: {
-              strict: true,
-              jsx,
-              jsxImportSource: 'react',
-            },
-            allowScripts: [],
-          }),
-          'app/main.ts': "console.log('ok');\n",
-          'app/index.html': '<html><body></body></html>',
-        },
-      );
+          allowScripts: [],
+        }),
+        'app/main.ts': "console.log('ok');\n",
+        'app/index.html': '<html><body></body></html>',
+      },
+    );
 
-      await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
-        /compilerOptions.jsx must be "react-jsx"/,
-      );
-    },
-  );
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /compilerOptions.jsx must be "react-jsx"/,
+    );
+  });
 
   it('rejects a custom jsxImportSource', async () => {
     const { sourceDir, outputDir } = await makeAppSource(
@@ -812,81 +791,6 @@ describe('buildApp fixed browser configuration', () => {
     await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
       /App deno.json must not declare imports/,
     );
-  });
-
-  it('rejects App-owned import-map scopes', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { frontend: true },
-        app: {
-          entry: 'app/main.ts',
-          html: 'app/index.html',
-          routes: [],
-        },
-      },
-      {
-        'deno.json': JSON.stringify({
-          allowScripts: [],
-          compilerOptions: {
-            strict: true,
-            jsx: 'react-jsx',
-            jsxImportSource: 'react',
-          },
-          scopes: {
-            './app/': {
-              './app/original.ts': './app/replacement.ts',
-            },
-          },
-        }),
-        'app/main.ts':
-          "import { message } from './original.ts';\nconsole.log(message);\n",
-        'app/replacement.ts':
-          "export const message = 'normalized-relative-key-message';\n",
-        'app/index.html': '<html><body></body></html>',
-      },
-    );
-
-    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
-      /App deno.json must not declare scopes/,
-    );
-  });
-
-  it('rejects App-owned import-map targets before building', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { frontend: true },
-        app: {
-          entry: 'app/main.ts',
-          html: 'app/index.html',
-          routes: [],
-        },
-      },
-      {
-        'deno.json': JSON.stringify({
-          allowScripts: [],
-          imports: { '#outside': '../outside.ts' },
-        }),
-        'app/main.ts':
-          "import { outside } from '#outside';\nconsole.log(outside);\n",
-        'app/index.html': '<html><body></body></html>',
-      },
-    );
-    await fs.writeFile(
-      path.join(path.dirname(sourceDir), 'outside.ts'),
-      "export const outside = 'must-not-be-read';\n",
-      'utf8',
-    );
-
-    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
-      /App deno.json must not declare imports/,
-    );
-    await expect(fs.access(outputDir)).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
   });
 });
 

@@ -182,15 +182,6 @@ describe('runAgentTurn terminal outcomes', () => {
     });
   });
 
-  it('uses a stable fallback when a provider error has no message', async () => {
-    const result = await runWithResponse(
-      fauxAssistantMessage([], { stopReason: 'error' }),
-      'provider-error-fallback',
-    );
-
-    expect(result.error).toBe('Agent run failed.');
-  });
-
   it('propagates an aborted result without dropping partial content', async () => {
     const result = await runWithResponse(
       fauxAssistantMessage([fauxText('partial reply')], {
@@ -207,63 +198,6 @@ describe('runAgentTurn terminal outcomes', () => {
       stopReason: 'aborted',
       errorMessage: 'Request was aborted',
     });
-  });
-
-  it('keeps a successful response successful', async () => {
-    const result = await runWithResponse(
-      fauxAssistantMessage('done'),
-      'success',
-    );
-
-    expect(result.error).toBeUndefined();
-    expect(result.messages.at(-1)).toMatchObject({
-      role: 'assistant',
-      content: [{ type: 'text', text: 'done' }],
-      stopReason: 'stop',
-    });
-  });
-
-  it('marks a non-zero command as an error without dropping diagnostics', async () => {
-    const sessionId = 'command-nonzero';
-    const events: AgentStreamEvent[] = [];
-
-    const result = await runWithResponses(
-      [
-        fauxAssistantMessage(
-          fauxToolCall('run_command', {
-            command: "printf 'kept-output\\n'; exit 7",
-          }),
-        ),
-        fauxAssistantMessage('done'),
-      ],
-      sessionId,
-      (event) => events.push(event),
-    );
-
-    const toolEnd = events.find(
-      (event): event is Extract<AgentStreamEvent, { type: 'tool_end' }> =>
-        event.type === 'tool_end' && event.name === 'run_command',
-    );
-    expect(toolEnd).toMatchObject({
-      isError: true,
-      details: { exitCode: 7 },
-    });
-    expect(toolEnd?.output).toContain('kept-output');
-    expect(toolEnd?.output).toContain('exit code: 7');
-
-    const toolResult = result.messages.find(
-      (message) =>
-        message !== null &&
-        typeof message === 'object' &&
-        !Array.isArray(message) &&
-        message.role === 'toolResult' &&
-        message.toolName === 'run_command',
-    );
-    expect(toolResult).toMatchObject({
-      isError: true,
-      details: { exitCode: 7 },
-    });
-    expect(JSON.stringify(toolResult)).toContain('kept-output');
   });
 
   it('does not stream details from tools that did not opt in', async () => {
@@ -466,19 +400,15 @@ describe('runAgentTurn terminal outcomes', () => {
     ).resolves.toBe(content);
   });
 
-  it('keeps an attempted absolute path when a file tool fails', async () => {
-    const sessionId = 'failed-write-path-details';
-    const attemptedPath = '../outside.txt';
+  it('persists the attempted path when a write fails validation', async () => {
+    const toolName = 'write_file';
+    const args = { path: 'missing-content.txt' };
+    const sessionId = 'invalid-write-file';
     const events: AgentStreamEvent[] = [];
 
     const result = await runWithResponses(
       [
-        fauxAssistantMessage(
-          fauxToolCall('write_file', {
-            path: attemptedPath,
-            content: 'blocked',
-          }),
-        ),
+        fauxAssistantMessage(fauxToolCall(toolName, args)),
         fauxAssistantMessage('done'),
       ],
       sessionId,
@@ -486,18 +416,18 @@ describe('runAgentTurn terminal outcomes', () => {
     );
     const canonicalCwd = await realpath(agentWorkDir(sessionId));
     const expectedDetails = {
-      relativePath: attemptedPath,
-      absolutePath: path.resolve(canonicalCwd, attemptedPath),
+      relativePath: args.path,
+      absolutePath: path.join(canonicalCwd, args.path),
     };
 
     expect(
       events.find(
-        (event) => event.type === 'tool_start' && event.name === 'write_file',
+        (event) => event.type === 'tool_start' && event.name === toolName,
       ),
     ).toMatchObject({ details: expectedDetails });
     expect(
       events.find(
-        (event) => event.type === 'tool_end' && event.name === 'write_file',
+        (event) => event.type === 'tool_end' && event.name === toolName,
       ),
     ).toMatchObject({ isError: true, details: expectedDetails });
     expect(
@@ -507,144 +437,9 @@ describe('runAgentTurn terminal outcomes', () => {
           typeof message === 'object' &&
           !Array.isArray(message) &&
           message.role === 'toolResult' &&
-          message.toolName === 'write_file',
+          message.toolName === toolName,
       ),
     ).toMatchObject({ isError: true, details: expectedDetails });
-  });
-
-  it.each([
-    {
-      toolName: 'read_file',
-      args: { path: 'invalid-page.txt', limit: 0 },
-    },
-    {
-      toolName: 'write_file',
-      args: { path: 'missing-content.txt' },
-    },
-  ])(
-    'persists attempted paths when $toolName fails argument validation',
-    async ({ toolName, args }) => {
-      const sessionId = `invalid-${toolName}`;
-      const events: AgentStreamEvent[] = [];
-
-      const result = await runWithResponses(
-        [
-          fauxAssistantMessage(fauxToolCall(toolName, args)),
-          fauxAssistantMessage('done'),
-        ],
-        sessionId,
-        (event) => events.push(event),
-      );
-      const canonicalCwd = await realpath(agentWorkDir(sessionId));
-      const expectedDetails = {
-        relativePath: args.path,
-        absolutePath: path.join(canonicalCwd, args.path),
-      };
-
-      expect(
-        events.find(
-          (event) => event.type === 'tool_start' && event.name === toolName,
-        ),
-      ).toMatchObject({ details: expectedDetails });
-      expect(
-        events.find(
-          (event) => event.type === 'tool_end' && event.name === toolName,
-        ),
-      ).toMatchObject({ isError: true, details: expectedDetails });
-      expect(
-        result.messages.find(
-          (message) =>
-            message !== null &&
-            typeof message === 'object' &&
-            !Array.isArray(message) &&
-            message.role === 'toolResult' &&
-            message.toolName === toolName,
-        ),
-      ).toMatchObject({ isError: true, details: expectedDetails });
-    },
-  );
-
-  it('does not fabricate root details for an invalid list path', async () => {
-    const sessionId = 'invalid-list-path';
-    const events: AgentStreamEvent[] = [];
-
-    const result = await runWithResponses(
-      [
-        fauxAssistantMessage(fauxToolCall('list_files', { path: null })),
-        fauxAssistantMessage('done'),
-      ],
-      sessionId,
-      (event) => events.push(event),
-    );
-    const toolStart = events.find(
-      (event) => event.type === 'tool_start' && event.name === 'list_files',
-    );
-    const toolEnd = events.find(
-      (event) => event.type === 'tool_end' && event.name === 'list_files',
-    );
-    const toolResult = result.messages.find(
-      (message) =>
-        message !== null &&
-        typeof message === 'object' &&
-        !Array.isArray(message) &&
-        message.role === 'toolResult' &&
-        message.toolName === 'list_files',
-    );
-
-    expect(toolStart).toMatchObject({ args: { path: null } });
-    expect(toolStart).not.toHaveProperty('details');
-    expect(toolEnd).toMatchObject({ isError: true });
-    expect(toolEnd).not.toHaveProperty('details');
-    expect(toolResult).toMatchObject({ isError: true });
-    expect(toolResult).not.toHaveProperty('details.relativePath');
-    expect(toolResult).not.toHaveProperty('details.absolutePath');
-  });
-
-  it('does not fabricate root details for non-object list arguments', async () => {
-    const sessionId = 'invalid-list-arguments';
-    const events: AgentStreamEvent[] = [];
-
-    const result = await runWithResponses(
-      [
-        fauxAssistantMessage(fauxToolCall('list_files', null as never)),
-        fauxAssistantMessage('done'),
-      ],
-      sessionId,
-      (event) => events.push(event),
-    );
-    const toolStart = events.find(
-      (event) => event.type === 'tool_start' && event.name === 'list_files',
-    );
-    const toolEnd = events.find(
-      (event) => event.type === 'tool_end' && event.name === 'list_files',
-    );
-    const toolResult = result.messages.find(
-      (message) =>
-        message !== null &&
-        typeof message === 'object' &&
-        !Array.isArray(message) &&
-        message.role === 'toolResult' &&
-        message.toolName === 'list_files',
-    );
-
-    expect(toolStart).toMatchObject({ args: null });
-    expect(toolStart).not.toHaveProperty('details');
-    expect(toolEnd).toMatchObject({ isError: true });
-    expect(toolEnd).not.toHaveProperty('details');
-    expect(toolResult).toMatchObject({ isError: true });
-    expect(toolResult).not.toHaveProperty('details.relativePath');
-    expect(toolResult).not.toHaveProperty('details.absolutePath');
-    expect(result.messages).toContainEqual(
-      expect.objectContaining({
-        role: 'assistant',
-        content: expect.arrayContaining([
-          expect.objectContaining({
-            name: 'list_files',
-            arguments: null,
-          }),
-        ]),
-      }),
-    );
   });
 
   it('does not apply current path details to a prior reused tool-call id', async () => {

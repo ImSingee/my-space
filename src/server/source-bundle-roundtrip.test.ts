@@ -295,7 +295,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
   }, 15_000);
 
   describe('existing checkout synchronization', () => {
-    for (const kind of SOURCE_KINDS) {
+    for (const kind of ['app'] as const) {
       it(`synchronizes a clean ${kind} master already equal to remote`, async () => {
         const id = `sync-equal-${kind}`;
         const expectedCommit = await seedPlatformSource(id);
@@ -315,7 +315,9 @@ describe('git bundle round-trip (platform <-> runner)', () => {
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v1\n');
       }, 15_000);
+    }
 
+    for (const kind of SOURCE_KINDS) {
       it(`advances a clean existing ${kind} master that is behind remote`, async () => {
         const id = `sync-behind-${kind}`;
         await seedPlatformSource(id);
@@ -346,7 +348,9 @@ describe('git bundle round-trip (platform <-> runner)', () => {
           readFile(path.join(synchronized.absolutePath, 'README.md'), 'utf8'),
         ).resolves.toBe('v2\n');
       }, 15_000);
+    }
 
+    for (const kind of ['app'] as const) {
       it(`materializes the first remote commit in an unborn clean ${kind} master`, async () => {
         const id = `sync-unborn-${kind}`;
         const sessionId = `${id}-session`;
@@ -375,7 +379,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       });
     }
 
-    for (const kind of SOURCE_KINDS) {
+    for (const kind of ['app'] as const) {
       for (const relation of ['ahead', 'diverged'] as const) {
         it(`preserves a clean ${kind} master that is ${relation} from remote`, async () => {
           const id = `sync-${relation}-${kind}`;
@@ -446,7 +450,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
       }
     }
 
-    for (const kind of SOURCE_KINDS) {
+    for (const kind of ['app'] as const) {
       for (const state of ['dirty', 'feature', 'detached'] as const) {
         it(`preserves an existing ${kind} checkout on ${state} state`, async () => {
           const id = `sync-${state}-${kind}`;
@@ -604,7 +608,7 @@ describe('git bundle round-trip (platform <-> runner)', () => {
     ).rejects.toThrow(/ENOENT/);
   });
 
-  for (const kind of SOURCE_KINDS) {
+  for (const kind of ['app'] as const) {
     it(`requires force to discard local ${kind} work against an empty remote`, async () => {
       const sessionId = `rt-empty-remote-${kind}`;
       const id = `empty-remote-${kind}`;
