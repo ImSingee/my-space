@@ -66,7 +66,10 @@ async function recordCronRun(
   }
 }
 
-/** Read cron jobs from an app's current deployment normalized manifest. */
+/**
+ * Read declared cron jobs from an app's current deployment for inspection and
+ * lookup. Scheduling and invocation enforce compatibility separately.
+ */
 async function cronJobsFor(appId: string): Promise<CronJob[]> {
   const app = await db.query.apps.findFirst({
     where: { id: appId },
@@ -82,9 +85,6 @@ async function cronJobsFor(appId: string): Promise<CronJob[]> {
   const deployment = await db.query.deployments.findFirst({
     where: { id: app.currentDeploymentId as string },
   });
-  if (!appCompatibility(deployment?.compatibilityVersion).isSupported) {
-    return [];
-  }
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
   return manifest?.cron ?? [];
 }
