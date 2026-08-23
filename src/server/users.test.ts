@@ -25,6 +25,7 @@ async function seedSessionAndAccount(userId: string) {
   });
   await db.insert(schema.account).values({
     id: `account-${userId}`,
+    issuer: 'local:credential',
     accountId: userId,
     providerId: 'credential',
     userId,

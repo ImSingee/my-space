@@ -57,6 +57,13 @@
       "when": 1786998478091,
       "tag": "0007_remove_userscripts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787510338181,
+      "tag": "0008_majestic_hemingway",
+      "breakpoints": true
     }
   ]
 }

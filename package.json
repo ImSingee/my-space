@@ -27,7 +27,7 @@
     "migrations:generate": "drizzle-kit generate",
     "migrations:apply": "drizzle-kit migrate",
     "migrations:push": "drizzle-kit push",
-    "auth:generate": "pnpx auth@latest generate --config ./src/auth/server.ts --output ./src/db/auth-schema.ts -y && pnpm format",
+    "auth:generate": "pnpx auth@1.7.1 generate --config ./src/auth/server.ts --output ./src/db/auth-schema.ts -y && pnpm format",
     "db:seed": "tsx scripts/seed-db.ts",
     "drizzle:studio": "drizzle-kit studio"
   },
@@ -57,7 +57,7 @@
     "@tanstack/react-start": "^1.168.44",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/router-plugin": "^1.168.30",
-    "better-auth": "^1.6.23",
+    "better-auth": "1.7.1",
     "copy-to-clipboard": "^4.0.2",
     "dayjs": "^1.11.21",
     "diff": "^8.0.4",
