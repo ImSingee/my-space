@@ -178,11 +178,30 @@ toast.promise(promise, {
 
 ### Drizzle ORM
 
-The project uses [Drizzle ORM](https://orm.drizzle.team/) with postgres-js for database operations.
+**Required:** The project uses [Drizzle ORM](https://orm.drizzle.team/) v1
+with postgres-js and Relational Queries v2 (RQB v2). All new or modified
+relational queries must use the RQB v2 object API. Do not introduce legacy
+Drizzle v0.x configuration or callback-based RQB v1 queries.
 
 - Schema: `src/db/schema.ts`
+- Relations: `src/db/relations.ts`, defined with `defineRelations`
 - Database client: `src/db/db.ts` (import as `import { db, schema } from '~/db'`)
 - Migrations: `migrations/` directory
+
+Use object filters and object ordering for `db.query`:
+
+```ts
+await db.query.agentRuns.findMany({
+  where: {
+    sessionId,
+    status: { in: ['queued', 'running'] },
+  },
+  orderBy: { createdAt: 'desc' },
+});
+```
+
+The core SQL query builder is separate from RQB and continues to use SQL
+expressions, for example `db.select().from(table).where(eq(table.id, id))`.
 
 Commands:
 
