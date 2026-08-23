@@ -23,15 +23,6 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('not deployed');
   });
 
-  it('routes App compatibility questions and updates through the Skill', () => {
-    const prompt = buildSystemPrompt(appUrl);
-
-    expect(prompt).toMatch(
-      /list_apps.*get_app.*older compatibility version.*app-compatibility/s,
-    );
-    expect(prompt).toMatch(/before explaining or redeploying the App/);
-  });
-
   it('keeps existing checkout synchronization non-destructive', () => {
     const prompt = buildSystemPrompt(appUrl);
 

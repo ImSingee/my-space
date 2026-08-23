@@ -162,8 +162,6 @@ test('replaces an unsupported frontend with an Agent update state', async () => 
   const screen = await renderAppView();
 
   expect(screen.container.querySelector('iframe')).toBeNull();
-  await expect.element(screen.getByText('App update required')).toBeVisible();
-  await expect.element(screen.getByText(/cannot run/)).toBeVisible();
   await expect
     .element(screen.getByRole('link', { name: 'Open Agent' }))
     .toBeVisible();

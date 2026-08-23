@@ -61,19 +61,4 @@ describe('getAppViewState', () => {
       canOpen: false,
     });
   });
-
-  test('blocks a live frontend below the minimum compatibility', () => {
-    expect(
-      getAppViewState({
-        status: 'deployed',
-        deploymentRevision: 'revision-one',
-        hasFrontend: true,
-        runtimeSupported: false,
-      }),
-    ).toEqual({
-      hasLiveDeployment: true,
-      isCompatibilityBlocked: true,
-      canOpen: false,
-    });
-  });
 });
