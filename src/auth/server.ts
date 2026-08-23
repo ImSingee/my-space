@@ -38,12 +38,14 @@ export const auth = betterAuth({
       },
     },
   },
-  experimental: { joins: true },
-  // advanced: {
-  //   ipAddress: {
-  //     ipAddressHeaders: ["x-forwarded-for", "cf-connecting-ip"],
-  //   },
-  // },
+  advanced: {
+    database: {
+      joins: true,
+    },
+    // ipAddress: {
+    //   ipAddressHeaders: ['x-forwarded-for', 'cf-connecting-ip'],
+    // },
+  },
   plugins: [
     tanstackStartCookies(), // This should be the last plugin
   ],
