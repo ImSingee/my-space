@@ -46,6 +46,7 @@ function defaultCounterTemplateFixture(): Plugin {
 
 export default defineConfig({
   test: {
+    maxWorkers: 2,
     passWithNoTests: true,
     projects: [
       {
