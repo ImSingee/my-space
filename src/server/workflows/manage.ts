@@ -53,11 +53,11 @@ export async function listWorkflowDeployments(
   id: string,
 ): Promise<WorkflowDeploymentSummary[]> {
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   const rows = await db.query.workflowDeployments.findMany({
-    where: (d, { eq: e }) => e(d.workflowId, id),
-    orderBy: (d, { desc }) => [desc(d.version)],
+    where: { workflowId: id },
+    orderBy: { version: 'desc' },
   });
   const current = workflow?.currentDeploymentId ?? null;
   return Promise.all(
@@ -93,8 +93,7 @@ export async function workflowDeploymentBuildLog(
   deploymentId: string,
 ): Promise<string | null> {
   const d = await db.query.workflowDeployments.findFirst({
-    where: (row, { eq: e, and: a }) =>
-      a(e(row.workflowId, workflowId), e(row.id, deploymentId)),
+    where: { workflowId, id: deploymentId },
   });
   return d?.buildLog ?? null;
 }
@@ -104,7 +103,7 @@ export async function setWorkflowArchived(
   archived: boolean,
 ): Promise<{ status: WorkflowStatus }> {
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!workflow) throw new Error(`Workflow "${id}" not found.`);
 
@@ -143,12 +142,12 @@ async function rollbackWorkflowInner(
   deploymentId: string,
 ): Promise<{ version: number }> {
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!workflow) throw new Error(`Workflow "${id}" not found.`);
 
   const deployment = await db.query.workflowDeployments.findFirst({
-    where: (d, { eq: e }) => e(d.id, deploymentId),
+    where: { id: deploymentId },
   });
   if (!deployment || deployment.workflowId !== id) {
     throw new Error('Deployment not found for this workflow.');
@@ -209,8 +208,7 @@ export async function rollbackWorkflowToVersion(
   version: number,
 ): Promise<{ version: number }> {
   const deployment = await db.query.workflowDeployments.findFirst({
-    where: (d, { eq: e, and: a }) =>
-      a(e(d.workflowId, id), e(d.version, version)),
+    where: { workflowId: id, version },
   });
   if (!deployment) {
     throw new Error(`Workflow "${id}" has no deployment v${version}.`);
@@ -310,16 +308,12 @@ export async function listWorkflowRuns(
   limit = 50,
 ): Promise<WorkflowRunSummary[]> {
   const rows = await db.query.workflowRuns.findMany({
-    where: (r, { eq: e }) => e(r.workflowId, id),
-    orderBy: (r, { desc }) => [desc(r.createdAt)],
+    where: { workflowId: id },
+    orderBy: { createdAt: 'desc' },
     limit,
   });
   const steps = await db.query.workflowRunSteps.findMany({
-    where: (s, { inArray }) =>
-      inArray(
-        s.runId,
-        rows.map((r) => r.id),
-      ),
+    where: { runId: { in: rows.map((r) => r.id) } },
   });
   const counts = new Map<string, number>();
   for (const s of steps) counts.set(s.runId, (counts.get(s.runId) ?? 0) + 1);
@@ -352,17 +346,13 @@ export async function listRecentWorkflowRuns(
   limit = 100,
 ): Promise<WorkflowRunGlobalItem[]> {
   const rows = await db.query.workflowRuns.findMany({
-    orderBy: (r, { desc }) => [desc(r.createdAt)],
+    orderBy: { createdAt: 'desc' },
     limit,
   });
   if (rows.length === 0) return [];
 
   const steps = await db.query.workflowRunSteps.findMany({
-    where: (s, { inArray }) =>
-      inArray(
-        s.runId,
-        rows.map((r) => r.id),
-      ),
+    where: { runId: { in: rows.map((r) => r.id) } },
   });
   const counts = new Map<string, number>();
   for (const s of steps) counts.set(s.runId, (counts.get(s.runId) ?? 0) + 1);
@@ -422,12 +412,12 @@ export async function getWorkflowRun(
   runId: string,
 ): Promise<WorkflowRunDetail | null> {
   const run = await db.query.workflowRuns.findFirst({
-    where: (r, { eq: e }) => e(r.id, runId),
+    where: { id: runId },
   });
   if (!run) return null;
   const steps = await db.query.workflowRunSteps.findMany({
-    where: (s, { eq: e }) => e(s.runId, runId),
-    orderBy: (s, { asc }) => [asc(s.seq), asc(s.attempt)],
+    where: { runId },
+    orderBy: { seq: 'asc', attempt: 'asc' },
   });
   return {
     id: run.id,

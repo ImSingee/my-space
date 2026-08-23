@@ -99,7 +99,7 @@ async function finishCommittedRelease(
     .returning({ id: schema.apps.id });
   if (finalized.length === 0) {
     const current = await db.query.apps.findFirst({
-      where: (row, { eq: equal }) => equal(row.id, id),
+      where: { id },
       columns: { currentDeploymentId: true, dataActivationId: true },
     });
     if (
@@ -191,7 +191,7 @@ async function restoreLiveBuild(
   return db.transaction(async (tx) => {
     await appDeployLock.acquire(tx, id);
     const current = await tx.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
       columns: { currentDeploymentId: true },
     });
     if ((current?.currentDeploymentId ?? null) !== deploymentId) {
@@ -247,7 +247,7 @@ async function reconcilePendingActivation(id: string): Promise<string | null> {
     // was still resolving COMMIT, then inspect its exact deployment id.
     await appDeployLock.acquire(tx, id);
     const app = await tx.query.apps.findFirst({
-      where: (row, { eq: equal }) => equal(row.id, id),
+      where: { id },
       columns: {
         status: true,
         currentDeploymentId: true,
@@ -260,17 +260,12 @@ async function reconcilePendingActivation(id: string): Promise<string | null> {
     if (!app?.dataActivationId) return null;
     const pendingId = app.dataActivationId;
     const pendingDeployment = await tx.query.deployments.findFirst({
-      where: (row, { and: all, eq: equal }) =>
-        all(equal(row.id, pendingId), equal(row.appId, id)),
+      where: { id: pendingId, appId: id },
       columns: { id: true },
     });
     const currentDeployment = app.currentDeploymentId
       ? await tx.query.deployments.findFirst({
-          where: (row, { and: all, eq: equal }) =>
-            all(
-              equal(row.id, app.currentDeploymentId as string),
-              equal(row.appId, id),
-            ),
+          where: { id: app.currentDeploymentId as string, appId: id },
           columns: { id: true, dataSchemaHash: true },
         })
       : null;
@@ -437,7 +432,7 @@ async function reconcilePendingActivation(id: string): Promise<string | null> {
 /** Best-effort crash recovery run once during platform startup. */
 export async function reconcilePendingAppActivations(): Promise<void> {
   const pending = await db.query.apps.findMany({
-    where: (row, { isNotNull }) => isNotNull(row.dataActivationId),
+    where: { dataActivationId: { isNotNull: true } },
     columns: { id: true },
   });
   for (const app of pending) {
@@ -485,7 +480,7 @@ async function deployAppInner(
   const supersededPendingId = await reconcilePendingActivation(id);
 
   let app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!app) {
     throw new Error(`App "${id}" not found.`);
@@ -702,7 +697,7 @@ async function deployAppInner(
       // building or waiting for the cutover lock. Refresh every retained field
       // and the restore pointer before mutating either database or the live dir.
       const currentApp = await db.query.apps.findFirst({
-        where: (row, { eq: equal }) => equal(row.id, id),
+        where: { id },
       });
       if (!currentApp) throw new Error(`App "${id}" not found.`);
       // Capture a concurrent archive request, but never replace the original
@@ -721,8 +716,7 @@ async function deployAppInner(
 
       const currentDeployment = prevDeploymentId
         ? await db.query.deployments.findFirst({
-            where: (row, { eq: equal }) =>
-              equal(row.id, prevDeploymentId as string),
+            where: { id: prevDeploymentId as string },
             columns: { dataSchemaHash: true },
           })
         : null;
@@ -828,8 +822,8 @@ async function deployAppInner(
       await db.transaction(async (tx) => {
         await appDeployLock.acquire(tx, id);
         const last = await tx.query.deployments.findFirst({
-          where: (d, { eq: e }) => e(d.appId, id),
-          orderBy: (d, { desc }) => [desc(d.version)],
+          where: { appId: id },
+          orderBy: { version: 'desc' },
         });
         version = (last?.version ?? 0) + 1;
 
@@ -930,7 +924,7 @@ async function deployAppInner(
           // visible.
           await appDeployLock.acquire(tx, id);
           const committed = await tx.query.deployments.findFirst({
-            where: (row, { eq: equal }) => equal(row.id, deploymentId),
+            where: { id: deploymentId },
             columns: { id: true, version: true },
           });
           committedVersion = committed?.version ?? null;
@@ -1007,8 +1001,7 @@ async function deployAppInner(
         .transaction(async (tx) => {
           await appDeployLock.acquire(tx, id);
           const owner = await tx.query.deployments.findFirst({
-            where: (d, { eq: e, and: a }) =>
-              a(e(d.appId, id), e(d.sourceTag, tag)),
+            where: { appId: id, sourceTag: tag },
           });
           if (!owner) {
             await deleteDeploymentTag(id, tag).catch(() => {});

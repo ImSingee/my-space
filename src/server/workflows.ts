@@ -30,7 +30,7 @@ export const listWorkflows = createServerFn({ method: 'GET' })
     // shipped to the browser. The webhook secret is disclosed only by the
     // dedicated ops endpoint, and only for a live deployment.
     const rows = await db.query.workflows.findMany({
-      orderBy: (s, { desc }) => [desc(s.updatedAt)],
+      orderBy: { updatedAt: 'desc' },
       columns: {
         id: true,
         name: true,
@@ -67,7 +67,7 @@ export const getWorkflow = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<WorkflowDetail | null> => {
     const row = await db.query.workflows.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
       columns: {
         id: true,
         name: true,
@@ -172,7 +172,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<WorkflowOps> => {
     const workflow = await db.query.workflows.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
     });
     if (!workflow) {
       return {
@@ -189,8 +189,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
     // must not surface a URL/secret that would 404.
     if (workflow.status === 'deployed' && workflow.currentDeploymentId) {
       const deployment = await db.query.workflowDeployments.findFirst({
-        where: (d, { eq: e }) =>
-          e(d.id, workflow.currentDeploymentId as string),
+        where: { id: workflow.currentDeploymentId as string },
       });
       const manifest = deployment?.manifestNormalized as {
         triggers?: { webhook?: { enabled?: boolean } };

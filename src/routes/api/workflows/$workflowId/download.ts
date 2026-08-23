@@ -22,8 +22,7 @@ async function handle({ request }: { request: Request }): Promise<Response> {
 
   const deployment = deploymentId
     ? await db.query.workflowDeployments.findFirst({
-        where: (d, { eq, and }) =>
-          and(eq(d.id, deploymentId), eq(d.workflowId, id)),
+        where: { id: deploymentId, workflowId: id },
       })
     : null;
   if (!deployment) return new Response('Not found', { status: 404 });

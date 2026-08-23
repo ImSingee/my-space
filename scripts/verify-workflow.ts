@@ -148,7 +148,7 @@ async function main() {
   console.log('   input schema:', JSON.stringify(dep.inputSchema));
 
   const row = await db.query.workflows.findFirst({
-    where: (s, { eq: e }) => e(s.id, ID),
+    where: { id: ID },
   });
   console.log('   webhook secret:', row?.webhookSecret);
 

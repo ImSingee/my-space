@@ -321,7 +321,7 @@ async function main(): Promise<void> {
     deployed = true;
 
     const row = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
       columns: { signingSecret: true },
     });
     check(

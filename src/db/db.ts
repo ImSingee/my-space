@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 
 import { developmentQueryLogger } from './parameter-redacting-logger';
+import { relations } from './relations';
 import * as schema from './schema';
 
 export { schema };
@@ -12,8 +13,7 @@ if (!DATABASE_URL) {
 
 export const db = drizzle({
   connection: DATABASE_URL,
-  schema,
-  casing: 'snake_case',
+  relations,
   logger:
     process.env.NODE_ENV === 'development' ? developmentQueryLogger : false,
 });

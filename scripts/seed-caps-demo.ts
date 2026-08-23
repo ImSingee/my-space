@@ -176,7 +176,7 @@ async function main() {
   // Reset any prior copy. The id is now a generated ULID, so find the existing
   // app by its slug and clean up using whatever id it has.
   const prior = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.slug, SLUG),
+    where: { slug: SLUG },
     columns: { id: true },
   });
   if (prior) {
@@ -222,7 +222,7 @@ async function main() {
     message: 'Seed demo deployment',
   });
   const row = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   console.log('deployed', id, '(slug ' + SLUG + ') v' + dep.version);
   console.log('webhookSecret', row?.webhookSecret);

@@ -1,6 +1,5 @@
 /** Server-only: authorize runtime serving of a deployed app's built assets. */
-import { inArray } from 'drizzle-orm';
-import { db, schema, type DB } from '~/db';
+import { db, type DB } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
 import {
   isValidAppSlug,
@@ -15,12 +14,12 @@ import {
  */
 export async function resolveAppId(idOrSlug: string): Promise<string | null> {
   const byId = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, idOrSlug),
+    where: { id: idOrSlug },
     columns: { id: true },
   });
   if (byId) return byId.id;
   const bySlug = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.slug, idOrSlug),
+    where: { slug: idOrSlug },
     columns: { id: true },
   });
   return bySlug?.id ?? null;
@@ -30,7 +29,7 @@ export async function resolveAppId(idOrSlug: string): Promise<string | null> {
 export async function appIdForSlug(slug: string): Promise<string | null> {
   if (!isValidAppSlug(slug)) return null;
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.slug, slug),
+    where: { slug },
     columns: { id: true },
   });
   return app?.id ?? null;
@@ -39,7 +38,7 @@ export async function appIdForSlug(slug: string): Promise<string | null> {
 /** Look up an app's current (mutable) slug by its immutable id. */
 export async function appSlug(id: string): Promise<string | null> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: { slug: true },
   });
   return app?.slug ?? null;
@@ -58,10 +57,14 @@ export async function slugConflictExists(
   selfId?: string,
 ): Promise<boolean> {
   const conflict = await db.query.apps.findFirst({
-    where: (s, { or, eq, and, ne }) => {
-      const sameValue = or(eq(s.slug, candidate), eq(s.id, candidate));
-      return selfId ? and(sameValue, ne(s.id, selfId)) : sameValue;
-    },
+    where: selfId
+      ? {
+          AND: [
+            { OR: [{ slug: candidate }, { id: candidate }] },
+            { id: { ne: selfId } },
+          ],
+        }
+      : { OR: [{ slug: candidate }, { id: candidate }] },
     columns: { id: true },
   });
   return Boolean(conflict);
@@ -77,12 +80,12 @@ export async function normalizedManifestFor(
   id: string,
 ): Promise<NormalizedManifest | null> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: { slug: true, currentDeploymentId: true },
   });
   if (!app?.currentDeploymentId) return null;
   const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+    where: { id: app.currentDeploymentId as string },
     columns: { manifestNormalized: true },
   });
   const manifest = (deployment?.manifestNormalized ??
@@ -118,7 +121,7 @@ export async function liveAppDeployment(
   manifest: NormalizedManifest;
 } | null> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: {
       slug: true,
       status: true,
@@ -135,7 +138,7 @@ export async function liveAppDeployment(
     return null;
   }
   const deployment = await db.query.deployments.findFirst({
-    where: (row, { eq }) => eq(row.id, app.currentDeploymentId as string),
+    where: { id: app.currentDeploymentId as string },
     columns: { manifestNormalized: true },
   });
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
@@ -163,7 +166,7 @@ export async function liveAppManifests(
   if (unique.length === 0) return result;
 
   const apps = await database.query.apps.findMany({
-    where: inArray(schema.apps.id, unique),
+    where: { id: { in: unique } },
   });
   const servable = apps.filter(
     (app) =>
@@ -174,10 +177,11 @@ export async function liveAppManifests(
   if (servable.length === 0) return result;
 
   const deployments = await database.query.deployments.findMany({
-    where: inArray(
-      schema.deployments.id,
-      servable.map((app) => app.currentDeploymentId as string),
-    ),
+    where: {
+      id: {
+        in: servable.map((app) => app.currentDeploymentId as string),
+      },
+    },
   });
   const byDeploymentId = new Map(deployments.map((d) => [d.id, d]));
   for (const app of servable) {

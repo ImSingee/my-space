@@ -27,7 +27,7 @@ export async function handle({
 
   const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
   });
   // Gate on a live deployment rather than status === 'deployed' so a redeploy
   // (status 'building', previous backend still live) keeps accepting webhooks
@@ -44,7 +44,7 @@ export async function handle({
   // deployments predate the field, so default to 'platform' (the historical
   // behaviour, which always required a verified secret).
   const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+    where: { id: app.currentDeploymentId as string },
     columns: { manifestNormalized: true },
   });
   const auth =

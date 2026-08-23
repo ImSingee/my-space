@@ -68,7 +68,7 @@ export const getSession = createServerFn({ method: 'GET' })
   .validator((id: string) => z.string().parse(id))
   .handler(async ({ data: id }): Promise<SessionDetail | null> => {
     const row = await db.query.agentSessions.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
     });
     if (!row) return null;
     return {

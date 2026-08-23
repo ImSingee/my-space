@@ -57,7 +57,7 @@ export function appDataDatabaseUrl(id: string, password: string): string {
 /** Resolve the stored credential without creating database resources. */
 export async function resolveAppDataDatabaseUrl(id: string): Promise<string> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq: equal }) => equal(row.id, id),
+    where: { id },
     columns: { dataDbPasswordCiphertext: true },
   });
   if (!app) throw new Error(`App "${id}" not found.`);
@@ -140,7 +140,7 @@ export async function ensureAppDataDatabase(id: string): Promise<string> {
     );
 
     const app = await tx.query.apps.findFirst({
-      where: (row, { eq: equal }) => equal(row.id, id),
+      where: { id },
       columns: { dataDbPasswordCiphertext: true },
     });
     if (!app) throw new Error(`App "${id}" not found.`);

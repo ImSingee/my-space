@@ -416,7 +416,7 @@ async function assertCurrentAppState(
   options: DataTableAccessOptions,
 ): Promise<void> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: {
       status: true,
       currentDeploymentId: true,

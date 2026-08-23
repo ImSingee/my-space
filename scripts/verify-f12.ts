@@ -54,7 +54,7 @@ async function expectKvError(
 
 async function main() {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.slug, 'caps-demo'),
+    where: { slug: 'caps-demo' },
   });
   if (!app) throw new Error('seed caps-demo first (scripts/seed-caps-demo.ts)');
   const appId = app.id;
@@ -89,8 +89,7 @@ async function main() {
   const sec = await setKv(appId, 'vf12-secret', 'sekret', { secret: true });
   check('setKv secret=true', sec.secret === true, sec);
   const encrypted = await db.query.appKv.findFirst({
-    where: (row, { and, eq }) =>
-      and(eq(row.appId, appId), eq(row.key, 'vf12-secret')),
+    where: { appId, key: 'vf12-secret' },
   });
   check(
     'new secret stores ciphertext without plaintext',
@@ -113,8 +112,7 @@ async function main() {
   const sec3 = await setKv(appId, 'vf12-secret', 'sekret3', { secret: false });
   check('explicit secret=false unsets the flag', sec3.secret === false, sec3);
   const visible = await db.query.appKv.findFirst({
-    where: (row, { and, eq }) =>
-      and(eq(row.appId, appId), eq(row.key, 'vf12-secret')),
+    where: { appId, key: 'vf12-secret' },
   });
   check(
     'secret=false clears ciphertext',

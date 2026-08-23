@@ -1,5 +1,4 @@
 /** Server-only: cron scheduler that triggers app backends on schedule. */
-import { inArray } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import { createCronScheduler } from '~server/cron-scheduler';
 import {
@@ -65,7 +64,7 @@ async function recordCronRun(
 /** Read cron jobs from an app's current deployment normalized manifest. */
 async function cronJobsFor(appId: string): Promise<CronJob[]> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, appId),
+    where: { id: appId },
   });
   if (
     !app ||
@@ -76,7 +75,7 @@ async function cronJobsFor(appId: string): Promise<CronJob[]> {
     return [];
   }
   const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+    where: { id: app.currentDeploymentId as string },
   });
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
   return manifest?.cron ?? [];
@@ -93,12 +92,12 @@ async function cronInvokeContext(appId: string): Promise<{
   deploymentId?: string;
 }> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, appId),
+    where: { id: appId },
     columns: { signingSecret: true, currentDeploymentId: true },
   });
   if (!app?.currentDeploymentId) return {};
   const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+    where: { id: app.currentDeploymentId as string },
     columns: { manifestNormalized: true },
   });
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
@@ -214,7 +213,7 @@ const scheduler = createCronScheduler<CronJob>({
   },
   loadJobs: async () => {
     const apps = await db.query.apps.findMany({
-      where: (s, { eq }) => eq(s.status, 'deployed'),
+      where: { status: 'deployed' },
       columns: { id: true, capabilities: true, currentDeploymentId: true },
     });
     const cronApps = apps.filter(
@@ -223,10 +222,11 @@ const scheduler = createCronScheduler<CronJob>({
     if (cronApps.length === 0) return [];
     // One batched manifest lookup instead of cronJobsFor()'s 2 queries per app.
     const deployments = await db.query.deployments.findMany({
-      where: inArray(
-        schema.deployments.id,
-        cronApps.map((app) => app.currentDeploymentId as string),
-      ),
+      where: {
+        id: {
+          in: cronApps.map((app) => app.currentDeploymentId as string),
+        },
+      },
       columns: { id: true, manifestNormalized: true },
     });
     const manifestByDeploymentId = new Map(
@@ -314,8 +314,8 @@ export async function listCronRuns(
   limit = 50,
 ): Promise<AppCronRunView[]> {
   const rows = await db.query.appCronRuns.findMany({
-    where: (r, { eq }) => eq(r.appId, appId),
-    orderBy: (r, { desc }) => [desc(r.createdAt)],
+    where: { appId },
+    orderBy: { createdAt: 'desc' },
     limit,
   });
   return rows.map((r) => ({

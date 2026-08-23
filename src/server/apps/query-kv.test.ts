@@ -82,8 +82,7 @@ describe('queryAppKv operations', () => {
       record: { key: 'api-token', value: null, secret: true },
     });
     const stored = await db.query.appKv.findFirst({
-      where: (t, { and, eq: equals }) =>
-        and(equals(t.appId, 'secrets'), equals(t.key, 'api-token')),
+      where: { appId: 'secrets', key: 'api-token' },
     });
     expect(stored).toMatchObject({
       value: null,
@@ -142,8 +141,7 @@ describe('queryAppKv operations', () => {
       secret: true,
     });
     const stored = await db.query.appKv.findFirst({
-      where: (t, { and, eq: equals }) =>
-        and(equals(t.appId, 'corrupted-secret'), equals(t.key, 'api-token')),
+      where: { appId: 'corrupted-secret', key: 'api-token' },
     });
     const envelope = stored?.valueCiphertext;
     if (!stored || !envelope) throw new Error('Expected encrypted KV row.');

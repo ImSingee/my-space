@@ -54,7 +54,7 @@ async function handle({ request }: { request: Request }): Promise<Response> {
 
   const { db } = await import('~/db');
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
   });
   if (!workflow || workflow.status !== 'deployed') {
     return new Response('Not found', { status: 404 });
@@ -63,7 +63,7 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     return new Response('Webhook not enabled', { status: 404 });
   }
   const deployment = await db.query.workflowDeployments.findFirst({
-    where: (d, { eq }) => eq(d.id, workflow.currentDeploymentId as string),
+    where: { id: workflow.currentDeploymentId as string },
   });
   const manifest = deployment?.manifestNormalized as {
     triggers?: { webhook?: { enabled?: boolean } };

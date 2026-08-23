@@ -1,10 +1,10 @@
 import { betterAuth } from 'better-auth/minimal';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { drizzleAdapter } from '@better-auth/drizzle-adapter/relations-v2';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
 
 // FIXME: We have to use ../db (rather than ~db) here to make @better-auth/cli happy
 // See https://github.com/better-auth/better-auth/issues/6373
-import { db } from '../db';
+import { db, schema } from '../db';
 import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 
@@ -24,6 +24,7 @@ export const auth = betterAuth({
   secret: betterAuthSecret,
   database: drizzleAdapter(db, {
     provider: 'pg',
+    schema,
   }),
   emailAndPassword: {
     enabled: true,

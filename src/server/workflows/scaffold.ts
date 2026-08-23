@@ -50,7 +50,7 @@ export async function createWorkflow(
   }
 
   const existing = await db.query.workflows.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
   });
   if (existing) {
     throw new Error(`Workflow "${id}" already exists.`);

@@ -11,7 +11,7 @@
  *   sees plaintext (it's the app's own data); and
  * - the manage UI, via session-authed server fns, which masks `secret` values.
  */
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import { AppError } from '~server/errors';
 import { decryptKvSecret, encryptKvSecret } from './kv-secret';
@@ -158,7 +158,7 @@ export async function getKv(
 ): Promise<KvRecord | null> {
   const k = normalizeKvKey(key);
   const row = await db.query.appKv.findFirst({
-    where: (t, { eq: e, and: a }) => a(e(t.appId, appId), e(t.key, k)),
+    where: { appId, key: k },
   });
   return row ? toRecord(row, opts) : null;
 }
@@ -169,8 +169,8 @@ export async function listKv(
   opts: KvReadOptions = {},
 ): Promise<KvRecord[]> {
   const rows = await db.query.appKv.findMany({
-    where: (t, { eq: e }) => e(t.appId, appId),
-    orderBy: (t, { asc }) => [asc(t.key)],
+    where: { appId },
+    orderBy: { key: 'asc' },
   });
   return rows.map((row) => toRecord(row, opts));
 }
@@ -191,10 +191,8 @@ export async function listKvPage(
   opts: { after?: string; limit: number; revealSecrets?: boolean },
 ): Promise<KvPage> {
   const rows = await db.query.appKv.findMany({
-    where: opts.after
-      ? and(eq(schema.appKv.appId, appId), gt(schema.appKv.key, opts.after))
-      : eq(schema.appKv.appId, appId),
-    orderBy: (t, { asc }) => [asc(t.key)],
+    where: opts.after ? { appId, key: { gt: opts.after } } : { appId },
+    orderBy: { key: 'asc' },
     limit: opts.limit + 1,
   });
   return {
@@ -206,7 +204,7 @@ export async function listKvPage(
 /** Number of entries for an app (for the soft cap). */
 export async function countKv(appId: string): Promise<number> {
   const rows = await db.query.appKv.findMany({
-    where: (t, { eq: e }) => e(t.appId, appId),
+    where: { appId },
     columns: { id: true },
   });
   return rows.length;
@@ -238,7 +236,7 @@ export async function setKv(
       );
 
       const existing = await tx.query.appKv.findFirst({
-        where: (t, { eq: e, and: a }) => a(e(t.appId, appId), e(t.key, k)),
+        where: { appId, key: k },
         columns: { id: true, secret: true },
       });
 
@@ -268,7 +266,7 @@ export async function setKv(
       }
 
       const current = await tx.query.appKv.findMany({
-        where: (t, { eq: e }) => e(t.appId, appId),
+        where: { appId },
         columns: { id: true },
       });
       if (current.length >= KV_MAX_ENTRIES) {

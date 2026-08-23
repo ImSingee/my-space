@@ -133,7 +133,7 @@ describe('session workspace affinity', () => {
     ).rejects.toThrow('belongs to another Runner');
 
     const run = await db.query.agentRuns.findFirst({
-      where: (row, { eq }) => eq(row.id, 'run-affinity'),
+      where: { id: 'run-affinity' },
     });
     expect(run?.runnerId).toBe('runner-owner');
   });
@@ -412,7 +412,7 @@ describe('startAgentRun retry', () => {
     } as unknown as AgentRunInput);
 
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'session-retry'),
+      where: { id: 'session-retry' },
     });
     expect(session?.messages).toEqual([
       ...baseMessages,
@@ -443,7 +443,7 @@ describe('startAgentRun retry', () => {
     });
 
     const run = await db.query.agentRuns.findFirst({
-      where: (row, { eq }) => eq(row.id, runId),
+      where: { id: runId },
     });
     expect(run).toMatchObject({
       status: 'running',
@@ -558,7 +558,7 @@ describe('startAgentRun retry', () => {
     findProviderSpy.mockRestore();
 
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'session-stale-retry'),
+      where: { id: 'session-stale-retry' },
     });
     expect(session?.messages).toEqual(failedAgainMessages);
     expect(session?.updatedAt.toISOString()).not.toBe(expectedSessionUpdatedAt);
@@ -628,7 +628,7 @@ describe('startAgentRun retry', () => {
     });
 
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'session-normal-send'),
+      where: { id: 'session-normal-send' },
     });
     expect(session?.messages).toEqual([
       ...existingMessages,
@@ -684,11 +684,11 @@ describe('startAgentRun retry', () => {
     });
 
     const attachment = await db.query.agentAttachments.findFirst({
-      where: (row, { eq }) => eq(row.id, 'document-a'),
+      where: { id: 'document-a' },
     });
     expect(attachment?.attachedAt).toBeInstanceOf(Date);
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'session-attachments'),
+      where: { id: 'session-attachments' },
     });
     expect(session?.messages).toEqual([
       {
@@ -776,7 +776,7 @@ describe('startAgentRun retry', () => {
     });
 
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'session-disabled-model'),
+      where: { id: 'session-disabled-model' },
     });
     expect(session).toMatchObject({
       messages: failedMessages,

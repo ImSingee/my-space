@@ -22,7 +22,7 @@ export async function handleRpcRequest({
   // 'building', previous backend still valid) keeps serving without downtime.
   const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
   });
   if (
     !app ||

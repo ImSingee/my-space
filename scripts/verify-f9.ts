@@ -278,7 +278,7 @@ async function main(): Promise<void> {
     deployed = true;
 
     const rowPlatform = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
       columns: {
         webhookSecret: true,
         signingSecret: true,
@@ -442,7 +442,7 @@ async function main(): Promise<void> {
     await deployApp(id, { sourceDir: srcDir, message: 'f9 none deploy' });
 
     const rowNone = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
       columns: { webhookSecret: true, signingSecret: true },
     });
     // The secret is RETAINED (not nulled) across a none-mode deploy so a later

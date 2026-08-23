@@ -30,7 +30,7 @@ function check(name: string, cond: boolean, detail?: unknown): void {
 
 async function main() {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.slug, SLUG),
+    where: { slug: SLUG },
     columns: { id: true },
   });
   if (!app) {

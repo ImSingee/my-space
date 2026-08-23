@@ -6,6 +6,7 @@ type Row = Record<string, unknown>;
 type Predicate =
   | { op: 'eq'; field: string; value: unknown }
   | { op: 'and'; predicates: Predicate[] };
+type QueryFilter = Record<string, unknown>;
 
 const mocks = vi.hoisted(() => ({
   root: `/tmp/hatch-deploy-recovery-${process.pid}`,
@@ -122,22 +123,88 @@ vi.mock('~/db', () => {
     predicate.op === 'eq'
       ? row[predicate.field] === predicate.value
       : predicate.predicates.every((child) => matches(row, child));
-  const predicateFrom = (
+  const matchesField = (value: unknown, filter: unknown): boolean => {
+    if (
+      filter === null ||
+      typeof filter !== 'object' ||
+      Array.isArray(filter)
+    ) {
+      return value === filter;
+    }
+    return Object.entries(filter).every(([operator, operand]) => {
+      switch (operator) {
+        case 'eq':
+          return value === operand;
+        case 'ne':
+          return value !== operand;
+        case 'gt':
+          return (value as number | string) > (operand as number | string);
+        case 'gte':
+          return (value as number | string) >= (operand as number | string);
+        case 'lt':
+          return (value as number | string) < (operand as number | string);
+        case 'lte':
+          return (value as number | string) <= (operand as number | string);
+        case 'in':
+          return (operand as unknown[]).includes(value);
+        case 'notIn':
+          return !(operand as unknown[]).includes(value);
+        case 'isNull':
+          return operand === true ? value === null : true;
+        case 'isNotNull':
+          return operand === true ? value !== null : true;
+        case 'AND':
+          return (operand as unknown[]).every((child) =>
+            matchesField(value, child),
+          );
+        case 'OR':
+          return (operand as unknown[]).some((child) =>
+            matchesField(value, child),
+          );
+        case 'NOT':
+          return !matchesField(value, operand);
+        default:
+          return false;
+      }
+    });
+  };
+  const matchesFilter = (row: Row, filter: QueryFilter): boolean =>
+    Object.entries(filter).every(([field, value]) => {
+      switch (field) {
+        case 'AND':
+          return (value as QueryFilter[]).every((child) =>
+            matchesFilter(row, child),
+          );
+        case 'OR':
+          return (value as QueryFilter[]).some((child) =>
+            matchesFilter(row, child),
+          );
+        case 'NOT':
+          return !matchesFilter(row, value as QueryFilter);
+        default:
+          return matchesField(row[field], value);
+      }
+    });
+  const filterFrom = (
     where: unknown,
     table: Record<string, string>,
-  ): Predicate | undefined =>
+  ): Predicate | QueryFilter | undefined =>
     typeof where === 'function'
       ? (where(table, { and: all, eq: equal, isNotNull: () => undefined }) as
           | Predicate
           | undefined)
-      : (where as Predicate | undefined);
+      : (where as Predicate | QueryFilter | undefined);
+  const isPredicate = (filter: Predicate | QueryFilter): filter is Predicate =>
+    filter.op === 'eq' || filter.op === 'and';
+  const matchesWhere = (row: Row, filter: Predicate | QueryFilter): boolean =>
+    isPredicate(filter) ? matches(row, filter) : matchesFilter(row, filter);
   const select = (
     rows: Iterable<Row>,
     options: { where?: unknown } | undefined,
     table: Record<string, string>,
   ): Row | undefined => {
-    const predicate = predicateFrom(options?.where, table);
-    return [...rows].find((row) => !predicate || matches(row, predicate));
+    const filter = filterFrom(options?.where, table);
+    return [...rows].find((row) => !filter || matchesWhere(row, filter));
   };
 
   const appFindFirst = async (options?: { where?: unknown }) =>
@@ -152,9 +219,12 @@ vi.mock('~/db', () => {
   const query = {
     apps: {
       findFirst: appFindFirst,
-      findMany: async () =>
+      findMany: async (options?: { where?: unknown }) =>
         [...mocks.apps.values()]
-          .filter((app) => app.dataActivationId !== null)
+          .filter((app) => {
+            const filter = filterFrom(options?.where, schema.apps);
+            return !filter || matchesWhere(app, filter);
+          })
           .map((app) => ({ id: app.id })),
     },
     deployments: { findFirst: deploymentFindFirst },

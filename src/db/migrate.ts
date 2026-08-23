@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
@@ -8,20 +8,29 @@ import postgres from 'postgres';
 const MIGRATION_LOCK_KEY = 0x4d494752;
 
 /**
- * Resolve the SQL migrations directory to an absolute path. The built server is
- * shipped alongside a `migrations/` folder at its working directory (the Docker
- * image copies it, and the platform server runs from the repo root),
- * but the bundle itself doesn't contain it — so resolve from cwd and fail with a
- * clear, actionable error rather than a cryptic ENOENT if it can't be found.
- * `HATCH_MIGRATIONS_DIR` overrides the location for non-standard layouts.
+ * Resolve the Drizzle Kit v3 migrations directory to an absolute path. The
+ * built server is shipped alongside a `migrations/` folder at its working
+ * directory (the Docker image copies it, and the platform server runs from the
+ * repo root), but the bundle itself doesn't contain it — so resolve from cwd
+ * and fail with a clear, actionable error rather than a cryptic ENOENT if it
+ * can't be found. `HATCH_MIGRATIONS_DIR` overrides the location for
+ * non-standard layouts.
  */
 function resolveMigrationsFolder(): string {
   const folder = resolve(process.env.HATCH_MIGRATIONS_DIR ?? './migrations');
-  if (!existsSync(resolve(folder, 'meta/_journal.json'))) {
+  const hasMigration =
+    existsSync(folder) &&
+    readdirSync(folder, { withFileTypes: true }).some(
+      (entry) =>
+        entry.isDirectory() &&
+        existsSync(resolve(folder, entry.name, 'migration.sql')),
+    );
+
+  if (!hasMigration) {
     throw new Error(
-      `Database migrations folder not found at "${folder}". Ensure the ` +
-        '`migrations/` directory is present in the server working directory, ' +
-        'or set HATCH_MIGRATIONS_DIR to its absolute path.',
+      `Database migrations folder not found at "${folder}". Ensure it ` +
+        'contains timestamped subdirectories with migration.sql files, or set ' +
+        'HATCH_MIGRATIONS_DIR to its absolute path.',
     );
   }
   return folder;
@@ -37,7 +46,7 @@ export async function runMigrations() {
 
   // Use a separate connection for migrations with max: 1
   const migrationClient = postgres(DATABASE_URL, { max: 1 });
-  const db = drizzle(migrationClient);
+  const db = drizzle({ client: migrationClient });
 
   console.log('Running database migrations...');
 

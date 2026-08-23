@@ -13,7 +13,7 @@
  *   Cancel/answer/environment flow platform → runner over the same channel.
  *   A sweeper interrupts active runs whose lease expired (runner died).
  */
-import { and, eq, inArray, isNull, gt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { db, schema } from '~/db';
 import type { AgentRunStatus, JsonObject, JsonValue } from '~/db/schema';
@@ -284,9 +284,8 @@ export async function getActiveAgentRun(
   sessionId: string,
 ): Promise<ActiveAgentRun | null> {
   const row = await db.query.agentRuns.findFirst({
-    where: (r, { and: all, eq: equals, inArray: within }) =>
-      all(equals(r.sessionId, sessionId), within(r.status, ACTIVE_STATUSES)),
-    orderBy: (r, { desc: descending }) => [descending(r.createdAt)],
+    where: { sessionId, status: { in: ACTIVE_STATUSES } },
+    orderBy: { createdAt: 'desc' },
   });
   if (!row) return null;
   return {
@@ -299,7 +298,7 @@ export async function getActiveAgentRun(
 
 export async function getAgentRun(runId: string) {
   return db.query.agentRuns.findFirst({
-    where: (r, { eq: equals }) => equals(r.id, runId),
+    where: { id: runId },
   });
 }
 
@@ -312,8 +311,8 @@ export async function listRunEventsAfter(
   // callers page through with `limit` instead of loading the whole tail into
   // memory at once (see the SSE replay loop).
   const rows = await db.query.agentRunEvents.findMany({
-    where: (e) => and(eq(e.runId, runId), gt(e.seq, afterSeq)),
-    orderBy: (e, { asc }) => [asc(e.seq)],
+    where: { runId, seq: { gt: afterSeq } },
+    orderBy: { seq: 'asc' },
     limit,
   });
   return rows.map((row) => ({
@@ -347,20 +346,14 @@ async function resolveRunModelConfig(
   modelId: string,
 ): Promise<RunModelConfig> {
   const provider = await db.query.agentProviders.findFirst({
-    where: (p, { and: all, eq: equals }) =>
-      all(equals(p.id, providerId), equals(p.enabled, true)),
+    where: { id: providerId, enabled: true },
   });
   if (!provider) {
     throw new AppError('The selected Agent model is unavailable.', 409);
   }
 
   const model = await db.query.agentModels.findFirst({
-    where: (m, { and: all, eq: equals }) =>
-      all(
-        equals(m.providerId, providerId),
-        equals(m.modelId, modelId),
-        equals(m.enabled, true),
-      ),
+    where: { providerId, modelId, enabled: true },
   });
   if (!model) {
     throw new AppError('The selected Agent model is unavailable.', 409);
@@ -389,7 +382,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
   runId: string;
 }> {
   const sessionRow = await db.query.agentSessions.findFirst({
-    where: (s, { eq: equals }) => equals(s.id, input.sessionId),
+    where: { id: input.sessionId },
   });
   if (!sessionRow) throw new AppError('Session not found.', 404);
 
@@ -630,7 +623,7 @@ export async function getSessionWorkspaceAffinity(
   sessionId: string,
 ): Promise<SessionWorkspaceAffinity> {
   const session = await db.query.agentSessions.findFirst({
-    where: (row, { eq: equals }) => equals(row.id, sessionId),
+    where: { id: sessionId },
     columns: { workspaceAffinityState: true, workspaceRunnerId: true },
   });
   if (!session) throw new Error('Agent session no longer exists.');
@@ -852,8 +845,7 @@ export async function reconcileRunnerRuns(
   }
 
   const owned = await db.query.agentRuns.findMany({
-    where: (r, { and: all, eq: equals, inArray: within }) =>
-      all(equals(r.runnerId, runnerId), within(r.status, ACTIVE_STATUSES)),
+    where: { runnerId, status: { in: ACTIVE_STATUSES } },
   });
   for (const run of owned) {
     if (!claimed.has(run.id)) {
@@ -1063,8 +1055,7 @@ export async function completeRunFromRunner(
     // more recent run exists on the session, this transcript is stale (ULIDs
     // order by creation time, so id comparison finds newer runs).
     const newerRun = await db.query.agentRuns.findFirst({
-      where: (r, { and: all, eq: equals, gt }) =>
-        all(equals(r.sessionId, run.sessionId), gt(r.id, run.id)),
+      where: { sessionId: run.sessionId, id: { gt: run.id } },
       columns: { id: true },
     });
     if (message.messages.length > 0 && !newerRun) {
@@ -1115,11 +1106,7 @@ async function ensureTerminalEvent(
   error?: string | null,
 ): Promise<void> {
   const existing = await db.query.agentRunEvents.findFirst({
-    where: (e, { and: all, eq: equals, inArray: within }) =>
-      all(
-        equals(e.runId, runId),
-        within(e.type, ['done', 'cancelled', 'error']),
-      ),
+    where: { runId, type: { in: ['done', 'cancelled', 'error'] } },
   });
   if (existing) return;
   await appendEvent(runId, terminalEventForStatus(status, error));
@@ -1354,7 +1341,7 @@ export async function interruptAgentRun(
  */
 export async function sweepExpiredAgentRuns(): Promise<void> {
   const rows = await db.query.agentRuns.findMany({
-    where: (r, { inArray: within }) => within(r.status, ACTIVE_STATUSES),
+    where: { status: { in: ACTIVE_STATUSES } },
   });
   const now = Date.now();
   for (const run of rows) {
