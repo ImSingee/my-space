@@ -127,20 +127,11 @@ function LoginPage() {
               <form onSubmit={submit}>
                 <Stack gap="md">
                   {mode === 'signup' ? (
-                    <TextInput
-                      label="Name"
-                      placeholder="Your name"
-                      {...form.getInputProps('name')}
-                    />
+                    <TextInput label="Name" {...form.getInputProps('name')} />
                   ) : null}
-                  <TextInput
-                    label="Email"
-                    placeholder="you@example.com"
-                    {...form.getInputProps('email')}
-                  />
+                  <TextInput label="Email" {...form.getInputProps('email')} />
                   <PasswordInput
                     label="Password"
-                    placeholder="••••••••"
                     {...form.getInputProps('password')}
                   />
                   <Button
