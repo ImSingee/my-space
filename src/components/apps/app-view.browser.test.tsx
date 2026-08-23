@@ -21,8 +21,14 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
       ...options,
       useLoaderData: () => mocks.app,
     }),
-    Link: ({ children, ...props }: { children: React.ReactNode }) =>
-      createElement('a', props, children),
+    Link: ({
+      children,
+      to,
+      ...props
+    }: {
+      children: React.ReactNode;
+      to?: string;
+    }) => createElement('a', { href: to, ...props }, children),
     useRouter: () => ({ invalidate: mocks.invalidate }),
     useRouterState: () => '',
   };
@@ -72,6 +78,13 @@ function app(overrides: Partial<AppDetail> = {}): AppDetail {
     status: 'deployed',
     capabilities: frontendCapabilities,
     deploymentRevision: 'revision-one',
+    compatibility: {
+      version: 2,
+      latestVersion: 2,
+      minimumSupportedVersion: 1,
+      isSupported: true,
+      isLatest: true,
+    },
     currentSourceCommit: null,
     dbName: null,
     createdAt: '2026-08-13T00:00:00.000Z',
@@ -133,6 +146,27 @@ test('marks an update and remounts the iframe only after reload', async () => {
     .element(screen.getByRole('button', { name: 'Reload app' }))
     .toBeVisible();
   expect(screen.container.querySelector('output')).toBeNull();
+});
+
+test('replaces an unsupported frontend with an Agent update state', async () => {
+  mocks.app = app({
+    compatibility: {
+      version: 0,
+      latestVersion: 2,
+      minimumSupportedVersion: 1,
+      isSupported: false,
+      isLatest: false,
+    },
+  });
+
+  const screen = await renderAppView();
+
+  expect(screen.container.querySelector('iframe')).toBeNull();
+  await expect.element(screen.getByText('App update required')).toBeVisible();
+  await expect.element(screen.getByText(/cannot run/)).toBeVisible();
+  await expect
+    .element(screen.getByRole('link', { name: 'Open Agent' }))
+    .toBeVisible();
 });
 
 test('offers reload for a first deployment and opens its frontend', async () => {

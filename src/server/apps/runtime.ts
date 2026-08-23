@@ -23,6 +23,7 @@ import {
   buildMatchesDeployment,
   readBuildDeploymentMarker,
 } from './build-identity';
+import { assertSupportedDeployment } from './compatibility';
 import { appDatabaseRuntimeEnv } from './runtime-database';
 import { dataTableUrl, kvUrl } from './manifest';
 import {
@@ -652,6 +653,12 @@ async function startBackend(
       `App "${id}" deployment changed before its backend started. Retry ` +
         'against the active deployment.',
     );
+  }
+  try {
+    await assertSupportedDeployment(targetDeploymentId);
+  } catch (error) {
+    setKeepAlive(id, false);
+    throw error;
   }
   const buildDir = runtimeBuildDir(id, targetDeploymentId);
   const buildMarker = readBuildDeploymentMarker(buildDir);

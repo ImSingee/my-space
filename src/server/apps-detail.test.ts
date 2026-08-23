@@ -5,6 +5,10 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (options?: unknown) => Promise<Record<string, unknown> | undefined>
     >(),
+  findDeployment:
+    vi.fn<
+      (options?: unknown) => Promise<Record<string, unknown> | undefined>
+    >(),
 }));
 
 vi.mock('@tanstack/react-start', () => ({
@@ -26,7 +30,12 @@ vi.mock('@tanstack/react-start', () => ({
 }));
 
 vi.mock('~/db', () => ({
-  db: { query: { apps: { findFirst: mocks.findApp } } },
+  db: {
+    query: {
+      apps: { findFirst: mocks.findApp },
+      deployments: { findFirst: mocks.findDeployment },
+    },
+  },
 }));
 
 vi.mock('./auth', () => ({ authMiddleware: {} }));
@@ -57,6 +66,9 @@ describe('App deployment revision views', () => {
 
   it('maps the live deployment id to the safe detail revision field', async () => {
     mocks.findApp.mockResolvedValueOnce(row);
+    mocks.findDeployment.mockResolvedValueOnce({
+      compatibilityVersion: null,
+    });
 
     const detail = await getAppBySlug({ data: 'example' });
 
@@ -68,6 +80,13 @@ describe('App deployment revision views', () => {
       status: 'deployed',
       capabilities: { frontend: true },
       deploymentRevision: 'revision-two',
+      compatibility: {
+        version: 1,
+        latestVersion: 2,
+        minimumSupportedVersion: 1,
+        isSupported: true,
+        isLatest: false,
+      },
       currentSourceCommit: 'commit-two',
       dbName: null,
       createdAt: '2026-08-13T00:00:00.000Z',
@@ -75,6 +94,7 @@ describe('App deployment revision views', () => {
     });
     expect(detail).not.toHaveProperty('currentDeploymentId');
     expect(mocks.findApp).toHaveBeenCalledOnce();
+    expect(mocks.findDeployment).toHaveBeenCalledOnce();
     expect(mocks.findApp.mock.calls[0]?.[0]).toMatchObject({
       columns: {
         currentDeploymentId: true,

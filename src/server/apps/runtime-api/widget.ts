@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { APP_COMPATIBILITY_UPDATE_MESSAGE } from '~/app-compatibility';
 import { appBuildDir } from '~agent/paths';
 import { auth } from '~auth/server';
 import { parseAppApiPath } from './path';
@@ -26,7 +27,13 @@ export async function handleWidgetRequest({
   // or direct URLs could keep executing a retired app's widget code.
   const { liveAppDeployment } = await import('~server/apps/access');
   const live = await liveAppDeployment(id, 'widgets');
-  if (!live || !live.manifest.widgets.some((w) => w.id === widgetId)) {
+  if (!live) {
+    return new Response('Not found', { status: 404 });
+  }
+  if (live.state === 'unsupported') {
+    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
+  }
+  if (!live.manifest.widgets.some((w) => w.id === widgetId)) {
     return new Response('Not found', { status: 404 });
   }
   const { readLiveBuildFile } = await import('~server/apps/build-identity');

@@ -41,6 +41,7 @@ import { toast } from 'sonner';
 import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { Page } from '~components/app-shell/page';
 import { ApiPanel } from '~components/apps/api-panel';
+import { AppCompatibilityNotice } from '~components/apps/app-compatibility-notice';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
@@ -80,6 +81,7 @@ function AppDetailPage() {
   const isPinned = Boolean(pins?.some((p) => p.appId === app.id));
   const capabilities = app.capabilities ?? null;
   const hasFrontend = Boolean(capabilities?.frontend);
+  const runtimeSupported = app.compatibility?.isSupported ?? false;
 
   const isArchived = app.status === 'archived';
   // Source only lands on `master` once an app has been deployed at least once.
@@ -169,7 +171,7 @@ function AppDetailPage() {
                   {...props}
                 />
               )}
-              disabled={app.status !== 'deployed'}
+              disabled={app.status !== 'deployed' || !runtimeSupported}
               leftSection={<IconExternalLink size={16} stroke={1.8} />}
             >
               Open app
@@ -237,13 +239,19 @@ function AppDetailPage() {
       }
     >
       <Stack gap="xl">
+        <AppCompatibilityNotice compatibility={app.compatibility} />
+
         <Box component="section">
           <Text fw={600} fz="lg" mb="md">
             Overview
           </Text>
 
           <Stack gap="sm">
-            <SlugField appId={app.id} slug={app.slug} />
+            <SlugField
+              appId={app.id}
+              slug={app.slug}
+              runtimeSupported={runtimeSupported}
+            />
             <Field label="App ID" value={app.id} mono copyValue={app.id} />
             <Field
               label="Updated"
@@ -264,6 +272,7 @@ function AppDetailPage() {
 
         <OperationsPanel
           appId={app.id}
+          runtimeSupported={runtimeSupported}
           dbName={app.dbName ?? null}
           dbEnabled={Boolean(capabilities?.database) || Boolean(app.dbName)}
         />
@@ -289,7 +298,15 @@ function AppDetailPage() {
  * it never requires a rebuild because technical APIs and storage are keyed off
  * the immutable id.
  */
-function SlugField({ appId, slug }: { appId: string; slug: string }) {
+function SlugField({
+  appId,
+  slug,
+  runtimeSupported,
+}: {
+  appId: string;
+  slug: string;
+  runtimeSupported: boolean;
+}) {
   const router = useRouter();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -397,18 +414,35 @@ function SlugField({ appId, slug }: { appId: string; slug: string }) {
           <Text size="sm" ff="monospace" truncate>
             {slug}
           </Text>
-          <Tooltip label="Open app" withArrow position="top">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              component="a"
-              href={`/app/${slug}/embed/`}
-              target="_blank"
-              aria-label="Open app"
+          {runtimeSupported ? (
+            <Tooltip label="Open app" withArrow position="top">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                component="a"
+                href={`/app/${slug}/embed/`}
+                target="_blank"
+                aria-label="Open app"
+              >
+                <IconExternalLink size={15} />
+              </ActionIcon>
+            </Tooltip>
+          ) : (
+            <Tooltip
+              label="Update and redeploy this App before opening it"
+              withArrow
+              position="top"
             >
-              <IconExternalLink size={15} />
-            </ActionIcon>
-          </Tooltip>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                disabled
+                aria-label="Open app unavailable"
+              >
+                <IconExternalLink size={15} />
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Tooltip label="Edit slug" withArrow position="top">
             <ActionIcon
               variant="subtle"

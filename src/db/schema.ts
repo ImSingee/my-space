@@ -202,6 +202,11 @@ export const deployments = snakeCase.table(
       .notNull()
       .references(() => apps.id, { onDelete: 'cascade' }),
     version: integer().notNull().default(1),
+    /**
+     * Platform runtime contract captured by a successful final deploy. Null
+     * denotes legacy compatibility v1 so historical rows remain untouched.
+     */
+    compatibilityVersion: integer(),
     status: text().$type<DeploymentStatus>().notNull().default('building'),
     /**
      * Release note for this deployment. Required for new deploys (the Agent

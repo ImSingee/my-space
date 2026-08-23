@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 const mocks = vi.hoisted(() => ({
   findApp: vi.fn<(options?: unknown) => Promise<unknown>>(),
+  findDeployment: vi.fn<(options?: unknown) => Promise<unknown>>(),
   getSession: vi.fn<(options: unknown) => Promise<unknown>>(),
   queryDataTable:
     vi.fn<
@@ -16,7 +17,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('~/db', () => ({
-  db: { query: { apps: { findFirst: mocks.findApp } } },
+  db: {
+    query: {
+      apps: { findFirst: mocks.findApp },
+      deployments: { findFirst: mocks.findDeployment },
+    },
+  },
 }));
 vi.mock('~auth/server', () => ({
   auth: { api: { getSession: mocks.getSession } },
@@ -35,6 +41,7 @@ import { handle } from '~/routes/api/app/$appId/data/$.ts';
 describe('managed Data Table runtime fence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findDeployment.mockResolvedValue({ compatibilityVersion: null });
     mocks.subscribeDataChanges.mockResolvedValue(() => {});
   });
 
@@ -76,6 +83,28 @@ describe('managed Data Table runtime fence', () => {
 
     expect(response.status).toBe(409);
     await expect(response.text()).resolves.toContain('inactive deployment');
+    expect(mocks.getSession).not.toHaveBeenCalled();
+    expect(mocks.subscribeDataChanges).not.toHaveBeenCalled();
+  });
+
+  it('rejects the active deployment below the compatibility minimum', async () => {
+    mocks.findApp.mockResolvedValue({
+      status: 'deployed',
+      currentDeploymentId: 'deployment-v2',
+      capabilities: { dataTable: true },
+      dataActivationId: null,
+    });
+    mocks.findDeployment.mockResolvedValue({ compatibilityVersion: 0 });
+
+    const response = await handle({
+      request: new Request(
+        'https://hatch.test/api/app/example/data/events?since=0',
+        { headers: { 'x-hatch-data-deployment': 'deployment-v2' } },
+      ),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toContain('cannot run');
     expect(mocks.getSession).not.toHaveBeenCalled();
     expect(mocks.subscribeDataChanges).not.toHaveBeenCalled();
   });

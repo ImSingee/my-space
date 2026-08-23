@@ -4,6 +4,7 @@ import type { DataSchemaDescriptor } from './schema';
 
 const mocks = vi.hoisted(() => ({
   findApp: vi.fn<(options?: unknown) => Promise<unknown>>(),
+  findDeployment: vi.fn<(options?: unknown) => Promise<unknown>>(),
   pgClient: vi.fn<(...args: unknown[]) => unknown>(),
   pgQuery: vi.fn<(...args: unknown[]) => unknown>(),
   postgres: vi.fn<(url?: unknown, options?: unknown) => unknown>(),
@@ -11,7 +12,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('~/db', () => ({
-  db: { query: { apps: { findFirst: mocks.findApp } } },
+  db: {
+    query: {
+      apps: { findFirst: mocks.findApp },
+      deployments: { findFirst: mocks.findDeployment },
+    },
+  },
 }));
 vi.mock('pg', () => ({
   default: { Client: mocks.pgClient, Query: mocks.pgQuery },
@@ -22,6 +28,7 @@ vi.mock('./provision', () => ({
 }));
 
 import {
+  assertDataTableAccess,
   executeDataTableRawSql,
   inspectDataTables,
   mutateDataTable,
@@ -301,6 +308,19 @@ describe('managed Data Table service', () => {
 
     await expect(run()).rejects.toMatchObject({ status: 409 });
     expect(unsafe).not.toHaveBeenCalled();
+  });
+
+  it('blocks App Data access below the minimum but keeps management access', async () => {
+    mocks.findApp.mockResolvedValue(liveApp());
+    mocks.findDeployment.mockResolvedValue({ compatibilityVersion: 0 });
+
+    await expect(
+      assertDataTableAccess(APP_ID, {
+        expectedDeploymentId: DEPLOYMENT_ID,
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+    await expect(assertDataTableAccess(APP_ID, {})).resolves.toBeUndefined();
+    expect(mocks.findDeployment).toHaveBeenCalledOnce();
   });
 
   it('queries an explicit JSON null separately from SQL NULL', async () => {

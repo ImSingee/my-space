@@ -6,6 +6,7 @@
  * top of the runtime process manager. Runtime facts (started/stopped times,
  * exit codes) come from the in-memory runtime view and are never persisted.
  */
+import { appCompatibility, type AppCompatibility } from '~/app-compatibility';
 import { db } from '~/db';
 import { AppError } from '../errors';
 import {
@@ -37,6 +38,7 @@ export type AppBackendView = {
   slug: string;
   name: string;
   mode: BackendMode;
+  compatibility: AppCompatibility | null;
   runtime: AppBackendRuntime;
 };
 
@@ -63,18 +65,39 @@ export async function listAppBackends(): Promise<AppBackendView[]> {
       name: true,
       capabilities: true,
       backendMode: true,
+      currentDeploymentId: true,
     },
     orderBy: { name: 'asc', id: 'asc' },
   });
-  return rows
-    .filter((r) => r.capabilities?.backend)
-    .map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      name: r.name,
-      mode: r.backendMode ?? 'serverless',
-      runtime: serializeRuntime(getBackendRuntimeView(r.id)),
-    }));
+  const backendRows = rows.filter(
+    (row) => row.capabilities?.backend && row.currentDeploymentId,
+  );
+  const deployments =
+    backendRows.length === 0
+      ? []
+      : await db.query.deployments.findMany({
+          where: {
+            id: {
+              in: backendRows.map((row) => row.currentDeploymentId as string),
+            },
+          },
+          columns: { id: true, compatibilityVersion: true },
+        });
+  const compatibilityByDeployment = new Map(
+    deployments.map((deployment) => [
+      deployment.id,
+      appCompatibility(deployment.compatibilityVersion),
+    ]),
+  );
+  return backendRows.map((r) => ({
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    mode: r.backendMode ?? 'serverless',
+    compatibility:
+      compatibilityByDeployment.get(r.currentDeploymentId as string) ?? null,
+    runtime: serializeRuntime(getBackendRuntimeView(r.id)),
+  }));
 }
 
 /**
@@ -85,6 +108,7 @@ export async function listAppBackends(): Promise<AppBackendView[]> {
  */
 async function requireBackendApp(
   id: string,
+  options: { requireSupportedCompatibility: boolean },
 ): Promise<{ id: string; mode: BackendMode; deploymentId: string }> {
   const app = await db.query.apps.findFirst({
     where: { id },
@@ -105,6 +129,10 @@ async function requireBackendApp(
   if (!app.currentDeploymentId) {
     throw new AppError('This app has never been deployed.', 400);
   }
+  if (options.requireSupportedCompatibility) {
+    const { assertSupportedDeployment } = await import('./compatibility');
+    await assertSupportedDeployment(app.currentDeploymentId);
+  }
   return {
     id: app.id,
     mode: app.backendMode ?? 'serverless',
@@ -115,7 +143,9 @@ async function requireBackendApp(
 export async function startBackendForApp(
   id: string,
 ): Promise<AppBackendRuntime> {
-  const { mode, deploymentId } = await requireBackendApp(id);
+  const { mode, deploymentId } = await requireBackendApp(id, {
+    requireSupportedCompatibility: true,
+  });
   await startAppBackend(id, {
     keepAlive: mode === 'long-running',
     expectedDeploymentId: deploymentId,
@@ -127,7 +157,7 @@ export async function startBackendForApp(
 export async function stopBackendForApp(
   id: string,
 ): Promise<AppBackendRuntime> {
-  await requireBackendApp(id);
+  await requireBackendApp(id, { requireSupportedCompatibility: false });
   stopApp(id);
   return serializeRuntime(getBackendRuntimeView(id));
 }
@@ -135,7 +165,9 @@ export async function stopBackendForApp(
 export async function restartBackendForApp(
   id: string,
 ): Promise<AppBackendRuntime> {
-  const { mode, deploymentId } = await requireBackendApp(id);
+  const { mode, deploymentId } = await requireBackendApp(id, {
+    requireSupportedCompatibility: true,
+  });
   await restartAppBackend(id, {
     keepAlive: mode === 'long-running',
     expectedDeploymentId: deploymentId,

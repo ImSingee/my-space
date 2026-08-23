@@ -1,8 +1,13 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  LATEST_APP_COMPATIBILITY_VERSION,
+  LEGACY_APP_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+} from '../app-compatibility';
 import { SKILLS_DIR } from './paths';
 import type { PlatformClient } from './platform-client';
 import { loadAgentSkills } from './skills';
@@ -39,7 +44,40 @@ describe('Agent skills', () => {
         'building-workflows',
         'importing-apps',
         'importing-workflows',
+        'app-compatibility',
       ]),
+    );
+  });
+
+  it('keeps App compatibility history in one synchronized Skill file', async () => {
+    const env = new NodeExecutionEnv({ cwd: process.cwd() });
+    const skills = await loadAgentSkills(env, SKILLS_DIR);
+    const skill = skills.find(({ name }) => name === 'app-compatibility');
+    if (!skill) throw new Error('Missing app-compatibility Skill');
+
+    expect(await readdir(path.join(SKILLS_DIR, 'app-compatibility'))).toEqual([
+      'SKILL.md',
+    ]);
+    expect(skill.content).toContain(
+      `Latest compatibility version: \`${LATEST_APP_COMPATIBILITY_VERSION}\`.`,
+    );
+    expect(skill.content).toContain(
+      `Minimum supported compatibility version: \`${MIN_SUPPORTED_APP_COMPATIBILITY_VERSION}\`.`,
+    );
+    expect(skill.content).toContain(
+      `### Compatibility v${LEGACY_APP_COMPATIBILITY_VERSION}`,
+    );
+    expect(skill.content).toContain(
+      `### Compatibility v${LATEST_APP_COMPATIBILITY_VERSION}`,
+    );
+    expect(skill.content).toMatch(
+      /before compatibility versions were recorded/,
+    );
+    expect(skill.content).toMatch(
+      /does not introduce an App source or runtime behavior change/,
+    );
+    expect(skill.content).toMatch(
+      /Do not\s+create separate per-version reference files\./,
     );
   });
 

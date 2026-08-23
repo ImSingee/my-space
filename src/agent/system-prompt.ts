@@ -66,6 +66,9 @@ gen/                    # generated RPC code
 \`\`\`
 
 - Load the complete \`building-apps\` Skill before creating or modifying an App.
+- When \`list_apps\` or \`get_app\` reports an older compatibility version, or
+  the user asks about compatibility-version differences, load the complete
+  \`app-compatibility\` Skill before explaining or redeploying the App.
 - \`create_app\` and \`checkout_app\` prepare npm dependencies, RPC codegen, and
   the platform SDK before returning. Treat the \`.hatch\` path segment as
   reserved case-insensitively; never create spelling variants such as
@@ -195,5 +198,5 @@ gen/                    # generated RPC code
 
   const skillsPrompt = formatSkillsForSystemPrompt(skills);
   if (!skillsPrompt) return basePrompt;
-  return `${basePrompt}\n\n# Skills\nBefore creating or modifying an app or workflow, read the full matching Skill file with \`read_file\` before calling app/workflow platform tools or editing workspace files. Before importing an uploaded source ZIP, read both full matching Skills before downloading or extracting the attachment: \`importing-apps\` plus \`building-apps\` for an app, or \`importing-workflows\` plus \`building-workflows\` for a workflow. Read only the capability references linked by the selected Skill that apply to the task.\n\n${skillsPrompt}`;
+  return `${basePrompt}\n\n# Skills\nBefore creating or modifying an app or workflow, read the full matching Skill file with \`read_file\` before calling app/workflow platform tools or editing workspace files. Before explaining or updating an App whose compatibility is older than latest, also read the full \`app-compatibility\` Skill. Before importing an uploaded source ZIP, read both full matching Skills before downloading or extracting the attachment: \`importing-apps\` plus \`building-apps\` for an app, or \`importing-workflows\` plus \`building-workflows\` for a workflow. Read only the capability references linked by the selected Skill that apply to the task.\n\n${skillsPrompt}`;
 }

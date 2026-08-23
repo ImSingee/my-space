@@ -11,6 +11,7 @@ const REQUIRED_SKILL_NAMES = [
   'building-workflows',
   'importing-apps',
   'importing-workflows',
+  'app-compatibility',
 ] as const;
 
 function formatDiagnostic(diagnostic: SkillDiagnostic): string {

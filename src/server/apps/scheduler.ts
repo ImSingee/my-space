@@ -1,6 +1,11 @@
 /** Server-only: cron scheduler that triggers app backends on schedule. */
+import {
+  APP_COMPATIBILITY_UPDATE_MESSAGE,
+  appCompatibility,
+} from '~/app-compatibility';
 import { db, schema } from '~/db';
 import { createCronScheduler } from '~server/cron-scheduler';
+import { AppError } from '~server/errors';
 import {
   HATCH_SIGNATURE_HEADER,
   HATCH_TIMESTAMP_HEADER,
@@ -77,6 +82,9 @@ async function cronJobsFor(appId: string): Promise<CronJob[]> {
   const deployment = await db.query.deployments.findFirst({
     where: { id: app.currentDeploymentId as string },
   });
+  if (!appCompatibility(deployment?.compatibilityVersion).isSupported) {
+    return [];
+  }
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
   return manifest?.cron ?? [];
 }
@@ -98,8 +106,13 @@ async function cronInvokeContext(appId: string): Promise<{
   if (!app?.currentDeploymentId) return {};
   const deployment = await db.query.deployments.findFirst({
     where: { id: app.currentDeploymentId as string },
-    columns: { manifestNormalized: true },
+    columns: { manifestNormalized: true, compatibilityVersion: true },
   });
+  if (!deployment) return {};
+  const compatibility = appCompatibility(deployment.compatibilityVersion);
+  if (!compatibility.isSupported) {
+    throw new AppError(APP_COMPATIBILITY_UPDATE_MESSAGE, 503);
+  }
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
   return {
     service: manifest?.rpc?.service,
@@ -227,13 +240,22 @@ const scheduler = createCronScheduler<CronJob>({
           in: cronApps.map((app) => app.currentDeploymentId as string),
         },
       },
-      columns: { id: true, manifestNormalized: true },
+      columns: {
+        id: true,
+        manifestNormalized: true,
+        compatibilityVersion: true,
+      },
     });
     const manifestByDeploymentId = new Map(
-      deployments.map((d) => [
-        d.id,
-        d.manifestNormalized as NormalizedManifest | null,
-      ]),
+      deployments
+        .filter(
+          (deployment) =>
+            appCompatibility(deployment.compatibilityVersion).isSupported,
+        )
+        .map((deployment) => [
+          deployment.id,
+          deployment.manifestNormalized as NormalizedManifest | null,
+        ]),
     );
     return cronApps.map((app) => ({
       ownerId: app.id,

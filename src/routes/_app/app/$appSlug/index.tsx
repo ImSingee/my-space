@@ -20,6 +20,7 @@ import {
 } from '@tanstack/react-router';
 import {
   IconDots,
+  IconAlertTriangle,
   IconExternalLink,
   IconRefresh,
   IconRocket,
@@ -60,11 +61,13 @@ export function AppView() {
   // technical API paths and never appear in these links.
   const src = `/app/${app.slug}/embed/`;
   const hasFrontend = Boolean(app.capabilities?.frontend);
-  const { canOpen, hasLiveDeployment } = getAppViewState({
-    status: app.status,
-    deploymentRevision: app.deploymentRevision,
-    hasFrontend,
-  });
+  const { canOpen, hasLiveDeployment, isCompatibilityBlocked } =
+    getAppViewState({
+      status: app.status,
+      deploymentRevision: app.deploymentRevision,
+      hasFrontend,
+      runtimeSupported: app.compatibility?.isSupported ?? false,
+    });
   const { updateAvailable } = useAppDeploymentUpdate({
     appId: app.id,
     deploymentRevision: app.deploymentRevision,
@@ -326,35 +329,59 @@ export function AppView() {
               size={52}
               radius="xl"
               variant="light"
-              color={hasLiveDeployment ? 'gray' : 'ember'}
+              color={
+                isCompatibilityBlocked
+                  ? 'red'
+                  : hasLiveDeployment
+                    ? 'gray'
+                    : 'ember'
+              }
             >
-              {hasLiveDeployment ? (
+              {isCompatibilityBlocked ? (
+                <IconAlertTriangle size={26} stroke={1.5} />
+              ) : hasLiveDeployment ? (
                 <IconServerBolt size={26} stroke={1.5} />
               ) : (
                 <IconRocket size={26} stroke={1.5} />
               )}
             </ThemeIcon>
             <Text fw={600} mt="xs">
-              {hasLiveDeployment ? 'Backend-only app' : 'Not deployed yet'}
+              {isCompatibilityBlocked
+                ? 'App update required'
+                : hasLiveDeployment
+                  ? 'Backend-only app'
+                  : 'Not deployed yet'}
             </Text>
             <Text size="sm" c="dimmed" ta="center">
-              {hasLiveDeployment
-                ? 'This app has no frontend — it runs a backend (cron or webhook). Open Manage to inspect its capabilities.'
-                : 'Deploy this app to use it here. You can build and deploy it from the Manage page.'}
+              {isCompatibilityBlocked
+                ? 'This App cannot run on the current platform. Use Agent to update and redeploy it.'
+                : hasLiveDeployment
+                  ? 'This app has no frontend — it runs a backend (cron or webhook). Open Manage to inspect its capabilities.'
+                  : 'Deploy this app to use it here. You can build and deploy it from the Manage page.'}
             </Text>
             <Button
               variant="default"
               mt="sm"
-              leftSection={<IconSettings size={16} stroke={1.7} />}
-              renderRoot={(props) => (
-                <Link
-                  to="/app/$appSlug/manage"
-                  params={{ appSlug: app.slug }}
-                  {...props}
-                />
-              )}
+              leftSection={
+                isCompatibilityBlocked ? (
+                  <IconRocket size={16} stroke={1.7} />
+                ) : (
+                  <IconSettings size={16} stroke={1.7} />
+                )
+              }
+              renderRoot={(props) =>
+                isCompatibilityBlocked ? (
+                  <Link to="/agent" {...props} />
+                ) : (
+                  <Link
+                    to="/app/$appSlug/manage"
+                    params={{ appSlug: app.slug }}
+                    {...props}
+                  />
+                )
+              }
             >
-              Manage app
+              {isCompatibilityBlocked ? 'Open Agent' : 'Manage app'}
             </Button>
           </Stack>
         </Box>

@@ -32,6 +32,14 @@ export async function handleRpcRequest({
   ) {
     return new Response('Not found', { status: 404 });
   }
+  try {
+    const { assertSupportedDeployment } =
+      await import('~server/apps/compatibility');
+    await assertSupportedDeployment(app.currentDeploymentId);
+  } catch (error) {
+    const { errorResponse } = await import('~server/errors');
+    return errorResponse(error, 503);
+  }
   const { proxyAppRequest } = await import('~server/apps/runtime');
   try {
     // Sign the forward with the per-app key so the backend can distinguish

@@ -45,8 +45,8 @@ describe('App creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v8 for session-only workspace reconciliation', () => {
-    expect(PROTOCOL_VERSION).toBe(8);
+  it('uses protocol v9 for App compatibility REST responses', () => {
+    expect(PROTOCOL_VERSION).toBe(9);
   });
 
   it('parses runner.hello', () => {

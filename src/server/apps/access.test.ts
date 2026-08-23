@@ -128,11 +128,56 @@ describe('normalizedManifestFor', () => {
     const single = await liveAppDeployment('01immutableid', 'widgets');
     const batch = await liveAppManifests(['01immutableid'], 'widgets');
 
-    expect(single?.manifest.widgets[0]?.url).toBe(
-      '/api/app/01immutableid/widget/summary',
-    );
+    expect(single?.state).toBe('live');
+    expect(single).toMatchObject({
+      state: 'live',
+      manifest: {
+        widgets: [{ url: '/api/app/01immutableid/widget/summary' }],
+      },
+    });
     expect(batch.get('01immutableid')?.widgets[0]?.url).toBe(
       '/api/app/01immutableid/widget/summary',
     );
+  });
+
+  it('blocks direct and batched serving below the compatibility minimum', async () => {
+    await db.insert(schema.deployments).values({
+      id: '01deployment',
+      appId: '01immutableid',
+      status: 'deployed',
+      compatibilityVersion: 0,
+      manifestNormalized: {
+        widgets: [
+          {
+            id: 'summary',
+            url: '/api/app/01immutableid/widget/summary',
+          },
+        ],
+      },
+    });
+    await db
+      .update(schema.apps)
+      .set({
+        status: 'deployed',
+        currentDeploymentId: '01deployment',
+        capabilities: {
+          database: false,
+          frontend: false,
+          widgets: true,
+          backend: false,
+          cron: false,
+          webhook: false,
+          kv: false,
+        },
+      })
+      .where(eq(schema.apps.id, '01immutableid'));
+    const single = await liveAppDeployment('01immutableid', 'widgets');
+    const batch = await liveAppManifests(['01immutableid'], 'widgets');
+
+    expect(single).toMatchObject({
+      state: 'unsupported',
+      compatibility: { version: 0, isSupported: false },
+    });
+    expect(batch.has('01immutableid')).toBe(false);
   });
 });

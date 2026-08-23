@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
+import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
 import {
   BUILD_WORK_DIR,
   appBuildDir,
@@ -39,6 +40,7 @@ import { appDataDbName, withAppDataCutoverLock } from './data-table/provision';
 export type DeployResult = {
   deploymentId: string;
   version: number;
+  compatibilityVersion: number;
   normalized: NormalizedManifest;
   log: string;
 };
@@ -837,6 +839,7 @@ async function deployAppInner(
           id: deploymentId,
           appId: id,
           version,
+          compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION,
           status: 'deployed',
           message,
           manifestNormalized: releaseBuild.normalized as unknown as JsonObject,
@@ -899,6 +902,7 @@ async function deployAppInner(
     return {
       deploymentId,
       version,
+      compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION,
       normalized: build.normalized,
       log: build.log,
     };
@@ -961,6 +965,7 @@ async function deployAppInner(
       return {
         deploymentId,
         version,
+        compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION,
         normalized: build.normalized,
         log: build.log,
       };

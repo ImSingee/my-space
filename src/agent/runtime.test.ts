@@ -209,6 +209,7 @@ describe('runAgentTurn terminal outcomes', () => {
       description: `details-only-${'x'.repeat(128)}`,
       status: 'draft' as const,
       currentVersion: null,
+      compatibility: null,
       capabilities: [],
       updatedAt: '2026-07-19T00:00:00.000Z',
     })) satisfies Awaited<ReturnType<PlatformClient['listApps']>>;

@@ -64,6 +64,11 @@ beforeEach(async () => {
     capabilities: KV_CAPABILITIES,
     signingSecret: SIGNING_SECRET,
   });
+  await db.insert(schema.deployments).values({
+    id: 'deployment-signed-kv',
+    appId: APP_ID,
+    status: 'deployed',
+  });
 });
 
 afterAll(() => {
@@ -71,6 +76,20 @@ afterAll(() => {
 });
 
 describe('signed app KV route secret storage', () => {
+  it('rejects an authenticated App request below the compatibility minimum', async () => {
+    await db
+      .update(schema.deployments)
+      .set({ compatibilityVersion: 0 })
+      .where(eq(schema.deployments.id, 'deployment-signed-kv'));
+
+    const response = await handle({
+      request: signedRequest(`/api/app/${APP_ID}/kv`),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toContain('cannot run');
+  });
+
   it('returns plaintext to the app while storing no plaintext or envelope in the response', async () => {
     const plaintext = 'backend-visible-secret';
     const body = JSON.stringify({ value: plaintext, secret: true });

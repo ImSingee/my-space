@@ -144,6 +144,7 @@ import {
   deleteApp,
   listDeployments,
   rollbackApp,
+  rollbackAppToVersion,
   setAppArchived,
 } from './manage';
 
@@ -240,7 +241,15 @@ describe('App Data lifecycle recovery', () => {
 
     expect(
       deployments.find((row) => row.id === TARGET_DEPLOYMENT_ID),
-    ).toMatchObject({ canRollback: true, dataSchemaMismatch: true });
+    ).toMatchObject({
+      canRollback: true,
+      dataSchemaMismatch: true,
+      compatibility: {
+        version: 1,
+        isSupported: true,
+        isLatest: false,
+      },
+    });
     expect(mocks.currentDataSchema).not.toHaveBeenCalled();
   });
 
@@ -280,6 +289,13 @@ describe('App Data lifecycle recovery', () => {
     await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).resolves.toEqual({
       version: 1,
       dataSchemaMismatch: true,
+      compatibility: {
+        version: 1,
+        latestVersion: 2,
+        minimumSupportedVersion: 1,
+        isSupported: true,
+        isLatest: false,
+      },
     });
 
     const activationUpdate = mocks.updates.find(
@@ -338,6 +354,13 @@ describe('App Data lifecycle recovery', () => {
     await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).resolves.toEqual({
       version: 1,
       dataSchemaMismatch: false,
+      compatibility: {
+        version: 1,
+        latestVersion: 2,
+        minimumSupportedVersion: 1,
+        isSupported: true,
+        isLatest: false,
+      },
     });
 
     const backup = `/workspace/build/${APP_ID}.bak-pending-deployment`;
@@ -515,9 +538,58 @@ describe('App Data lifecycle recovery', () => {
     await expect(rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID)).resolves.toEqual({
       version: 1,
       dataSchemaMismatch: false,
+      compatibility: {
+        version: 1,
+        latestVersion: 2,
+        minimumSupportedVersion: 1,
+        isSupported: true,
+        isLatest: false,
+      },
     });
 
     expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+  });
+
+  it('blocks unsupported public rollback before mutation but lets Agent restore it', async () => {
+    mocks.findApp.mockResolvedValue({
+      id: APP_ID,
+      name: 'Example',
+      status: 'deployed',
+      currentDeploymentId: CURRENT_DEPLOYMENT_ID,
+      capabilities: { dataTable: false, backend: false },
+      backendMode: 'serverless',
+      manifest: {},
+      dataDbName: null,
+      dataSchemaHash: null,
+      dataActivationId: null,
+    });
+    mocks.findDeployment.mockResolvedValue({
+      id: TARGET_DEPLOYMENT_ID,
+      appId: APP_ID,
+      version: 1,
+      compatibilityVersion: 0,
+      status: 'deployed',
+      sourceTag: 'deploy/v1',
+      manifestNormalized: {
+        name: 'Example',
+        capabilities: { dataTable: false, backend: false },
+        backendMode: 'serverless',
+      },
+      dataSchemaHash: null,
+    });
+
+    await expect(
+      rollbackApp(APP_ID, TARGET_DEPLOYMENT_ID),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(mocks.fsAccess).not.toHaveBeenCalled();
+    expect(mocks.moveMasterToDeploymentTag).not.toHaveBeenCalled();
+
+    await expect(rollbackAppToVersion(APP_ID, 1)).resolves.toMatchObject({
+      version: 1,
+      compatibility: { version: 0, isSupported: false },
+    });
+    expect(mocks.moveMasterToDeploymentTag).toHaveBeenCalledOnce();
+    expect(mocks.closeDataRealtime).toHaveBeenCalledWith(APP_ID);
   });
 
   it('serializes archive behind deploy and Data cutover locks', async () => {

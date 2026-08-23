@@ -3,6 +3,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
+  APP_COMPATIBILITY_ROLLBACK_MESSAGE,
+  appCompatibility,
+  type AppCompatibility,
+} from '~/app-compatibility';
+import {
   deploymentBuildDir,
   appBuildDir,
   appSrcDir,
@@ -19,6 +24,7 @@ import {
   isAppNameWithinMaxLength,
 } from '~/app-identity';
 import { publishPlatformEvent } from '~server/platform-events';
+import { AppError } from '~server/errors';
 import { buildMatchesDeployment } from './build-identity';
 import { appDeployLock } from './deploy';
 import { moveMasterToDeploymentTag } from './git';
@@ -68,6 +74,13 @@ export type DeploymentSummary = {
   hasBuildLog: boolean;
   /** True when rolling back code would keep a newer/different Data Table schema. */
   dataSchemaMismatch: boolean;
+  compatibility: AppCompatibility;
+};
+
+export type AppRollbackResult = {
+  version: number;
+  dataSchemaMismatch: boolean;
+  compatibility: AppCompatibility;
 };
 
 /** List an app's deployment history, newest first, with rollback hints. */
@@ -110,6 +123,7 @@ export async function listDeployments(
           (dataActivationPending && !isCurrent) ||
           (Boolean(d.dataSchemaHash || liveDataSchemaHash) &&
             (d.dataSchemaHash ?? null) !== liveDataSchemaHash),
+        compatibility: appCompatibility(d.compatibilityVersion),
         canRollback:
           !isCurrent &&
           d.status === 'deployed' &&
@@ -236,16 +250,21 @@ export async function renameAppSlug(
 export function rollbackApp(
   id: string,
   deploymentId: string,
-): Promise<{ version: number; dataSchemaMismatch: boolean }> {
+): Promise<AppRollbackResult> {
   return appDeployLock.withLock(id, () =>
-    withAppDataCutoverLock(id, () => rollbackAppInner(id, deploymentId)),
+    withAppDataCutoverLock(id, () =>
+      rollbackAppInner(id, deploymentId, {
+        allowUnsupportedCompatibility: false,
+      }),
+    ),
   );
 }
 
 async function rollbackAppInner(
   id: string,
   deploymentId: string,
-): Promise<{ version: number; dataSchemaMismatch: boolean }> {
+  options: { allowUnsupportedCompatibility: boolean },
+): Promise<AppRollbackResult> {
   const app = await db.query.apps.findFirst({
     where: { id },
   });
@@ -256,6 +275,10 @@ async function rollbackAppInner(
   });
   if (!deployment || deployment.appId !== id) {
     throw new Error('Deployment not found for this app.');
+  }
+  const compatibility = appCompatibility(deployment.compatibilityVersion);
+  if (!compatibility.isSupported && !options.allowUnsupportedCompatibility) {
+    throw new AppError(APP_COMPATIBILITY_ROLLBACK_MESSAGE, 409);
   }
   if (deployment.status !== 'deployed') {
     throw new Error('Only successful deployments can be restored.');
@@ -379,7 +402,11 @@ async function rollbackAppInner(
   // keep-alive contract for the *restored* manifest: rolling back to/from a
   // long-running backend must flip warm-start accordingly (stopApp cleared it).
   stopApp(id);
+  if (!compatibility.isSupported) {
+    await closeDataRealtime(id);
+  }
   const longRunning =
+    compatibility.isSupported &&
     manifest?.backendMode === 'long-running' &&
     Boolean(manifest?.capabilities?.backend);
   if (longRunning) {
@@ -394,6 +421,7 @@ async function rollbackAppInner(
   await reloadScheduler();
   return {
     version: deployment.version,
+    compatibility,
     dataSchemaMismatch:
       !dataMigrationResolved ||
       (Boolean(deployment.dataSchemaHash || latestDataSchemaHash) &&
@@ -403,21 +431,28 @@ async function rollbackAppInner(
 
 /**
  * Roll back by user-facing version number (e.g. 4 → v4). Resolves the version
- * to its deployment row, then defers to {@link rollbackApp}. This is what the
- * Agent uses, since versions — not opaque deployment ids — are how deployments
- * are referred to everywhere (UI, tags, get_app).
+ * to its deployment row, then uses the Agent-only compatibility override while
+ * retaining every artifact, source-tag, identity, and Data cutover validation.
+ * Versions — not opaque deployment ids — are how Agent-facing deployment
+ * history is referred to everywhere (UI, tags, get_app).
  */
 export async function rollbackAppToVersion(
   id: string,
   version: number,
-): Promise<{ version: number; dataSchemaMismatch: boolean }> {
+): Promise<AppRollbackResult> {
   const deployment = await db.query.deployments.findFirst({
     where: { appId: id, version },
   });
   if (!deployment) {
     throw new Error(`App "${id}" has no deployment v${version}.`);
   }
-  return rollbackApp(id, deployment.id);
+  return appDeployLock.withLock(id, () =>
+    withAppDataCutoverLock(id, () =>
+      rollbackAppInner(id, deployment.id, {
+        allowUnsupportedCompatibility: true,
+      }),
+    ),
+  );
 }
 
 /** Permanently delete an app: process, database, rows, and all artifacts. */

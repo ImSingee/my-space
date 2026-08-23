@@ -140,6 +140,7 @@ function BackendRow({ backend }: { backend: AppBackendView }) {
             appId={backend.id}
             runtime={runtime}
             name={backend.name}
+            runtimeSupported={backend.compatibility?.isSupported ?? false}
           />
           <Tooltip label="Manage app" withArrow>
             <ActionIcon

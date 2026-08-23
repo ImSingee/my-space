@@ -1,8 +1,15 @@
-import { Box, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import {
+  Badge,
+  Box,
+  Button,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from '@tanstack/react-router';
-import { IconDownload, IconFileZip } from '@tabler/icons-react';
+import { Link, useRouter } from '@tanstack/react-router';
+import { IconDownload, IconFileZip, IconRobot } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import {
   BuildLogContent,
@@ -18,6 +25,7 @@ import {
 import { rollbackAppFn } from '~server/apps';
 import {
   requiresDataSchemaConfirmation,
+  requiresAgentRollback,
   rollbackNotification,
 } from './deployment-history-policy';
 
@@ -90,6 +98,43 @@ export function DeploymentHistory({ appId }: { appId: string }) {
       emptyNoun="app"
       onRollback={requestRollback}
       rollingId={rollback.isPending ? (rollback.variables ?? null) : null}
+      renderVersionMeta={(deployment) => (
+        <Badge
+          size="xs"
+          variant="light"
+          color={deployment.compatibility.isLatest ? 'gray' : 'orange'}
+        >
+          Compatibility v{deployment.compatibility.version}
+        </Badge>
+      )}
+      renderRollbackAction={(deployment, defaultAction) =>
+        requiresAgentRollback(deployment) ? (
+          <Tooltip
+            label="Only Agent can restore a deployment below the minimum supported compatibility version"
+            withArrow
+          >
+            <Button
+              size="compact-sm"
+              variant="light"
+              color="orange"
+              leftSection={<IconRobot size={14} />}
+              renderRoot={(props) => (
+                <Link
+                  to="/agent"
+                  search={{
+                    prompt: `Restore App ${appId} to v${deployment.version}, then update and redeploy it for the latest platform compatibility.`,
+                  }}
+                  {...props}
+                />
+              )}
+            >
+              Use Agent
+            </Button>
+          </Tooltip>
+        ) : (
+          defaultAction
+        )
+      }
       renderArtifact={(deployment) =>
         deployment.hasArtifact ? (
           <Tooltip label="Download artifact (.tar.gz)" withArrow position="top">

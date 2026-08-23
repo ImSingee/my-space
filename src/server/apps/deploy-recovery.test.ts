@@ -520,6 +520,10 @@ describe('App deployment activation recovery', () => {
       sourceDir: '/source',
     });
 
+    expect(result.compatibilityVersion).toBe(2);
+    expect(mocks.deployments.get(result.deploymentId)).toMatchObject({
+      compatibilityVersion: 2,
+    });
     expect(app).toMatchObject({
       status: 'deployed',
       currentDeploymentId: result.deploymentId,
