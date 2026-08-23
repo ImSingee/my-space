@@ -16,8 +16,10 @@ Use pnpm for everything. `pnpm dev` starts the Vite dev server on port 3000 with
 
 Dependency upgrade policy:
 
-- Keep `@types/node` and `nitro` at their current versions.
-- Do not upgrade them unless explicitly requested.
+- Keep `@types/node` on major version 26. Routine 26.x updates are allowed,
+  but do not upgrade to a later major unless explicitly requested.
+- Keep `nitro` at its current version; do not upgrade it unless explicitly
+  requested.
 
 Testing uses Vitest:
 

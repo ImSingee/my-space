@@ -1,5 +1,5 @@
 /** Server-only identity check for the mutable live build directory. */
-import { promises as fs, readFileSync } from 'node:fs';
+import { promises as fs, readFileSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import {
   appBuildDir,
@@ -131,7 +131,7 @@ async function deploymentAllowsMissingMarker(
   return deployment.artifactPath === null;
 }
 
-type StableFileStat = Awaited<ReturnType<typeof fs.stat>>;
+type StableFileStat = Stats;
 
 function sameFile(a: StableFileStat, b: StableFileStat): boolean {
   return (

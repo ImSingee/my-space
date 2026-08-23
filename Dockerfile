@@ -4,7 +4,7 @@
 FROM denoland/deno:bin-2.8.3 AS deno
 
 # --- Base image with pnpm ----------------------------------------------------
-FROM node:24-slim AS base
+FROM node:26-slim AS base
 WORKDIR /app
 RUN npm install --global pnpm@11.21.0
 
@@ -26,7 +26,7 @@ COPY . .
 RUN pnpm build
 
 # --- Runtime image -----------------------------------------------------------
-FROM node:24-slim AS runner
+FROM node:26-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
