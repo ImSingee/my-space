@@ -178,7 +178,7 @@ toast.promise(promise, {
 
 ### Drizzle ORM
 
-The project uses [Drizzle ORM](https://orm.drizzle.team/) with postgres-js for database operations. See `docs/drizzle.md` for details.
+The project uses [Drizzle ORM](https://orm.drizzle.team/) with postgres-js for database operations.
 
 - Schema: `src/db/schema.ts`
 - Database client: `src/db/db.ts` (import as `import { db, schema } from '~/db'`)
