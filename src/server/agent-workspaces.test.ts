@@ -194,7 +194,7 @@ describe('runner workspace reconciliation', () => {
     });
 
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'active-unowned'),
+      where: { id: 'active-unowned' },
     });
     expect(session?.workspaceAffinityState).toBe('claimed');
     expect(session?.workspaceRunnerId).toBe('runner-a');
@@ -226,7 +226,7 @@ describe('runner workspace reconciliation', () => {
     });
 
     const session = await db.query.agentSessions.findFirst({
-      where: (row, { eq }) => eq(row.id, 'awaiting-dispatch'),
+      where: { id: 'awaiting-dispatch' },
     });
     expect(session).toMatchObject({
       workspaceAffinityState: 'uninitialized',

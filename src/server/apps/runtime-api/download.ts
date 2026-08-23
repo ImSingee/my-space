@@ -34,7 +34,7 @@ export async function handleDownloadRequest({
 
   // Resolve against a real app row so the id can't be a path-traversal payload.
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
   });
   if (!app) return new Response('Not found', { status: 404 });
 
@@ -44,8 +44,7 @@ export async function handleDownloadRequest({
       // Resolve the deployment against this app so the id can't be spoofed.
       const deployment = deploymentId
         ? await db.query.deployments.findFirst({
-            where: (d, { eq, and }) =>
-              and(eq(d.id, deploymentId), eq(d.appId, id)),
+            where: { id: deploymentId, appId: id },
           })
         : null;
       if (!deployment) return new Response('Not found', { status: 404 });

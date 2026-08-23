@@ -27,7 +27,7 @@ export async function getCallableWorkflow(
   id: string,
 ): Promise<CallableWorkflow | null> {
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: {
       id: true,
       name: true,
@@ -48,7 +48,7 @@ export async function getCallableWorkflow(
   // so confirm the LIVE deployment still enables it (the public route checks the
   // same field, and would otherwise 404 the call).
   const deployment = await db.query.workflowDeployments.findFirst({
-    where: (d, { eq }) => eq(d.id, workflow.currentDeploymentId as string),
+    where: { id: workflow.currentDeploymentId as string },
     columns: { manifestNormalized: true },
   });
   const manifest = deployment?.manifestNormalized as {

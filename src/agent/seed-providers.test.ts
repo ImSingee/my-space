@@ -19,9 +19,7 @@ describe('seedDefaultProviders', () => {
     await expect(seedDefaultProviders()).resolves.toBe(true);
 
     const providers = await db.query.agentProviders.findMany({
-      orderBy: (provider, { asc: ascending }) => [
-        ascending(provider.sortOrder),
-      ],
+      orderBy: { sortOrder: 'asc' },
     });
     expect(
       providers.map(

@@ -26,7 +26,7 @@ function presentKvRecord(
 
 async function requireKvEnabledApp(id: string): Promise<void> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: { status: true, capabilities: true },
   });
   if (!app || app.status === 'archived' || !app.capabilities?.kv) {

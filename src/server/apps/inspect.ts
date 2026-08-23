@@ -1,6 +1,5 @@
 /** Server-only: read-only app inventory + details for Agent tools. */
-import { inArray } from 'drizzle-orm';
-import { db, schema } from '~/db';
+import { db } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { listDeployments } from './manage';
 import {
@@ -44,7 +43,7 @@ export type AppSummary = {
 /** All apps, newest-updated first, with a compact summary for discovery. */
 export async function listAppsForAgent(): Promise<AppSummary[]> {
   const apps = await db.query.apps.findMany({
-    orderBy: (s, { desc }) => [desc(s.updatedAt)],
+    orderBy: { updatedAt: 'desc' },
   });
   const deploymentIds = apps
     .map((app) => app.currentDeploymentId)
@@ -53,7 +52,7 @@ export async function listAppsForAgent(): Promise<AppSummary[]> {
     deploymentIds.length === 0
       ? []
       : await db.query.deployments.findMany({
-          where: inArray(schema.deployments.id, deploymentIds),
+          where: { id: { in: deploymentIds } },
           columns: { id: true, version: true },
         });
   const versionByDeploymentId = new Map(
@@ -148,13 +147,13 @@ export async function getAppDetailForAgent(
   id: string,
 ): Promise<AppDetail | null> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
   });
   if (!app) return null;
 
   const currentDeployment = app.currentDeploymentId
     ? await db.query.deployments.findFirst({
-        where: (d, { eq }) => eq(d.id, app.currentDeploymentId as string),
+        where: { id: app.currentDeploymentId as string },
       })
     : null;
   const storedManifest = (currentDeployment?.manifestNormalized ??

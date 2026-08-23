@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   betterAuth: vi.fn<(options: unknown) => unknown>((options) => options),
+  database: {},
   drizzleAdapter: vi.fn<(database: unknown, options: unknown) => string>(
     () => 'database-adapter',
   ),
+  schema: {},
   tanstackStartCookies: vi.fn<() => string>(() => 'tanstack-start-cookies'),
 }));
 
@@ -12,7 +14,7 @@ vi.mock('better-auth/minimal', () => ({
   betterAuth: mocks.betterAuth,
 }));
 
-vi.mock('better-auth/adapters/drizzle', () => ({
+vi.mock('@better-auth/drizzle-adapter/relations-v2', () => ({
   drizzleAdapter: mocks.drizzleAdapter,
 }));
 
@@ -21,7 +23,8 @@ vi.mock('better-auth/tanstack-start', () => ({
 }));
 
 vi.mock('../db', () => ({
-  db: {},
+  db: mocks.database,
+  schema: mocks.schema,
 }));
 
 vi.mock('./signup-gate', () => ({
@@ -51,5 +54,9 @@ describe('Better Auth configuration', () => {
         secret: 'auth-secret',
       }),
     );
+    expect(mocks.drizzleAdapter).toHaveBeenCalledWith(mocks.database, {
+      provider: 'pg',
+      schema: mocks.schema,
+    });
   });
 });

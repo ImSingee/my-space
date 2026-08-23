@@ -1,6 +1,5 @@
 /** Server-only: cron scheduler that starts workflow runs on schedule. */
-import { inArray } from 'drizzle-orm';
-import { db, schema } from '~/db';
+import { db } from '~/db';
 import { nextRun, parseCron } from '~server/apps/cron-expr';
 import { createCronScheduler } from '~server/cron-scheduler';
 import { startWorkflowRun } from './execute';
@@ -9,7 +8,7 @@ import type { NormalizedWorkflowManifest, WorkflowCronJob } from './manifest';
 /** Read cron jobs from a workflow's current deployment normalized manifest. */
 async function cronJobsFor(workflowId: string): Promise<WorkflowCronJob[]> {
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq }) => eq(s.id, workflowId),
+    where: { id: workflowId },
   });
   if (
     !workflow ||
@@ -19,7 +18,7 @@ async function cronJobsFor(workflowId: string): Promise<WorkflowCronJob[]> {
     return [];
   }
   const deployment = await db.query.workflowDeployments.findFirst({
-    where: (d, { eq }) => eq(d.id, workflow.currentDeploymentId as string),
+    where: { id: workflow.currentDeploymentId as string },
   });
   const manifest =
     deployment?.manifestNormalized as NormalizedWorkflowManifest | null;
@@ -46,17 +45,18 @@ const scheduler = createCronScheduler<WorkflowCronJob>({
   fire,
   loadJobs: async () => {
     const workflows = await db.query.workflows.findMany({
-      where: (s, { eq }) => eq(s.status, 'deployed'),
+      where: { status: 'deployed' },
       columns: { id: true, currentDeploymentId: true },
     });
     const deployed = workflows.filter((w) => w.currentDeploymentId);
     if (deployed.length === 0) return [];
     // One batched manifest lookup instead of cronJobsFor()'s 2 queries per flow.
     const deployments = await db.query.workflowDeployments.findMany({
-      where: inArray(
-        schema.workflowDeployments.id,
-        deployed.map((w) => w.currentDeploymentId as string),
-      ),
+      where: {
+        id: {
+          in: deployed.map((w) => w.currentDeploymentId as string),
+        },
+      },
       columns: { id: true, manifestNormalized: true },
     });
     const manifestByDeploymentId = new Map(

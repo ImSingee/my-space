@@ -47,7 +47,7 @@ export const listApps = createServerFn({ method: 'GET' })
     // (webhookSecret, dbName, repoPath, source commit, raw manifest) the app
     // list UI never needs and must not ship to the browser.
     const rows = await db.query.apps.findMany({
-      orderBy: (s, { desc }) => [desc(s.updatedAt)],
+      orderBy: { updatedAt: 'desc' },
       columns: {
         id: true,
         slug: true,
@@ -105,7 +105,7 @@ export const getAppBySlug = createServerFn({ method: 'GET' })
       updatedAt: true,
     } as const;
     const row = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.slug, slug),
+      where: { slug },
       columns,
     });
     if (!row) return null;
@@ -125,7 +125,7 @@ export const getAppDeploymentRevision = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<string | null> => {
     const app = await db.query.apps.findFirst({
-      where: (row, { eq }) => eq(row.id, id),
+      where: { id },
       columns: { currentDeploymentId: true },
     });
     return app?.currentDeploymentId ?? null;
@@ -246,7 +246,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<AppOps> => {
     const app = await db.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
     });
     if (!app) {
       return {
@@ -355,7 +355,7 @@ export const listCronRunsFn = createServerFn({ method: 'GET' })
  */
 async function requireKvApp(id: string): Promise<void> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
     columns: { status: true, capabilities: true },
   });
   if (!app || app.status === 'archived' || !app.capabilities?.kv) {
@@ -418,7 +418,7 @@ export const deleteAppKvFn = createServerFn({ method: 'POST' })
 
 async function requireDataTableApp(id: string): Promise<void> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: {
       status: true,
       capabilities: true,

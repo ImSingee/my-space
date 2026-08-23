@@ -67,7 +67,7 @@ export async function getPlatformConfig<K extends PlatformConfigKey>(
 ): Promise<PlatformConfigValue<K>> {
   const entry = REGISTRY[key];
   const row = await db.query.platformConfig.findFirst({
-    where: (c, { eq }) => eq(c.key, key),
+    where: { key },
   });
   if (!row) return entry.fallback as PlatformConfigValue<K>;
 

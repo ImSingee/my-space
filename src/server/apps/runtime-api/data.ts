@@ -81,7 +81,7 @@ async function authorize(
     return true;
   }
   const app = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: { signingSecret: true },
   });
   if (!app?.signingSecret) return false;
@@ -98,7 +98,7 @@ async function liveDataAppState(
   expectedDeploymentId: string,
 ): Promise<'missing' | 'activating' | 'stale' | 'live'> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: {
       status: true,
       currentDeploymentId: true,

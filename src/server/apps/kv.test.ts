@@ -28,8 +28,7 @@ async function seedApp(id = APP_ID) {
 
 async function rawKv(key: string, appId = APP_ID) {
   const row = await db.query.appKv.findFirst({
-    where: (t, { and, eq: equals }) =>
-      and(equals(t.appId, appId), equals(t.key, key)),
+    where: { appId, key },
   });
   if (!row) throw new Error(`Missing raw KV row for ${appId}/${key}`);
   return row;
@@ -210,7 +209,7 @@ describe('KV secret storage', () => {
     });
 
     const rows = await db.query.appKv.findMany({
-      where: (table, { eq: equals }) => equals(table.appId, APP_ID),
+      where: { appId: APP_ID },
     });
     expect(rows.map((row) => row.key)).toEqual(['valid-🔐-key']);
   });

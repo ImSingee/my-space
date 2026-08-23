@@ -47,8 +47,7 @@ function signedRequest(
 
 async function rawKv(key: string) {
   const row = await db.query.appKv.findFirst({
-    where: (t, { and, eq: equals }) =>
-      and(equals(t.appId, APP_ID), equals(t.key, key)),
+    where: { appId: APP_ID, key },
   });
   if (!row) throw new Error(`Missing raw KV row for ${key}`);
   return row;

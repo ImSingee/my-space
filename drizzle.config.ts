@@ -11,6 +11,6 @@ export default defineConfig({
     url: DATABASE_URL,
   },
   schema: './src/db/schema.ts',
-  casing: 'snake_case',
+  schemaFilter: ['public'],
   out: './migrations',
 });

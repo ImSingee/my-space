@@ -65,7 +65,7 @@ export async function ensureAppDatabase(id: string): Promise<string> {
     );
 
     const app = await tx.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, id),
+      where: { id },
       columns: { dbPasswordCiphertext: true },
     });
     if (!app) throw new Error(`App "${id}" not found.`);

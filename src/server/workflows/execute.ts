@@ -58,7 +58,7 @@ export async function startWorkflowRun(
   options: StartRunOptions,
 ): Promise<StartRunResult> {
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!workflow) throw new Error(`Workflow "${id}" not found.`);
   if (workflow.status !== 'deployed' || !workflow.currentDeploymentId) {
@@ -66,7 +66,7 @@ export async function startWorkflowRun(
   }
 
   const deployment = await db.query.workflowDeployments.findFirst({
-    where: (d, { eq: e }) => e(d.id, workflow.currentDeploymentId as string),
+    where: { id: workflow.currentDeploymentId as string },
   });
   const version = deployment?.version ?? null;
 
@@ -390,7 +390,7 @@ async function executeRun(
 
   // A concurrent cancel may have already marked the run; respect it.
   const current = await db.query.workflowRuns.findFirst({
-    where: (r, { eq: e }) => e(r.id, runId),
+    where: { id: runId },
   });
   if (current?.status === 'canceled') {
     await failRunningSteps(runId, 'Canceled');
@@ -456,7 +456,7 @@ async function executeRun(
  */
 export async function interruptStaleWorkflowRuns(): Promise<void> {
   const runs = await db.query.workflowRuns.findMany({
-    where: (r, { inArray: within }) => within(r.status, ['queued', 'running']),
+    where: { status: { in: ['queued', 'running'] } },
     columns: { id: true },
   });
   for (const run of runs) {
@@ -486,8 +486,7 @@ export async function killActiveWorkflowRuns(
   workflowId: string,
 ): Promise<void> {
   const runs = await db.query.workflowRuns.findMany({
-    where: (r, { eq: e, and: a, inArray }) =>
-      a(e(r.workflowId, workflowId), inArray(r.status, ['queued', 'running'])),
+    where: { workflowId, status: { in: ['queued', 'running'] } },
     columns: { id: true },
   });
   const registry = runRegistry();
@@ -508,7 +507,7 @@ export async function cancelWorkflowRun(
   runId: string,
 ): Promise<{ canceled: boolean }> {
   const run = await db.query.workflowRuns.findFirst({
-    where: (r, { eq: e }) => e(r.id, runId),
+    where: { id: runId },
   });
   if (!run) throw new Error('Run not found.');
   if (run.status !== 'running' && run.status !== 'queued') {

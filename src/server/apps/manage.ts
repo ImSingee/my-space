@@ -78,11 +78,11 @@ export async function listDeployments(
   id: string,
 ): Promise<DeploymentSummary[]> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   const rows = await db.query.deployments.findMany({
-    where: (d, { eq: e }) => e(d.appId, id),
-    orderBy: (d, { desc }) => [desc(d.version)],
+    where: { appId: id },
+    orderBy: { version: 'desc' },
   });
   const liveDataSchemaHash = app?.dataSchemaHash ?? null;
   const dataActivationPending = Boolean(
@@ -134,8 +134,7 @@ export async function deploymentBuildLog(
   deploymentId: string,
 ): Promise<string | null> {
   const d = await db.query.deployments.findFirst({
-    where: (row, { eq: e, and: a }) =>
-      a(e(row.appId, appId), e(row.id, deploymentId)),
+    where: { appId, id: deploymentId },
   });
   return d?.buildLog ?? null;
 }
@@ -158,7 +157,7 @@ async function setAppArchivedInner(
   archived: boolean,
 ): Promise<{ status: schema.AppStatus }> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!app) throw new Error(`App "${id}" not found.`);
 
@@ -208,7 +207,7 @@ export async function renameAppSlug(
   }
 
   const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
     columns: { id: true, slug: true },
   });
   if (!app) throw new Error(`App "${id}" not found.`);
@@ -251,12 +250,12 @@ async function rollbackAppInner(
   deploymentId: string,
 ): Promise<{ version: number; dataSchemaMismatch: boolean }> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!app) throw new Error(`App "${id}" not found.`);
 
   const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq: e }) => e(d.id, deploymentId),
+    where: { id: deploymentId },
   });
   if (!deployment || deployment.appId !== id) {
     throw new Error('Deployment not found for this app.');
@@ -321,7 +320,7 @@ async function rollbackAppInner(
   await db.transaction(async (tx) => {
     await appDeployLock.acquire(tx, id);
     const current = await tx.query.apps.findFirst({
-      where: (row, { eq: equal }) => equal(row.id, id),
+      where: { id },
       columns: { currentDeploymentId: true },
     });
     if (!current) throw new Error(`App "${id}" not found.`);
@@ -416,7 +415,7 @@ export async function rollbackAppToVersion(
   version: number,
 ): Promise<{ version: number; dataSchemaMismatch: boolean }> {
   const deployment = await db.query.deployments.findFirst({
-    where: (d, { eq: e, and: a }) => a(e(d.appId, id), e(d.version, version)),
+    where: { appId: id, version },
   });
   if (!deployment) {
     throw new Error(`App "${id}" has no deployment v${version}.`);
@@ -443,7 +442,7 @@ export function deleteApp(id: string): Promise<{ ok: true }> {
 
 async function deleteAppInner(id: string): Promise<{ ok: true }> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq: equal }) => equal(row.id, id),
+    where: { id },
     columns: {
       capabilities: true,
       dataDbName: true,

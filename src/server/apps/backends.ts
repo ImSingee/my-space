@@ -53,8 +53,10 @@ function serializeRuntime(view: BackendRuntimeView): AppBackendRuntime {
 /** Every app whose backend can be run from the Backends page. */
 export async function listAppBackends(): Promise<AppBackendView[]> {
   const rows = await db.query.apps.findMany({
-    where: (s, { and, isNotNull, ne }) =>
-      and(ne(s.status, 'archived'), isNotNull(s.currentDeploymentId)),
+    where: {
+      status: { ne: 'archived' },
+      currentDeploymentId: { isNotNull: true },
+    },
     columns: {
       id: true,
       slug: true,
@@ -62,7 +64,7 @@ export async function listAppBackends(): Promise<AppBackendView[]> {
       capabilities: true,
       backendMode: true,
     },
-    orderBy: (s, { asc }) => [asc(s.name), asc(s.id)],
+    orderBy: { name: 'asc', id: 'asc' },
   });
   return rows
     .filter((r) => r.capabilities?.backend)
@@ -85,7 +87,7 @@ async function requireBackendApp(
   id: string,
 ): Promise<{ id: string; mode: BackendMode; deploymentId: string }> {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: {
       id: true,
       status: true,

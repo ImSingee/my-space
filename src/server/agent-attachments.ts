@@ -125,13 +125,13 @@ export async function uploadAgentAttachment(input: {
   }
 
   const session = await db.query.agentSessions.findFirst({
-    where: (row, { eq: equals }) => equals(row.id, input.sessionId),
+    where: { id: input.sessionId },
     columns: { id: true },
   });
   if (!session) throw new AppError('Session not found.', 404);
 
   const existing = await db.query.agentAttachments.findFirst({
-    where: (row, { eq: equals }) => equals(row.id, id),
+    where: { id },
   });
   if (
     existing &&
@@ -201,13 +201,7 @@ export async function getAgentAttachment(
 ): Promise<{ attachment: AgentAttachmentRef; body: Uint8Array } | null> {
   requireAttachmentId(id);
   const row = await db.query.agentAttachments.findFirst({
-    where: (attachment, { and: all, eq: equals }) =>
-      sessionId
-        ? all(
-            equals(attachment.id, id),
-            equals(attachment.sessionId, sessionId),
-          )
-        : equals(attachment.id, id),
+    where: sessionId ? { id, sessionId } : { id },
   });
   if (!row) return null;
   try {

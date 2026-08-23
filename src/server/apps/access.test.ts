@@ -86,7 +86,7 @@ describe('normalizedManifestFor', () => {
     );
     expect(manifest?.kv?.url).toBe('/api/app/01immutableid/kv');
     const stored = await db.query.deployments.findFirst({
-      where: eq(schema.deployments.id, '01deployment'),
+      where: { id: '01deployment' },
     });
     expect(stored?.manifestNormalized).toMatchObject({
       app: { url: '/api/apps/01immutableid/app/' },

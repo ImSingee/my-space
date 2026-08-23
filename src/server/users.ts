@@ -52,7 +52,7 @@ export const getUsersPanelData = createServerFn({ method: 'GET' })
     const session = await requireSession();
     const [users, allowSignup] = await Promise.all([
       db.query.user.findMany({
-        orderBy: (u, { asc }) => [asc(u.createdAt), asc(u.id)],
+        orderBy: { createdAt: 'asc', id: 'asc' },
       }),
       getPlatformConfig('auth.allowSignup'),
     ]);

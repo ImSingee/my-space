@@ -122,7 +122,7 @@ export function buildAgentRunnerStatusSnapshot(input: {
 /** Live snapshot for the status page: hub memory + active run rows. */
 export async function getAgentRunnerStatusSnapshot(): Promise<AgentRunnerStatusSnapshot> {
   const runs = await db.query.agentRuns.findMany({
-    where: (r, { inArray: within }) => within(r.status, ACTIVE_STATUSES),
+    where: { status: { in: ACTIVE_STATUSES } },
   });
 
   const sessionIds = [...new Set(runs.map((run) => run.sessionId))];

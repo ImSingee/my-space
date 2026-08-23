@@ -80,7 +80,7 @@ export async function handleKvRequest({
 
   const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: {
       status: true,
       currentDeploymentId: true,

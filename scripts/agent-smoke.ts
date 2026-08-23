@@ -41,7 +41,7 @@ const PROMPT =
 /** Remove any prior app using this slug, cleaning resources by its real id. */
 async function cleanupBySlug(slug: string) {
   const app = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.slug, slug),
+    where: { slug },
     columns: { id: true },
   });
   if (!app) return;
@@ -182,7 +182,7 @@ async function main() {
   }
 
   const row = await db.query.apps.findFirst({
-    where: (s, { eq: e }) => e(s.slug, SLUG),
+    where: { slug: SLUG },
   });
   console.log(
     '\n[app row]',

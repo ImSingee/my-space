@@ -121,7 +121,7 @@ async function resolveApp(handle: string): Promise<string> {
 async function requireAppGeneration(id: string): Promise<string> {
   const { db } = await import('~/db');
   const row = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: { createdAt: true },
   });
   if (!row) throw new AppError(`App "${id}" not found.`, 404);
@@ -133,7 +133,7 @@ async function requireWorkflow(
 ): Promise<{ id: string; generation: string }> {
   const { db } = await import('~/db');
   const row = await db.query.workflows.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: { id: true, createdAt: true },
   });
   if (!row) throw new AppError(`Workflow "${id}" not found.`, 404);

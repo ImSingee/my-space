@@ -1,6 +1,6 @@
 /** Server functions for sidebar app pins. */
 import { createServerFn } from '@tanstack/react-start';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import { normalizeEntryHash } from './apps/sidebar';
@@ -28,11 +28,11 @@ export const listSidebarItems = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async (): Promise<SidebarItem[]> => {
     const pins = await db.query.sidebarItems.findMany({
-      orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
+      orderBy: { sortOrder: 'asc', createdAt: 'asc' },
     });
     if (pins.length === 0) return [];
     const apps = await db.query.apps.findMany({
-      where: inArray(schema.apps.id, [...new Set(pins.map((p) => p.appId))]),
+      where: { id: { in: [...new Set(pins.map((p) => p.appId))] } },
       columns: { id: true, slug: true, name: true, status: true },
     });
     const appById = new Map(apps.map((app) => [app.id, app]));
@@ -64,7 +64,7 @@ async function appendSidebarPin(appId: string) {
       sql`select pg_advisory_xact_lock(${SIDEBAR_PIN_LOCK_NS}, 0)`,
     );
     const app = await tx.query.apps.findFirst({
-      where: (s, { eq: e }) => e(s.id, appId),
+      where: { id: appId },
     });
     if (!app) throw new Error('App not found.');
     const [row] = await tx
@@ -97,11 +97,11 @@ export const setSidebarPin = createServerFn({ method: 'POST' })
           sql`select pg_advisory_xact_lock(${SIDEBAR_PIN_LOCK_NS}, 0)`,
         );
         const existing = await tx.query.sidebarItems.findFirst({
-          where: (s, { eq: e }) => e(s.appId, data.appId),
+          where: { appId: data.appId },
         });
         if (existing) return existing;
         const app = await tx.query.apps.findFirst({
-          where: (s, { eq: e }) => e(s.id, data.appId),
+          where: { id: data.appId },
         });
         if (!app) throw new Error('App not found.');
         const [row] = await tx

@@ -80,8 +80,7 @@ async function deploymentAllowsMissingMarker(
 ): Promise<boolean> {
   const deployment = await db.query.deployments
     .findFirst({
-      where: (row, { and, eq }) =>
-        and(eq(row.id, expectedDeploymentId), eq(row.appId, id)),
+      where: { id: expectedDeploymentId, appId: id },
       columns: { artifactPath: true, manifestNormalized: true },
     })
     .catch(() => undefined);

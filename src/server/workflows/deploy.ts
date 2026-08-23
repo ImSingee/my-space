@@ -85,7 +85,7 @@ async function deployWorkflowInner(
   }
 
   const workflow = await db.query.workflows.findFirst({
-    where: (s, { eq: e }) => e(s.id, id),
+    where: { id },
   });
   if (!workflow) {
     throw new Error(`Workflow "${id}" not found.`);
@@ -201,8 +201,8 @@ async function deployWorkflowInner(
         currentWorkflow.createdAt,
       );
       const last = await tx.query.workflowDeployments.findFirst({
-        where: (d, { eq: e }) => e(d.workflowId, id),
-        orderBy: (d, { desc }) => [desc(d.version)],
+        where: { workflowId: id },
+        orderBy: { version: 'desc' },
       });
       version = (last?.version ?? 0) + 1;
 
@@ -268,8 +268,7 @@ async function deployWorkflowInner(
         .transaction(async (tx) => {
           await workflowDeployLock.acquire(tx, id);
           const owner = await tx.query.workflowDeployments.findFirst({
-            where: (d, { eq: e, and: a }) =>
-              a(e(d.workflowId, id), e(d.sourceTag, tag)),
+            where: { workflowId: id, sourceTag: tag },
           });
           if (!owner) {
             await deleteDeploymentTag(id, tag).catch(() => {});

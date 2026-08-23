@@ -7,8 +7,8 @@ import {
   integer,
   jsonb,
   pgEnum,
-  pgTable,
   primaryKey,
+  snakeCase,
   text,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -135,7 +135,7 @@ export type AgentWorkspaceAffinityState = 'uninitialized' | 'claimed';
  * `/app/<slug>`. Renaming it is cheap (no rebuild) because nothing technical
  * is keyed off it.
  */
-export const apps = pgTable(
+export const apps = snakeCase.table(
   'apps',
   {
     id: text().primaryKey(),
@@ -194,7 +194,7 @@ export const apps = pgTable(
 
 /** ================== deployments ================== */
 
-export const deployments = pgTable(
+export const deployments = snakeCase.table(
   'deployments',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -242,7 +242,7 @@ export const deployments = pgTable(
  * `logs` (a free-text backend/agent log stream) — this is structured run data
  * (status, duration, trigger) mirroring `workflow_runs`.
  */
-export const appCronRuns = pgTable(
+export const appCronRuns = snakeCase.table(
   'app_cron_runs',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -282,7 +282,7 @@ export const appCronRuns = pgTable(
  * use authenticated encryption when written; legacy secret rows may retain
  * plaintext until they are overwritten.
  */
-export const appKv = pgTable(
+export const appKv = snakeCase.table(
   'app_kv',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -300,12 +300,13 @@ export const appKv = pgTable(
   (table) => [
     // One value per (app, key); also the lookup path for get/set/delete.
     uniqueIndex('app_kv_app_key_idx').on(table.appId, table.key),
+    // Converted v2 snapshots retain explicit table qualification.
     check(
       'app_kv_value_storage_check',
       sql`(
-        (not ${table.secret} and ${table.value} is not null and ${table.valueCiphertext} is null)
+        (not "app_kv"."secret" and "app_kv"."value" is not null and "app_kv"."value_ciphertext" is null)
         or
-        (${table.secret} and ((${table.value} is not null) <> (${table.valueCiphertext} is not null)))
+        ("app_kv"."secret" and (("app_kv"."value" is not null) <> ("app_kv"."value_ciphertext" is not null)))
       )`,
     ),
   ],
@@ -319,7 +320,7 @@ export const appKv = pgTable(
  * (manually, on a cron, or via webhook) and to audit its runs. `id` is a
  * human-readable kebab-case slug used in URLs and the workflow's Git repo.
  */
-export const workflows = pgTable('workflows', {
+export const workflows = snakeCase.table('workflows', {
   id: text().primaryKey(),
   name: text().notNull(),
   description: text(),
@@ -345,7 +346,7 @@ export const workflows = pgTable('workflows', {
   updatedAt,
 });
 
-export const workflowDeployments = pgTable(
+export const workflowDeployments = snakeCase.table(
   'workflow_deployments',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -384,7 +385,7 @@ export const workflowDeployments = pgTable(
 
 /** ================== workflow runs ================== */
 
-export const workflowRuns = pgTable(
+export const workflowRuns = snakeCase.table(
   'workflow_runs',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -418,7 +419,7 @@ export const workflowRuns = pgTable(
   ],
 );
 
-export const workflowRunSteps = pgTable(
+export const workflowRunSteps = snakeCase.table(
   'workflow_run_steps',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -453,7 +454,7 @@ export const workflowRunSteps = pgTable(
  * LLM provider config. Configured from the platform UI (not env vars) so the
  * user can register multiple providers and pick per agent session.
  */
-export const agentProviders = pgTable('agent_providers', {
+export const agentProviders = snakeCase.table('agent_providers', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   name: text().notNull(),
   apiType: text().$type<ProviderApiType>().notNull(),
@@ -465,7 +466,7 @@ export const agentProviders = pgTable('agent_providers', {
   updatedAt,
 });
 
-export const agentModels = pgTable('agent_models', {
+export const agentModels = snakeCase.table('agent_models', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   providerId: ulid()
     .notNull()
@@ -485,7 +486,7 @@ export const agentModels = pgTable('agent_models', {
 
 /** ================== agent sessions ================== */
 
-export const agentSessions = pgTable(
+export const agentSessions = snakeCase.table(
   'agent_sessions',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -510,19 +511,20 @@ export const agentSessions = pgTable(
     createdAt,
     updatedAt,
   },
-  (table) => [
+  () => [
+    // Converted v2 snapshots retain explicit table qualification.
     check(
       'agent_sessions_workspace_affinity_check',
       sql`(
-        (${table.workspaceAffinityState} = 'claimed' and ${table.workspaceRunnerId} is not null)
+        ("agent_sessions"."workspace_affinity_state" = 'claimed' and "agent_sessions"."workspace_runner_id" is not null)
         or
-        (${table.workspaceAffinityState} = 'uninitialized' and ${table.workspaceRunnerId} is null)
+        ("agent_sessions"."workspace_affinity_state" = 'uninitialized' and "agent_sessions"."workspace_runner_id" is null)
       )`,
     ),
   ],
 );
 
-export const agentAttachments = pgTable(
+export const agentAttachments = snakeCase.table(
   'agent_attachments',
   {
     id: text().primaryKey(),
@@ -539,7 +541,7 @@ export const agentAttachments = pgTable(
   (table) => [index('agent_attachments_session_idx').on(table.sessionId)],
 );
 
-export const agentRuns = pgTable(
+export const agentRuns = snakeCase.table(
   'agent_runs',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -577,13 +579,14 @@ export const agentRuns = pgTable(
     updatedAt,
   },
   (table) => [
+    // Converted v2 snapshots retain explicit table qualification.
     uniqueIndex('agent_runs_active_session_idx')
       .on(table.sessionId)
-      .where(sql`${table.status} in ('running', 'blocked')`),
+      .where(sql`"agent_runs"."status" in ('running', 'blocked')`),
   ],
 );
 
-export const agentRunEvents = pgTable(
+export const agentRunEvents = snakeCase.table(
   'agent_run_events',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -617,7 +620,7 @@ export const agentRunEvents = pgTable(
  * A dashboard is a named board the user arranges widgets on. Users can create
  * multiple dashboards; each owns its own set of widget placements.
  */
-export const dashboards = pgTable('dashboards', {
+export const dashboards = snakeCase.table('dashboards', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   name: text().notNull(),
   /** Optional free-form subtitle shown in the dashboard page header. */
@@ -642,7 +645,7 @@ export const dashboardBreakpoint = pgEnum('dashboard_breakpoint', [
   'mobile',
 ]);
 
-export const dashboardWidgets = pgTable(
+export const dashboardWidgets = snakeCase.table(
   'dashboard_widgets',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -669,7 +672,7 @@ export const dashboardWidgets = pgTable(
   ],
 );
 
-export const dashboardWidgetLayouts = pgTable(
+export const dashboardWidgetLayouts = snakeCase.table(
   'dashboard_widget_layouts',
   {
     dashboardWidgetId: text('dashboard_widget_id')
@@ -686,7 +689,7 @@ export const dashboardWidgetLayouts = pgTable(
   ],
 );
 
-export const sidebarItems = pgTable(
+export const sidebarItems = snakeCase.table(
   'sidebar_items',
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
@@ -722,7 +725,7 @@ export type LogSource =
   | 'cron'
   | 'workflow';
 
-export const logs = pgTable('logs', {
+export const logs = snakeCase.table('logs', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   appId: text(),
   source: text().$type<LogSource>().notNull(),
@@ -744,7 +747,7 @@ export const logs = pgTable('logs', {
  * every read/write through a typed, Zod-validated registry
  * (`~server/platform-config`), so this never becomes an arbitrary state bag.
  */
-export const platformConfig = pgTable('platform_config', {
+export const platformConfig = snakeCase.table('platform_config', {
   key: text().primaryKey(),
   value: jsonb().$type<JsonValue>().notNull(),
   updatedAt,

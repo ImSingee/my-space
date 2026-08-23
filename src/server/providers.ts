@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { ProviderApiType } from '~/db/schema';
@@ -44,17 +44,14 @@ export const listProviders = createServerFn({ method: 'GET' })
     await seedDefaultProviders();
 
     const providers = await db.query.agentProviders.findMany({
-      orderBy: (p, { asc }) => [asc(p.sortOrder), asc(p.createdAt)],
+      orderBy: { sortOrder: 'asc', createdAt: 'asc' },
     });
     const allModels =
       providers.length === 0
         ? []
         : await db.query.agentModels.findMany({
-            where: inArray(
-              schema.agentModels.providerId,
-              providers.map((p) => p.id),
-            ),
-            orderBy: (m, { asc }) => [asc(m.sortOrder), asc(m.createdAt)],
+            where: { providerId: { in: providers.map((p) => p.id) } },
+            orderBy: { sortOrder: 'asc', createdAt: 'asc' },
           });
     const modelsByProvider = new Map<string, typeof allModels>();
     for (const model of allModels) {

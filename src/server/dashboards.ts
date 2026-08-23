@@ -57,7 +57,7 @@ export const listDashboards = createServerFn({ method: 'GET' })
   .handler(async (): Promise<Dashboard[]> => {
     await ensureDefaultDashboard();
     const rows = await db.query.dashboards.findMany({
-      orderBy: (d, { asc }) => [asc(d.sortOrder), asc(d.createdAt)],
+      orderBy: { sortOrder: 'asc', createdAt: 'asc' },
     });
     return rows.map((d) => ({
       id: d.id,
@@ -280,7 +280,7 @@ export const getDashboard = createServerFn({ method: 'GET' })
       appIds.length === 0
         ? Promise.resolve([])
         : db.query.apps.findMany({
-            where: inArray(schema.apps.id, appIds),
+            where: { id: { in: appIds } },
             columns: { id: true, slug: true },
           }),
     ]);
@@ -354,7 +354,7 @@ export const listAvailableWidgets = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async (): Promise<AvailableWidget[]> => {
     const deployed = await db.query.apps.findMany({
-      where: (s, { eq: e }) => e(s.status, 'deployed'),
+      where: { status: 'deployed' },
       columns: { id: true, slug: true },
     });
     const manifests = await liveAppManifests(
@@ -504,7 +504,7 @@ export const saveDashboardDraft = createServerFn({ method: 'POST' })
         appIds.length === 0
           ? Promise.resolve([])
           : tx.query.apps.findMany({
-              where: inArray(schema.apps.id, appIds),
+              where: { id: { in: appIds } },
               columns: { id: true, slug: true },
             }),
       ]);

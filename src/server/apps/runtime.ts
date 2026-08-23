@@ -475,7 +475,7 @@ export function setKeepAlive(id: string, on: boolean): void {
  */
 export async function warmLongRunningBackends(): Promise<void> {
   const apps = await db.query.apps.findMany({
-    where: (s, { eq }) => eq(s.status, 'deployed'),
+    where: { status: 'deployed' },
     columns: {
       id: true,
       backendMode: true,
@@ -628,7 +628,7 @@ async function startBackend(
   // instead of registering/serving a build the caller has since superseded.
   const epoch = stopEpoch(id);
   const initialApp = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: {
       status: true,
       capabilities: true,
@@ -700,7 +700,7 @@ async function startBackend(
   // apps deployed before this column existed; such backends simply can't verify
   // and the cron call still reaches them.
   const appRow = await db.query.apps.findFirst({
-    where: (s, { eq }) => eq(s.id, id),
+    where: { id },
     columns: {
       status: true,
       signingSecret: true,
