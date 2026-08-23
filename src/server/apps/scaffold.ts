@@ -11,6 +11,7 @@ import {
   isAppNameWithinMaxLength,
 } from '~/app-identity';
 import { db, schema } from '~/db';
+import { AppError } from '~server/errors';
 import { slugConflictExists } from './access';
 import { ensureAppRepo } from './git';
 import { isValidAppSlug } from './manifest';
@@ -108,6 +109,11 @@ export type CreateAppResult = {
   files: ScaffoldFile[];
 };
 
+export type CreateAppContext = {
+  /** Conversation that requested this App; omitted by non-Agent callers. */
+  sessionId?: string;
+};
+
 /**
  * Register a new app: validate the slug, mint the immutable id, create the
  * canonical bare repo and the database row, and render the scaffold template.
@@ -116,6 +122,7 @@ export type CreateAppResult = {
  */
 export async function createApp(
   input: CreateAppInput,
+  context: CreateAppContext = {},
 ): Promise<CreateAppResult> {
   const slug = input.slug.trim();
   if (slug.length > APP_SLUG_MAX_LENGTH) {
@@ -137,6 +144,14 @@ export async function createApp(
     throw new Error(
       `Slug "${slug}" conflicts with an existing app's id or slug.`,
     );
+  }
+
+  if (context.sessionId) {
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: context.sessionId },
+      columns: { id: true },
+    });
+    if (!session) throw new AppError('Agent session not found.', 404);
   }
 
   // The id is an immutable internal key, independent of the mutable slug.
@@ -163,34 +178,43 @@ export async function createApp(
     { exclude: ['.hatch', 'gen', 'node_modules'] },
   );
 
-  const [created] = await db
-    .insert(schema.apps)
-    .values({
-      id,
-      slug,
-      name,
-      description: description || null,
-      status: 'draft',
-      repoPath,
-    })
-    .returning({ id: schema.apps.id });
-  if (!created) throw new Error('Failed to create app.');
-
-  // Pinning is independent of deploy-time capabilities. A draft has none yet;
-  // deploy_app declares them from the source manifest after the build succeeds.
-  // Mirrors the insert in `setSidebarPin`.
-  const shouldPin = input.pin ?? true;
-  if (shouldPin) {
-    const pins = await db.query.sidebarItems.findMany();
-    await db
-      .insert(schema.sidebarItems)
+  await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(schema.apps)
       .values({
-        appId: id,
-        label: name,
-        sortOrder: pins.length,
+        id,
+        slug,
+        name,
+        description: description || null,
+        status: 'draft',
+        repoPath,
       })
-      .onConflictDoNothing();
-  }
+      .returning({ id: schema.apps.id });
+    if (!created) throw new Error('Failed to create app.');
+
+    if (context.sessionId) {
+      await tx.insert(schema.agentSessionApps).values({
+        sessionId: context.sessionId,
+        appId: id,
+      });
+    }
+
+    // Pinning is independent of deploy-time capabilities. A draft has none
+    // yet; deploy_app declares them from the source manifest after the build
+    // succeeds. Mirrors the insert in `setSidebarPin`.
+    const shouldPin = input.pin ?? true;
+    if (shouldPin) {
+      const pins = await tx.query.sidebarItems.findMany();
+      await tx
+        .insert(schema.sidebarItems)
+        .values({
+          appId: id,
+          label: name,
+          sortOrder: pins.length,
+        })
+        .onConflictDoNothing();
+    }
+  });
 
   return {
     id,

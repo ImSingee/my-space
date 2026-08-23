@@ -5,8 +5,22 @@ import type {
   ParsedQueryAppDataTableRequest,
   QueryAppDataTableResponse,
 } from '~agent/protocol';
+import type {
+  CreateAppContext,
+  CreateAppInput,
+  CreateAppResult,
+} from '~server/apps/scaffold';
 
 const mocks = vi.hoisted(() => ({
+  associateAgentSessionApp:
+    vi.fn<(sessionId: string, handle: string) => Promise<{ appId: string }>>(),
+  createApp:
+    vi.fn<
+      (
+        input: CreateAppInput,
+        context?: CreateAppContext,
+      ) => Promise<CreateAppResult>
+    >(),
   resolveAppId: vi.fn<(handle: string) => Promise<string | null>>(),
   queryAppDataTable:
     vi.fn<
@@ -18,6 +32,12 @@ const mocks = vi.hoisted(() => ({
     >(),
 }));
 
+vi.mock('~server/agent-session-apps', () => ({
+  associateAgentSessionApp: mocks.associateAgentSessionApp,
+}));
+
+vi.mock('~server/apps/scaffold', () => ({ createApp: mocks.createApp }));
+
 vi.mock('~server/apps/access', () => ({
   resolveAppId: mocks.resolveAppId,
 }));
@@ -28,10 +48,13 @@ vi.mock('~server/apps/query-data-table', () => ({
 
 const { handleInternalApiRequest } = await import('./internal-api');
 
-function request(): http.IncomingMessage {
+function request(
+  url = '/internal/api/apps/demo-app/query-data-table',
+  method = 'POST',
+): http.IncomingMessage {
   const req = new EventEmitter() as http.IncomingMessage;
-  req.method = 'POST';
-  req.url = '/internal/api/apps/demo-app/query-data-table';
+  req.method = method;
+  req.url = url;
   return req;
 }
 
@@ -57,9 +80,60 @@ function response(): http.ServerResponse {
 }
 
 beforeEach(() => {
+  mocks.associateAgentSessionApp.mockReset();
+  mocks.createApp.mockReset();
   mocks.resolveAppId.mockReset();
   mocks.resolveAppId.mockResolvedValue('app-id');
   mocks.queryAppDataTable.mockReset();
+});
+
+describe('Agent Runner conversation App association internal API', () => {
+  it('associates an existing App by id-or-slug handle', async () => {
+    const req = request(
+      '/internal/api/agent-sessions/session-one/apps/mutable-slug',
+    );
+    const res = response();
+    mocks.associateAgentSessionApp.mockResolvedValue({
+      appId: 'canonical-app',
+    });
+
+    await handleInternalApiRequest(req, res);
+
+    expect(mocks.associateAgentSessionApp).toHaveBeenCalledWith(
+      'session-one',
+      'mutable-slug',
+    );
+    expect(res.writeHead).toHaveBeenCalledWith(200, {
+      'content-type': 'application/json',
+    });
+    expect(res.end).toHaveBeenCalledWith(
+      JSON.stringify({ appId: 'canonical-app' }),
+    );
+  });
+
+  it('passes Runner-owned session identity separately when creating an App', async () => {
+    const req = request('/internal/api/apps');
+    const res = response();
+    mocks.createApp.mockResolvedValue({
+      id: 'created-app',
+      slug: 'created-app',
+      name: 'Created App',
+      files: [],
+    });
+
+    const handling = handleInternalApiRequest(req, res);
+    sendBody(req, {
+      slug: 'created-app',
+      name: 'Created App',
+      sessionId: 'session-one',
+    });
+    await handling;
+
+    expect(mocks.createApp).toHaveBeenCalledWith(
+      { slug: 'created-app', name: 'Created App' },
+      { sessionId: 'session-one' },
+    );
+  });
 });
 
 describe('Agent Runner Data Table internal API', () => {

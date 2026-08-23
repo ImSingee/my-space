@@ -13,6 +13,8 @@
  *   POST /internal/api/apps/:handle/query-kv    → QueryAppKvResponse
  *   POST /internal/api/apps/:handle/query-data-table
  *                                                → QueryAppDataTableResponse
+ *   POST /internal/api/agent-sessions/:id/apps/:handle
+ *                                                → { appId }
  *   GET  /internal/api/workflows                → WorkflowSummaryForAgent[]
  *   GET  /internal/api/workflows/:id            → WorkflowDetailForAgent (404)
  *   POST /internal/api/workflows                → CreateWorkflowResult
@@ -22,7 +24,7 @@
  */
 import type http from 'node:http';
 import {
-  createAppRequestSchema,
+  createAppForSessionRequestSchema,
   createWorkflowRequestSchema,
   deploySourceRequestSchema,
   queryAppDataTableRequestSchema,
@@ -195,6 +197,14 @@ async function handleAgentSessions(
   method: string,
   rest: string[],
 ): Promise<void> {
+  if (method === 'POST' && rest.length === 3 && rest[1] === 'apps') {
+    const sessionId = decodeURIComponent(rest[0]);
+    const handle = requireHandle(rest[2]);
+    const { associateAgentSessionApp } =
+      await import('~server/agent-session-apps');
+    json(res, 200, await associateAgentSessionApp(sessionId, handle));
+    return;
+  }
   if (method !== 'GET' || rest.length !== 3 || rest[1] !== 'attachments') {
     throw new AppError('Not found.', 404);
   }
@@ -225,9 +235,11 @@ async function handleApps(
       return;
     }
     if (method === 'POST') {
-      const body = createAppRequestSchema.parse(await readJsonBody(req));
+      const { sessionId, ...body } = createAppForSessionRequestSchema.parse(
+        await readJsonBody(req),
+      );
       const { createApp } = await import('~server/apps/scaffold');
-      json(res, 200, await createApp(body));
+      json(res, 200, await createApp(body, { sessionId }));
       return;
     }
     throw new AppError('Method not allowed.', 405);

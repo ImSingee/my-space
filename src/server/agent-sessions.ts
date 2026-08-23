@@ -1,5 +1,13 @@
+/**
+ * Agent conversation server functions.
+ *
+ * This module is import-reachable from `~queries/agent`. Keep every runtime
+ * value that touches `db` inside a createServerFn handler so TanStack removes
+ * it from the browser graph. Module-scope database helpers survive that
+ * transform and pull the Postgres client into the root browser bundle.
+ */
 import { createServerFn } from '@tanstack/react-start';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
@@ -13,48 +21,89 @@ import { authMiddleware } from './auth';
 export type SessionSummary = {
   id: string;
   title: string;
-  appId: string | null;
+  appIds: string[];
   providerId: string | null;
   modelId: string | null;
   messageCount: number;
   updatedAt: string;
 };
 
+const listSessionsSchema = z.object({
+  appId: z.string().min(1).optional(),
+});
+
 export const listSessions = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .handler(async (): Promise<SessionSummary[]> => {
+  .validator((input: z.input<typeof listSessionsSchema> | undefined) =>
+    listSessionsSchema.parse(input ?? {}),
+  )
+  .handler(async ({ data }): Promise<SessionSummary[]> => {
     // Count messages in SQL: pulling every session's full messages JSONB just
     // to call .length made this list scale with total chat history size.
-    const rows = await db
-      .select({
-        id: schema.agentSessions.id,
-        title: schema.agentSessions.title,
-        appId: schema.agentSessions.appId,
-        providerId: schema.agentSessions.providerId,
-        modelId: schema.agentSessions.modelId,
-        messageCount: sql<number>`case
-          when jsonb_typeof(${schema.agentSessions.messages}) = 'array'
-          then jsonb_array_length(${schema.agentSessions.messages})
-          else 0 end`,
-        updatedAt: schema.agentSessions.updatedAt,
-      })
-      .from(schema.agentSessions)
-      .orderBy(desc(schema.agentSessions.updatedAt));
-    return rows.map((s) => ({
-      id: s.id,
-      title: s.title,
-      appId: s.appId,
-      providerId: s.providerId,
-      modelId: s.modelId,
-      messageCount: s.messageCount,
-      updatedAt: s.updatedAt.toISOString(),
+    const selection = {
+      id: schema.agentSessions.id,
+      title: schema.agentSessions.title,
+      providerId: schema.agentSessions.providerId,
+      modelId: schema.agentSessions.modelId,
+      messageCount: sql<number>`case
+        when jsonb_typeof(${schema.agentSessions.messages}) = 'array'
+        then jsonb_array_length(${schema.agentSessions.messages})
+        else 0 end`,
+      updatedAt: schema.agentSessions.updatedAt,
+    };
+    const rows =
+      data.appId !== undefined
+        ? await db
+            .select(selection)
+            .from(schema.agentSessions)
+            .innerJoin(
+              schema.agentSessionApps,
+              and(
+                eq(schema.agentSessionApps.sessionId, schema.agentSessions.id),
+                eq(schema.agentSessionApps.appId, data.appId),
+              ),
+            )
+            .orderBy(desc(schema.agentSessions.updatedAt))
+        : await db
+            .select(selection)
+            .from(schema.agentSessions)
+            .orderBy(desc(schema.agentSessions.updatedAt));
+    const associations =
+      rows.length === 0
+        ? []
+        : await db
+            .select({
+              sessionId: schema.agentSessionApps.sessionId,
+              appId: schema.agentSessionApps.appId,
+            })
+            .from(schema.agentSessionApps)
+            .where(
+              inArray(
+                schema.agentSessionApps.sessionId,
+                rows.map((row) => row.id),
+              ),
+            );
+    const appIdsBySession = new Map<string, string[]>();
+    for (const association of associations) {
+      const appIds = appIdsBySession.get(association.sessionId) ?? [];
+      appIds.push(association.appId);
+      appIdsBySession.set(association.sessionId, appIds);
+    }
+    return rows.map((session) => ({
+      id: session.id,
+      title: session.title,
+      appIds: (appIdsBySession.get(session.id) ?? []).sort(),
+      providerId: session.providerId,
+      modelId: session.modelId,
+      messageCount: session.messageCount,
+      updatedAt: session.updatedAt.toISOString(),
     }));
   });
 
 export type SessionDetail = {
   id: string;
   title: string;
-  appId: string | null;
+  appIds: string[];
   providerId: string | null;
   modelId: string | null;
   /** Changes whenever the persisted session is mutated; used as a Retry CAS. */
@@ -71,21 +120,27 @@ export const getSession = createServerFn({ method: 'GET' })
       where: { id },
     });
     if (!row) return null;
+    const [associations, activeRun] = await Promise.all([
+      db
+        .select({ appId: schema.agentSessionApps.appId })
+        .from(schema.agentSessionApps)
+        .where(eq(schema.agentSessionApps.sessionId, row.id)),
+      getActiveAgentRun(row.id),
+    ]);
     return {
       id: row.id,
       title: row.title,
-      appId: row.appId,
+      appIds: associations.map((association) => association.appId).sort(),
       providerId: row.providerId,
       modelId: row.modelId,
       updatedAt: row.updatedAt.toISOString(),
       messages: row.messages,
-      activeRun: await getActiveAgentRun(row.id),
+      activeRun,
     };
   });
 
 const createSchema = z.object({
   title: z.string().optional(),
-  appId: z.string().nullish(),
   providerId: z.string().nullish(),
   modelId: z.string().nullish(),
 });
@@ -98,7 +153,6 @@ export const createSession = createServerFn({ method: 'POST' })
       .insert(schema.agentSessions)
       .values({
         title: data.title?.trim() || 'New chat',
-        appId: data.appId ?? null,
         providerId: data.providerId ?? null,
         modelId: data.modelId ?? null,
       })

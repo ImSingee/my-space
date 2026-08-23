@@ -20,7 +20,7 @@ import { isReservedEnvKey } from './env-keys';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -456,6 +456,11 @@ export const createAppRequestSchema = z.object({
     }),
   description: z.string().optional(),
   pin: z.boolean().optional(),
+});
+
+/** Runner-only create payload; session identity never comes from the model. */
+export const createAppForSessionRequestSchema = createAppRequestSchema.extend({
+  sessionId: z.string().min(1),
 });
 
 export const createWorkflowRequestSchema = z.object({

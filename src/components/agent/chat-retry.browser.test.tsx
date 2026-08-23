@@ -11,7 +11,7 @@ const fixtures = vi.hoisted(() => ({
   session: {
     id: 'session-1',
     title: 'Failed request',
-    appId: null,
+    appIds: [],
     providerId: 'provider-original',
     modelId: 'model:with-colon',
     updatedAt: '2026-07-11T12:00:00.000Z',

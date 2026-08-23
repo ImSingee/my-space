@@ -95,8 +95,16 @@ export function createPlatformRestClient(opts: {
     listApps: () => call('GET', '/internal/api/apps'),
     getApp: (handle) =>
       call('GET', `/internal/api/apps/${enc(handle)}`, undefined, true),
-    createApp: (input) =>
-      call<CreateAppResult>('POST', '/internal/api/apps', input),
+    associateSessionApp: (sessionId, handle) =>
+      call(
+        'POST',
+        `/internal/api/agent-sessions/${enc(sessionId)}/apps/${enc(handle)}`,
+      ),
+    createApp: (input, sessionId) =>
+      call<CreateAppResult>('POST', '/internal/api/apps', {
+        ...input,
+        sessionId,
+      }),
     getAppSource: (handle) =>
       call<SourceBundleResponse>(
         'GET',

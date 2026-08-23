@@ -10,8 +10,8 @@ function toolText(result: { content: { type: string; text?: string }[] }) {
     .join('');
 }
 
-function queryDataTableTool(platform: PlatformClient) {
-  const query = createAppTools({ platform }).find(
+function queryDataTableTool(platform: PlatformClient, sessionId?: string) {
+  const query = createAppTools({ platform, sessionId }).find(
     (tool) => tool.name === 'query_app_data_table',
   );
   if (!query) throw new Error('Missing query_app_data_table tool.');
@@ -241,6 +241,7 @@ describe('query_app_data_table', () => {
   });
 
   it('renders inspection, pagination, mutations, and raw SQL results', async () => {
+    const associateSessionApp = vi.fn<PlatformClient['associateSessionApp']>();
     const queryAppDataTable = vi
       .fn<PlatformClient['queryAppDataTable']>()
       .mockResolvedValueOnce({ action: 'inspect', data: null })
@@ -281,9 +282,13 @@ describe('query_app_data_table', () => {
         ],
         truncated: true,
       });
-    const query = queryDataTableTool({
-      queryAppDataTable,
-    } as unknown as PlatformClient);
+    const query = queryDataTableTool(
+      {
+        associateSessionApp,
+        queryAppDataTable,
+      } as unknown as PlatformClient,
+      'session-one',
+    );
 
     const inspection = await query.execute('inspect', {
       id: 'demo-app',
@@ -342,5 +347,6 @@ describe('query_app_data_table', () => {
       },
       undefined,
     );
+    expect(associateSessionApp).not.toHaveBeenCalled();
   });
 });
