@@ -7,9 +7,32 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('~/db', () => ({ db: {}, schema: {} }));
+const mocks = vi.hoisted(() => ({
+  findApp: vi.fn<
+    () => Promise<
+      | {
+          status: 'deployed';
+          capabilities: { backend: true };
+          currentDeploymentId: string;
+        }
+      | undefined
+    >
+  >(),
+  findDeployment:
+    vi.fn<() => Promise<{ compatibilityVersion: number | null } | undefined>>(),
+}));
+
+vi.mock('~/db', () => ({
+  db: {
+    query: {
+      apps: { findFirst: mocks.findApp },
+      deployments: { findFirst: mocks.findDeployment },
+    },
+  },
+  schema: {},
+}));
 vi.mock('./provision', () => ({
   ensureAppDatabase: vi.fn<() => Promise<string>>(),
 }));
@@ -18,10 +41,16 @@ const {
   backendArtifactEnv,
   backendStorageEnv,
   buildBackendDenoArgs,
+  ensureAppRunning,
+  getBackendRuntimeView,
   resolveBackendArtifact,
+  setKeepAlive,
+  startAppBackend,
 } = await import('./runtime');
 
 const tempDirs: string[] = [];
+const KEEP_ALIVE_APP_ID = 'keep-alive-app';
+const KEEP_ALIVE_DEPLOYMENT_ID = 'keep-alive-deployment';
 
 function runtimeDir(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hatch-runtime-'));
@@ -45,9 +74,44 @@ function writeManifest(root: string, value: unknown): void {
 }
 
 afterEach(() => {
+  setKeepAlive(KEEP_ALIVE_APP_ID, false);
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('long-running backend compatibility checks', () => {
+  beforeEach(() => {
+    mocks.findApp.mockReset();
+    mocks.findDeployment.mockReset();
+    mocks.findApp.mockResolvedValue({
+      status: 'deployed',
+      capabilities: { backend: true },
+      currentDeploymentId: KEEP_ALIVE_DEPLOYMENT_ID,
+    });
+  });
+
+  it('preserves keep-alive on transient reads and clears confirmed blocks', async () => {
+    const transientFailure = new Error('database temporarily unavailable');
+    mocks.findDeployment.mockRejectedValueOnce(transientFailure);
+
+    await expect(
+      startAppBackend(KEEP_ALIVE_APP_ID, {
+        keepAlive: true,
+        expectedDeploymentId: KEEP_ALIVE_DEPLOYMENT_ID,
+      }),
+    ).rejects.toBe(transientFailure);
+    expect(getBackendRuntimeView(KEEP_ALIVE_APP_ID).keepAlive).toBe(true);
+
+    mocks.findDeployment.mockResolvedValueOnce(undefined);
+    await expect(
+      ensureAppRunning(KEEP_ALIVE_APP_ID, KEEP_ALIVE_DEPLOYMENT_ID),
+    ).rejects.toMatchObject({
+      message: 'The active App deployment record is unavailable.',
+      status: 503,
+    });
+    expect(getBackendRuntimeView(KEEP_ALIVE_APP_ID).keepAlive).toBe(false);
+  });
 });
 
 describe('app backend runtime artifacts', () => {

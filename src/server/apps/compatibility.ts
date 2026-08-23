@@ -7,6 +7,13 @@ import {
 import { db, type DB } from '~/db';
 import { AppError } from '~server/errors';
 
+/** A confirmed deployment state that cannot enter the current App runtime. */
+export class AppDeploymentCompatibilityError extends AppError {
+  constructor(message: string) {
+    super(message, 503);
+  }
+}
+
 export async function readDeploymentCompatibility(
   deploymentId: string,
   database: Pick<DB, 'query'> = db,
@@ -23,10 +30,12 @@ export async function assertSupportedDeployment(
 ): Promise<AppCompatibility> {
   const compatibility = await readDeploymentCompatibility(deploymentId);
   if (!compatibility) {
-    throw new AppError('The active App deployment record is unavailable.', 503);
+    throw new AppDeploymentCompatibilityError(
+      'The active App deployment record is unavailable.',
+    );
   }
   if (!compatibility.isSupported) {
-    throw new AppError(APP_COMPATIBILITY_UPDATE_MESSAGE, 503);
+    throw new AppDeploymentCompatibilityError(APP_COMPATIBILITY_UPDATE_MESSAGE);
   }
   return compatibility;
 }

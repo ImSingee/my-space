@@ -23,7 +23,10 @@ import {
   buildMatchesDeployment,
   readBuildDeploymentMarker,
 } from './build-identity';
-import { assertSupportedDeployment } from './compatibility';
+import {
+  AppDeploymentCompatibilityError,
+  assertSupportedDeployment,
+} from './compatibility';
 import { appDatabaseRuntimeEnv } from './runtime-database';
 import { dataTableUrl, kvUrl } from './manifest';
 import {
@@ -657,7 +660,9 @@ async function startBackend(
   try {
     await assertSupportedDeployment(targetDeploymentId);
   } catch (error) {
-    setKeepAlive(id, false);
+    if (error instanceof AppDeploymentCompatibilityError) {
+      setKeepAlive(id, false);
+    }
     throw error;
   }
   const buildDir = runtimeBuildDir(id, targetDeploymentId);
