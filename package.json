@@ -81,7 +81,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@bufbuild/buf": "^1.71.0",
+    "@bufbuild/buf": "^1.72.0",
     "@bufbuild/protoc-gen-es": "^2.12.1",
     "@electric-sql/pglite": "^0.5.4",
     "@tanstack/devtools-vite": "^0.8.3",
