@@ -48,9 +48,3 @@ v1 to v2. Redeploying successfully through the current platform records v2.
   latest version.
 - If the platform reports a compatibility version not documented here, do not
   guess its behavior. Report that this Skill is older than the platform policy.
-
-## Maintaining this history
-
-Append every future compatibility version and its upgrade guidance to this file.
-Keep the latest and minimum values above synchronized with the platform. Do not
-create separate per-version reference files.

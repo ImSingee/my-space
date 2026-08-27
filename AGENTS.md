@@ -60,9 +60,12 @@ Before declaring any Agent task complete, re-run `pnpm check:types` and `pnpm fo
   Raising it is a breaking change: update the full runtime gate, UI/API rollback
   restrictions, Agent recovery path, and durable boundary tests in the same
   change.
-- Whenever either constant changes, update the version history in
-  `skills/app-compatibility/SKILL.md` and keep final-deployment recording in
-  sync. If required Platform/Runner REST fields change, also increment
+- Keep all compatibility history and upgrade guidance in the single
+  `skills/app-compatibility/SKILL.md` file. Append every future compatibility
+  version there; do not create separate per-version files.
+- Whenever either constant changes, synchronize the Skill's latest and minimum
+  values and relevant history, and keep final-deployment recording in sync. If
+  required Platform/Runner REST fields change, also increment
   `PROTOCOL_VERSION`.
 
 ## Oxlint
