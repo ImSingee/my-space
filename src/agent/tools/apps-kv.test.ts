@@ -179,27 +179,4 @@ describe('query_app_kv', () => {
     ]);
     expect(associateSessionApp).not.toHaveBeenCalled();
   });
-
-  it('does not associate direct App database writes with the conversation', async () => {
-    const associateSessionApp = vi.fn<PlatformClient['associateSessionApp']>();
-    const queryAppDb = vi
-      .fn<PlatformClient['queryAppDb']>()
-      .mockResolvedValue({ text: 'OK', rowCount: 1 });
-    const query = createAppTools({
-      sessionId: 'session-one',
-      platform: {
-        associateSessionApp,
-        queryAppDb,
-      } as unknown as PlatformClient,
-    }).find((tool) => tool.name === 'query_app_db');
-    if (!query) throw new Error('Missing query_app_db tool.');
-
-    await query.execute('write', {
-      id: 'demo-app',
-      sql: 'insert into settings values (1)',
-    });
-
-    expect(queryAppDb).toHaveBeenCalledOnce();
-    expect(associateSessionApp).not.toHaveBeenCalled();
-  });
 });

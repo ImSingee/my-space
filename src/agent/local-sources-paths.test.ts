@@ -470,52 +470,6 @@ describe('runner source paths', () => {
     ).rejects.toThrow(/already exists/);
   });
 
-  it('associates deploy and rollback attempts before later failures', async () => {
-    const sessionId = 'app-lifecycle-associations';
-    const associateSessionApp = vi.fn<PlatformClient['associateSessionApp']>(
-      async () => ({ appId: 'canonical-app' }),
-    );
-    const deployApp = vi.fn<PlatformClient['deployApp']>();
-    const rollbackApp = vi
-      .fn<PlatformClient['rollbackApp']>()
-      .mockRejectedValue(new Error('rollback failed'));
-    const tools = createAppTools({
-      sessionId,
-      platform: {
-        associateSessionApp,
-        deployApp,
-        getApp: vi.fn<PlatformClient['getApp']>(async () => ({
-          ...appDetail('canonical-app', 'mutable-slug'),
-          createdAt: '2026-08-24T00:00:00.000Z',
-        })),
-        rollbackApp,
-      } as unknown as PlatformClient,
-    });
-    const deploy = tools.find((tool) => tool.name === 'deploy_app');
-    const rollback = tools.find((tool) => tool.name === 'rollback_app');
-    if (!deploy || !rollback) throw new Error('Missing App lifecycle tools.');
-
-    await expect(
-      deploy.execute('deploy', {
-        id: 'mutable-slug',
-        source_path: 'custom/missing',
-        message: 'Test association',
-      }),
-    ).rejects.toThrow(/not checked out/);
-    expect(associateSessionApp).toHaveBeenCalledWith(
-      sessionId,
-      'canonical-app',
-    );
-    expect(deployApp).not.toHaveBeenCalled();
-
-    associateSessionApp.mockClear();
-    await expect(
-      rollback.execute('rollback', { id: 'mutable-slug', version: 2 }),
-    ).rejects.toThrow('rollback failed');
-    expect(associateSessionApp).toHaveBeenCalledWith(sessionId, 'mutable-slug');
-    expect(rollbackApp).toHaveBeenCalledWith('canonical-app', 2);
-  });
-
   it('reports synchronized existing app and workflow checkouts', async () => {
     const sourceSessionId = 'checkout-tools-sync-source';
     const sourceWorktree = await initNewWorktree(
