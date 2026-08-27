@@ -1,5 +1,4 @@
 import { Text } from '@mantine/core';
-import { IconSparkles } from '@tabler/icons-react';
 import classes from './brand.module.css';
 
 type BrandProps = {
@@ -8,7 +7,7 @@ type BrandProps = {
 };
 
 const MARK_SIZE = { sm: 28, md: 32, lg: 44 } as const;
-const ICON_SIZE = { sm: 16, md: 19, lg: 26 } as const;
+const BRAND_ICON_SRC = '/logo192.png?v=20260827';
 
 export function Brand({ size = 'md', withWordmark = true }: BrandProps) {
   return (
@@ -17,7 +16,12 @@ export function Brand({ size = 'md', withWordmark = true }: BrandProps) {
         className={classes.mark}
         style={{ width: MARK_SIZE[size], height: MARK_SIZE[size] }}
       >
-        <IconSparkles size={ICON_SIZE[size]} stroke={1.9} />
+        <img
+          className={classes.image}
+          src={BRAND_ICON_SRC}
+          alt=""
+          draggable={false}
+        />
       </div>
       {withWordmark ? (
         <Text
