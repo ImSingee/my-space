@@ -36,6 +36,16 @@ export const Route = createRootRouteWithContext<{
     ],
     links: [
       {
+        rel: 'icon',
+        type: 'image/x-icon',
+        sizes: '16x16 24x24 32x32 48x48 64x64',
+        href: '/favicon.ico?v=20260827',
+      },
+      {
+        rel: 'manifest',
+        href: '/manifest.json',
+      },
+      {
         rel: 'preconnect',
         href: 'https://fonts.googleapis.com',
       },
