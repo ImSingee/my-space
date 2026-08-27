@@ -34,6 +34,7 @@ function renderedFile(
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  await db.delete(schema.agentSessions);
   await db.delete(schema.apps);
 });
 
@@ -173,5 +174,35 @@ describe('createApp', () => {
       currentDeploymentId: null,
     });
     await expect(db.query.sidebarItems.findMany()).resolves.toEqual([]);
+  });
+
+  it('creates the requesting conversation association atomically with the App', async () => {
+    await db
+      .insert(schema.agentSessions)
+      .values({ id: 'creating-session', title: 'Creating session' });
+
+    const result = await createApp(
+      { slug: 'associated-app', name: 'Associated App', pin: false },
+      { sessionId: 'creating-session' },
+    );
+
+    await expect(db.select().from(schema.agentSessionApps)).resolves.toEqual([
+      { sessionId: 'creating-session', appId: result.id },
+    ]);
+  });
+
+  it('rejects an unknown requesting conversation before creating App state', async () => {
+    await expect(
+      createApp(
+        { slug: 'orphan-app', name: 'Orphan App', pin: false },
+        { sessionId: 'missing-session' },
+      ),
+    ).rejects.toThrow('Agent session not found.');
+
+    expect(mocks.ensureAppRepo).not.toHaveBeenCalled();
+    await expect(db.query.apps.findMany()).resolves.toEqual([]);
+    await expect(db.select().from(schema.agentSessionApps)).resolves.toEqual(
+      [],
+    );
   });
 });

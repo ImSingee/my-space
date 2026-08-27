@@ -76,12 +76,20 @@ export type PlatformClient = {
   listApps(): Promise<AppSummary[]>;
   /** Resolves an id-or-slug handle; null when no app matches. */
   getApp(handle: string): Promise<AppDetail | null>;
-  createApp(input: {
-    slug: string;
-    name: string;
-    description?: string;
-    pin?: boolean;
-  }): Promise<CreateAppResult>;
+  /** Idempotently associate a conversation with one canonical App. */
+  associateSessionApp(
+    sessionId: string,
+    handle: string,
+  ): Promise<{ appId: string }>;
+  createApp(
+    input: {
+      slug: string;
+      name: string;
+      description?: string;
+      pin?: boolean;
+    },
+    sessionId: string,
+  ): Promise<CreateAppResult>;
   /** Canonical repo master as a git bundle (null bundle when empty). */
   getAppSource(handle: string): Promise<SourceBundleResponse>;
   deployApp(

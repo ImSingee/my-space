@@ -8,7 +8,7 @@ import { SessionsPanel } from './sessions-panel';
 type SessionFixture = {
   id: string;
   title: string;
-  appId: null;
+  appIds: string[];
   providerId: null;
   modelId: null;
   messageCount: number;
@@ -43,7 +43,7 @@ function session(id: string, title: string, updatedAt: string): SessionFixture {
   return {
     id,
     title,
-    appId: null,
+    appIds: [],
     providerId: null,
     modelId: null,
     messageCount: 2,

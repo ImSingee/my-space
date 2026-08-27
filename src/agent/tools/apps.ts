@@ -273,7 +273,11 @@ export function createAppTools(options: {
             sourceHandle = detail.id;
             sourcePath = agentAppWorkDir(sessionId, detail.slug);
           }
-          const source = await platform.getAppSource(sourceHandle);
+          const { appId } = await platform.associateSessionApp(
+            sessionId,
+            sourceHandle,
+          );
+          const source = await platform.getAppSource(appId);
           const resolved = await resolveAgentWorkspacePath(
             sessionId,
             sourcePath,
@@ -374,7 +378,7 @@ export function createAppTools(options: {
           // Keep validation and local initialization under one session lock so
           // parallel create calls cannot both reserve the same target.
           await assertWorkspacePathAvailable(sessionId, targetPath);
-          const res = await platform.createApp(input);
+          const res = await platform.createApp(input, sessionId);
           const checkout = await initNewWorktree(
             sessionId,
             'app',
@@ -476,6 +480,7 @@ export function createAppTools(options: {
         async () => {
           const detail = await platform.getApp(params.id);
           if (!detail) throw new Error(`App "${params.id}" not found.`);
+          await platform.associateSessionApp(sessionId, detail.id);
           const { bundleBase64 } = await bundleWorktreeForDeploy(
             sessionId,
             'app',
@@ -527,8 +532,13 @@ export function createAppTools(options: {
       }),
     }),
     execute: async (_id, params) => {
+      const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
-      const res = await platform.rollbackApp(params.id, params.version);
+      const { appId } = await platform.associateSessionApp(
+        sessionId,
+        params.id,
+      );
+      const res = await platform.rollbackApp(appId, params.version);
       return text(
         `Rolled back "${params.id}" to v${res.version}. ` +
           (res.dataSchemaMismatch

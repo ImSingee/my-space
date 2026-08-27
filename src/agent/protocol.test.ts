@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
+  createAppForSessionRequestSchema,
   createAppRequestSchema,
   deploySourceRequestSchema,
   isSafeRelativePath,
@@ -42,11 +43,27 @@ describe('App creation payload', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('requires Runner-owned session identity on the internal create payload', () => {
+    expect(
+      createAppForSessionRequestSchema.parse({
+        slug: 'created-app',
+        name: 'Created App',
+        sessionId: 'session-one',
+      }),
+    ).toMatchObject({ sessionId: 'session-one' });
+    expect(
+      createAppForSessionRequestSchema.safeParse({
+        slug: 'created-app',
+        name: 'Created App',
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v9 for App compatibility REST responses', () => {
-    expect(PROTOCOL_VERSION).toBe(9);
+  it('uses protocol v10 for compatibility and App association changes', () => {
+    expect(PROTOCOL_VERSION).toBe(10);
   });
 
   it('parses runner.hello', () => {

@@ -20,7 +20,7 @@ export const agentRunnerStatusQueryOptions = queryOptions({
 
 export const sessionsQueryOptions = queryOptions({
   queryKey: ['agent', 'sessions'],
-  queryFn: () => listSessions(),
+  queryFn: () => listSessions({ data: {} }),
 });
 
 export function sessionQueryOptions(sessionId: string) {

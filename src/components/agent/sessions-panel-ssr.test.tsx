@@ -34,7 +34,7 @@ test('defers local-calendar headings until after hydration', () => {
       {
         id: '01K2A000000000000000000001',
         title: 'Timezone boundary chat',
-        appId: null,
+        appIds: [],
         providerId: null,
         modelId: null,
         messageCount: 2,

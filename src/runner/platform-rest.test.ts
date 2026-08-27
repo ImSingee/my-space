@@ -69,6 +69,60 @@ describe('Platform REST KV client', () => {
   });
 });
 
+describe('Platform REST App association client', () => {
+  it('sends association and session-bound create requests', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      return url.endsWith('/apps/mutable-slug')
+        ? Response.json({ appId: 'canonical-app' })
+        : Response.json({
+            id: 'created-app',
+            slug: 'created-app',
+            name: 'Created App',
+            files: [],
+          });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createPlatformRestClient({
+      baseUrl: 'http://platform.internal',
+      token: 'runner-token',
+    });
+
+    await expect(
+      client.associateSessionApp('session-one', 'mutable-slug'),
+    ).resolves.toEqual({ appId: 'canonical-app' });
+    await client.createApp(
+      { slug: 'created-app', name: 'Created App' },
+      'session-one',
+    );
+
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        'http://platform.internal/internal/api/agent-sessions/session-one/apps/mutable-slug',
+        {
+          method: 'POST',
+          headers: { authorization: 'Bearer runner-token' },
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/apps',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            slug: 'created-app',
+            name: 'Created App',
+            sessionId: 'session-one',
+          }),
+        },
+      ],
+    ]);
+  });
+});
+
 describe('Platform REST Data Table client', () => {
   it('sends every action to the bearer-authenticated endpoint', async () => {
     const responses: QueryAppDataTableResponse[] = [

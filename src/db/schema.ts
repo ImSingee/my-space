@@ -496,8 +496,6 @@ export const agentSessions = snakeCase.table(
   {
     id: ulid().$defaultFn(genUlid).primaryKey(),
     title: text().notNull().default('New chat'),
-    /** Optional app this conversation is scoped to. */
-    appId: text().references(() => apps.id, { onDelete: 'set null' }),
     providerId: ulid(),
     modelId: text(),
     /** Persisted pi `AgentMessage[]` (stored as JSON). */
@@ -525,6 +523,26 @@ export const agentSessions = snakeCase.table(
         or
         ("agent_sessions"."workspace_affinity_state" = 'uninitialized' and "agent_sessions"."workspace_runner_id" is null)
       )`,
+    ),
+  ],
+);
+
+/** Apps whose source or deployment lifecycle this conversation edited. */
+export const agentSessionApps = snakeCase.table(
+  'agent_session_apps',
+  {
+    sessionId: ulid('session_id')
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: 'cascade' }),
+    appId: text('app_id')
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.appId] }),
+    index('agent_session_apps_app_session_idx').on(
+      table.appId,
+      table.sessionId,
     ),
   ],
 );

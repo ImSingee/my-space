@@ -9,8 +9,8 @@ function toolText(result: { content: { type: string; text?: string }[] }) {
     .join('');
 }
 
-function queryKvTool(platform: PlatformClient) {
-  const query = createAppTools({ platform }).find(
+function queryKvTool(platform: PlatformClient, sessionId?: string) {
+  const query = createAppTools({ platform, sessionId }).find(
     (tool) => tool.name === 'query_app_kv',
   );
   if (!query) throw new Error('Missing query_app_kv tool.');
@@ -78,6 +78,7 @@ describe('query_app_kv', () => {
   });
 
   it('renders list, get, set, and delete results for the model', async () => {
+    const associateSessionApp = vi.fn<PlatformClient['associateSessionApp']>();
     const queryAppKv = vi
       .fn<PlatformClient['queryAppKv']>()
       .mockResolvedValueOnce({
@@ -115,9 +116,13 @@ describe('query_app_kv', () => {
         },
       })
       .mockResolvedValueOnce({ action: 'delete', ok: true });
-    const query = queryKvTool({
-      queryAppKv,
-    } as unknown as PlatformClient);
+    const query = queryKvTool(
+      {
+        associateSessionApp,
+        queryAppKv,
+      } as unknown as PlatformClient,
+      'session-one',
+    );
 
     const list = await query.execute('list', {
       id: 'demo-app',
@@ -172,5 +177,6 @@ describe('query_app_kv', () => {
       ],
       ['demo-app', { action: 'delete', key: 'mode' }],
     ]);
+    expect(associateSessionApp).not.toHaveBeenCalled();
   });
 });

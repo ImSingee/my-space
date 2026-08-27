@@ -84,7 +84,7 @@ it('reports only session roots and removes stale conversations before ready', as
     expect(socket.sent).toContainEqual({
       type: 'runner.hello',
       runnerId: 'runner-test',
-      protocolVersion: 9,
+      protocolVersion: 10,
       activeRunIds: [],
       workspaceSessionIds: ['session-present'],
     }),

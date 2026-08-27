@@ -323,6 +323,10 @@ describe('runner source paths', () => {
     ]);
 
     expect(createApp).toHaveBeenCalledOnce();
+    expect(createApp).toHaveBeenCalledWith(
+      { slug: 'app-a', name: 'App A' },
+      sessionId,
+    );
     expect(results.map((result) => result.status).sort()).toEqual([
       'fulfilled',
       'rejected',
@@ -348,16 +352,15 @@ describe('runner source paths', () => {
 
   it('creates an app under apps/<slug> by default', async () => {
     const sessionId = 'create-default-slug';
+    const createApp = vi.fn<PlatformClient['createApp']>(async (input) => ({
+      id: 'immutable-app-id',
+      slug: input.slug,
+      name: input.name,
+      files: [],
+    }));
     const tools = createAppTools({
       sessionId,
-      platform: {
-        createApp: vi.fn<PlatformClient['createApp']>(async (input) => ({
-          id: 'immutable-app-id',
-          slug: input.slug,
-          name: input.name,
-          files: [],
-        })),
-      } as unknown as PlatformClient,
+      platform: { createApp } as unknown as PlatformClient,
       prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
     });
     const create = tools.find((candidate) => candidate.name === 'create_app');
@@ -373,6 +376,10 @@ describe('runner source paths', () => {
       path: 'apps/human-slug',
       absolutePath: agentAppWorkDir(sessionId, 'human-slug'),
     });
+    expect(createApp).toHaveBeenCalledWith(
+      { slug: 'human-slug', name: 'Human Slug' },
+      sessionId,
+    );
     await expect(
       git(
         agentAppWorkDir(sessionId, 'human-slug'),
@@ -393,9 +400,16 @@ describe('runner source paths', () => {
       masterCommit: null,
       bundleBase64: null,
     }));
+    const associateSessionApp = vi.fn<PlatformClient['associateSessionApp']>(
+      async () => ({ appId: 'immutable-app-id' }),
+    );
     const tools = createAppTools({
       sessionId,
-      platform: { getApp, getAppSource } as unknown as PlatformClient,
+      platform: {
+        associateSessionApp,
+        getApp,
+        getAppSource,
+      } as unknown as PlatformClient,
       prepareWorktree: vi.fn<() => Promise<void>>(async () => undefined),
     });
     const checkout = tools.find((tool) => tool.name === 'checkout_app');
@@ -444,6 +458,10 @@ describe('runner source paths', () => {
       absolutePath: agentAppWorkDir(sessionId, 'human-slug'),
     });
     expect(getApp).toHaveBeenCalledOnce();
+    expect(associateSessionApp).toHaveBeenCalledWith(
+      sessionId,
+      'immutable-app-id',
+    );
     await expect(
       checkout.execute('clone-existing', {
         id: 'immutable-app-id',
@@ -476,6 +494,9 @@ describe('runner source paths', () => {
     const appTools = createAppTools({
       sessionId,
       platform: {
+        associateSessionApp: vi.fn<PlatformClient['associateSessionApp']>(
+          async () => ({ appId: 'app-id' }),
+        ),
         getApp: vi.fn<PlatformClient['getApp']>(async () =>
           appDetail('app-id', 'app-slug'),
         ),
