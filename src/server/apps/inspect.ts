@@ -1,4 +1,5 @@
 /** Server-only: read-only app inventory + details for Agent tools. */
+import { appCompatibility, type AppCompatibility } from '~/app-compatibility';
 import { db } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { listDeployments } from './manage';
@@ -36,6 +37,7 @@ export type AppSummary = {
   status: AppStatus;
   /** Version of the live deployment, or null when never successfully deployed. */
   currentVersion: number | null;
+  compatibility: AppCompatibility | null;
   capabilities: string[];
   updatedAt: string;
 };
@@ -53,10 +55,16 @@ export async function listAppsForAgent(): Promise<AppSummary[]> {
       ? []
       : await db.query.deployments.findMany({
           where: { id: { in: deploymentIds } },
-          columns: { id: true, version: true },
+          columns: { id: true, version: true, compatibilityVersion: true },
         });
   const versionByDeploymentId = new Map(
     deployments.map((d) => [d.id, d.version]),
+  );
+  const compatibilityByDeploymentId = new Map(
+    deployments.map((deployment) => [
+      deployment.id,
+      appCompatibility(deployment.compatibilityVersion),
+    ]),
   );
   return apps.map((app) => ({
     id: app.id,
@@ -66,6 +74,9 @@ export async function listAppsForAgent(): Promise<AppSummary[]> {
     status: app.status,
     currentVersion: app.currentDeploymentId
       ? (versionByDeploymentId.get(app.currentDeploymentId) ?? null)
+      : null,
+    compatibility: app.currentDeploymentId
+      ? (compatibilityByDeploymentId.get(app.currentDeploymentId) ?? null)
       : null,
     capabilities: enabledCapabilities(app.capabilities),
     updatedAt: app.updatedAt.toISOString(),
@@ -81,6 +92,7 @@ export type AgentDeploymentSummary = {
   isCurrent: boolean;
   canRollback: boolean;
   dataSchemaMismatch: boolean;
+  compatibility: AppCompatibility;
 };
 
 export type AppRuntimeOps = {
@@ -127,6 +139,7 @@ export type AppDetail = {
   dataDbName: string | null;
   currentVersion: number | null;
   currentDeploymentId: string | null;
+  compatibility: AppCompatibility | null;
   currentSourceCommit: string | null;
   capabilities: string[];
   createdAt: string;
@@ -183,6 +196,9 @@ export async function getAppDetailForAgent(
     dataDbName: app.dataDbName ?? null,
     currentVersion: currentDeployment?.version ?? null,
     currentDeploymentId: app.currentDeploymentId ?? null,
+    compatibility: currentDeployment
+      ? appCompatibility(currentDeployment.compatibilityVersion)
+      : null,
     currentSourceCommit: app.currentSourceCommit ?? null,
     capabilities: enabledCapabilities(caps),
     createdAt: app.createdAt.toISOString(),
@@ -227,6 +243,7 @@ export async function getAppDetailForAgent(
       isCurrent: d.isCurrent,
       canRollback: d.canRollback,
       dataSchemaMismatch: d.dataSchemaMismatch,
+      compatibility: d.compatibility,
     })),
   };
 }

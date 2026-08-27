@@ -122,25 +122,43 @@ export function BuildLogContent({
   );
 }
 
-function DeploymentItem({
+function DeploymentItem<TDeployment extends DeploymentLike>({
   deployment,
   onRollback,
   rolling,
   renderArtifact,
   renderBuildLog,
+  renderVersionMeta,
+  renderRollbackAction,
 }: {
-  deployment: DeploymentLike;
+  deployment: TDeployment;
   onRollback: (deploymentId: string) => void;
   rolling: boolean;
   /** Download link(s) shown for a deployed version, or null to omit. */
-  renderArtifact: (deployment: DeploymentLike) => ReactNode;
+  renderArtifact: (deployment: TDeployment) => ReactNode;
   /** Lazily-fetched build log body (mounted only when `hasBuildLog`). */
   renderBuildLog: (deploymentId: string, open: boolean) => ReactNode;
+  renderVersionMeta?: (deployment: TDeployment) => ReactNode;
+  renderRollbackAction?: (
+    deployment: TDeployment,
+    defaultAction: ReactNode,
+  ) => ReactNode;
 }) {
   const [open, handlers] = useDisclosure(false);
   const hasLog = Boolean(deployment.error) || deployment.hasBuildLog;
   const artifactNode =
     deployment.status === 'deployed' ? renderArtifact(deployment) : null;
+  const defaultRollbackAction = deployment.canRollback ? (
+    <Button
+      size="compact-sm"
+      variant="default"
+      leftSection={<IconRestore size={14} />}
+      loading={rolling}
+      onClick={() => onRollback(deployment.id)}
+    >
+      Restore
+    </Button>
+  ) : null;
 
   const body = (
     <Stack gap={6}>
@@ -154,6 +172,7 @@ function DeploymentItem({
               Live
             </Badge>
           ) : null}
+          {renderVersionMeta?.(deployment)}
           {/* "Deployed" is the expected default; only surface the label for the
               states that actually need calling out (building / failed). */}
           {deployment.status !== 'deployed' ? (
@@ -166,17 +185,9 @@ function DeploymentItem({
             {formatRelative(deployment.createdAt)}
           </Text>
         </Group>
-        {deployment.canRollback ? (
-          <Button
-            size="compact-sm"
-            variant="default"
-            leftSection={<IconRestore size={14} />}
-            loading={rolling}
-            onClick={() => onRollback(deployment.id)}
-          >
-            Restore
-          </Button>
-        ) : null}
+        {renderRollbackAction
+          ? renderRollbackAction(deployment, defaultRollbackAction)
+          : defaultRollbackAction}
       </Group>
 
       {deployment.sourceCommit ||
@@ -294,7 +305,7 @@ function DeploymentItem({
  * data fetching and rollback mutation (query keys and invalidations differ);
  * this owns all presentation.
  */
-export function DeploymentHistoryView({
+export function DeploymentHistoryView<TDeployment extends DeploymentLike>({
   deployments,
   isLoading,
   emptyNoun,
@@ -302,16 +313,25 @@ export function DeploymentHistoryView({
   rollingId,
   renderArtifact,
   renderBuildLog,
+  renderVersionMeta,
+  renderRollbackAction,
 }: {
-  deployments: DeploymentLike[];
+  deployments: TDeployment[];
   isLoading: boolean;
   /** "app" or "workflow" — used in the empty-state copy. */
   emptyNoun: string;
   onRollback: (deploymentId: string) => void;
   /** Deployment id currently being restored, if any. */
   rollingId: string | null;
-  renderArtifact: (deployment: DeploymentLike) => ReactNode;
+  renderArtifact: (deployment: TDeployment) => ReactNode;
   renderBuildLog: (deploymentId: string, open: boolean) => ReactNode;
+  /** Optional metadata shown beside the version and Live badge. */
+  renderVersionMeta?: (deployment: TDeployment) => ReactNode;
+  /** Optional action override; receives the standard Restore button. */
+  renderRollbackAction?: (
+    deployment: TDeployment,
+    defaultAction: ReactNode,
+  ) => ReactNode;
 }) {
   return (
     <Box component="section">
@@ -351,6 +371,8 @@ export function DeploymentHistoryView({
               rolling={rollingId === deployment.id}
               renderArtifact={renderArtifact}
               renderBuildLog={renderBuildLog}
+              renderVersionMeta={renderVersionMeta}
+              renderRollbackAction={renderRollbackAction}
             />
           ))}
         </Timeline>

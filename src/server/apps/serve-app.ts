@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { APP_COMPATIBILITY_UPDATE_MESSAGE } from '~/app-compatibility';
 import { appBuildDir } from '~agent/paths';
 import { liveAppDeployment } from './access';
 import { readLiveBuildFile } from './build-identity';
@@ -31,6 +32,9 @@ export async function serveAppAppFile(
   const live = await liveAppDeployment(id, 'frontend');
   if (!live) {
     return new Response('Not found', { status: 404 });
+  }
+  if (live.state === 'unsupported') {
+    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
   }
   let rel = decodeURIComponent(rawRel || '');
   if (rel === '' || rel.endsWith('/')) {

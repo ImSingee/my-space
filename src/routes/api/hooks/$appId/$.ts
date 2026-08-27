@@ -1,4 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
+import {
+  APP_COMPATIBILITY_UPDATE_MESSAGE,
+  appCompatibility,
+} from '~/app-compatibility';
 import type { NormalizedManifest } from '~server/apps/manifest';
 
 /**
@@ -45,8 +49,11 @@ export async function handle({
   // behaviour, which always required a verified secret).
   const deployment = await db.query.deployments.findFirst({
     where: { id: app.currentDeploymentId as string },
-    columns: { manifestNormalized: true },
+    columns: { manifestNormalized: true, compatibilityVersion: true },
   });
+  const compatibility = deployment
+    ? appCompatibility(deployment.compatibilityVersion)
+    : null;
   const auth =
     (deployment?.manifestNormalized as NormalizedManifest | null)?.webhook
       ?.auth ?? 'platform';
@@ -63,6 +70,9 @@ export async function handle({
   };
 
   if (auth === 'none') {
+    if (!compatibility?.isSupported) {
+      return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
+    }
     // Unauthenticated passthrough. The app self-secures; proxyAppRequest still
     // strips platform headers (x-hatch-*) so a caller can't forge a signature,
     // and leaves `?secret=` intact (here it would be the app's own parameter).
@@ -85,6 +95,9 @@ export async function handle({
   const { secretsMatch } = await import('~server/secrets');
   if (!secretsMatch(provided, app.webhookSecret)) {
     return new Response('Forbidden', { status: 403 });
+  }
+  if (!compatibility?.isSupported) {
+    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
   }
 
   try {

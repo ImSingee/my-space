@@ -294,6 +294,7 @@ async function handleApps(
       json(res, 200, {
         deploymentId: result.deploymentId,
         version: result.version,
+        compatibilityVersion: result.compatibilityVersion,
         slug,
         normalized: projectAppManifestUrls(result.normalized, id, slug),
       });

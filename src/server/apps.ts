@@ -1,6 +1,7 @@
 /** Server functions for app management (list/detail, deployments, ops, KV). */
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { appCompatibility, type AppCompatibility } from '~/app-compatibility';
 import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { db } from '~/db';
 // Type-only: a value import of `schema` used in exported type annotations
@@ -75,6 +76,7 @@ export type AppDetail = {
   status: AppStatus;
   capabilities: AppCapabilities | null;
   deploymentRevision: string | null;
+  compatibility: AppCompatibility | null;
   currentSourceCommit: string | null;
   dbName: string | null;
   createdAt: string;
@@ -110,10 +112,19 @@ export const getAppBySlug = createServerFn({ method: 'GET' })
     });
     if (!row) return null;
     const { currentDeploymentId, ...detail } = row;
+    const deployment = currentDeploymentId
+      ? await db.query.deployments.findFirst({
+          where: { id: currentDeploymentId },
+          columns: { compatibilityVersion: true },
+        })
+      : null;
     return {
       ...detail,
       capabilities: projectAppCapabilities(detail.capabilities),
       deploymentRevision: currentDeploymentId,
+      compatibility: deployment
+        ? appCompatibility(deployment.compatibilityVersion)
+        : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

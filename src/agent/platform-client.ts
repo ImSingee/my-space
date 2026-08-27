@@ -8,6 +8,7 @@
  * pull in platform code (database client, deploy pipeline, …).
  */
 import type { NormalizedManifest } from '~server/apps/manifest';
+import type { AppCompatibility } from '~/app-compatibility';
 import type { AppDetail, AppSummary } from '~server/apps/inspect';
 import type { NormalizedWorkflowManifest } from '~server/workflows/manifest';
 import type {
@@ -40,6 +41,7 @@ export type CreateWorkflowResult = {
 export type AppDeployResponse = {
   deploymentId: string;
   version: number;
+  compatibilityVersion: number;
   slug: string;
   normalized: NormalizedManifest;
 };
@@ -95,7 +97,11 @@ export type PlatformClient = {
   rollbackApp(
     handle: string,
     version: number,
-  ): Promise<{ version: number; dataSchemaMismatch: boolean }>;
+  ): Promise<{
+    version: number;
+    dataSchemaMismatch: boolean;
+    compatibility: AppCompatibility;
+  }>;
   /** `signal` aborts the platform request (and the running statement). */
   queryAppDb(
     handle: string,

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { db } from '~/db';
 import type { JsonValue } from '~/db/schema';
 import { AppError } from '~server/errors';
+import { assertSupportedDeployment } from '../compatibility';
 import { DATA_MIGRATION_LOCK_KEY } from './migrate';
 import { resolveAppDataDatabaseUrl } from './provision';
 import { parseDataRevision } from './revision';
@@ -443,6 +444,9 @@ async function assertCurrentAppState(
       'Data Table client is stale. Reload the App before retrying.',
       409,
     );
+  }
+  if (options.expectedDeploymentId) {
+    await assertSupportedDeployment(app.currentDeploymentId);
   }
 }
 

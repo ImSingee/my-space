@@ -108,6 +108,7 @@ export function BackendControls({
   runtime,
   name = 'backend',
   size = 'md',
+  runtimeSupported = true,
 }: {
   appId: string;
   runtime: AppBackendRuntime;
@@ -115,6 +116,8 @@ export function BackendControls({
   name?: string;
   /** Icon button size; "sm" fits inline in a section header. */
   size?: 'sm' | 'md';
+  /** Unsupported deployments may be stopped, but cannot start or restart. */
+  runtimeSupported?: boolean;
 }) {
   const iconSize = size === 'sm' ? 14 : 16;
   const qc = useQueryClient();
@@ -148,13 +151,25 @@ export function BackendControls({
 
   return (
     <Group gap={4} wrap="nowrap">
-      <Tooltip label="Start" withArrow>
+      <Tooltip
+        label={
+          runtimeSupported
+            ? 'Start'
+            : 'Update and redeploy this App before starting its backend'
+        }
+        withArrow
+      >
         <ActionIcon
           variant="subtle"
           color="teal"
           size={size}
           loading={start.isPending}
-          disabled={pending || running || runtime.state === 'starting'}
+          disabled={
+            !runtimeSupported ||
+            pending ||
+            running ||
+            runtime.state === 'starting'
+          }
           onClick={() => start.mutate()}
           aria-label={`Start ${name}`}
         >
@@ -177,13 +192,20 @@ export function BackendControls({
           <IconPlayerStop size={iconSize} stroke={1.8} />
         </ActionIcon>
       </Tooltip>
-      <Tooltip label="Restart" withArrow>
+      <Tooltip
+        label={
+          runtimeSupported
+            ? 'Restart'
+            : 'Update and redeploy this App before restarting its backend'
+        }
+        withArrow
+      >
         <ActionIcon
           variant="subtle"
           color="gray"
           size={size}
           loading={restart.isPending}
-          disabled={pending}
+          disabled={!runtimeSupported || pending}
           onClick={() => restart.mutate()}
           aria-label={`Restart ${name}`}
         >

@@ -37,9 +37,11 @@ function RuntimeFact({
 function BackendSection({
   appId,
   backend,
+  runtimeSupported,
 }: {
   appId: string;
   backend: AppOps['backend'];
+  runtimeSupported: boolean;
 }) {
   // The runtime state lives in the polled Backends list (the same query the
   // Backends page uses), so this section stays live and shares its cache.
@@ -62,7 +64,12 @@ function BackendSection({
                   · {mode}
                 </Text>
               </Group>
-              <BackendControls appId={appId} runtime={runtime} size="sm" />
+              <BackendControls
+                appId={appId}
+                runtime={runtime}
+                size="sm"
+                runtimeSupported={runtimeSupported}
+              />
             </Group>
           ) : backends ? (
             <Text size="xs" c="dimmed">
@@ -158,12 +165,15 @@ export function OperationsPanel({
   appId,
   dbName,
   dbEnabled,
+  runtimeSupported = true,
 }: {
   appId: string;
   /** Provisioned database name, or null when not yet provisioned. */
   dbName?: string | null;
   /** Whether this app declares/uses a database (controls the Database row). */
   dbEnabled?: boolean;
+  /** Whether controls that invoke App code may run. */
+  runtimeSupported?: boolean;
 }) {
   const query = useQuery(appOpsQueryOptions(appId));
 
@@ -206,13 +216,21 @@ export function OperationsPanel({
       ) : (
         <Stack gap="lg">
           {ops.backend.capable ? (
-            <BackendSection appId={appId} backend={ops.backend} />
+            <BackendSection
+              appId={appId}
+              backend={ops.backend}
+              runtimeSupported={runtimeSupported}
+            />
           ) : null}
           {dbEnabled ? <DatabaseSection dbName={dbName} /> : null}
           {ops.storage.enabled ? <PersistentStorageSection /> : null}
           {ops.dataTable.enabled ? <DataTableSection appId={appId} /> : null}
           {ops.cron.enabled ? (
-            <CronSection appId={appId} cron={ops.cron} />
+            <CronSection
+              appId={appId}
+              cron={ops.cron}
+              runtimeSupported={runtimeSupported}
+            />
           ) : null}
           {ops.webhook.enabled ? (
             <WebhookSection webhook={ops.webhook} />

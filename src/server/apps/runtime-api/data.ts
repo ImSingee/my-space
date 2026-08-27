@@ -1,4 +1,5 @@
 import { ZodError } from 'zod';
+import { APP_COMPATIBILITY_UPDATE_MESSAGE } from '~/app-compatibility';
 import { auth } from '~auth/server';
 import { db } from '~/db';
 import {
@@ -14,6 +15,7 @@ import {
   verifyHatchSignature,
 } from '~server/secrets';
 import { parseAppApiPath } from './path';
+import { readDeploymentCompatibility } from '../compatibility';
 
 const DATA_DEPLOYMENT_HEADER = 'x-hatch-data-deployment';
 
@@ -96,7 +98,7 @@ async function authorize(
 async function liveDataAppState(
   id: string,
   expectedDeploymentId: string,
-): Promise<'missing' | 'activating' | 'stale' | 'live'> {
+): Promise<'missing' | 'activating' | 'stale' | 'unsupported' | 'live'> {
   const app = await db.query.apps.findFirst({
     where: { id },
     columns: {
@@ -115,7 +117,11 @@ async function liveDataAppState(
     return 'missing';
   }
   if (app.dataActivationId) return 'activating';
-  return expectedDeploymentId === app.currentDeploymentId ? 'live' : 'stale';
+  if (expectedDeploymentId !== app.currentDeploymentId) return 'stale';
+  const compatibility = await readDeploymentCompatibility(
+    app.currentDeploymentId,
+  );
+  return compatibility?.isSupported ? 'live' : 'unsupported';
 }
 
 function eventStream(
@@ -269,6 +275,9 @@ export async function handleDataRequest({
       'This Data client belongs to an inactive deployment. Reload or restart it.',
       { status: 409 },
     );
+  }
+  if (state === 'unsupported') {
+    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
   }
 
   const rawBody =

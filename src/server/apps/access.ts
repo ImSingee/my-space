@@ -1,4 +1,5 @@
 /** Server-only: authorize runtime serving of a deployed app's built assets. */
+import { appCompatibility, type AppCompatibility } from '~/app-compatibility';
 import { db, type DB } from '~/db';
 import type { AppCapabilities } from '~/db/schema';
 import {
@@ -99,10 +100,11 @@ export async function normalizedManifestFor(
  * isn't servable.
  *
  * Returns null when the app doesn't exist, is archived, has never been deployed
- * (no `currentDeploymentId`), or lacks the requested capability — so retired or
- * never-built apps can't be reached through a stale direct URL and leftover
- * build/storage files. `building` (a redeploy of an already-live app) is
- * allowed because the previous build keeps serving until the swap.
+ * (no `currentDeploymentId`), lacks the requested capability, or is below the
+ * runtime compatibility minimum — so retired or unusable apps cannot be
+ * reached through stale URLs and leftover files. `building` (a redeploy of an
+ * already-live app) is allowed because the previous build keeps serving until
+ * the swap.
  */
 export async function liveAppManifest(
   id: string,
@@ -112,14 +114,23 @@ export async function liveAppManifest(
   return result.get(id) ?? null;
 }
 
-/** Single-app serving context including the deployment identity of its bytes. */
+/**
+ * Single-app serving context including the deployment identity of its bytes.
+ * The explicit unsupported state lets direct routes return an actionable 503
+ * while batch/list callers simply omit the App.
+ */
 export async function liveAppDeployment(
   id: string,
   capability: keyof AppCapabilities,
-): Promise<{
-  deploymentId: string;
-  manifest: NormalizedManifest;
-} | null> {
+): Promise<
+  | {
+      state: 'live';
+      deploymentId: string;
+      manifest: NormalizedManifest;
+    }
+  | { state: 'unsupported'; compatibility: AppCompatibility }
+  | null
+> {
   const app = await db.query.apps.findFirst({
     where: { id },
     columns: {
@@ -139,11 +150,17 @@ export async function liveAppDeployment(
   }
   const deployment = await db.query.deployments.findFirst({
     where: { id: app.currentDeploymentId as string },
-    columns: { manifestNormalized: true },
+    columns: { manifestNormalized: true, compatibilityVersion: true },
   });
+  if (!deployment) return null;
+  const compatibility = appCompatibility(deployment.compatibilityVersion);
+  if (!compatibility.isSupported) {
+    return { state: 'unsupported', compatibility };
+  }
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
   return manifest
     ? {
+        state: 'live',
         deploymentId: app.currentDeploymentId,
         manifest: projectAppManifestUrls(manifest, id, app.slug),
       }
@@ -153,8 +170,8 @@ export async function liveAppDeployment(
 /**
  * Batch form of {@link liveAppManifest}: resolves many apps with two queries
  * instead of 2-per-app, for list endpoints (dashboard, sidebar). Apps that are
- * missing/archived/undeployed or lack the capability are simply absent from
- * the returned map.
+ * missing/archived/undeployed, unsupported, or lack the capability are simply
+ * absent from the returned map.
  */
 export async function liveAppManifests(
   ids: string[],
@@ -185,8 +202,12 @@ export async function liveAppManifests(
   });
   const byDeploymentId = new Map(deployments.map((d) => [d.id, d]));
   for (const app of servable) {
-    const manifest = byDeploymentId.get(app.currentDeploymentId as string)
-      ?.manifestNormalized as NormalizedManifest | null;
+    const deployment = byDeploymentId.get(app.currentDeploymentId as string);
+    if (!appCompatibility(deployment?.compatibilityVersion).isSupported) {
+      continue;
+    }
+    const manifest =
+      deployment?.manifestNormalized as NormalizedManifest | null;
     if (manifest) {
       result.set(app.id, projectAppManifestUrls(manifest, app.id, app.slug));
     }

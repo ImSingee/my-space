@@ -116,7 +116,14 @@ export function createAppTools(options: {
             : ' (not deployed)';
         const caps =
           a.capabilities.length > 0 ? ` — ${a.capabilities.join(', ')}` : '';
-        return `- ${a.slug} · ${a.name} (id: ${a.id}) [${a.status}]${version}${caps}`;
+        const compatibility = a.compatibility
+          ? ` · compatibility v${a.compatibility.version}${
+              a.compatibility.isLatest
+                ? ''
+                : ' (update available; read the `app-compatibility` Skill)'
+            }`
+          : '';
+        return `- ${a.slug} · ${a.name} (id: ${a.id}) [${a.status}]${version}${compatibility}${caps}`;
       });
       return text(lines.join('\n'), { apps });
     },
@@ -144,6 +151,15 @@ export function createAppTools(options: {
             ? ` · v${detail.currentVersion}`
             : ' · not deployed'),
         detail.description ? `Description: ${detail.description}` : null,
+        detail.compatibility
+          ? `Compatibility: v${detail.compatibility.version} ` +
+            `(latest v${detail.compatibility.latestVersion}, minimum v${detail.compatibility.minimumSupportedVersion})` +
+            (detail.compatibility.isSupported
+              ? detail.compatibility.isLatest
+                ? ''
+                : ' — read the `app-compatibility` Skill, then redeploy to update'
+              : ' — runtime disabled; read the `app-compatibility` Skill before updating and redeploying')
+          : null,
         `Backend: ${
           detail.ops.backend.capable
             ? `${detail.backendMode ?? 'serverless'}${
@@ -189,9 +205,9 @@ export function createAppTools(options: {
           .slice(0, 10)
           .map(
             (d) =>
-              `  v${d.version} — ${d.status}${d.isCurrent ? ' (current)' : ''}${
+              `  v${d.version} — ${d.status} · compatibility v${d.compatibility.version}${d.isCurrent ? ' (current)' : ''}${
                 d.canRollback ? ' [rollbackable]' : ''
-              }${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${
+              }${!d.compatibility.isSupported ? ' [Agent restore only; runtime disabled]' : ''}${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${
                 d.createdAt
               }`,
           ),
@@ -475,7 +491,7 @@ export function createAppTools(options: {
             dataMigrationApprovalToken: params.data_migration_approval_token,
           });
           const lines = [
-            `Deployed "${detail.id}" (v${res.version}).`,
+            `Deployed "${detail.id}" (v${res.version}, compatibility v${res.compatibilityVersion}).`,
             res.normalized.app
               ? `App (iframe): ${res.normalized.app.url}`
               : null,
@@ -502,7 +518,8 @@ export function createAppTools(options: {
       "version's artifact and moves the app repo master branch to its " +
       'deployment tag commit. Pass the version number shown by get_app ' +
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
-      'restored.',
+      'restored. Agent can restore versions below the platform minimum, but ' +
+      'their runtime stays disabled until the app is updated and redeployed.',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to rollback.' }),
       version: Type.Number({
@@ -517,6 +534,11 @@ export function createAppTools(options: {
           (res.dataSchemaMismatch
             ? 'Warning: the managed Data Table schema was not rolled back and differs from this code version. '
             : '') +
+          (!res.compatibility.isSupported
+            ? `Warning: compatibility v${res.compatibility.version} is below the platform minimum v${res.compatibility.minimumSupportedVersion}; read the \`app-compatibility\` Skill. This App cannot run until it is updated and redeployed. `
+            : !res.compatibility.isLatest
+              ? `Compatibility v${res.compatibility.version} is older than latest v${res.compatibility.latestVersion}; read the \`app-compatibility\` Skill, then redeploy to update it. `
+              : '') +
           'Existing Agent worktrees were not changed. Re-run checkout_app with ' +
           'clone: false and the same source_path. It synchronizes only when ' +
           'remote master fast-forwards a clean local master; ahead or diverged ' +

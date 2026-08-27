@@ -47,6 +47,27 @@ Tests that only exercise helper internals, exact copy or DOM structure, framewor
 
 Before declaring any Agent task complete, re-run `pnpm check:types` and `pnpm format` and ensure both commands pass cleanly.
 
+## App Compatibility Versions
+
+`src/app-compatibility.ts` owns the platform compatibility constants.
+
+- Increment `LATEST_APP_COMPATIBILITY_VERSION` only when a platform change
+  introduces a new deployed-App compatibility contract and every successful
+  final deployment must record that new version. Do not increment it for
+  backward-compatible features, refactors, or UI-only changes.
+- Increment `MIN_SUPPORTED_APP_COMPATIBILITY_VERSION` only when the platform
+  intentionally stops running deployments created for an older contract.
+  Raising it is a breaking change: update the full runtime gate, UI/API rollback
+  restrictions, Agent recovery path, and durable boundary tests in the same
+  change.
+- Keep all compatibility history and upgrade guidance in the single
+  `skills/app-compatibility/SKILL.md` file. Append every future compatibility
+  version there; do not create separate per-version files.
+- Whenever either constant changes, synchronize the Skill's latest and minimum
+  values and relevant history, and keep final-deployment recording in sync. If
+  required Platform/Runner REST fields change, also increment
+  `PROTOCOL_VERSION`.
+
 ## Oxlint
 
 Oxlint config lives in `.oxlintrc.json` and enables TypeScript, React, accessibility, Vitest, import, unicorn, and oxc checks.

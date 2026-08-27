@@ -23,3 +23,13 @@ export function requiresDataSchemaConfirmation(
 ): boolean {
   return deployment?.dataSchemaMismatch === true;
 }
+
+export function requiresAgentRollback(
+  deployment:
+    | { canRollback: boolean; compatibility: { isSupported: boolean } }
+    | undefined,
+): boolean {
+  return Boolean(
+    deployment?.canRollback && !deployment.compatibility.isSupported,
+  );
+}

@@ -135,6 +135,15 @@ export async function handleKvRequest({
   });
   if (!verified) return new Response('Forbidden', { status: 403 });
 
+  try {
+    const { assertSupportedDeployment } =
+      await import('~server/apps/compatibility');
+    await assertSupportedDeployment(app.currentDeploymentId);
+  } catch (error) {
+    const { errorResponse } = await import('~server/errors');
+    return errorResponse(error, 503);
+  }
+
   const kv = await import('~server/apps/kv');
   try {
     if (request.method === 'GET') {

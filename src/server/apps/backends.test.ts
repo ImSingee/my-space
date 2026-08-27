@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('~/db', async () => {
@@ -51,15 +52,26 @@ async function seedApp(
   id: string,
   overrides: Partial<typeof schema.apps.$inferInsert> = {},
 ) {
+  const currentDeploymentId =
+    overrides.currentDeploymentId === undefined
+      ? `dep-${id}`
+      : overrides.currentDeploymentId;
   await db.insert(schema.apps).values({
     id,
     slug: id,
     name: `App ${id}`,
     status: 'deployed',
     capabilities: BACKEND_CAPS,
-    currentDeploymentId: `dep-${id}`,
+    currentDeploymentId,
     ...overrides,
   });
+  if (currentDeploymentId) {
+    await db.insert(schema.deployments).values({
+      id: currentDeploymentId,
+      appId: id,
+      status: 'deployed',
+    });
+  }
 }
 
 beforeEach(async () => {
@@ -91,6 +103,11 @@ describe('listAppBackends', () => {
     expect(byId.get('plain')?.mode).toBe('serverless');
     expect(byId.get('long')?.mode).toBe('long-running');
     expect(byId.get('plain')?.runtime.state).toBe('stopped');
+    expect(byId.get('plain')?.compatibility).toMatchObject({
+      version: 1,
+      isSupported: true,
+      isLatest: false,
+    });
   });
 
   it('serializes runtime timestamps as ISO strings', async () => {
@@ -182,5 +199,26 @@ describe('backend controls', () => {
     const view = await stopBackendForApp('idle');
     expect(runtime.stopApp).toHaveBeenCalledWith('idle');
     expect(view.state).toBe('stopped');
+  });
+
+  it('blocks start and restart below the minimum but still allows stop', async () => {
+    await seedApp('legacy');
+    await db
+      .update(schema.deployments)
+      .set({ compatibilityVersion: 0 })
+      .where(eq(schema.deployments.id, 'dep-legacy'));
+
+    await expect(startBackendForApp('legacy')).rejects.toMatchObject({
+      status: 503,
+    });
+    await expect(restartBackendForApp('legacy')).rejects.toMatchObject({
+      status: 503,
+    });
+    await expect(stopBackendForApp('legacy')).resolves.toMatchObject({
+      state: 'stopped',
+    });
+    expect(runtime.startAppBackend).not.toHaveBeenCalled();
+    expect(runtime.restartAppBackend).not.toHaveBeenCalled();
+    expect(runtime.stopApp).toHaveBeenCalledWith('legacy');
   });
 });

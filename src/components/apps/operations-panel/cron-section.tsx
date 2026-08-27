@@ -109,9 +109,11 @@ function CronHistory({ appId }: { appId: string }) {
 export function CronSection({
   appId,
   cron,
+  runtimeSupported = true,
 }: {
   appId: string;
   cron: AppOps['cron'];
+  runtimeSupported?: boolean;
 }) {
   const qc = useQueryClient();
 
@@ -184,6 +186,7 @@ export function CronSection({
                     loading={
                       runCron.isPending && runCron.variables === job.name
                     }
+                    disabled={!runtimeSupported}
                     onClick={() => runCron.mutate(job.name)}
                   >
                     Run now

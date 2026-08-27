@@ -39,6 +39,7 @@ describe('Agent skills', () => {
         'building-workflows',
         'importing-apps',
         'importing-workflows',
+        'app-compatibility',
       ]),
     );
   });
