@@ -1,8 +1,8 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "8ea094ea-8e37-43dc-9c35-183d6f8946ff",
-  "prevIds": ["35966959-8505-4958-b272-6cabef1bed61"],
+  "id": "906fec0d-9850-46da-828a-3e44764018fc",
+  "prevIds": ["ea6c9c39-3989-43a6-a581-7adc773638b9"],
   "ddl": [
     {
       "values": ["desktop", "tablet", "mobile"],
@@ -1768,6 +1768,19 @@
       "generated": null,
       "identity": null,
       "name": "version",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "deployments"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "compatibility_version",
       "entityType": "columns",
       "schema": "public",
       "table": "deployments"
