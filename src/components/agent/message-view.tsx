@@ -20,6 +20,7 @@ import {
   IconSettings,
 } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import type { AgentComposerContentPart } from '~agent/composer-content';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
@@ -43,6 +44,25 @@ type DeployedApp = {
   reference: string;
   app?: AppListItem;
 };
+
+function UserComposerText({
+  content,
+  fallback,
+}: {
+  content: AgentComposerContentPart[] | undefined;
+  fallback: string;
+}) {
+  if (!content || content.length === 0) return fallback;
+  return content.map((part, index) =>
+    part.type === 'text' ? (
+      part.text
+    ) : (
+      <span key={`${part.id}-${index}`} className={classes.messageAppMention}>
+        @{part.name}
+      </span>
+    ),
+  );
+}
 
 /** Resolve id/slug handles and deduplicate aliases by the canonical app id. */
 export function resolveDeployedApps(
@@ -255,7 +275,11 @@ export function MessageView({
   apps?: AppListItem[];
 }) {
   if (message.role === 'user') {
-    const text = partsToText(message.content, message.attachments);
+    const text = partsToText(
+      message.content,
+      message.attachments,
+      message.composerContent,
+    );
     const images = partsToImages(message.content);
     const files = message.attachments ?? [];
     return (
@@ -301,7 +325,12 @@ export function MessageView({
           ) : null}
           {text ? (
             <Paper className={classes.userBubble} radius="md" px="sm" py={6}>
-              <Text className={classes.messageText}>{text}</Text>
+              <Text className={classes.messageText}>
+                <UserComposerText
+                  content={message.composerContent}
+                  fallback={text}
+                />
+              </Text>
             </Paper>
           ) : null}
         </Stack>

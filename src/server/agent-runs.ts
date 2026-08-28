@@ -29,6 +29,12 @@ import {
   type AgentAttachmentRef,
 } from '~agent/attachments';
 import {
+  composerDisplayText,
+  composerModelText,
+  type AgentComposerContentPart,
+  type ComposerInputPart,
+} from '~agent/composer-content';
+import {
   LEASE_SWEEP_INTERVAL_MS,
   RUN_LEASE_TTL_MS,
   envEntriesSchema,
@@ -50,7 +56,7 @@ export type AgentRunInput =
   | {
       sessionId: string;
       retry?: false;
-      userText: string;
+      content: ComposerInputPart[];
       images?: SendImage[];
       attachmentIds?: string[];
       providerId: string;
@@ -134,6 +140,7 @@ function deriveTitle(userText: string): string {
 
 function userMessage(
   userText: string,
+  composerContent: AgentComposerContentPart[] = [],
   images: SendImage[] = [],
   attachments: AgentAttachmentRef[] = [],
 ): JsonObject {
@@ -152,6 +159,9 @@ function userMessage(
     content,
     ...(attachments.length > 0
       ? { attachments: attachments as unknown as JsonValue }
+      : {}),
+    ...(composerContent.some((part) => part.type === 'app')
+      ? { composerContent: composerContent as unknown as JsonValue }
       : {}),
   };
 }
@@ -417,6 +427,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     run: typeof schema.agentRuns.$inferSelect;
     baseMessages: JsonValue[];
     userText: string;
+    composerContent: AgentComposerContentPart[];
     images: SendImage[];
     attachments: AgentAttachmentRef[];
   };
@@ -458,6 +469,8 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       const sessionMessages = (lockedSession.messages ?? []) as JsonValue[];
       let baseMessages: JsonValue[];
       let userText: string;
+      let displayText: string;
+      let composerContent: AgentComposerContentPart[];
       let images: SendImage[];
       let requestedAttachmentIds: string[];
       let isRetry = false;
@@ -468,6 +481,11 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         }
         baseMessages = retry.baseMessages;
         userText = retry.userText;
+        composerContent = retry.composerContent;
+        displayText =
+          composerContent.length > 0
+            ? composerDisplayText(composerContent)
+            : userText;
         images = retry.images;
         requestedAttachmentIds = retry.attachments.map(
           (attachment) => attachment.id,
@@ -475,7 +493,14 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         isRetry = true;
       } else {
         baseMessages = sessionMessages;
-        userText = input.userText;
+        // App mentions are user-provided context, not capabilities. Keep the
+        // selection-time snapshot so deleting or renaming an App cannot
+        // invalidate an already-written draft.
+        userText = composerModelText(input.content);
+        displayText = composerDisplayText(input.content);
+        composerContent = input.content.some((part) => part.type === 'app')
+          ? input.content
+          : [];
         images = input.images ?? [];
         requestedAttachmentIds = input.attachmentIds ?? [];
       }
@@ -519,7 +544,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       const title =
         lockedSession.title && lockedSession.title !== 'New chat'
           ? lockedSession.title
-          : deriveTitle(userText);
+          : deriveTitle(displayText);
       const [inserted] = await tx
         .insert(schema.agentRuns)
         .values({
@@ -534,6 +559,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
           // persisted session message, and duplicating them here bloated the row.
           input: {
             userText,
+            composerContent,
             images: images.map((image) => ({ mimeType: image.mimeType })),
             attachments,
           },
@@ -548,7 +574,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         .set({
           messages: [
             ...baseMessages,
-            userMessage(userText, images, attachments),
+            userMessage(userText, composerContent, images, attachments),
           ],
           title,
           providerId: model.providerId,
@@ -573,6 +599,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         run: inserted,
         baseMessages,
         userText,
+        composerContent,
         images,
         attachments,
       };
@@ -583,13 +610,15 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     }
     throw error;
   }
-  const { run, baseMessages, userText, images, attachments } = prepared;
+  const { run, baseMessages, userText, composerContent, images, attachments } =
+    prepared;
 
   try {
     await hub.dispatchRun({
       runId: run.id,
       sessionId: input.sessionId,
       userText,
+      composerContent,
       images,
       attachments,
       priorMessages: baseMessages,

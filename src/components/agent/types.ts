@@ -3,6 +3,10 @@
 import type { StopReason } from '@earendil-works/pi-ai';
 import type { AgentAttachmentRef } from '~agent/attachments';
 import { stripAttachmentPrompt } from '~agent/attachments';
+import {
+  composerDisplayText,
+  type AgentComposerContentPart,
+} from '~agent/composer-content';
 
 export type TextBlock = { type: 'text'; text: string };
 export type ThinkingBlock = { type: 'thinking'; thinking: string };
@@ -27,6 +31,7 @@ export type ChatMessage =
       role: 'user';
       content: string | ContentPart[];
       attachments?: AgentAttachmentRef[];
+      composerContent?: AgentComposerContentPart[];
     }
   | {
       role: 'assistant';
@@ -79,7 +84,11 @@ export function pairToolResults(
 export function partsToText(
   content: string | ContentPart[],
   attachments: AgentAttachmentRef[] = [],
+  composerContent?: AgentComposerContentPart[],
 ): string {
+  if (composerContent && composerContent.length > 0) {
+    return composerDisplayText(composerContent);
+  }
   const text =
     typeof content === 'string'
       ? content

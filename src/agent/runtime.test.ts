@@ -19,6 +19,7 @@ import {
   type FauxResponseStep,
 } from '@earendil-works/pi-ai/providers/faux';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentComposerContentPart } from './composer-content';
 import type { AgentStreamEvent } from './events';
 import type { PlatformClient } from './platform-client';
 import type { ResolvedModel } from './remote-models';
@@ -68,6 +69,10 @@ async function runWithResponses(
   platform: PlatformClient = stubPlatform,
   requestEnv?: EnvBridge,
   priorMessages: AgentMessage[] = [],
+  composerInput?: {
+    userText: string;
+    composerContent: AgentComposerContentPart[];
+  },
 ) {
   const providerId = `runtime-test-${sessionId}`;
   const faux = fauxProvider({ provider: providerId });
@@ -85,7 +90,10 @@ async function runWithResponses(
     appUrl: 'https://hatch.example.test',
     priorMessages,
     sessionId,
-    userText: 'hello',
+    userText: composerInput?.userText ?? 'hello',
+    ...(composerInput
+      ? { composerContent: composerInput.composerContent }
+      : {}),
     models,
     picked,
     platform,
@@ -96,6 +104,39 @@ async function runWithResponses(
 }
 
 describe('runAgentTurn terminal outcomes', () => {
+  it('keeps App snapshot metadata while exposing inline text to the model', async () => {
+    const composerContent: AgentComposerContentPart[] = [
+      { type: 'text', text: 'Review ' },
+      {
+        type: 'app',
+        id: 'app-stable',
+        name: 'Original Name',
+        slug: 'original-slug',
+      },
+      { type: 'text', text: ' now.' },
+    ];
+    const userText =
+      'Review @APP{name="Original Name" id="app-stable" slug="original-slug"} now.';
+    const result = await runWithResponses(
+      [
+        (context) => {
+          expect(JSON.stringify(context)).toContain(userText);
+          return fauxAssistantMessage('Reviewed.');
+        },
+      ],
+      'app-reference',
+      () => {},
+      stubPlatform,
+      undefined,
+      [],
+      { userText, composerContent },
+    );
+
+    expect(result.messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ composerContent })]),
+    );
+  });
+
   it('reveals only browser-classified non-secret values to the model', async () => {
     const sessionId = 'secret-canary';
     const canary = 'canary-secret-93b7f7c8-never-in-context';

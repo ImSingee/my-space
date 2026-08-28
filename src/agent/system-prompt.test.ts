@@ -41,6 +41,15 @@ describe('Agent system prompt skills', () => {
     );
   });
 
+  it('treats an inline App marker as context without implied intent', () => {
+    const prompt = buildSystemPrompt(appUrl);
+
+    expect(prompt).toContain('@APP{name="..." id="..." slug="..."}');
+    expect(prompt).toContain('Use its stable id with App tools');
+    expect(prompt).toContain('supplies context');
+    expect(prompt).toMatch(/does not by itself require modifying,\s+deploying/);
+  });
+
   it('describes safe web search and fetch usage', () => {
     const prompt = buildSystemPrompt(appUrl);
 

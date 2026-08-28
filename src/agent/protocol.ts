@@ -16,11 +16,12 @@ import {
 } from '~/app-identity';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
+import { agentComposerContentSchema } from './composer-content';
 import { isReservedEnvKey } from './env-keys';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -314,6 +315,7 @@ export const runStartSchema = z.object({
   runId: z.string().min(1),
   sessionId: z.string().min(1),
   userText: z.string(),
+  composerContent: agentComposerContentSchema,
   images: z.array(sendImageSchema),
   attachments: z.array(agentAttachmentRefSchema),
   /** Persisted pi AgentMessage[] history for the session. */

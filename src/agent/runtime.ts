@@ -12,6 +12,7 @@ import {
 import type { Models } from '@earendil-works/pi-ai';
 import type { JsonValue } from '~/db/schema';
 import { formatAttachmentPrompt, type AgentAttachmentRef } from './attachments';
+import type { AgentComposerContentPart } from './composer-content';
 import type { AgentStreamEvent } from './events';
 import { SKILLS_DIR } from './paths';
 import type { PlatformClient } from './platform-client';
@@ -167,6 +168,7 @@ export type RunAgentTurnOptions = {
   priorMessages: AgentMessage[];
   sessionId: string;
   userText: string;
+  composerContent?: AgentComposerContentPart[];
   images?: { data: string; mimeType: string }[];
   attachments?: AgentAttachmentRef[];
   models: Models;
@@ -395,7 +397,10 @@ export async function runAgentTurn(
       toolStartDetailsById,
     );
     const attachments = opts.attachments ?? [];
-    if (attachments.length === 0) return messages;
+    const composerContent = opts.composerContent ?? [];
+    if (attachments.length === 0 && composerContent.length === 0) {
+      return messages;
+    }
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index];
       if (
@@ -406,7 +411,12 @@ export async function runAgentTurn(
       ) {
         messages[index] = {
           ...message,
-          attachments: attachments as unknown as JsonValue,
+          ...(attachments.length > 0
+            ? { attachments: attachments as unknown as JsonValue }
+            : {}),
+          ...(composerContent.length > 0
+            ? { composerContent: composerContent as unknown as JsonValue }
+            : {}),
         };
         break;
       }

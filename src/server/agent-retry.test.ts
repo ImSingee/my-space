@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JsonValue } from '~/db/schema';
+import type { AgentComposerContentPart } from '~agent/composer-content';
 import { parseRetryableAgentTurn } from './agent-retry';
 
 describe('parseRetryableAgentTurn', () => {
@@ -42,6 +43,7 @@ describe('parseRetryableAgentTurn', () => {
     expect(parseRetryableAgentTurn(messages)).toEqual({
       baseMessages,
       userText: 'Retry this',
+      composerContent: [],
       images: [
         { data: 'aW1hZ2Ux', mimeType: 'image/png' },
         { data: 'aW1hZ2Uy', mimeType: 'image/webp' },
@@ -59,6 +61,38 @@ describe('parseRetryableAgentTurn', () => {
     ).toEqual({
       baseMessages: [],
       userText: 'Retry this string',
+      composerContent: [],
+      images: [],
+      attachments: [],
+    });
+  });
+
+  it('rebuilds inline App text from the persisted identity snapshot', () => {
+    const composerContent: AgentComposerContentPart[] = [
+      { type: 'text', text: 'Review ' },
+      {
+        type: 'app',
+        id: 'app-stable',
+        name: 'Original Name',
+        slug: 'original-slug',
+      },
+      { type: 'text', text: ' before publishing.' },
+    ];
+    expect(
+      parseRetryableAgentTurn([
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'model-visible persisted text' }],
+          composerContent,
+        },
+        { role: 'assistant', content: [], stopReason: 'error' },
+      ]),
+    ).toEqual({
+      baseMessages: [],
+      userText:
+        'Review @APP{name="Original Name" id="app-stable" slug="original-slug"}' +
+        ' before publishing.',
+      composerContent,
       images: [],
       attachments: [],
     });
@@ -94,6 +128,7 @@ describe('parseRetryableAgentTurn', () => {
     ).toEqual({
       baseMessages: [],
       userText: 'Inspect it',
+      composerContent: [],
       images: [],
       attachments: [
         {
@@ -117,6 +152,7 @@ describe('parseRetryableAgentTurn', () => {
     ).toEqual({
       baseMessages: [],
       userText: literal,
+      composerContent: [],
       images: [],
       attachments: [],
     });
