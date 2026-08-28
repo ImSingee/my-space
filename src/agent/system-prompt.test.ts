@@ -41,6 +41,27 @@ describe('Agent system prompt skills', () => {
     );
   });
 
+  it('does not advertise temporarily disabled Workflow capabilities', () => {
+    const prompt = buildSystemPrompt(appUrl);
+
+    expect(prompt).toContain(
+      'Workflow capabilities are temporarily unavailable',
+    );
+    expect(prompt).toContain(
+      'do not add new\n  top-level Workflow calls to Apps',
+    );
+    for (const capability of [
+      'create_workflow',
+      'checkout_workflow',
+      'deploy_workflow',
+      'building-workflows',
+      'importing-workflows',
+      'workflows/<id>',
+    ]) {
+      expect(prompt).not.toContain(capability);
+    }
+  });
+
   it('treats an inline App marker as context without implied intent', () => {
     const prompt = buildSystemPrompt(appUrl);
 
@@ -70,7 +91,7 @@ describe('Agent system prompt skills', () => {
     expect(prompt).not.toContain('FULL_SKILL_BODY_SENTINEL');
   });
 
-  it('requires import and build Skills before opening source archives', () => {
+  it('requires App import and build Skills before opening source archives', () => {
     const prompt = buildSystemPrompt(appUrl, [
       visibleSkill,
       {
@@ -90,10 +111,10 @@ describe('Agent system prompt skills', () => {
       },
     ]);
 
-    expect(prompt).toMatch(
-      /importing-apps.*building-apps.*importing-workflows.*building-workflows/s,
-    );
+    expect(prompt).toMatch(/importing-apps.*building-apps/s);
     expect(prompt).toMatch(/before downloading or extracting the attachment/i);
+    expect(prompt).not.toContain('building-workflows');
+    expect(prompt).not.toContain('importing-workflows');
   });
 
   it('hides skills disabled for model invocation', () => {

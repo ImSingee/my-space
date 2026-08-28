@@ -4,6 +4,7 @@
  * Agent Runner process — never import `~server/*` values here.
  */
 import type { ExecutionEnv } from '@earendil-works/pi-agent-core';
+import { WORKFLOWS_ENABLED } from '~/features';
 import type { PlatformClient } from '../platform-client';
 import { createAppTools } from './apps';
 import { createAttachmentTool } from './attachments';
@@ -42,7 +43,7 @@ export function createTools(
     createCommandTool(env, options.sessionId),
     createAttachmentTool(shared),
     ...createAppTools(shared),
-    ...createWorkflowTools(shared),
+    ...(WORKFLOWS_ENABLED ? createWorkflowTools(shared) : []),
     ...createWebTools(
       options.tavilyApiKey ? { tavilyApiKey: options.tavilyApiKey } : {},
     ),
