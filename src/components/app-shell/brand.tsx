@@ -7,7 +7,7 @@ type BrandProps = {
 };
 
 const MARK_SIZE = { sm: 28, md: 32, lg: 44 } as const;
-const BRAND_ICON_SRC = '/logo192.png?v=20260827';
+const BRAND_ICON_SRC = '/logo192.png?v=20260828';
 
 export function Brand({ size = 'md', withWordmark = true }: BrandProps) {
   return (
