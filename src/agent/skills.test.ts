@@ -29,18 +29,20 @@ afterEach(async () => {
 });
 
 describe('Agent skills', () => {
-  it('loads the required shipped skills without diagnostics', async () => {
+  it('loads only enabled shipped skills without diagnostics', async () => {
     const env = new NodeExecutionEnv({ cwd: process.cwd() });
     const skills = await loadAgentSkills(env, SKILLS_DIR);
+    const names = skills.map((skill) => skill.name);
 
-    expect(skills.map((skill) => skill.name)).toEqual(
+    expect(names).toEqual(
       expect.arrayContaining([
         'building-apps',
-        'building-workflows',
         'importing-apps',
-        'importing-workflows',
         'app-compatibility',
       ]),
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining(['building-workflows', 'importing-workflows']),
     );
   });
 

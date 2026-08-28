@@ -4,6 +4,7 @@ import {
   type Skill,
   type SkillDiagnostic,
 } from '@earendil-works/pi-agent-core';
+import { WORKFLOWS_ENABLED } from '~/features';
 import { SKILLS_DIR } from './paths';
 
 const REQUIRED_SKILL_NAMES = [
@@ -13,6 +14,11 @@ const REQUIRED_SKILL_NAMES = [
   'importing-workflows',
   'app-compatibility',
 ] as const;
+
+const WORKFLOW_SKILL_NAMES = new Set([
+  'building-workflows',
+  'importing-workflows',
+]);
 
 function formatDiagnostic(diagnostic: SkillDiagnostic): string {
   return `${diagnostic.code} at ${diagnostic.path}: ${diagnostic.message}`;
@@ -48,5 +54,7 @@ export async function loadAgentSkills(
     );
   }
 
-  return skills;
+  return WORKFLOWS_ENABLED
+    ? skills
+    : skills.filter((skill) => !WORKFLOW_SKILL_NAMES.has(skill.name));
 }
