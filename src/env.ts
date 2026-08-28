@@ -5,6 +5,14 @@ import {
 } from './agent/runner-constants';
 
 const DEV_AGENT_RUNNER_TOKEN = 'hatch-dev-runner-token';
+const PRERENDER_ONLY_SECRET =
+  'Zp8V4nQ2xR7mL5kC9sT3wH6fD1bG0yE4uA8jN2qP7rX5cM9v';
+const PRERENDER_ONLY_TOKEN = 'hatch-spa-shell-prerender';
+
+/** TanStack Start sets this only while its build-time SPA shell server runs. */
+export function isSpaShellPrerendering(): boolean {
+  return process.env.TSS_PRERENDERING === 'true';
+}
 
 /** Immutable startup configuration for the Platform process. */
 export type PlatformEnv = Readonly<{
@@ -77,6 +85,21 @@ function resolveAppUrl(): string {
 }
 
 function resolvePlatformEnv(): PlatformEnv {
+  if (isSpaShellPrerendering()) {
+    // The SPA shell contains no matched route or user data, but TanStack Start
+    // starts the built Nitro server to render it. Supply inert configuration so
+    // importing Better Auth does not make a production build depend on runtime
+    // credentials. The Nitro startup plugin separately skips all side effects.
+    return Object.freeze({
+      appUrl: 'http://127.0.0.1',
+      secret: PRERENDER_ONLY_SECRET,
+      betterAuthSecret: PRERENDER_ONLY_SECRET,
+      agentRunnerToken: PRERENDER_ONLY_TOKEN,
+      agentInternalHost: '127.0.0.1',
+      agentInternalPort: DEFAULT_INTERNAL_PORT,
+    });
+  }
+
   const secret = process.env.SECRET;
   if (!secret?.trim()) {
     throw new Error('SECRET is not set');

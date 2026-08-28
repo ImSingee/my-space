@@ -6,7 +6,7 @@ import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { db } from '~/db';
 // Type-only: a value import of `schema` used in exported type annotations
 // would survive the client transform and drag postgres-js into the browser
-// bundle (crashing hydration with "Buffer is not defined").
+// bundle (crashing the app with "Buffer is not defined").
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { normalizedManifestFor } from './apps/access';
 import {

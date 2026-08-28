@@ -79,9 +79,9 @@ export function AppView() {
   // Mirror the embedded app's URL hash and document title out to the host page:
   // the host URL stays shareable/refreshable (its hash deep-links into the app)
   // and the browser tab reflects whichever page the user is on inside the app.
-  // Also clears the loading overlay — on a direct (SSR) load the iframe can
-  // finish before this effect runs, so the native `load` event would be missed;
-  // the already-complete check below handles that case.
+  // Also clears the loading overlay — on a direct load the iframe can finish
+  // before this effect runs, so the native `load` event would be missed; the
+  // already-complete check below handles that case.
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame || !canOpen) return;

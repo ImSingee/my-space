@@ -15,7 +15,6 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from '@tanstack/react-query';
-import { ClientOnly } from '@tanstack/react-router';
 import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { openTextPromptModal } from '~components/system/text-prompt-modal';
@@ -186,9 +185,7 @@ export function SessionsPanel({
               No chats yet.
             </Text>
           ) : (
-            <ClientOnly
-              fallback={<Stack gap={2}>{sessions.map(renderSession)}</Stack>}
-            >
+            <>
               {groups.map((group) => (
                 <Box component="section" key={group.key}>
                   <Text component="h2" className={classes.sessionGroupTitle}>
@@ -197,7 +194,7 @@ export function SessionsPanel({
                   <Stack gap={2}>{group.sessions.map(renderSession)}</Stack>
                 </Box>
               ))}
-            </ClientOnly>
+            </>
           )}
         </Stack>
       </ScrollArea>

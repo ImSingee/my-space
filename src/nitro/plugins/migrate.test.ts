@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     });
   return {
     events,
+    isSpaShellPrerendering: vi.fn<() => boolean>(() => false),
     runMigrations: asyncStep('migrations'),
     hardenPlatformDatabase: asyncStep('harden'),
     reconcileActivations: asyncStep('activations'),
@@ -31,6 +32,7 @@ vi.mock('nitro', () => ({
 }));
 vi.mock('~env', () => ({
   getPlatformEnv: () => ({ secret: 'test-platform-secret' }),
+  isSpaShellPrerendering: mocks.isSpaShellPrerendering,
 }));
 vi.mock('~db/migrate.ts', () => ({ runMigrations: mocks.runMigrations }));
 vi.mock('~server/agent-runs', () => ({
@@ -68,6 +70,7 @@ describe('platform startup migrations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.events.length = 0;
+    mocks.isSpaShellPrerendering.mockReturnValue(false);
   });
 
   it('recovers pending activations before starting backends', async () => {
@@ -86,5 +89,13 @@ describe('platform startup migrations', () => {
       'backend-warmup',
       'retention',
     ]);
+  });
+
+  it('skips every runtime side effect while prerendering the SPA shell', async () => {
+    mocks.isSpaShellPrerendering.mockReturnValue(true);
+
+    await migratePlugin({} as never);
+
+    expect(mocks.events).toEqual([]);
   });
 });
