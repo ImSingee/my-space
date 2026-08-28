@@ -524,7 +524,7 @@ test('sends a new message with the model currently shown in the picker', async (
   );
   expect(JSON.parse(String(startCall?.[1]?.body))).toEqual({
     sessionId: 'session-1',
-    userText: 'Use the new model',
+    content: [{ type: 'text', text: 'Use the new model' }],
     images: [],
     attachmentIds: [],
     providerId: 'provider-latest',

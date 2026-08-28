@@ -1,12 +1,18 @@
 import type { JsonValue } from '~/db/schema';
 import type { AgentAttachmentRef } from '~agent/attachments';
 import { stripAttachmentPrompt } from '~agent/attachments';
+import {
+  composerModelText,
+  parseAgentComposerContent,
+  type AgentComposerContentPart,
+} from '~agent/composer-content';
 import type { SendImage } from '~agent/protocol';
 
 export type RetryableAgentTurn = {
   /** Transcript before the user message that started the failed turn. */
   baseMessages: JsonValue[];
   userText: string;
+  composerContent: AgentComposerContentPart[];
   images: SendImage[];
   attachments: AgentAttachmentRef[];
 };
@@ -37,6 +43,7 @@ export function parseRetryableAgentTurn(
     const textParts: string[] = [];
     const images: SendImage[] = [];
     const attachments: AgentAttachmentRef[] = [];
+    const composerContent = parseAgentComposerContent(message.composerContent);
     if (typeof message.content === 'string') {
       textParts.push(message.content);
     } else if (Array.isArray(message.content)) {
@@ -78,10 +85,14 @@ export function parseRetryableAgentTurn(
     }
 
     const persistedText = textParts.join('');
-    const userText =
+    const visiblePersistedText =
       attachments.length > 0
         ? stripAttachmentPrompt(persistedText, attachments)
         : persistedText;
+    const userText =
+      composerContent && composerContent.length > 0
+        ? composerModelText(composerContent)
+        : visiblePersistedText;
     if (
       userText.trim().length === 0 &&
       images.length === 0 &&
@@ -92,6 +103,7 @@ export function parseRetryableAgentTurn(
     return {
       baseMessages: messages.slice(0, index),
       userText,
+      composerContent: composerContent ?? [],
       images,
       attachments,
     };

@@ -433,6 +433,7 @@ describe('startAgentRun retry', () => {
       runId,
       sessionId: 'session-retry',
       userText: 'Failed request',
+      composerContent: [],
       images: [{ data: 'aW1hZ2U=', mimeType: 'image/png' }],
       attachments: [],
       priorMessages: baseMessages,
@@ -621,7 +622,7 @@ describe('startAgentRun retry', () => {
 
     const { runId } = await startAgentRun({
       sessionId: 'session-normal-send',
-      userText: 'A distinct new request',
+      content: [{ type: 'text', text: 'A distinct new request' }],
       images: [],
       providerId: PROVIDER_B_ID,
       modelId: MODEL_B_ID,
@@ -654,6 +655,120 @@ describe('startAgentRun retry', () => {
     );
   });
 
+  it('uses ordered App snapshots in inline model text', async () => {
+    await seedAvailableModels();
+    await seedSession('session-app-reference', []);
+
+    const { runId } = await startAgentRun({
+      sessionId: 'session-app-reference',
+      content: [
+        { type: 'text', text: 'Compare ' },
+        {
+          type: 'app',
+          id: 'app-notes',
+          name: 'Team Notes',
+          slug: 'team-notes',
+        },
+        { type: 'text', text: ' with ' },
+        {
+          type: 'app',
+          id: 'app-notes',
+          name: 'Team Notes',
+          slug: 'team-notes',
+        },
+        { type: 'text', text: ' and summarize the gaps.' },
+      ],
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+    });
+
+    const composerContent = [
+      { type: 'text', text: 'Compare ' },
+      {
+        type: 'app',
+        id: 'app-notes',
+        name: 'Team Notes',
+        slug: 'team-notes',
+      },
+      { type: 'text', text: ' with ' },
+      {
+        type: 'app',
+        id: 'app-notes',
+        name: 'Team Notes',
+        slug: 'team-notes',
+      },
+      { type: 'text', text: ' and summarize the gaps.' },
+    ] as const;
+    const modelText =
+      'Compare @APP{name="Team Notes" id="app-notes" slug="team-notes"}' +
+      ' with @APP{name="Team Notes" id="app-notes" slug="team-notes"}' +
+      ' and summarize the gaps.';
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: 'session-app-reference' },
+    });
+    expect(session?.messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: modelText }],
+        composerContent,
+      },
+    ]);
+    expect(hub.dispatchRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        userText: modelText,
+        composerContent,
+      }),
+    );
+  });
+
+  it('accepts an App snapshot after the App no longer exists', async () => {
+    await seedAvailableModels();
+    const originalMessages: JsonValue[] = [
+      { role: 'user', content: 'Earlier request' },
+      { role: 'assistant', content: 'Earlier response' },
+    ];
+    await seedSession('session-stale-app', originalMessages);
+
+    const composerContent = [
+      { type: 'text' as const, text: 'Update ' },
+      {
+        type: 'app' as const,
+        id: 'deleted-app',
+        name: 'Deleted Notes',
+        slug: 'deleted-notes',
+      },
+    ];
+    const userText =
+      'Update @APP{name="Deleted Notes" id="deleted-app" slug="deleted-notes"}';
+    const { runId } = await startAgentRun({
+      sessionId: 'session-stale-app',
+      content: composerContent,
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+    });
+
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: 'session-stale-app' },
+    });
+    expect(session?.messages).toEqual([
+      ...originalMessages,
+      {
+        role: 'user',
+        content: [{ type: 'text', text: userText }],
+        composerContent,
+      },
+    ]);
+    expect(hub.dispatchRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        userText,
+        composerContent,
+        priorMessages: originalMessages,
+      }),
+    );
+  });
+
   it('attaches only files uploaded for this session and marks them referenced', async () => {
     await seedAvailableModels();
     await seedSession('session-attachments', []);
@@ -677,7 +792,7 @@ describe('startAgentRun retry', () => {
 
     const { runId } = await startAgentRun({
       sessionId: 'session-attachments',
-      userText: 'Inspect this file',
+      content: [{ type: 'text', text: 'Inspect this file' }],
       attachmentIds: ['document-a'],
       providerId: PROVIDER_A_ID,
       modelId: MODEL_A_ID,
@@ -731,7 +846,7 @@ describe('startAgentRun retry', () => {
     await expect(
       startAgentRun({
         sessionId: 'session-attachments',
-        userText: 'Try another session file',
+        content: [{ type: 'text', text: 'Try another session file' }],
         attachmentIds: ['document-other'],
         providerId: PROVIDER_A_ID,
         modelId: MODEL_A_ID,

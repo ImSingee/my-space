@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { hasComposerText } from '~agent/composer-content';
 import { appsQueryOptions } from '~queries/apps';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import { uploadAgentFiles } from './attachment-api';
@@ -222,13 +223,18 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   const send = useCallback(
     async (
-      text: string,
+      content: ComposerSubmit['content'],
       images: ComposerImage[],
       files: ComposerFile[],
       modelValue: string,
     ): Promise<boolean> => {
       if (runBusy) return false;
-      if (!text && images.length === 0 && files.length === 0) return false;
+      if (
+        !hasComposerText(content) &&
+        images.length === 0 &&
+        files.length === 0
+      )
+        return false;
       const parsed = splitModelValue(modelValue);
       if (!parsed) return false;
 
@@ -246,7 +252,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
       const runId = await sendRun({
         sessionId,
-        userText: text,
+        content,
         images,
         attachmentIds,
         providerId: parsed.providerId,
@@ -404,12 +410,12 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // Return acceptance so the composer keeps the draft if the run fails to start
   // (e.g. an oversized payload the server rejects) instead of losing it.
   const onComposerSubmit = ({
-    text,
+    content,
     images,
     files,
   }: ComposerSubmit): Promise<boolean> => {
     if (!effectiveModel) return Promise.resolve(false);
-    return send(text, images, files, effectiveModel);
+    return send(content, images, files, effectiveModel);
   };
 
   const selectModel = useCallback(
@@ -551,6 +557,9 @@ export function Chat({ sessionId }: { sessionId: string }) {
         <Box className={classes.composerInner}>
           <Composer
             onSubmit={onComposerSubmit}
+            apps={appsQuery.data}
+            appsLoading={appsQuery.isLoading}
+            appsError={appsQuery.isError}
             busy={busy}
             onStop={stop}
             disabled={!effectiveModel}

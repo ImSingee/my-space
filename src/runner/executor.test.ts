@@ -40,6 +40,7 @@ const payload: RunStartPayload = {
   runId: 'run-1',
   sessionId: 'session-1',
   userText: 'hello',
+  composerContent: [],
   images: [],
   attachments: [],
   priorMessages: [],
@@ -406,6 +407,7 @@ describe('RunnerExecutor terminal outcomes', () => {
       expect.objectContaining({
         appUrl: APP_URL,
         tavilyApiKey: TAVILY_API_KEY,
+        composerContent: [],
       }),
     );
 

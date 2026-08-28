@@ -364,6 +364,30 @@ test('renders a persisted file attachment with a download link', async () => {
   await expect.element(screen.getByText('See the file')).toBeVisible();
 });
 
+test('renders the App snapshot as an @ mention instead of internal model text', async () => {
+  const internal =
+    'Review @APP{name="Original Name" id="app-stable" slug="original-slug"} now.';
+  const screen = await renderMessage({
+    role: 'user',
+    content: [{ type: 'text', text: internal }],
+    composerContent: [
+      { type: 'text', text: 'Review ' },
+      {
+        type: 'app',
+        id: 'app-stable',
+        name: 'Original Name',
+        slug: 'original-slug',
+      },
+      { type: 'text', text: ' now.' },
+    ],
+  });
+
+  await expect.element(screen.getByText('@Original Name')).toBeVisible();
+  expect(screen.getByTestId('message-shell').element().textContent).toBe(
+    'Review @Original Name now.',
+  );
+  expect(document.body.textContent).not.toContain(internal);
+});
 test('keeps the tail of a persisted read path visible in a narrow header', async () => {
   const screen = await renderMessage(
     {

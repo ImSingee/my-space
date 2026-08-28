@@ -8,11 +8,12 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { IconPlugConnected, IconSparkles } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { appsQueryOptions } from '~queries/apps';
 import { sessionsQueryOptions } from '~queries/agent';
 import { uploadAgentFiles } from './attachment-api';
 import { Composer, type ComposerSubmit } from './composer';
@@ -44,6 +45,7 @@ export function NewChat({
   initialPrompt?: string;
 }) {
   const qc = useQueryClient();
+  const appsQuery = useQuery(appsQueryOptions);
   const { groups, first, available } = useModelOptions();
   const [model, setModel] = useLastSelectedModel();
   const [creating, setCreating] = useState(false);
@@ -58,7 +60,7 @@ export function NewChat({
   const effectiveModel = resolveEffectiveModel(model, null, available, first);
 
   const start = async ({
-    text,
+    content,
     images,
     files,
   }: ComposerSubmit): Promise<boolean> => {
@@ -77,7 +79,7 @@ export function NewChat({
       const attachments = await uploadAgentFiles(id, files);
       await startAgentRunRequest({
         sessionId: id,
-        userText: text,
+        content,
         images,
         attachmentIds: attachments.map((attachment) => attachment.id),
         providerId,
@@ -139,6 +141,9 @@ export function NewChat({
           <>
             <Composer
               onSubmit={start}
+              apps={appsQuery.data}
+              appsLoading={appsQuery.isLoading}
+              appsError={appsQuery.isError}
               disabled={creating}
               focusOnMount
               placeholder="Describe the app you want to build…"

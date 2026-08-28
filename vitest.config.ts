@@ -73,6 +73,14 @@ export default defineConfig({
         },
         optimizeDeps: {
           exclude: ['@tanstack/react-start', '@tanstack/react-start/server'],
+          // The mention popup imports these entry points directly. Prebundle
+          // them before Browser Mode starts so Vite never reloads the page
+          // mid-test when it discovers a lazily rendered Composer.
+          include: [
+            '@floating-ui/dom',
+            '@tiptap/pm/state',
+            '@tiptap/suggestion',
+          ],
         },
         plugins: [defaultCounterTemplateFixture(), viteReact()],
         test: {

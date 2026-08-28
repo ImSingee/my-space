@@ -10,6 +10,17 @@
   font-size: var(--mantine-font-size-sm);
 }
 
+.messageAppMention {
+  display: inline;
+  padding: 1px 4px;
+  border-radius: var(--mantine-radius-xs);
+  background: var(--mantine-color-ember-light);
+  color: var(--mantine-color-ember-light-color);
+  font-weight: 600;
+  white-space: nowrap;
+  box-decoration-break: clone;
+}
+
 .userRow {
   display: flex;
   justify-content: flex-end;
@@ -565,10 +576,74 @@ button.stepHeader:hover {
   pointer-events: none;
 }
 
-.composerInput {
+.composerEditor {
+  min-width: 0;
+}
+
+.composerEditorContent {
+  min-height: 34px;
+  max-height: 240px;
+  overflow-y: auto;
   padding: 6px 6px 0;
+  outline: none;
   font-size: var(--mantine-font-size-sm);
   line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.composerEditorContent p {
+  min-height: 1.55em;
+  margin: 0;
+}
+
+.composerEditorContent p:global(.is-editor-empty)::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--mantine-color-placeholder);
+  pointer-events: none;
+}
+
+.composerMention {
+  padding: 1px 4px;
+  border-radius: var(--mantine-radius-xs);
+  background: var(--mantine-color-ember-light);
+  color: var(--mantine-color-ember-light-color);
+  font-weight: 600;
+  white-space: nowrap;
+  box-decoration-break: clone;
+}
+
+.mentionMenu {
+  width: min(340px, calc(100vw - 24px));
+  background: var(--mantine-color-body);
+}
+
+.mentionMenuPortal {
+  z-index: 400;
+}
+
+.mentionMenuItems {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.mentionMenuItem {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-text);
+}
+
+.mentionMenuItem:hover,
+.mentionMenuItem[data-selected] {
+  background: var(--mantine-color-default-hover);
+}
+
+.mentionMenuIdentity {
+  flex: 1;
+  min-width: 0;
 }
 
 .composerBar {

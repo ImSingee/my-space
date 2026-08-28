@@ -201,6 +201,7 @@ export class RunnerExecutor {
         priorMessages: payload.priorMessages as AgentMessage[],
         sessionId: payload.sessionId,
         userText: payload.userText,
+        composerContent: payload.composerContent,
         images: payload.images,
         attachments: payload.attachments,
         models,

@@ -148,6 +148,7 @@ const runPayload: RunStartPayload = {
   runId: 'run-dispatch',
   sessionId: 'session-dispatch',
   userText: 'hello',
+  composerContent: [{ type: 'text', text: 'hello' }],
   images: [],
   attachments: [],
   priorMessages: [],

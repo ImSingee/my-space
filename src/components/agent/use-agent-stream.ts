@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import type { ComposerInputPart } from '~agent/composer-content';
 import type {
   AgentRunStreamEvent,
   AgentStreamEvent,
@@ -377,7 +378,7 @@ export type SendImage = { data: string; mimeType: string };
 
 export type SendParams = {
   sessionId: string;
-  userText: string;
+  content: ComposerInputPart[];
   images?: SendImage[];
   attachmentIds?: string[];
   providerId: string;

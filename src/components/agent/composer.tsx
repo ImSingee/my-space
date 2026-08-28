@@ -5,7 +5,6 @@ import {
   Group,
   Image,
   Text,
-  Textarea,
   Tooltip,
 } from '@mantine/core';
 import {
@@ -14,8 +13,14 @@ import {
   IconPaperclip,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import {
+  hasComposerText,
+  type ComposerInputPart,
+} from '~agent/composer-content';
+import type { AppListItem } from '~server/apps';
+import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
 import classes from './chat.module.css';
 
 export type ComposerImage = { data: string; mimeType: string };
@@ -27,7 +32,7 @@ export type ComposerFile = {
   file: File;
 };
 export type ComposerSubmit = {
-  text: string;
+  content: ComposerInputPart[];
   images: ComposerImage[];
   files: ComposerFile[];
 };
@@ -131,6 +136,9 @@ export function Composer({
   seedText,
   seedNonce,
   modelControl,
+  apps,
+  appsLoading = false,
+  appsError = false,
 }: {
   /**
    * Send the draft. Return `false` (or reject) to keep the draft intact — e.g.
@@ -150,31 +158,21 @@ export function Composer({
   seedNonce?: number;
   /** Control rendered in the action bar, left of Send (e.g. ModelPicker). */
   modelControl?: ReactNode;
+  /** Apps available to the inline @ mention menu. */
+  apps?: AppListItem[];
+  appsLoading?: boolean;
+  appsError?: boolean;
 }) {
-  const [input, setInput] = useState('');
+  const [content, setContent] = useState<ComposerInputPart[]>(() =>
+    seedText ? [{ type: 'text', text: seedText }] : [],
+  );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [mentionLookupPending, setMentionLookupPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (focusOnMount) textareaRef.current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (seedNonce === undefined) return;
-    setInput(seedText ?? '');
-    const el = textareaRef.current;
-    if (el) {
-      el.focus();
-      const len = (seedText ?? '').length;
-      requestAnimationFrame(() => el.setSelectionRange(len, len));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedNonce]);
+  const editorRef = useRef<ComposerEditorHandle>(null);
 
   const addFiles = async (files: FileList | File[] | null) => {
     if (!files) return;
@@ -209,17 +207,27 @@ export function Composer({
     setAttachments((p) => p.filter((a) => a.id !== id));
 
   const canSend =
-    (input.trim().length > 0 || attachments.length > 0) &&
+    (hasComposerText(content) || attachments.length > 0) &&
     !disabled &&
+    !mentionLookupPending &&
     !submitting;
 
   const submit = async () => {
-    if (busy || disabled || submittingRef.current) return;
+    if (busy || disabled || mentionLookupPending || submittingRef.current)
+      return;
     // Snapshot exactly what we send so we can clear only this draft later.
-    const submittedInput = input;
+    const submittedDraft = editorRef.current?.getSnapshot() ?? {
+      content,
+      revision: -1,
+      mentionLookupPending: false,
+    };
     const submittedAttachments = attachments;
-    const text = submittedInput.trim();
-    if (!text && submittedAttachments.length === 0) return;
+    if (submittedDraft.mentionLookupPending) return;
+    if (
+      !hasComposerText(submittedDraft.content) &&
+      submittedAttachments.length === 0
+    )
+      return;
     const images = submittedAttachments
       .filter(
         (attachment): attachment is ImageAttachment =>
@@ -242,7 +250,12 @@ export function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      accepted = (await onSubmit({ text, images, files })) !== false;
+      accepted =
+        (await onSubmit({
+          content: submittedDraft.content,
+          images,
+          files,
+        })) !== false;
     } catch {
       accepted = false;
     } finally {
@@ -256,7 +269,7 @@ export function Composer({
       const submittedIds = new Set(
         submittedAttachments.map((attachment) => attachment.id),
       );
-      setInput((current) => (current === submittedInput ? '' : current));
+      editorRef.current?.clearIfRevision(submittedDraft.revision);
       setAttachments((current) =>
         current.filter((attachment) => !submittedIds.has(attachment.id)),
       );
@@ -337,31 +350,20 @@ export function Composer({
         }}
       />
 
-      <Textarea
-        ref={textareaRef}
-        variant="unstyled"
+      <ComposerEditor
+        ref={editorRef}
+        apps={apps}
+        appsLoading={appsLoading}
+        appsError={appsError}
+        disabled={disabled}
+        focusOnMount={focusOnMount}
         placeholder={placeholder}
-        autosize
-        minRows={1}
-        maxRows={10}
-        value={input}
-        classNames={{ input: classes.composerInput }}
-        onChange={(e) => setInput(e.currentTarget.value)}
-        onPaste={(e) => {
-          const files = Array.from(e.clipboardData.files);
-          if (files.length > 0) {
-            e.preventDefault();
-            void addFiles(files);
-          }
-        }}
-        onKeyDown={(e) => {
-          // `isComposing` guards IME users (CJK): the Enter that commits a
-          // candidate must not also submit the prompt mid-composition.
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
+        seedText={seedText}
+        seedNonce={seedNonce}
+        onChange={setContent}
+        onMentionLookupPendingChange={setMentionLookupPending}
+        onSubmit={() => void submit()}
+        onPasteFiles={(files) => void addFiles(files)}
       />
 
       <Group

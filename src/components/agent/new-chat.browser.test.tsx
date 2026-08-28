@@ -48,6 +48,13 @@ vi.mock('~queries/agent', () => ({
   },
 }));
 
+vi.mock('~queries/apps', () => ({
+  appsQueryOptions: {
+    queryKey: ['test-apps'],
+    queryFn: async () => [],
+  },
+}));
+
 vi.mock('./new-chat-api', () => ({
   createEmptyAgentSession: fixtures.createSession,
 }));
@@ -125,6 +132,44 @@ test('defaults a new chat to the last selected available model', async () => {
   });
 });
 
+test('clears an accepted draft after disabling the composer during start', async () => {
+  let finishStart: ((response: Response) => void) | undefined;
+  const startResponse = new Promise<Response>((resolve) => {
+    finishStart = resolve;
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (input) => {
+      if (String(input) !== '/api/agent/runs') {
+        throw new Error(`Unexpected fetch: ${String(input)}`);
+      }
+      return startResponse;
+    }),
+  );
+  const onStart = vi.fn<(sessionId: string) => void>();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const screen = await render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <NewChat onStart={onStart} />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+  const composer = screen.getByPlaceholder(
+    'Describe the app you want to build…',
+  );
+  await composer.fill('Build a calendar');
+
+  await screen.getByRole('button', { name: 'Send' }).click();
+  await expect.element(composer).toHaveAttribute('contenteditable', 'false');
+
+  finishStart?.(Response.json({ runId: 'new-run' }));
+  await vi.waitFor(() => expect(onStart).toHaveBeenCalledWith('new-session'));
+  await expect.element(composer).toHaveTextContent('');
+});
+
 test('reuses its unbound session when the first run start fails', async () => {
   let runAttempts = 0;
   let rejectFirstStart: (() => void) | undefined;
@@ -171,7 +216,9 @@ test('reuses its unbound session when the first run start fails', async () => {
   await expect.element(modelPicker).toBeDisabled();
   rejectFirstStart?.();
   await vi.waitFor(() => expect(send.element()).toBeEnabled());
-  await expect.element(composer).toHaveValue('Build with the latest model');
+  await expect
+    .element(composer)
+    .toHaveTextContent('Build with the latest model');
   expect(fixtures.createSession).toHaveBeenCalledOnce();
   expect(fixtures.createSession).toHaveBeenCalledWith();
 
@@ -185,7 +232,7 @@ test('reuses its unbound session when the first run start fails', async () => {
   expect(bodies).toEqual([
     {
       sessionId: 'new-session',
-      userText: 'Build with the latest model',
+      content: [{ type: 'text', text: 'Build with the latest model' }],
       images: [],
       attachmentIds: [],
       providerId: 'provider-b',
@@ -193,7 +240,7 @@ test('reuses its unbound session when the first run start fails', async () => {
     },
     {
       sessionId: 'new-session',
-      userText: 'Build with the latest model',
+      content: [{ type: 'text', text: 'Build with the latest model' }],
       images: [],
       attachmentIds: [],
       providerId: 'provider-b',
@@ -267,7 +314,7 @@ test('uploads a non-image file first and retains the draft when upload fails', a
   await send.click();
   await vi.waitFor(() => expect(uploadAttempts).toBe(1));
   await vi.waitFor(() => expect(send.element()).toBeEnabled());
-  await expect.element(composer).toHaveValue('Inspect this binary file');
+  await expect.element(composer).toHaveTextContent('Inspect this binary file');
   await expect.element(screen.getByText('payload.bin')).toBeVisible();
   expect(onStart).not.toHaveBeenCalled();
 
@@ -283,7 +330,7 @@ test('uploads a non-image file first and retains the draft when upload fails', a
   ]);
   expect(runBody).toEqual({
     sessionId: 'new-session',
-    userText: 'Inspect this binary file',
+    content: [{ type: 'text', text: 'Inspect this binary file' }],
     images: [],
     attachmentIds: [uploadedIds[0]],
     providerId: 'provider-a',

@@ -67,7 +67,11 @@ export function getRetryableErrorInput(messages: ChatMessage[]): {
     const message = messages[index];
     if (message.role !== 'user') continue;
 
-    const text = partsToText(message.content, message.attachments);
+    const text = partsToText(
+      message.content,
+      message.attachments,
+      message.composerContent,
+    );
     const images =
       typeof message.content === 'string'
         ? []

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { PROTOCOL_VERSION } from '~agent/protocol';
 
 const { abortSession, listSessionIds, removeSession, sockets } = vi.hoisted(
   () => ({
@@ -84,7 +85,7 @@ it('reports only session roots and removes stale conversations before ready', as
     expect(socket.sent).toContainEqual({
       type: 'runner.hello',
       runnerId: 'runner-test',
-      protocolVersion: 10,
+      protocolVersion: PROTOCOL_VERSION,
       activeRunIds: [],
       workspaceSessionIds: ['session-present'],
     }),

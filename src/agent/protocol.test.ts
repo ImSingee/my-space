@@ -62,8 +62,8 @@ describe('App creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v10 for compatibility and App association changes', () => {
-    expect(PROTOCOL_VERSION).toBe(10);
+  it('uses protocol v11 for required Composer reference payloads', () => {
+    expect(PROTOCOL_VERSION).toBe(11);
   });
 
   it('parses runner.hello', () => {
@@ -314,6 +314,7 @@ describe('platform -> runner messages', () => {
       runId: 'r1',
       sessionId: 's1',
       userText: 'hello',
+      composerContent: [{ type: 'text', text: 'hello' }],
       images: [],
       attachments: [],
       priorMessages: [],
@@ -335,6 +336,7 @@ describe('platform -> runner messages', () => {
     });
     if (message.type !== 'run.start') throw new Error('wrong type');
     expect(message.model.model.id).toBe('m1');
+    expect(message.composerContent).toEqual([{ type: 'text', text: 'hello' }]);
   });
 
   it('parses run.answer and defaults selectedOptionIds', () => {
