@@ -148,6 +148,27 @@ export function toolLabel(name: string, label?: string): string {
   return label ?? TOOL_LABELS[name] ?? name;
 }
 
+/**
+ * Prefer a tool-call-specific UI title when one exists. Tool arguments are
+ * persisted while live-only labels are not, so derive the Run Command title
+ * from its purpose in both render paths and retain the static label as a
+ * legacy/malformed-input fallback.
+ */
+export function toolDisplayLabel(
+  name: string,
+  value: unknown,
+  label?: string,
+): string {
+  if (name === 'run_command') {
+    const purpose = toolArgumentsRecord(value)?.purpose;
+    if (typeof purpose === 'string') {
+      const oneLine = purpose.replace(/\s+/g, ' ').trim();
+      if (oneLine) return oneLine;
+    }
+  }
+  return toolLabel(name, label);
+}
+
 export type ToolDetail = {
   value: string;
   ellipsis: 'start' | 'end';

@@ -108,12 +108,16 @@ function deployResult(isError = false): ToolResultMessage {
   };
 }
 
-function runCommandCall(id: string, command: string): ToolCallBlock {
+function runCommandCall(
+  id: string,
+  command: string,
+  purpose?: string,
+): ToolCallBlock {
   return {
     type: 'toolCall',
     id,
     name: 'run_command',
-    arguments: { command },
+    arguments: { command, ...(purpose === undefined ? {} : { purpose }) },
   };
 }
 
@@ -451,10 +455,11 @@ test('keeps the tail of a completed live write path visible', async () => {
 });
 
 test('reveals a complete persisted command without overflowing a narrow message', async () => {
+  const purpose = `Inspect ${'a very long command purpose '.repeat(8)}`;
   const screen = await renderMessage(
     {
       role: 'assistant',
-      content: [runCommandCall('command-long', longCommand)],
+      content: [runCommandCall('command-long', longCommand, purpose)],
     },
     {
       width: 320,
@@ -471,7 +476,7 @@ test('reveals a complete persisted command without overflowing a narrow message'
     },
   );
 
-  const toggle = screen.getByRole('button', { name: /Run command/ });
+  const toggle = screen.getByRole('button', { name: new RegExp(purpose) });
   expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
   const controlledId = toggle.element().getAttribute('aria-controls');
   expect(controlledId).toBeTruthy();
@@ -578,13 +583,15 @@ test('shows every web fetch input in a live call', async () => {
 });
 
 test('collapses a live command after completion and preserves its details', async () => {
+  const purpose = '  Run\nproject   checks  ';
   const screen = await render(
     <MantineProvider>
       <StreamingToolStep
         tool={{
           id: 'command-output',
           name: 'run_command',
-          args: { command: longCommand },
+          label: 'Run command',
+          args: { purpose, command: longCommand },
           done: false,
           output: 'partial output',
         }}
@@ -607,7 +614,8 @@ test('collapses a live command after completion and preserves its details', asyn
         tool={{
           id: 'command-output',
           name: 'run_command',
-          args: { command: longCommand },
+          label: 'Run command',
+          args: { purpose, command: longCommand },
           done: true,
           output: 'final output',
         }}
@@ -615,7 +623,9 @@ test('collapses a live command after completion and preserves its details', asyn
     </MantineProvider>,
   );
 
-  const toggle = screen.getByRole('button', { name: /Run command/ });
+  const toggle = screen.getByRole('button', {
+    name: /Run project checks/,
+  });
   expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
   const controlledId = toggle.element().getAttribute('aria-controls');
   const collapsedBody = document.getElementById(controlledId as string);
@@ -634,6 +644,17 @@ test('collapses a live command after completion and preserves its details', asyn
   expect(completedCommand.element().lastElementChild?.textContent).toBe(
     longCommand,
   );
+});
+
+test('falls back to Run command for a persisted legacy call', async () => {
+  const screen = await renderMessage({
+    role: 'assistant',
+    content: [runCommandCall('legacy-command', 'pwd')],
+  });
+
+  await expect
+    .element(screen.getByRole('button', { name: /Run command/ }))
+    .toBeVisible();
 });
 
 test('reveals a persisted read path without overflowing a narrow message', async () => {

@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditFileDetails } from './edit-file-details';
 import type { PlatformClient } from './platform-client';
 import { writeEnvFile } from './env-file';
@@ -82,7 +82,7 @@ async function setup(
     if (!found) throw new Error(`Missing tool ${name}`);
     return found;
   };
-  return { root, readOnlyRoot, getTool };
+  return { root, readOnlyRoot, env, getTool };
 }
 
 function textOf(result: { content: { type: string; text?: string }[] }) {
@@ -696,9 +696,102 @@ describe('agent file tools', () => {
 });
 
 describe('run_command sandbox', () => {
+  it('requires a concise purpose and validates bounded timeout overrides', async () => {
+    const { getTool } = await setup();
+    const commandTool = getTool('run_command');
+    const validate = (arguments_: Record<string, unknown>) =>
+      validateToolCall([commandTool], {
+        type: 'toolCall',
+        id: 'command',
+        name: 'run_command',
+        arguments: arguments_,
+      });
+
+    expect(
+      validate({ purpose: 'Check the build', command: 'pnpm build' }),
+    ).toEqual({ purpose: 'Check the build', command: 'pnpm build' });
+    expect(
+      validate({
+        purpose: 'Build the container',
+        command: 'docker build .',
+        timeout_seconds: 3600,
+      }),
+    ).toEqual({
+      purpose: 'Build the container',
+      command: 'docker build .',
+      timeout_seconds: 3600,
+    });
+    expect(commandTool.parameters).toMatchObject({
+      required: ['purpose', 'command'],
+      properties: {
+        purpose: {
+          type: 'string',
+          minLength: 1,
+          pattern: '\\S',
+          description: expect.stringMatching(/very brief.+UI title.+concise/i),
+        },
+        timeout_seconds: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 3600,
+          description: expect.stringMatching(
+            /defaults to 120.+only after.+timed out.+long-running/i,
+          ),
+        },
+      },
+    });
+    const validationError = /Validation failed for tool "run_command"/;
+    expect(() => validate({ command: 'true' })).toThrow(validationError);
+    expect(() => validate({ purpose: '   ', command: 'true' })).toThrow(
+      validationError,
+    );
+    expect(() =>
+      validate({ purpose: 'Check', command: 'true', timeout_seconds: 0 }),
+    ).toThrow(validationError);
+    expect(() =>
+      validate({ purpose: 'Check', command: 'true', timeout_seconds: 3601 }),
+    ).toThrow(validationError);
+    await expect(
+      commandTool.execute('fractional-timeout', {
+        purpose: 'Reject a fractional timeout',
+        command: 'true',
+        timeout_seconds: 1.5,
+      }),
+    ).rejects.toThrow(/timeout_seconds must be an integer between 1 and 3600/);
+  });
+
+  it('uses the default timeout and forwards an explicit override', async () => {
+    const { env, getTool } = await setup();
+    const exec = vi.spyOn(env, 'exec').mockResolvedValue({
+      ok: true,
+      value: { stdout: '', stderr: '', exitCode: 0 },
+    });
+    const commandTool = getTool('run_command');
+
+    await commandTool.execute('default-timeout', {
+      purpose: 'Use the default timeout',
+      command: 'true',
+    });
+    expect(exec).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ timeout: 120 }),
+    );
+
+    await commandTool.execute('custom-timeout', {
+      purpose: 'Wait for a long build',
+      command: 'true',
+      timeout_seconds: 900,
+    });
+    expect(exec).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ timeout: 900 }),
+    );
+  });
+
   it('runs ordinary commands (wrapped when the sandbox is available)', async () => {
     const { getTool } = await setup();
     const result = await getTool('run_command').execute('cmd', {
+      purpose: 'Verify command execution',
       command: 'echo sandbox-ok',
     });
     expect(textOf(result)).toContain('sandbox-ok');
@@ -709,6 +802,7 @@ describe('run_command sandbox', () => {
   it('keeps output and exit details for a non-zero command', async () => {
     const { getTool } = await setup();
     const result = await getTool('run_command').execute('cmd', {
+      purpose: 'Inspect a failing command',
       command: "printf 'command-out\\n'; printf 'command-err\\n' >&2; exit 7",
     });
 
@@ -725,6 +819,7 @@ describe('run_command sandbox', () => {
       { key: 'SECOND_TOKEN', value: 'second-value' },
     ]);
     const result = await getTool('run_command').execute('cmd', {
+      purpose: 'Verify selected environment values',
       command:
         'test "$FIRST_TOKEN" = "first-value" && ' +
         'test -z "${SECOND_TOKEN+x}" && echo selected-only',
@@ -744,6 +839,7 @@ describe('run_command sandbox', () => {
 
     await expect(
       getTool('run_command').execute('cmd', {
+        purpose: 'Check a missing environment value',
         command: 'true',
         env_keys: ['MISSING_TOKEN'],
       }),
@@ -754,12 +850,14 @@ describe('run_command sandbox', () => {
     const { getTool } = await setup();
     await expect(
       getTool('run_command').execute('cmd', {
+        purpose: 'Reject a reserved environment value',
         command: 'true',
         env_keys: ['PATH'],
       }),
     ).rejects.toThrow(/reserved/);
     await expect(
       getTool('run_command').execute('cmd', {
+        purpose: 'Reject duplicate environment values',
         command: 'true',
         env_keys: ['TOKEN', 'TOKEN'],
       }),
@@ -778,6 +876,7 @@ describe('run_command sandbox', () => {
 
     const { getTool } = await setup();
     const result = await getTool('run_command').execute('cmd', {
+      purpose: 'Verify platform environment isolation',
       command: `cat ${JSON.stringify(envFile)}`,
     });
     const body = textOf(result);

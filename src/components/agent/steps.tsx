@@ -18,8 +18,8 @@ import {
   type ToolInputDetail,
   toolArgumentsRecord,
   toolDetail,
+  toolDisplayLabel,
   toolInputDetails,
-  toolLabel,
 } from './types';
 import classes from './chat.module.css';
 
@@ -329,7 +329,7 @@ export function ToolStep({
   return (
     <StepRow
       icon={icon}
-      label={toolLabel(name)}
+      label={toolDisplayLabel(name, args)}
       detail={resolvedToolDetail(name, args, result?.details, isError, detail)}
       error={isError}
     >
@@ -474,7 +474,7 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     tool.details,
     isError,
   );
-  const label = toolLabel(tool.name, tool.label);
+  const label = toolDisplayLabel(tool.name, tool.args, tool.label);
   const header = (
     <>
       <span className={isError ? classes.stepIconError : classes.stepIcon}>

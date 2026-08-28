@@ -13,6 +13,10 @@ const MAX_COMMAND_OUTPUT = MAX_FILE_CHARS;
 const HARD_OUTPUT_LIMIT = 5_000_000;
 /** Minimum gap between streamed run_command updates. */
 const COMMAND_UPDATE_INTERVAL_MS = 100;
+/** Default command timeout when the Agent does not request an override. */
+const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
+/** Keep one tool call bounded even when a longer command is expected. */
+const MAX_COMMAND_TIMEOUT_SECONDS = 3600;
 
 export type CommandResultDetails = { exitCode: number };
 
@@ -36,6 +40,21 @@ function capCommandStream(label: string, value: string): string | null {
   );
 }
 
+function commandTimeoutSeconds(value: number | undefined): number {
+  const timeout = value ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
+  if (
+    !Number.isSafeInteger(timeout) ||
+    timeout < 1 ||
+    timeout > MAX_COMMAND_TIMEOUT_SECONDS
+  ) {
+    throw new Error(
+      `timeout_seconds must be an integer between 1 and ` +
+        `${MAX_COMMAND_TIMEOUT_SECONDS}.`,
+    );
+  }
+  return timeout;
+}
+
 export function createCommandTool(
   env: ExecutionEnv,
   sessionId?: string,
@@ -49,7 +68,25 @@ export function createCommandTool(
     selectStreamDetails: (details) =>
       isCommandResultDetails(details) ? details : undefined,
     parameters: Type.Object({
+      purpose: Type.String({
+        minLength: 1,
+        pattern: '\\S',
+        description:
+          'Very brief purpose for running this command, shown as its UI ' +
+          'title. Keep it concise.',
+      }),
       command: Type.String({ description: 'Shell command to run.' }),
+      timeout_seconds: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: MAX_COMMAND_TIMEOUT_SECONDS,
+          description:
+            `Maximum runtime in seconds. Defaults to ` +
+            `${DEFAULT_COMMAND_TIMEOUT_SECONDS}. Set this only after a ` +
+            'command timed out at the default, or when you already know it ' +
+            'is long-running and likely to exceed the default.',
+        }),
+      ),
       env_keys: Type.Optional(
         Type.Array(
           Type.String({
@@ -62,6 +99,7 @@ export function createCommandTool(
       ),
     }),
     execute: async (_id, params, signal, onUpdate) => {
+      const timeoutSeconds = commandTimeoutSeconds(params.timeout_seconds);
       const requestedKeys = params.env_keys ?? [];
       if (new Set(requestedKeys).size !== requestedKeys.length) {
         throw new Error('env_keys must be unique.');
@@ -113,7 +151,7 @@ export function createCommandTool(
       const { wrapShellCommand } = await import('../shell-sandbox');
       const res = await env.exec(wrapShellCommand(params.command, sessionId), {
         ...(selectedEnv ? { env: selectedEnv } : {}),
-        timeout: 120,
+        timeout: timeoutSeconds,
         abortSignal: signal,
         onStdout: stream,
         onStderr: stream,
