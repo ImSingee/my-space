@@ -159,6 +159,11 @@ button.stepHeader:hover {
 
 .stepLabel {
   flex-shrink: 0;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--mantine-font-size-xs);
   font-weight: 500;
   color: var(--mantine-color-text);
