@@ -98,15 +98,13 @@ export function DeploymentHistory({ appId }: { appId: string }) {
       emptyNoun="app"
       onRollback={requestRollback}
       rollingId={rollback.isPending ? (rollback.variables ?? null) : null}
-      renderVersionMeta={(deployment) => (
-        <Badge
-          size="xs"
-          variant="light"
-          color={deployment.compatibility.isLatest ? 'gray' : 'orange'}
-        >
-          Compatibility v{deployment.compatibility.version}
-        </Badge>
-      )}
+      renderVersionMeta={(deployment) =>
+        deployment.compatibility.isLatest ? null : (
+          <Badge size="xs" variant="light" color="orange">
+            Compatibility v{deployment.compatibility.version}
+          </Badge>
+        )
+      }
       renderRollbackAction={(deployment, defaultAction) =>
         requiresAgentRollback(deployment) ? (
           <Tooltip
