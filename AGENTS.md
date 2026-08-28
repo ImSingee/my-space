@@ -8,11 +8,16 @@ Source lives in `src/`. Global routing is defined in `src/router.tsx`, with rout
 
 - UI: Mantine v8. Use the context7 MCP tool with the library id `/mantine/mantine` to load docs.
 - Routing: TanStack Start/Router. Use context7 with `/websites/tanstack_com-start-latest` for Start docs and `/websites/tanstack_router` for Router docs.
+- Rendering: The platform UI uses TanStack Start global SPA mode
+  (`spa.enabled: true` with `ssr: false` on the root route). Route components,
+  loaders, and `beforeLoad` hooks run in the browser. Nitro remains required for
+  Server Functions, API and authentication routes, App runtime routes, and the
+  Agent Runner; the production deployment is not static-only.
 - Generated files like `routeTree.gen.ts` are auto-created; do not edit.
 
 ## Build & Development Commands
 
-Use pnpm for everything. `pnpm dev` starts the Vite dev server on port 3000 with hot reload. `pnpm build` emits the optimized bundle into `.output/`, while `pnpm preview` runs the Nitro server from `.output/` to sanity-check SSR. `pnpm check:types` runs `tsc --noEmit`. `pnpm lint` runs Oxlint, and `pnpm format` runs Oxfmt then auto-fixes lint errors with Oxlint.
+Use pnpm for everything. `pnpm dev` starts the Vite dev server on port 3000 with hot reload. `pnpm build` emits the optimized bundle into `.output/`, while `pnpm preview` runs the Nitro server from `.output/` to sanity-check the production SPA shell and server endpoints. `pnpm check:types` runs `tsc --noEmit`. `pnpm lint` runs Oxlint, and `pnpm format` runs Oxfmt then auto-fixes lint errors with Oxlint.
 
 Dependency upgrade policy:
 

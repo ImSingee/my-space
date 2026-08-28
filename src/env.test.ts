@@ -13,6 +13,7 @@ const ENV_KEYS = [
   'HATCH_RUNNER_ID',
   'HATCH_ALLOW_UNSANDBOXED',
   'TAVILY_API_KEY',
+  'TSS_PRERENDERING',
 ] as const;
 
 beforeEach(() => {
@@ -26,6 +27,23 @@ afterEach(() => {
 });
 
 describe('getPlatformEnv', () => {
+  it('uses inert configuration for the build-time SPA shell', async () => {
+    vi.stubEnv('APP_URL', undefined);
+    vi.stubEnv('SECRET', undefined);
+    vi.stubEnv('AGENT_RUNNER_TOKEN', undefined);
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('TSS_PRERENDERING', 'true');
+    const { getPlatformEnv } = await import('./env');
+
+    const result = getPlatformEnv();
+
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(result.appUrl).toBe('http://127.0.0.1');
+    expect(result.secret).toBe(result.betterAuthSecret);
+    expect(result.secret.length).toBeGreaterThanOrEqual(32);
+    expect(result.agentRunnerToken).toBe('hatch-spa-shell-prerender');
+  });
+
   it.each([undefined, '   '])(
     'requires APP_URL when it is %s',
     async (appUrl) => {

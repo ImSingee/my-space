@@ -21,6 +21,10 @@ import { appCssVariablesResolver, appTheme } from '~ui/theme';
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
+  // The shell is still prerendered, but every matched route (including its
+  // beforeLoad/loader hooks) must execute in the browser in global SPA mode.
+  // Setting this on the root also applies the boundary to all descendants.
+  ssr: false,
   head: () => ({
     meta: [
       {

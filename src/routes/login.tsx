@@ -14,7 +14,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
 import { Brand } from '~components/app-shell/brand';
-import { fetchSession } from '~server/auth';
+import { hasActiveSession } from '~server/auth';
 import { getSignupConfig } from '~server/users';
 import classes from './login.module.css';
 
@@ -33,8 +33,8 @@ export const Route = createFileRoute('/login')({
     redirect: typeof search.redirect === 'string' ? search.redirect : undefined,
   }),
   beforeLoad: async ({ search }) => {
-    const session = await fetchSession();
-    if (session) {
+    const authenticated = await hasActiveSession();
+    if (authenticated) {
       throw redirect({ href: safeRedirect(search.redirect) });
     }
   },

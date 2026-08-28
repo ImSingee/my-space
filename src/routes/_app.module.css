@@ -2,7 +2,8 @@
  * The top bar is a mobile-only affordance: on desktop the brand + navigation
  * live in the sidebar, so we hide the header and strip the offset it would
  * otherwise reserve above both the navbar and the main area. Driven purely by
- * CSS so it is SSR-correct and immune to media-query hydration timing.
+ * CSS so it is correct on the first render and independent of JavaScript
+ * media-query timing.
  */
 @media (min-width: 48em) {
   .shell {

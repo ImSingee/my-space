@@ -7,18 +7,19 @@ import { getRequest } from '@tanstack/react-start/server';
 import { auth } from '~auth/server';
 
 /**
- * Resolve the current Better Auth session on the server (SSR loaders, server
- * functions). Returns `null` when unauthenticated.
+ * Report whether the request has a valid Better Auth session.
+ *
+ * This server function is called by client-side route guards, so its return
+ * value crosses the network. Never return the raw session here: it contains
+ * server-only fields such as the session token.
  */
-export const fetchSession = createServerFn({ method: 'GET' }).handler(
+export const hasActiveSession = createServerFn({ method: 'GET' }).handler(
   async () => {
     const request = getRequest();
     const session = await auth.api.getSession({ headers: request.headers });
-    return session ?? null;
+    return Boolean(session);
   },
 );
-
-export type AppSession = Awaited<ReturnType<typeof fetchSession>>;
 
 /**
  * Require an authenticated session inside a server function. Throws (rejecting
@@ -26,9 +27,9 @@ export type AppSession = Awaited<ReturnType<typeof fetchSession>>;
  *
  * Wrapped with `createServerOnlyFn` so its server-only `getRequest()` usage is
  * stripped from client bundles — `~server/auth` is import-reachable from client
- * routes (e.g. `/login` consumes {@link fetchSession}), and a plain function
- * here would drag `@tanstack/react-start/server` into the client build and fail
- * TanStack Start import protection.
+ * routes (e.g. `/login` consumes {@link hasActiveSession}), and a plain
+ * function here would drag `@tanstack/react-start/server` into the client build
+ * and fail TanStack Start import protection.
  */
 export const requireSession = createServerOnlyFn(async () => {
   const request = getRequest();
@@ -43,7 +44,7 @@ export const requireSession = createServerOnlyFn(async () => {
  * TanStack server functions are plain HTTP endpoints, so a route's `beforeLoad`
  * guard does NOT protect them — without this, anyone could call the data RPCs
  * directly. Attach it to every data server function (everything except the
- * public {@link fetchSession} probe used to determine auth state).
+ * public {@link hasActiveSession} probe used to determine auth state).
  *
  * SINGLE-TENANT BY DESIGN: the platform is one person's personal space, so
  * authentication is the only boundary — once signed in, a session can see and

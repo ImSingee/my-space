@@ -28,9 +28,19 @@ const config = defineConfig({
       ignored: ['**/workspace/**', path.join(dataDir, '**')],
     },
   },
+  preview: {
+    // TanStack Start generates the SPA shell through a Vite preview server.
+    // node:26-slim resolves the listener and fetch sides of `localhost` to
+    // different IP families, so use an explicit loopback address.
+    host: '127.0.0.1',
+  },
   plugins: [
     devtools(),
-    tanstackStart(),
+    tanstackStart({
+      spa: {
+        enabled: true,
+      },
+    }),
     nitro({
       noExternals: true,
       // esbuild's Node API locates its native binary relative to its own

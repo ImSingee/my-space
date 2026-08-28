@@ -10,23 +10,21 @@ import { useEffect } from 'react';
 import { Brand } from '~components/app-shell/brand';
 import { Sidebar } from '~components/app-shell/sidebar';
 import { PlatformEventsProvider } from '~components/system/platform-events';
-import { fetchSession } from '~server/auth';
+import { hasActiveSession } from '~server/auth';
 import classes from './_app.module.css';
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
-    const session = await fetchSession();
-    if (!session) {
+    const authenticated = await hasActiveSession();
+    if (!authenticated) {
       // Carry the attempted URL so /login can return the user to their deep
       // link after authenticating instead of always landing on /dashboard.
       throw redirect({ to: '/login', search: { redirect: location.href } });
     }
-    // Intentionally return nothing. TanStack Router serializes beforeLoad return
-    // values into the SSR-dehydrated match state sent to the client, so returning
-    // the Better Auth session would leak its token (which must stay in the
-    // HttpOnly cookie). This is a guard only — server functions enforce auth
-    // independently via authMiddleware/requireSession, and the client reads user
-    // info through authClient.useSession().
+    // This guard intentionally receives only a boolean. The Better Auth session
+    // token stays in its HttpOnly cookie, while server functions independently
+    // enforce authorization through authMiddleware/requireSession. The client
+    // reads display-safe user information through authClient.useSession().
   },
   component: AppLayout,
 });
