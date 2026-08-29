@@ -80,7 +80,7 @@ describe('normalizedManifestFor', () => {
 
     const manifest = await normalizedManifestFor('01immutableid');
 
-    expect(manifest?.app?.url).toBe('/app/human-readable-slug/embed/');
+    expect(manifest?.app?.url).toBe('/app/human-readable-slug');
     expect(manifest?.widgets[0]?.url).toBe(
       '/api/app/01immutableid/widget/summary',
     );

@@ -488,7 +488,11 @@ export type NormalizedManifest = {
     /** Absent on legacy source artifacts; set by the bundle build path. */
     format?: 'bundle-v1';
   };
-  /** Iframe URL and discoverable routes for the full app, when present. */
+  /**
+   * Full-App URL and discoverable routes, when present. Stored deployment
+   * manifests use the stable id-based asset URL; projected read models expose
+   * the canonical user-facing `/app/<slug>` URL.
+   */
   app?: {
     url: string;
     /** Optional only for normalized manifests persisted before route metadata. */
@@ -571,7 +575,7 @@ export function projectAppManifestUrls(
       ? {
           app: {
             ...supportedManifest.app,
-            url: `/app/${slug}/embed/`,
+            url: `/app/${slug}`,
           },
         }
       : {}),

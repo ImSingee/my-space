@@ -244,7 +244,7 @@ describe('app route manifest', () => {
       'friendly-demo',
     );
 
-    expect(projected.app?.url).toBe('/app/friendly-demo/embed/');
+    expect(projected.app?.url).toBe('/app/friendly-demo');
     expect(projected.widgets[0]?.url).toBe(
       '/api/app/01authoritativeid/widget/summary',
     );

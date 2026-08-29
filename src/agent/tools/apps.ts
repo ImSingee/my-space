@@ -134,9 +134,9 @@ export function createAppTools(options: {
     label: 'Get app details',
     description:
       "Get one app's details: status, live version, capabilities, the " +
-      'normalized manifest (app/widget/RPC/webhook URLs), runtime ' +
-      'state (backend running, cron jobs), and deployment history. Mirrors ' +
-      'the app management panel.',
+      'user-facing App URL, normalized widget/RPC/webhook URLs, runtime state ' +
+      '(backend running, cron jobs), and deployment history. Mirrors the app ' +
+      'management panel.',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to inspect.' }),
     }),
@@ -439,7 +439,8 @@ export function createAppTools(options: {
       'checks for every enabled manifest entry, and production bundles before ' +
       'database migration or release activation. Requires package.json, ' +
       'deno.json, and a committed deno.lock; load the building-apps Skill to ' +
-      'repair validation errors. Reports the app/widget/RPC URLs.',
+      'repair validation errors. Reports the user-facing App URL plus ' +
+      'widget/RPC URLs.',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to deploy.' }),
@@ -497,9 +498,7 @@ export function createAppTools(options: {
           });
           const lines = [
             `Deployed "${detail.id}" (v${res.version}, compatibility v${res.compatibilityVersion}).`,
-            res.normalized.app
-              ? `App (iframe): ${res.normalized.app.url}`
-              : null,
+            res.normalized.app ? `App URL: ${res.normalized.app.url}` : null,
             res.normalized.widgets.length > 0
               ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
               : null,
