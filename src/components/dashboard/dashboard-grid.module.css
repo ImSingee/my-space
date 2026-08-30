@@ -46,6 +46,10 @@
   touch-action: none;
 }
 
+.measure[data-editing] :global(.react-grid-item > .react-resizable-handle) {
+  opacity: 1;
+}
+
 .grid :global(.react-resizable-handle)::after {
   content: '';
   position: absolute;

@@ -71,18 +71,22 @@ function Harness({
   editing = false,
   previewBreakpoint,
   transformScale = 1,
+  leftOffset = 0,
   onLayoutCommit = () => {},
 }: {
   width: number;
   editing?: boolean;
   previewBreakpoint?: 'desktop' | 'tablet' | 'mobile';
   transformScale?: number;
+  leftOffset?: number;
   onLayoutCommit?: OnLayoutCommit;
 }) {
   return (
     <div
+      data-left-offset={leftOffset}
       style={{
         width,
+        marginLeft: leftOffset,
         transform:
           transformScale === 1 ? undefined : `scale(${transformScale})`,
         transformOrigin: 'top left',
@@ -101,6 +105,25 @@ function Harness({
       </MantineProvider>
     </div>
   );
+}
+
+async function dragSecondWidgetToFirst({
+  container,
+  onLayoutCommit,
+}: {
+  container: HTMLElement;
+  onLayoutCommit: ReturnType<typeof vi.fn<OnLayoutCommit>>;
+}) {
+  const source = container.querySelector<HTMLElement>('[data-widget-id="b"]');
+  const target = container.querySelector<HTMLElement>('[data-widget-id="a"]');
+  expect(source).toBeTruthy();
+  expect(target).toBeTruthy();
+  await userEvent.dragAndDrop(source!, target!);
+  await vi.waitFor(() => expect(onLayoutCommit).toHaveBeenCalled());
+  const [breakpoint, committed] = onLayoutCommit.mock.calls.at(-1)!;
+
+  expect(breakpoint).toBe('desktop');
+  return committed;
 }
 
 function readItems(container: HTMLElement) {
@@ -143,36 +166,61 @@ test('edit preview uses the selected layout independent of host width', async ()
   });
 });
 
-test('commits logical grid coordinates when the preview is scaled', async () => {
-  const onLayoutCommit = vi.fn<OnLayoutCommit>();
-  const { container } = await render(
-    <Harness
-      width={1200}
-      editing
-      previewBreakpoint="desktop"
-      transformScale={0.8}
-      onLayoutCommit={onLayoutCommit}
-    />,
-  );
-  await vi.waitFor(() => {
-    expect(container.querySelectorAll('.react-grid-item')).toHaveLength(2);
-  });
+test.each([1, 0.8])(
+  'commits drag coordinates relative to an offset grid at scale %s',
+  async (transformScale) => {
+    const atOriginCommit = vi.fn<OnLayoutCommit>();
+    const offsetCommit = vi.fn<OnLayoutCommit>();
+    const { container } = await render(
+      <>
+        <Harness
+          width={1200}
+          editing
+          previewBreakpoint="desktop"
+          transformScale={transformScale}
+          onLayoutCommit={atOriginCommit}
+        />
+        <Harness
+          width={1200}
+          editing
+          previewBreakpoint="desktop"
+          transformScale={transformScale}
+          leftOffset={240}
+          onLayoutCommit={offsetCommit}
+        />
+      </>,
+    );
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('.react-grid-item')).toHaveLength(4);
+    });
 
-  const source = container.querySelector<HTMLElement>('[data-widget-id="a"]');
-  const target = container.querySelector<HTMLElement>('[data-widget-id="b"]');
-  expect(source).toBeTruthy();
-  expect(target).toBeTruthy();
-  vi.stubGlobal('process', { env: {} });
-  try {
-    await userEvent.dragAndDrop(source!, target!);
-    await vi.waitFor(() => expect(onLayoutCommit).toHaveBeenCalled());
-    const [breakpoint, committed] = onLayoutCommit.mock.calls.at(-1)!;
-    expect(breakpoint).toBe('desktop');
-    expect(committed.find((item) => item.id === 'a')?.x).not.toBe(0);
-  } finally {
-    vi.unstubAllGlobals();
-  }
-});
+    const atOriginContainer = container.querySelector<HTMLElement>(
+      '[data-left-offset="0"]',
+    );
+    const offsetContainer = container.querySelector<HTMLElement>(
+      '[data-left-offset="240"]',
+    );
+    expect(atOriginContainer).toBeTruthy();
+    expect(offsetContainer).toBeTruthy();
+
+    vi.stubGlobal('process', { env: {} });
+    try {
+      const atOrigin = await dragSecondWidgetToFirst({
+        container: atOriginContainer!,
+        onLayoutCommit: atOriginCommit,
+      });
+      const offset = await dragSecondWidgetToFirst({
+        container: offsetContainer!,
+        onLayoutCommit: offsetCommit,
+      });
+
+      expect(atOrigin.find((item) => item.id === 'b')?.x).not.toBe(6);
+      expect(offset).toEqual(atOrigin);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 test('commits a resize when the preview is scaled', async () => {
   const onLayoutCommit = vi.fn<OnLayoutCommit>();
@@ -195,6 +243,8 @@ test('commits a resize when the preview is scaled', async () => {
   const target = container.querySelector<HTMLElement>('[data-widget-id="b"]');
   expect(handle).toBeTruthy();
   expect(target).toBeTruthy();
+  await userEvent.hover(target!);
+  expect(getComputedStyle(handle!).opacity).toBe('1');
   vi.stubGlobal('process', { env: {} });
   try {
     await userEvent.dragAndDrop(handle!, target!);

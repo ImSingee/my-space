@@ -3,9 +3,14 @@
  * imports so they can be unit-tested in Node. The grid component wires these into
  * react-grid-layout; the snapping rules themselves live here.
  */
-import type { Layout } from 'react-grid-layout';
+import type {
+  Layout,
+  LayoutConstraint,
+  LayoutItem,
+} from 'react-grid-layout/core';
 import {
   DASHBOARD_COLUMNS,
+  DASHBOARD_MAX_HEIGHT,
   FREEFORM_MIN_HEIGHT,
   FREEFORM_MIN_WIDTH,
   fitWidgetSize,
@@ -22,23 +27,23 @@ export type WidgetLayoutDefinition = {
 };
 
 /**
- * Build one breakpoint's RGL layout, deriving each widget's resize
- * constraints from its declared footprints: clamp the handle to the footprints'
- * bounding box, and lock resizing entirely when only one footprint is supported.
- * Multi-footprint and free-form widgets inherit the grid-level edit-mode flag.
+ * Build one breakpoint's RGL layout, deriving each widget's resize constraints
+ * from its declared footprints. The min/max bounds limit the resize handle, a
+ * v2 per-item constraint snaps to valid footprints, and a single footprint
+ * locks resizing entirely. Free-form widgets inherit the grid edit-mode flag.
  */
 export function buildWidgetLayout(
   widgets: WidgetLayoutDefinition[],
   layout: DashboardLayoutItem[],
   breakpoint: DashboardBreakpoint,
-): Layout[] {
+): Layout {
   const widgetsById = new Map(widgets.map((widget) => [widget.id, widget]));
   const columns = DASHBOARD_COLUMNS[breakpoint];
 
   return layout.flatMap((item) => {
     const widget = widgetsById.get(item.id);
     if (!widget) return [];
-    const base: Layout = {
+    const base: LayoutItem = {
       i: item.id,
       x: item.x,
       y: item.y,
@@ -54,14 +59,28 @@ export function buildWidgetLayout(
       base.maxW = Math.max(...sizes.map((s) => s.w));
       base.minH = Math.min(...sizes.map((s) => s.h));
       base.maxH = Math.max(...sizes.map((s) => s.h));
+      base.constraints = [
+        declaredFootprintConstraint(widget.supportedSizes, breakpoint),
+      ];
       if (sizes.length === 1) base.isResizable = false;
     } else {
       base.minW = Math.min(FREEFORM_MIN_WIDTH, columns);
       base.maxW = columns;
       base.minH = FREEFORM_MIN_HEIGHT;
+      base.maxH = DASHBOARD_MAX_HEIGHT;
     }
     return [base];
   });
+}
+
+function declaredFootprintConstraint(
+  sizes: GridSize[],
+  breakpoint: DashboardBreakpoint,
+): LayoutConstraint {
+  return {
+    name: 'declaredWidgetFootprints',
+    constrainSize: (_item, w, h) => snapUnits(sizes, w, h, breakpoint),
+  };
 }
 
 /**
