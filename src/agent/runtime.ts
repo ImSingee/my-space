@@ -10,6 +10,7 @@ import {
   type AgentMessage,
 } from '@earendil-works/pi-agent-core';
 import type { Models } from '@earendil-works/pi-ai';
+import { hasBetaFeature, WORKFLOW_BETA_FEATURE } from '~/beta-features';
 import type { JsonValue } from '~/db/schema';
 import { formatAttachmentPrompt, type AgentAttachmentRef } from './attachments';
 import type { AgentComposerContentPart } from './composer-content';
@@ -164,6 +165,7 @@ function addToolStartDetailsToTranscript(
 
 export type RunAgentTurnOptions = {
   appUrl: string;
+  betaFeatures: readonly string[];
   tavilyApiKey?: string | null;
   priorMessages: AgentMessage[];
   sessionId: string;
@@ -190,6 +192,10 @@ export async function runAgentTurn(
 ): Promise<RunAgentTurnResult> {
   const { priorMessages, sessionId, userText, signal, emit, models, picked } =
     opts;
+  const workflowBetaEnabled = hasBetaFeature(
+    opts.betaFeatures,
+    WORKFLOW_BETA_FEATURE,
+  );
 
   prepareAgentSessionSandbox(sessionId);
 
@@ -209,8 +215,9 @@ export async function runAgentTurn(
     await session.appendMessage(message);
   }
 
-  const skills = await loadAgentSkills(env);
+  const skills = await loadAgentSkills(env, { workflowBetaEnabled });
   const tools = createTools(env, {
+    workflowBetaEnabled,
     platform: opts.platform,
     ...(opts.tavilyApiKey ? { tavilyApiKey: opts.tavilyApiKey } : {}),
     ...(opts.ask ? { ask: opts.ask } : {}),
@@ -244,7 +251,11 @@ export async function runAgentTurn(
     tools,
     resources: { skills },
     systemPrompt: ({ resources }) =>
-      buildSystemPrompt(opts.appUrl, resources.skills ?? []),
+      buildSystemPrompt(
+        opts.appUrl,
+        { workflowBetaEnabled },
+        resources.skills ?? [],
+      ),
     thinkingLevel: picked.model.reasoning ? 'medium' : 'off',
   });
   const toolStartDetailsById = new Map<string, JsonValue | undefined>();

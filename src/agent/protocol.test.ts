@@ -62,8 +62,8 @@ describe('App creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v11 for required Composer reference payloads', () => {
-    expect(PROTOCOL_VERSION).toBe(11);
+  it('uses protocol v12 for Platform-owned beta feature delivery', () => {
+    expect(PROTOCOL_VERSION).toBe(12);
   });
 
   it('parses runner.hello', () => {
@@ -302,6 +302,24 @@ describe('runner -> platform messages', () => {
 });
 
 describe('platform -> runner messages', () => {
+  it('parses the Platform beta features in hub.hello_ack', () => {
+    expect(
+      parseHubMessage({
+        type: 'hub.hello_ack',
+        betaFeatures: ['workflow', 'future-feature'],
+        resumedRunIds: [],
+        staleRunIds: [],
+        staleWorkspaceSessionIds: [],
+      }),
+    ).toEqual({
+      type: 'hub.hello_ack',
+      betaFeatures: ['workflow', 'future-feature'],
+      resumedRunIds: [],
+      staleRunIds: [],
+      staleWorkspaceSessionIds: [],
+    });
+  });
+
   it('parses hub.ready_ack', () => {
     expect(parseHubMessage({ type: 'hub.ready_ack' })).toEqual({
       type: 'hub.ready_ack',

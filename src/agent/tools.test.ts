@@ -74,6 +74,7 @@ async function setup(
   }
   const env = new NodeExecutionEnv({ cwd: root });
   const tools = createTools(env, {
+    workflowBetaEnabled: false,
     platform: stubPlatform,
     ...(readOnlyRoot ? { readOnlyRoots: [readOnlyRoot] } : {}),
   });

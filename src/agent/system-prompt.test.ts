@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { buildSystemPrompt } from './system-prompt';
 
 const appUrl = 'https://hatch.example.com';
+const workflowDisabled = { workflowBetaEnabled: false };
+const workflowEnabled = { workflowBetaEnabled: true };
 
 const visibleSkill: Skill = {
   name: 'building-apps',
@@ -13,7 +15,7 @@ const visibleSkill: Skill = {
 
 describe('Agent system prompt skills', () => {
   it('keeps third-party credentials out of ask and command text', () => {
-    const prompt = buildSystemPrompt(appUrl);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
     expect(prompt).toContain('use `request_env`');
     expect(prompt).toContain('never request credentials with `ask`');
@@ -24,7 +26,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('keeps existing checkout synchronization non-destructive', () => {
-    const prompt = buildSystemPrompt(appUrl);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
     expect(prompt).toMatch(/clean `master` checkout may\s+fast-forward/);
     expect(prompt).toContain('otherwise checkout preserves the target');
@@ -34,7 +36,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('identifies the current APP_URL', () => {
-    const prompt = buildSystemPrompt(appUrl);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
     expect(prompt).toContain(
       '# Environment\n- The platform URL is `https://hatch.example.com`.',
@@ -42,7 +44,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('does not advertise temporarily disabled Workflow capabilities', () => {
-    const prompt = buildSystemPrompt(appUrl);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
     expect(prompt).toContain(
       'Workflow capabilities are temporarily unavailable',
@@ -62,8 +64,19 @@ describe('Agent system prompt skills', () => {
     }
   });
 
+  it('advertises Workflow capabilities when the beta feature is enabled', () => {
+    const prompt = buildSystemPrompt(appUrl, workflowEnabled);
+
+    expect(prompt).toContain('Hatch has two kinds of buildable things');
+    expect(prompt).toContain('building-workflows');
+    expect(prompt).toContain('# Workflow contract');
+    expect(prompt).not.toContain(
+      'Workflow capabilities are temporarily unavailable',
+    );
+  });
+
   it('treats an inline App marker as context without implied intent', () => {
-    const prompt = buildSystemPrompt(appUrl);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
     expect(prompt).toContain('@APP{name="..." id="..." slug="..."}');
     expect(prompt).toContain('Use its stable id with App tools');
@@ -72,7 +85,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('describes safe web search and fetch usage', () => {
-    const prompt = buildSystemPrompt(appUrl);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
     expect(prompt).toContain('`web_search` to find sources');
     expect(prompt).toContain('`web_fetch` to read a known URL');
@@ -82,7 +95,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('lists visible skill metadata without eagerly including its body', () => {
-    const prompt = buildSystemPrompt(appUrl, [visibleSkill]);
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled, [visibleSkill]);
 
     expect(prompt).toContain('<available_skills>');
     expect(prompt).toContain('<name>building-apps</name>');
@@ -92,7 +105,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('requires App import and build Skills before opening source archives', () => {
-    const prompt = buildSystemPrompt(appUrl, [
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled, [
       visibleSkill,
       {
         ...visibleSkill,
@@ -118,7 +131,7 @@ describe('Agent system prompt skills', () => {
   });
 
   it('hides skills disabled for model invocation', () => {
-    const prompt = buildSystemPrompt(appUrl, [
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled, [
       { ...visibleSkill, disableModelInvocation: true },
     ]);
 
@@ -127,6 +140,8 @@ describe('Agent system prompt skills', () => {
   });
 
   it('does not render an empty skill section', () => {
-    expect(buildSystemPrompt(appUrl)).not.toContain('<available_skills>');
+    expect(buildSystemPrompt(appUrl, workflowDisabled)).not.toContain(
+      '<available_skills>',
+    );
   });
 });

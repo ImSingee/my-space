@@ -4,7 +4,6 @@ import {
   type Skill,
   type SkillDiagnostic,
 } from '@earendil-works/pi-agent-core';
-import { WORKFLOWS_ENABLED } from '~/features';
 import { SKILLS_DIR } from './paths';
 
 const REQUIRED_SKILL_NAMES = [
@@ -27,8 +26,12 @@ function formatDiagnostic(diagnostic: SkillDiagnostic): string {
 /** Load and validate the first-party skills required by the Hatch Agent. */
 export async function loadAgentSkills(
   env: ExecutionEnv,
-  skillsDir = SKILLS_DIR,
+  options: {
+    workflowBetaEnabled: boolean;
+    skillsDir?: string;
+  },
 ): Promise<Skill[]> {
+  const skillsDir = options.skillsDir ?? SKILLS_DIR;
   const { skills, diagnostics } = await loadSkills(env, skillsDir);
   const problems = diagnostics.map(formatDiagnostic);
   const names = new Set<string>();
@@ -54,7 +57,7 @@ export async function loadAgentSkills(
     );
   }
 
-  return WORKFLOWS_ENABLED
+  return options.workflowBetaEnabled
     ? skills
     : skills.filter((skill) => !WORKFLOW_SKILL_NAMES.has(skill.name));
 }

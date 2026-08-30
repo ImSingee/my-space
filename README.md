@@ -105,6 +105,13 @@ The Agent's web search and page-fetch tools use Tavily's keyless access mode by
 default. To use your Tavily account and quota, set `TAVILY_API_KEY` in `.env`
 and recreate the Agent Runner (`docker compose up -d --force-recreate agent`).
 
+Beta features are configured only on the Platform with the optional,
+comma-separated `HATCH_BETA` value. Set `HATCH_BETA=workflow` in `.env` to
+expose Workflow tools and guidance to Agent Runners. Restart the Platform after
+changing the value; connected Runners automatically reconnect and receive the
+new feature set. Unknown feature names are ignored by Runners that do not
+support them.
+
 ## Ideas to try
 
 - "Build a habit tracker with a streak widget I can pin to my dashboard."

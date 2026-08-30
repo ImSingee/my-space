@@ -4,7 +4,6 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { IconRepeat, IconSparkles } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { AppGlyph } from '~components/apps/app-glyph';
-import { WORKFLOWS_ENABLED } from '~/features';
 import { workflowsQueryOptions } from '~queries/workflows';
 import { setWorkflowPinFn } from '~server/workflows';
 import {
@@ -16,10 +15,6 @@ import {
 } from './section';
 
 export function PinnedWorkflows() {
-  return WORKFLOWS_ENABLED ? <EnabledPinnedWorkflows /> : null;
-}
-
-function EnabledPinnedWorkflows() {
   const isActive = useIsActive();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

@@ -88,6 +88,7 @@ async function runWithResponses(
 
   return runAgentTurn({
     appUrl: 'https://hatch.example.test',
+    betaFeatures: [],
     priorMessages,
     sessionId,
     userText: composerInput?.userText ?? 'hello',
