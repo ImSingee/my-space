@@ -106,7 +106,27 @@ export type NormalizedWorkflowManifest = {
 
 /** Public inbound webhook URL (secret appended at call time as `?secret=`). */
 export function workflowWebhookUrl(id: string): string {
-  return `/api/workflow-hooks/${id}`;
+  return `/api/workflow/${id}/run`;
+}
+
+/**
+ * Project deployment-owned URLs from the authoritative workflow id at read
+ * time. Stored deployment manifests are immutable and may contain legacy URLs.
+ */
+export function projectWorkflowManifestUrls(
+  manifest: NormalizedWorkflowManifest,
+  id: string,
+): NormalizedWorkflowManifest {
+  return {
+    ...manifest,
+    triggers: {
+      ...manifest.triggers,
+      webhook: {
+        enabled: manifest.triggers.webhook.enabled,
+        url: manifest.triggers.webhook.enabled ? workflowWebhookUrl(id) : null,
+      },
+    },
+  };
 }
 
 /** Parse + validate raw manifest JSON authored by the Agent. */

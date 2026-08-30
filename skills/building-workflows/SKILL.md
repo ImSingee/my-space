@@ -156,9 +156,10 @@ in the manifest — it is derived from your zod schema at deploy time.
   (`minute hour day-of-month month day-of-week`), and a fixed `input` object
   that must satisfy the input schema.
 - **webhook**: set `"webhook": true`. On deploy the platform generates a secret
-  and exposes a PUBLIC endpoint `/api/workflow-hooks/<id>?secret=<secret>`. POST
-  a JSON body (used as the run input) or GET with query params. The secret may
-  also be sent as the `x-hatch-secret` header.
+  and exposes a PUBLIC endpoint
+  `/api/workflow/<id>/run?secret=<secret>`. POST a JSON body (used as the run
+  input) or GET with query params. The secret may also be sent as the
+  `x-hatch-secret` header.
 
 ## Git workflow
 

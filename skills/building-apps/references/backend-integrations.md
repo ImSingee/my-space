@@ -65,7 +65,8 @@ through the platform.
 ## Webhook
 
 Enable both `webhook` and `backend`. Requests to the public
-`/api/hooks/<id>` endpoint are forwarded to `/__webhook/...` as plain HTTP.
+`/api/app/<id>/hook` endpoint and its subpaths are forwarded to
+`/__webhook/...` as plain HTTP.
 
 Select the platform auth mode in the top-level manifest block:
 

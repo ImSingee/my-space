@@ -71,6 +71,7 @@ describe('normalizedManifestFor', () => {
           },
         ],
         kv: { url: '/api/apps/01immutableid/kv' },
+        webhook: { url: '/api/hooks/01immutableid', auth: 'platform' },
       },
     });
     await db
@@ -85,12 +86,14 @@ describe('normalizedManifestFor', () => {
       '/api/app/01immutableid/widget/summary',
     );
     expect(manifest?.kv?.url).toBe('/api/app/01immutableid/kv');
+    expect(manifest?.webhook?.url).toBe('/api/app/01immutableid/hook');
     const stored = await db.query.deployments.findFirst({
       where: { id: '01deployment' },
     });
     expect(stored?.manifestNormalized).toMatchObject({
       app: { url: '/api/apps/01immutableid/app/' },
       kv: { url: '/api/apps/01immutableid/kv' },
+      webhook: { url: '/api/hooks/01immutableid', auth: 'platform' },
     });
   });
 

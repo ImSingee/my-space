@@ -26,8 +26,8 @@ describe('internalPlatformUrl', () => {
     vi.stubEnv('PORT', undefined);
     vi.stubEnv('APP_URL', 'https://public.example.test');
 
-    expect(internalPlatformUrl('/api/workflow-hooks/demo/run')).toBe(
-      'http://localhost:3700/api/workflow-hooks/demo/run',
+    expect(internalPlatformUrl('/api/workflow/demo/run')).toBe(
+      'http://localhost:3700/api/workflow/demo/run',
     );
   });
 });

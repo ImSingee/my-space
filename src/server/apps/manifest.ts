@@ -594,6 +594,14 @@ export function projectAppManifestUrls(
     ...(supportedManifest.dataTable
       ? { dataTable: { url: dataTableUrl(appId) } }
       : {}),
+    ...(supportedManifest.capabilities?.webhook || supportedManifest.webhook
+      ? {
+          webhook: {
+            url: webhookUrl(appId),
+            auth: supportedManifest.webhook?.auth ?? 'platform',
+          },
+        }
+      : {}),
   };
 }
 
@@ -617,7 +625,7 @@ export function dataTableUrl(id: string): string {
 
 /** Public inbound webhook URL (token appended at call time as `?secret=`). */
 export function webhookUrl(id: string): string {
-  return `/api/hooks/${id}`;
+  return `${appBasePath(id)}/hook`;
 }
 
 /** Parse + validate raw manifest JSON authored by the Agent. */

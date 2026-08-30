@@ -25,7 +25,7 @@ export async function handle({
   request: Request;
 }): Promise<Response> {
   const url = new URL(request.url);
-  const match = url.pathname.match(/^\/api\/hooks\/([^/]+)(\/.*)?$/);
+  const match = url.pathname.match(/^\/api\/app\/([^/]+)\/hook(?:\/.*)?$/);
   if (!match) return new Response('Not found', { status: 404 });
   const id = match[1];
 
@@ -59,13 +59,13 @@ export async function handle({
       ?.auth ?? 'platform';
 
   const { proxyAppRequest } = await import('~server/apps/runtime');
-  const base = `/api/hooks/${id}`;
+  const base = `/api/app/${id}/hook`;
   // This endpoint is reachable without a session, so never echo internal error
   // detail (backend start failures embed the process log tail — stack traces,
   // absolute paths, whatever the app printed). Log it server-side instead;
   // the owner sees the full story on the authenticated manage surfaces.
   const fail = (error: unknown) => {
-    console.error(`[hooks] app ${id} webhook forward failed:`, error);
+    console.error(`[app-hook] app ${id} webhook forward failed:`, error);
     return new Response('App backend error', { status: 502 });
   };
 
@@ -121,7 +121,7 @@ export async function handle({
   }
 }
 
-export const Route = createFileRoute('/api/hooks/$appId/$')({
+export const Route = createFileRoute('/api/app/$appId/hook/$')({
   server: {
     // Register every HTTP verb TanStack Start supports so the passthrough is as
     // verb-agnostic as the platform allows — webhook providers send preflights

@@ -46,9 +46,13 @@ async function readCappedText(
  * not require a platform session — it authenticates with the per-workflow
  * secret and starts a run with the request body (or query params) as input.
  */
-async function handle({ request }: { request: Request }): Promise<Response> {
+export async function handle({
+  request,
+}: {
+  request: Request;
+}): Promise<Response> {
   const url = new URL(request.url);
-  const match = url.pathname.match(/^\/api\/workflow-hooks\/([^/]+)(\/.*)?$/);
+  const match = url.pathname.match(/^\/api\/workflow\/([^/]+)\/run\/?$/);
   if (!match) return new Response('Not found', { status: 404 });
   const id = match[1];
 
@@ -119,15 +123,12 @@ async function handle({ request }: { request: Request }): Promise<Response> {
     if (error instanceof AppError && error.status < 500) {
       return new Response(error.message, { status: error.status });
     }
-    console.error(
-      `[workflow-hooks] workflow ${id} run failed to start:`,
-      error,
-    );
+    console.error(`[workflow-run] workflow ${id} run failed to start:`, error);
     return new Response('Workflow error', { status: 502 });
   }
 }
 
-export const Route = createFileRoute('/api/workflow-hooks/$workflowId/$')({
+export const Route = createFileRoute('/api/workflow/$workflowId/run')({
   server: {
     handlers: {
       GET: handle,
