@@ -82,7 +82,7 @@ function ExecutionsPage() {
                   style={{ cursor: 'pointer' }}
                   onClick={() =>
                     navigate({
-                      to: '/workflow/$workflowId/executions/$runId',
+                      to: '/workflow/$workflowId/execution/$runId',
                       params: { workflowId: run.workflowId, runId: run.id },
                     })
                   }
@@ -103,7 +103,7 @@ function ExecutionsPage() {
                       renderRoot={(props) => (
                         <Link
                           {...props}
-                          to="/workflow/$workflowId/executions/$runId"
+                          to="/workflow/$workflowId/execution/$runId"
                           params={{
                             workflowId: run.workflowId,
                             runId: run.id,
