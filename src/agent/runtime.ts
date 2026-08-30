@@ -244,7 +244,6 @@ export async function runAgentTurn(
   }
 
   const harness = new AgentHarness({
-    env,
     session,
     models,
     model: picked.model,
