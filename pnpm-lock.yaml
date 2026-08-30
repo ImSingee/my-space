@@ -28,11 +28,11 @@ importers:
         specifier: ^2.1.2
         version: 2.1.2(@bufbuild/protobuf@2.14.0)(@connectrpc/connect@2.1.2(@bufbuild/protobuf@2.14.0))
       '@earendil-works/pi-agent-core':
-        specifier: ^0.80.2
-        version: 0.80.2(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)
+        specifier: ^0.83.0
+        version: 0.83.0(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)
       '@earendil-works/pi-ai':
-        specifier: ^0.80.2
-        version: 0.80.2(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)
+        specifier: ^0.83.0
+        version: 0.83.0(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)
       '@floating-ui/dom':
         specifier: ^1.8.0
         version: 1.8.0
@@ -790,12 +790,12 @@ packages:
   '@drizzle-team/brocli@0.12.0':
     resolution: {integrity: sha512-mlUE+rZ8CatQekLhnaiN91Iemdd+e2gFKooGlnRB3oPTL3VghLfX24dx7HrzMNeC1JrIB/0kpsfyty3f5HNfxQ==}
 
-  '@earendil-works/pi-agent-core@0.80.2':
-    resolution: {integrity: sha512-BF9WPhixIFjT6Kp3Iz3H6ugkU+4AWotM8py96XE5pIK0arJbQKMWbR+dXSWWDEmR5yc/aFQODnuyowOEzMGO7Q==}
+  '@earendil-works/pi-agent-core@0.83.0':
+    resolution: {integrity: sha512-RorGp9OH5l3ElpuC5a5ZQ2eWcchZGXflXRzVGkV99y3y6tT+LLNyxoYIdVKvTKWEObwhExeQbTH0fI2tE4iX4g==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-ai@0.80.2':
-    resolution: {integrity: sha512-5GNKfdrRJ4uZ5Zd9iudoXggi/BbUcKnD/xfRHtdR+7q4vWqPvfx8auFuaT+ewGBVI8K4wj87eigFQ/iCSuy9RQ==}
+  '@earendil-works/pi-ai@0.83.0':
+    resolution: {integrity: sha512-m3IZD4g3er0V8TC9+Vpgw/sjTKqcJlkcIBy/JvsgRubuuik3tAVzyugUg4rVrShIkkOT69mEd34NEqKUIsl6JQ==}
     engines: {node: '>=22.19.0'}
     hasBin: true
 
@@ -6366,6 +6366,9 @@ packages:
   typebox@1.1.38:
     resolution: {integrity: sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA==}
 
+  typebox@1.3.7:
+    resolution: {integrity: sha512-meKuifc33Pccx0O6PdIzYMq3Og8zvP4TIi/a+Bw3AEMZMxOD0+RHGQvpglEe6Zdy3wZ8nqn/j95h8LUZLk/6Hg==}
+
   typescript@5.4.5:
     resolution: {integrity: sha512-vcI4UpRgg81oIRUFwR0WSIHKt11nJ7SAVlYNIu+QpqeyXP+gpQJy/Z4+F0aGxSE4MqwjyXvW/TzgkLAx2AGHwQ==}
     engines: {node: '>=14.17'}
@@ -7476,11 +7479,12 @@ snapshots:
 
   '@drizzle-team/brocli@0.12.0': {}
 
-  '@earendil-works/pi-agent-core@0.80.2(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)':
+  '@earendil-works/pi-agent-core@0.83.0(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)':
     dependencies:
-      '@earendil-works/pi-ai': 0.80.2(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)
+      '@earendil-works/pi-ai': 0.83.0(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)
+      diff: 8.0.4
       ignore: 7.0.5
-      typebox: 1.1.38
+      typebox: 1.3.7
       yaml: 2.9.0
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
@@ -7490,7 +7494,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@0.80.2(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)':
+  '@earendil-works/pi-ai@0.83.0(supports-color@10.2.2)(ws@8.21.3)(zod@4.5.2)':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.5.2)
       '@aws-sdk/client-bedrock-runtime': 3.1048.0
@@ -7502,7 +7506,7 @@ snapshots:
       https-proxy-agent: 7.0.6(supports-color@10.2.2)
       openai: 6.26.0(ws@8.21.3)(zod@4.5.2)
       partial-json: 0.1.7
-      typebox: 1.1.38
+      typebox: 1.3.7
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - bufferutil
@@ -13486,6 +13490,8 @@ snapshots:
       tagged-tag: 1.0.0
 
   typebox@1.1.38: {}
+
+  typebox@1.3.7: {}
 
   typescript@5.4.5: {}
 
