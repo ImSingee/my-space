@@ -1,17 +1,17 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:zod@^4.4.3": "4.4.3"
+    "npm:zod@4.5.2": "4.5.2"
   },
   "npm": {
-    "zod@4.4.3": {
-      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="
+    "zod@4.5.2": {
+      "integrity": "sha512-XkYXCol10+ba/6F/cueWV+TezUeOqXW0hdeJt5CdXjTYeAgAQg5N03RQdJ80mhfFE72+pblvYMW4wy2Qp4Qbrg=="
     }
   },
   "workspace": {
     "packageJson": {
       "dependencies": [
-        "npm:zod@^4.4.3"
+        "npm:zod@4.5.2"
       ]
     }
   }
