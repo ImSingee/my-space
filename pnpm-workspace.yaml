@@ -13,3 +13,6 @@ allowBuilds:
 overrides:
   'protobufjs@7.6.4': 7.6.5
   'seroval@<=1.5.2': 1.5.3
+
+patchedDependencies:
+  nitro@3.0.260610-beta: patches/nitro@3.0.260610-beta.patch
