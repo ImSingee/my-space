@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # --- Deno binary (used to run each app's backend) -------------------------
-FROM denoland/deno:bin-2.8.3 AS deno
+FROM denoland/deno:bin-2.9.6 AS deno
 
 # --- Base image with pnpm ----------------------------------------------------
 FROM node:26-slim AS base
 WORKDIR /app
-RUN npm install --global pnpm@11.21.0
+RUN npm install --global pnpm@11.24.0
 
 # --- Dependencies ------------------------------------------------------------
 # Install ALL deps (including dev) and DO run install scripts: the platform

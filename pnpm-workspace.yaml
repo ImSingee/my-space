@@ -9,3 +9,7 @@ allowBuilds:
   playwright: true
   prisma: false
   protobufjs: false
+
+overrides:
+  'protobufjs@7.6.4': 7.6.5
+  'seroval@<=1.5.2': 1.5.3
