@@ -34,11 +34,7 @@ import { ModelPicker } from './model-picker';
 import { resolveEffectiveModel, splitModelValue } from './model-value';
 import { StreamingBubble } from './streaming-bubble';
 import { type ChatMessage, pairToolResults } from './types';
-import {
-  sameStreamSeed,
-  type StreamSeed,
-  useAgentStream,
-} from './use-agent-stream';
+import { type StreamSeed, useAgentStream } from './use-agent-stream';
 import classes from './chat.module.css';
 
 export function Chat({ sessionId }: { sessionId: string }) {
@@ -159,20 +155,20 @@ export function Chat({ sessionId }: { sessionId: string }) {
   } = stream;
 
   const session = sessionQuery.data;
-  const activeRunId = session?.activeRun?.id ?? null;
-  const activeRunSeedRef = useRef<StreamSeed | undefined>(undefined);
-  const nextActiveRunSeed = session?.activeRun
-    ? {
-        pendingEnvRequest: session.activeRun.pendingEnvRequest,
-        pendingAsk: session.activeRun.pendingEnvRequest
-          ? null
-          : session.activeRun.pendingAsk,
-      }
-    : undefined;
-  if (!sameStreamSeed(activeRunSeedRef.current, nextActiveRunSeed)) {
-    activeRunSeedRef.current = nextActiveRunSeed;
-  }
-  const activeRunSeed = activeRunSeedRef.current;
+  const activeRun = session?.activeRun;
+  const activeRunId = activeRun?.id ?? null;
+  const activeRunSeed = useMemo<StreamSeed | undefined>(
+    () =>
+      activeRun
+        ? {
+            pendingEnvRequest: activeRun.pendingEnvRequest,
+            pendingAsk: activeRun.pendingEnvRequest
+              ? null
+              : activeRun.pendingAsk,
+          }
+        : undefined,
+    [activeRun],
+  );
   const activeRunSeedRevision = sessionQuery.dataUpdatedAt || undefined;
   const sessionModel =
     session?.providerId && session?.modelId

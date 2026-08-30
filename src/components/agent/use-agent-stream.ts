@@ -8,6 +8,7 @@ import type {
   AskQuestion,
   EnvVariableField,
 } from '~agent/events';
+import { useEventCallback } from '~hooks/use-latest-committed';
 import type { JsonValue } from '~/db/schema';
 import type { EnvEntry } from './env-form';
 
@@ -471,16 +472,17 @@ export function useAgentStream(
     requestId: number;
     stopRequested: boolean;
   } | null>(null);
-  const onDoneRef = useRef(onDone);
-  const onTerminalRef = useRef(onTerminal);
-  const onDisconnectRef = useRef(onDisconnect);
-  const onSessionChangedRef = useRef(onSessionChanged);
-  const onConnectedRef = useRef(onConnected);
-  onDoneRef.current = onDone;
-  onTerminalRef.current = onTerminal;
-  onDisconnectRef.current = onDisconnect;
-  onSessionChangedRef.current = onSessionChanged;
-  onConnectedRef.current = onConnected;
+  const handleDone = useEventCallback(onDone);
+  const handleTerminal = useEventCallback(onTerminal);
+  const handleDisconnect = useEventCallback((runId: string) => {
+    onDisconnect?.(runId);
+  });
+  const handleSessionChanged = useEventCallback(() => {
+    onSessionChanged?.();
+  });
+  const handleConnected = useEventCallback(() => {
+    onConnected?.();
+  });
 
   const isCurrentSource = useCallback(
     (source: StreamSource) =>
@@ -664,7 +666,7 @@ export function useAgentStream(
           runIdRef.current = null;
           promptBarrierRef.current = null;
           setState(IDLE);
-          onDoneRef.current();
+          handleDone();
           break;
         case 'cancelled':
           abortEnvSubmission();
@@ -672,7 +674,7 @@ export function useAgentStream(
           runIdRef.current = null;
           promptBarrierRef.current = null;
           setState(IDLE);
-          void Promise.resolve(onTerminalRef.current()).catch(() => {});
+          void Promise.resolve(handleTerminal()).catch(() => {});
           break;
         case 'error': {
           abortEnvSubmission();
@@ -686,7 +688,7 @@ export function useAgentStream(
           );
           void (async () => {
             try {
-              const persisted = await onTerminalRef.current(event.message);
+              const persisted = await handleTerminal(event.message);
               // A later connection generation owns the UI now, including when
               // a retry reuses the same run id.
               const terminalSource = terminalSourceRef.current;
@@ -711,7 +713,7 @@ export function useAgentStream(
           break;
       }
     },
-    [abortEnvSubmission, isCurrentSource],
+    [abortEnvSubmission, handleDone, handleTerminal, isCurrentSource],
   );
 
   /**
@@ -783,7 +785,7 @@ export function useAgentStream(
             throw new Error(`Request failed (${res.status})`);
           }
           // A healthy connection: let the caller reset any reconnect backoff.
-          onConnectedRef.current?.();
+          handleConnected();
 
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
@@ -808,16 +810,16 @@ export function useAgentStream(
             }
           }
           if (isCurrentConnection()) {
-            onSessionChangedRef.current?.();
-            onDisconnectRef.current?.(runId);
+            handleSessionChanged();
+            handleDisconnect(runId);
           }
         } catch {
           // A dropped/failed stream isn't fatal: the run keeps executing on the
           // server. Reconnect silently (the caller backs off and only surfaces a
           // toast after repeated failures) instead of alarming on every blip.
           if (isCurrentConnection()) {
-            onSessionChangedRef.current?.();
-            onDisconnectRef.current?.(runId);
+            handleSessionChanged();
+            handleDisconnect(runId);
           }
         }
       };
@@ -828,7 +830,14 @@ export function useAgentStream(
         ac.abort();
       };
     },
-    [abortEnvSubmission, handleEvent, isCurrentSource],
+    [
+      abortEnvSubmission,
+      handleConnected,
+      handleDisconnect,
+      handleEvent,
+      handleSessionChanged,
+      isCurrentSource,
+    ],
   );
 
   const reset = useCallback(() => {
@@ -854,55 +863,58 @@ export function useAgentStream(
     [],
   );
 
-  const start = useCallback(async (params: StartParams) => {
-    terminalSourceRef.current = null;
-    setEnvAnnouncement('');
-    const requestId = startRequestIdRef.current + 1;
-    startRequestIdRef.current = requestId;
-    pendingStartRef.current = { requestId, stopRequested: false };
+  const start = useCallback(
+    async (params: StartParams) => {
+      terminalSourceRef.current = null;
+      setEnvAnnouncement('');
+      const requestId = startRequestIdRef.current + 1;
+      startRequestIdRef.current = requestId;
+      pendingStartRef.current = { requestId, stopRequested: false };
 
-    try {
-      setState({ ...IDLE, active: true });
-      const { runId } = await startAgentRunRequest(params);
-      const pending = pendingStartRef.current;
-      const shouldCancel =
-        !pending || pending.requestId !== requestId || pending.stopRequested;
+      try {
+        setState({ ...IDLE, active: true });
+        const { runId } = await startAgentRunRequest(params);
+        const pending = pendingStartRef.current;
+        const shouldCancel =
+          !pending || pending.requestId !== requestId || pending.stopRequested;
 
-      if (pending?.requestId === requestId) {
-        pendingStartRef.current = null;
-      }
-
-      if (shouldCancel) {
-        try {
-          await cancelAgentRunRequest(runId);
-        } catch (error) {
-          toast.error(
-            error instanceof Error ? error.message : 'Could not stop.',
-          );
-        } finally {
-          onSessionChangedRef.current?.();
+        if (pending?.requestId === requestId) {
+          pendingStartRef.current = null;
         }
+
+        if (shouldCancel) {
+          try {
+            await cancelAgentRunRequest(runId);
+          } catch (error) {
+            toast.error(
+              error instanceof Error ? error.message : 'Could not stop.',
+            );
+          } finally {
+            handleSessionChanged();
+          }
+          return null;
+        }
+
+        // The run is live; the caller surfaces it via `activeRun` and the
+        // connection effect subscribes. We deliberately do not connect here so
+        // a single effect owns the stream's lifecycle.
+        return runId;
+      } catch (error) {
+        const pending = pendingStartRef.current;
+        const stopRequested =
+          pending?.requestId === requestId && pending.stopRequested;
+        if (pending?.requestId === requestId) {
+          pendingStartRef.current = null;
+        }
+        if (!stopRequested) {
+          toast.error(error instanceof Error ? error.message : 'Stream failed');
+        }
+        setState(IDLE);
         return null;
       }
-
-      // The run is live; the caller surfaces it via `activeRun` and the
-      // connection effect subscribes. We deliberately do not connect here so
-      // a single effect owns the stream's lifecycle.
-      return runId;
-    } catch (error) {
-      const pending = pendingStartRef.current;
-      const stopRequested =
-        pending?.requestId === requestId && pending.stopRequested;
-      if (pending?.requestId === requestId) {
-        pendingStartRef.current = null;
-      }
-      if (!stopRequested) {
-        toast.error(error instanceof Error ? error.message : 'Stream failed');
-      }
-      setState(IDLE);
-      return null;
-    }
-  }, []);
+    },
+    [handleSessionChanged],
+  );
 
   const send = useCallback((params: SendParams) => start(params), [start]);
   const retry = useCallback(

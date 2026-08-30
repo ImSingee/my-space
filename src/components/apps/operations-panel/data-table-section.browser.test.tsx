@@ -195,7 +195,7 @@ test('shows a row-query error and retries instead of claiming the table is empty
   await expect.element(screen.getByText('No rows yet.')).toBeVisible();
 });
 
-test('resets the selected table and pagination when the schema removes it', async () => {
+test('commits a schema fallback and discards pagination from a removed table', async () => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -230,6 +230,23 @@ test('resets the selected table and pagination when the schema removes it', asyn
       },
     });
   });
+  await expect
+    .element(screen.getByRole('button', { name: 'Previous page' }))
+    .toBeDisabled();
+
+  fixtures.info = dataTableInfo('alpha', 'beta');
+  queryClient.setQueryData(['test-data-tables', 'app-1'], fixtures.info);
+
+  await expect
+    .element(screen.getByRole('combobox', { name: 'Table' }))
+    .toHaveValue('beta (~0)');
+
+  fixtures.info = dataTableInfo('alpha');
+  queryClient.setQueryData(['test-data-tables', 'app-1'], fixtures.info);
+
+  await expect
+    .element(screen.getByRole('combobox', { name: 'Table' }))
+    .toHaveValue('alpha (~0)');
   await expect
     .element(screen.getByRole('button', { name: 'Previous page' }))
     .toBeDisabled();

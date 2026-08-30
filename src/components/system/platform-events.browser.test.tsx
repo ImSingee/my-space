@@ -115,6 +115,9 @@ function UpdateProbe({
       >
         Load revision two
       </button>
+      <button type="button" onClick={() => setBaseline('revision-three')}>
+        Load revision three
+      </button>
     </>
   );
 }
@@ -165,6 +168,13 @@ test('only marks a different revision for the canonical current app', async () =
   await expect
     .element(screen.getByTestId('available'))
     .toHaveTextContent('false');
+  await expect.element(screen.getByTestId('pending')).toHaveTextContent('none');
+
+  await screen.getByRole('button', { name: 'Load revision three' }).click();
+  await expect
+    .element(screen.getByTestId('available'))
+    .toHaveTextContent('false');
+  await expect.element(screen.getByTestId('pending')).toHaveTextContent('none');
 });
 
 test('mount reconciliation recovers a deployment missed before subscription', async () => {

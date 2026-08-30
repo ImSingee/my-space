@@ -21,6 +21,7 @@ import {
   type ComposerInputPart,
 } from '~agent/composer-content';
 import { AppGlyph } from '~components/apps/app-glyph';
+import { useEventCallback } from '~hooks/use-latest-committed';
 import type { AppListItem } from '~server/apps';
 import {
   plainTextComposerDocument,
@@ -70,11 +71,21 @@ function appOptionId(listboxId: string, appId: string): string {
    keep focus and selection inside the rich-text editor. */
 const AppMentionMenu = forwardRef<AppMentionMenuHandle, AppMentionMenuProps>(
   function AppMentionMenu(
-    { items, command, sourceState, listboxId, onActiveOptionChange },
+    { items, command, query, sourceState, listboxId, onActiveOptionChange },
     reference,
   ) {
-    const [selectedIndex, setSelectedIndex] = useState(0);
+    const selectionKey = JSON.stringify([query, items.map((item) => item.id)]);
+    const [selection, setSelection] = useState({
+      key: selectionKey,
+      index: 0,
+    });
     const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+    let currentSelection = selection;
+    if (selection.key !== selectionKey) {
+      currentSelection = { key: selectionKey, index: 0 };
+      setSelection(currentSelection);
+    }
+    const selectedIndex = currentSelection.index;
     const activeIndex =
       items.length > 0 ? Math.min(selectedIndex, items.length - 1) : -1;
     const activeApp = items[activeIndex];
@@ -82,7 +93,6 @@ const AppMentionMenu = forwardRef<AppMentionMenuHandle, AppMentionMenuProps>(
       ? appOptionId(listboxId, activeApp.id)
       : undefined;
 
-    useEffect(() => setSelectedIndex(0), [items]);
     useEffect(() => {
       optionRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
     }, [activeIndex]);
@@ -105,13 +115,17 @@ const AppMentionMenu = forwardRef<AppMentionMenuHandle, AppMentionMenuProps>(
           if (event.isComposing || event.keyCode === 229) return false;
           if (items.length === 0) return false;
           if (event.key === 'ArrowUp') {
-            setSelectedIndex(
-              (index) => (index + items.length - 1) % items.length,
-            );
+            setSelection({
+              key: selectionKey,
+              index: (activeIndex + items.length - 1) % items.length,
+            });
             return true;
           }
           if (event.key === 'ArrowDown') {
-            setSelectedIndex((index) => (index + 1) % items.length);
+            setSelection({
+              key: selectionKey,
+              index: (activeIndex + 1) % items.length,
+            });
             return true;
           }
           if (event.key === 'Enter' && !event.shiftKey) {
@@ -121,7 +135,7 @@ const AppMentionMenu = forwardRef<AppMentionMenuHandle, AppMentionMenuProps>(
           return false;
         },
       }),
-      [activeIndex, items, select],
+      [activeIndex, items, select, selectionKey],
     );
 
     let emptyMessage = 'No matching apps';
@@ -156,7 +170,7 @@ const AppMentionMenu = forwardRef<AppMentionMenuHandle, AppMentionMenuProps>(
                 className={classes.mentionMenuItem}
                 data-selected={index === activeIndex || undefined}
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setSelectedIndex(index)}
+                onMouseEnter={() => setSelection({ key: selectionKey, index })}
                 onClick={() => select(index)}
               >
                 <Group gap="sm" wrap="nowrap">
@@ -242,15 +256,17 @@ export const ComposerEditor = forwardRef<
 ) {
   const editorId = useId();
   const listboxId = `${editorId}-app-mentions`;
-  const appsRef = useRef(apps);
-  const sourceStateRef = useRef<AppSourceState>({
+  const getApps = useEventCallback(() => apps);
+  const getSourceState = useEventCallback((): AppSourceState => ({
     loading: appsLoading,
     error: appsError,
-  });
-  const onChangeRef = useRef(onChange);
-  const onMentionLookupPendingChangeRef = useRef(onMentionLookupPendingChange);
-  const onSubmitRef = useRef(onSubmit);
-  const onPasteFilesRef = useRef(onPasteFiles);
+  }));
+  const emitChange = useEventCallback(onChange);
+  const emitMentionLookupPendingChange = useEventCallback(
+    onMentionLookupPendingChange,
+  );
+  const emitSubmit = useEventCallback(onSubmit);
+  const emitPasteFiles = useEventCallback(onPasteFiles);
   const revisionRef = useRef(0);
   const menuOpenRef = useRef(false);
   const menuHasItemsRef = useRef(false);
@@ -262,13 +278,6 @@ export const ComposerEditor = forwardRef<
     AppListItem,
     MentionAttributes
   > | null>(null);
-
-  appsRef.current = apps;
-  sourceStateRef.current = { loading: appsLoading, error: appsError };
-  onChangeRef.current = onChange;
-  onMentionLookupPendingChangeRef.current = onMentionLookupPendingChange;
-  onSubmitRef.current = onSubmit;
-  onPasteFilesRef.current = onPasteFiles;
 
   const extensions = useMemo(
     () => [
@@ -307,7 +316,7 @@ export const ComposerEditor = forwardRef<
           placement: 'top-start',
           offset: { mainAxis: 8 },
           floatingUi: { middleware: [shift({ padding: 12 })] },
-          items: ({ query }) => filterApps(appsRef.current, query),
+          items: ({ query }) => filterApps(getApps(), query),
           allow: ({ state, range }) => {
             let mentions = 0;
             state.doc.descendants((node) => {
@@ -339,7 +348,7 @@ export const ComposerEditor = forwardRef<
               props: SuggestionProps<AppListItem, MentionAttributes>,
             ): AppMentionMenuProps => ({
               ...props,
-              sourceState: sourceStateRef.current,
+              sourceState: getSourceState(),
               listboxId,
               onActiveOptionChange,
             });
@@ -347,9 +356,7 @@ export const ComposerEditor = forwardRef<
               onStart(props) {
                 menuOpenRef.current = true;
                 menuHasItemsRef.current = props.items.length > 0;
-                onMentionLookupPendingChangeRef.current(
-                  sourceStateRef.current.loading,
-                );
+                emitMentionLookupPendingChange(getSourceState().loading);
                 editorElement = props.editor.view.dom;
                 editorElement.setAttribute('aria-expanded', 'true');
                 editorElement.setAttribute('aria-controls', listboxId);
@@ -368,9 +375,7 @@ export const ComposerEditor = forwardRef<
               },
               onUpdate(props) {
                 menuHasItemsRef.current = props.items.length > 0;
-                onMentionLookupPendingChangeRef.current(
-                  sourceStateRef.current.loading,
-                );
+                emitMentionLookupPendingChange(getSourceState().loading);
                 suggestionPropsRef.current = props;
                 menuRendererRef.current?.updateProps(menuProps(props));
               },
@@ -384,7 +389,7 @@ export const ComposerEditor = forwardRef<
               onExit() {
                 menuOpenRef.current = false;
                 menuHasItemsRef.current = false;
-                onMentionLookupPendingChangeRef.current(false);
+                emitMentionLookupPendingChange(false);
                 editorElement?.setAttribute('aria-expanded', 'false');
                 editorElement?.removeAttribute('aria-controls');
                 editorElement?.removeAttribute('aria-activedescendant');
@@ -400,7 +405,13 @@ export const ComposerEditor = forwardRef<
         },
       }),
     ],
-    [listboxId, placeholder],
+    [
+      emitMentionLookupPendingChange,
+      getApps,
+      getSourceState,
+      listboxId,
+      placeholder,
+    ],
   );
 
   const editor = useEditor({
@@ -428,7 +439,7 @@ export const ComposerEditor = forwardRef<
         ) {
           if (menuOpenRef.current && menuHasItemsRef.current) return false;
           event.preventDefault();
-          onSubmitRef.current();
+          emitSubmit();
           return true;
         }
         return false;
@@ -437,7 +448,7 @@ export const ComposerEditor = forwardRef<
         const files = Array.from(event.clipboardData?.files ?? []);
         if (files.length === 0) return false;
         event.preventDefault();
-        onPasteFilesRef.current(files);
+        emitPasteFiles(files);
         return true;
       },
     },
@@ -451,7 +462,7 @@ export const ComposerEditor = forwardRef<
       // editability changes, but that synthetic transaction has no doc change.
       if (!transaction.docChanged) return;
       revisionRef.current += 1;
-      onChangeRef.current(serializeComposerDocument(updatedEditor.getJSON()));
+      emitChange(serializeComposerDocument(updatedEditor.getJSON()));
     },
   });
 
@@ -472,15 +483,15 @@ export const ComposerEditor = forwardRef<
   useEffect(() => {
     const props = suggestionPropsRef.current;
     if (!props || !menuRendererRef.current) return;
-    onMentionLookupPendingChangeRef.current(appsLoading);
+    emitMentionLookupPendingChange(appsLoading);
     const items = filterApps(apps, props.query);
     menuHasItemsRef.current = items.length > 0;
     menuRendererRef.current.updateProps({
       ...props,
       items,
-      sourceState: sourceStateRef.current,
+      sourceState: { loading: appsLoading, error: appsError },
     });
-  }, [apps, appsError, appsLoading]);
+  }, [apps, appsError, appsLoading, emitMentionLookupPendingChange]);
 
   useImperativeHandle(
     reference,
@@ -488,14 +499,13 @@ export const ComposerEditor = forwardRef<
       getSnapshot: () => ({
         content: editor ? serializeComposerDocument(editor.getJSON()) : [],
         revision: revisionRef.current,
-        mentionLookupPending:
-          menuOpenRef.current && sourceStateRef.current.loading,
+        mentionLookupPending: menuOpenRef.current && getSourceState().loading,
       }),
       clearIfRevision: (revision) => {
         if (revisionRef.current === revision) editor?.commands.clearContent();
       },
     }),
-    [editor],
+    [editor, getSourceState],
   );
 
   return <EditorContent editor={editor} className={classes.composerEditor} />;
