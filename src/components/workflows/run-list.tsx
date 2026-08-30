@@ -63,7 +63,7 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
                 style={{ cursor: 'pointer' }}
                 onClick={() =>
                   navigate({
-                    to: '/workflows/$workflowId/executions/$runId',
+                    to: '/workflow/$workflowId/executions/$runId',
                     params: { workflowId, runId: run.id },
                   })
                 }
@@ -74,7 +74,7 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
                       modified click from ALSO firing the row's onClick and
                       navigating the current tab. */}
                   <Link
-                    to="/workflows/$workflowId/executions/$runId"
+                    to="/workflow/$workflowId/executions/$runId"
                     params={{ workflowId, runId: run.id }}
                     style={{ textDecoration: 'none' }}
                     onClick={(event) => event.stopPropagation()}

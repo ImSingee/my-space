@@ -8,7 +8,7 @@ import { TriggerForm } from '~components/workflows/trigger-form';
 import { WorkflowTabs } from '~components/workflows/workflow-tabs';
 import { getWorkflow } from '~server/workflows';
 
-export const Route = createFileRoute('/_app/workflows/$workflowId/')({
+export const Route = createFileRoute('/_app/workflow/$workflowId/')({
   loader: async ({ params }) => {
     const workflow = await getWorkflow({ data: params.workflowId });
     if (!workflow) throw notFound();

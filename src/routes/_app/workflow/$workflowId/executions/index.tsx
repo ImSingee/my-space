@@ -7,16 +7,14 @@ import { StatusBadge } from '~components/system/status-badge';
 import { WorkflowTabs } from '~components/workflows/workflow-tabs';
 import { getWorkflow } from '~server/workflows';
 
-export const Route = createFileRoute('/_app/workflows/$workflowId/executions/')(
-  {
-    loader: async ({ params }) => {
-      const workflow = await getWorkflow({ data: params.workflowId });
-      if (!workflow) throw notFound();
-      return workflow;
-    },
-    component: WorkflowExecutionsPage,
+export const Route = createFileRoute('/_app/workflow/$workflowId/executions/')({
+  loader: async ({ params }) => {
+    const workflow = await getWorkflow({ data: params.workflowId });
+    if (!workflow) throw notFound();
+    return workflow;
   },
-);
+  component: WorkflowExecutionsPage,
+});
 
 function WorkflowExecutionsPage() {
   const workflow = Route.useLoaderData();

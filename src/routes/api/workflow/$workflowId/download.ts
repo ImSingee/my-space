@@ -10,12 +10,16 @@ import { db } from '~/db';
  * program). Auth-gated; the deployment id is resolved against the workflow so
  * it can't be a path-traversal payload.
  */
-async function handle({ request }: { request: Request }): Promise<Response> {
+export async function handle({
+  request,
+}: {
+  request: Request;
+}): Promise<Response> {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return new Response('Unauthorized', { status: 401 });
 
   const url = new URL(request.url);
-  const match = url.pathname.match(/^\/api\/workflows\/([^/]+)\/download\/?$/);
+  const match = url.pathname.match(/^\/api\/workflow\/([^/]+)\/download\/?$/);
   if (!match) return new Response('Not found', { status: 404 });
   const id = match[1];
   const deploymentId = url.searchParams.get('deployment') ?? '';
@@ -45,7 +49,7 @@ async function handle({ request }: { request: Request }): Promise<Response> {
   }
 }
 
-export const Route = createFileRoute('/api/workflows/$workflowId/download')({
+export const Route = createFileRoute('/api/workflow/$workflowId/download')({
   server: {
     handlers: {
       GET: handle,
