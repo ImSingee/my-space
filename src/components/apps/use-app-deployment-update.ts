@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   usePlatformEvent,
   usePlatformResync,
 } from '~components/system/platform-events';
+import { useEventCallback } from '~hooks/use-latest-committed';
 
 type PendingRevision = {
   appId: string;
   revision: string | null;
+};
+
+type DeploymentUpdateState = {
+  appId: string;
+  baselineRevision: string | null;
+  pending: PendingRevision | null;
 };
 
 export type DeploymentRevisionReader = (
@@ -27,56 +34,69 @@ export function useAppDeploymentUpdate({
   deploymentRevision: string | null;
   revisionReader: DeploymentRevisionReader;
 }) {
-  const currentApp = useRef({ appId, deploymentRevision, revisionReader });
-  currentApp.current = { appId, deploymentRevision, revisionReader };
   const sequence = useRef(0);
-  const [pending, setPending] = useState<PendingRevision | null>(null);
+  const [updateState, setUpdateState] = useState<DeploymentUpdateState>(() => ({
+    appId,
+    baselineRevision: deploymentRevision,
+    pending: null,
+  }));
 
-  const applyRevision = useCallback(
+  let currentState = updateState;
+  if (
+    updateState.appId !== appId ||
+    updateState.baselineRevision !== deploymentRevision
+  ) {
+    currentState = {
+      appId,
+      baselineRevision: deploymentRevision,
+      pending:
+        updateState.pending?.appId === appId &&
+        updateState.pending.revision !== deploymentRevision
+          ? updateState.pending
+          : null,
+    };
+    setUpdateState(currentState);
+  }
+
+  const applyRevision = useEventCallback(
     (nextAppId: string, revision: string | null) => {
-      const baseline = currentApp.current;
-      if (nextAppId !== baseline.appId) return;
-      setPending(
-        revision === baseline.deploymentRevision
-          ? null
-          : { appId: nextAppId, revision },
-      );
+      if (nextAppId !== appId) return;
+      setUpdateState({
+        appId,
+        baselineRevision: deploymentRevision,
+        pending:
+          revision === deploymentRevision
+            ? null
+            : { appId: nextAppId, revision },
+      });
     },
-    [],
   );
 
-  useEffect(() => {
-    // A loader refresh or route change makes any older resync response stale.
+  useLayoutEffect(() => {
+    // Invalidate older resync responses as soon as a new loader baseline commits.
     sequence.current += 1;
-    setPending((current) => {
-      if (current?.appId !== appId) return null;
-      return current.revision === deploymentRevision ? null : current;
-    });
   }, [appId, deploymentRevision]);
 
   usePlatformEvent('app.deployment.activated', (event) => {
-    if (event.appId !== currentApp.current.appId) return;
+    if (event.appId !== appId) return;
     sequence.current += 1;
     applyRevision(event.appId, event.deploymentRevision);
   });
 
-  const resync = useCallback(() => {
-    const snapshot = currentApp.current;
+  const resync = useEventCallback(() => {
+    const snapshot = { appId, revisionReader };
     const requestSequence = ++sequence.current;
     void snapshot
       .revisionReader(snapshot.appId)
       .then((revision) => {
-        if (
-          sequence.current === requestSequence &&
-          currentApp.current.appId === snapshot.appId
-        ) {
+        if (sequence.current === requestSequence) {
           applyRevision(snapshot.appId, revision);
         }
       })
       // The EventSource will reconnect and issue another resync. Until then,
       // retain the last trustworthy event/loader state rather than guessing.
       .catch(() => undefined);
-  }, [applyRevision]);
+  });
 
   usePlatformResync(resync);
 
@@ -87,14 +107,10 @@ export function useAppDeploymentUpdate({
     resync();
   }, [appId, resync]);
 
-  const pendingRevision =
-    pending?.appId === appId && pending.revision !== deploymentRevision
-      ? pending.revision
-      : null;
+  const pendingRevision = currentState.pending?.revision ?? null;
 
   return {
     pendingRevision,
-    updateAvailable:
-      pending?.appId === appId && pending.revision !== deploymentRevision,
+    updateAvailable: currentState.pending !== null,
   };
 }

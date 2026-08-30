@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
+import { useEventCallback } from '~hooks/use-latest-committed';
 import type { PlatformEvent } from '~server/platform-events';
 
 type PlatformEventType = PlatformEvent['type'];
@@ -105,28 +106,23 @@ export function usePlatformEvent<TType extends PlatformEventType>(
   listener: (event: PlatformEventFor<TType>) => void,
 ) {
   const { subscribe } = usePlatformEventsContext();
-  const listenerRef = useRef(listener);
-  listenerRef.current = listener;
+  const onEvent = useEventCallback(listener);
 
   useEffect(
     () =>
       subscribe((event) => {
         if (event.type === type) {
-          listenerRef.current(event as PlatformEventFor<TType>);
+          onEvent(event as PlatformEventFor<TType>);
         }
       }),
-    [subscribe, type],
+    [onEvent, subscribe, type],
   );
 }
 
 /** Re-read durable state after the SSE stream connects or reconnects. */
 export function usePlatformResync(listener: ResyncListener) {
   const { subscribeResync } = usePlatformEventsContext();
-  const listenerRef = useRef(listener);
-  listenerRef.current = listener;
+  const onResync = useEventCallback(listener);
 
-  useEffect(
-    () => subscribeResync(() => listenerRef.current()),
-    [subscribeResync],
-  );
+  useEffect(() => subscribeResync(onResync), [onResync, subscribeResync]);
 }

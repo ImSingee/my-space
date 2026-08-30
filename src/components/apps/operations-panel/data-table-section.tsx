@@ -25,7 +25,7 @@ import {
   IconTable,
   IconTrash,
 } from '@tabler/icons-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { formatRelative } from '~lib/format';
 import { appDataTablesQueryOptions } from '~queries/apps';
@@ -35,6 +35,11 @@ import { SectionHeader } from './section-header';
 type Row = Record<string, unknown> & { id?: string };
 type RowFields = Record<string, { optional: boolean }>;
 type RowPatch = { value: Record<string, unknown>; unset: string[] };
+type TableViewState = {
+  table: string | null;
+  cursor: string | null;
+  history: string[];
+};
 
 function jsonValuesEqual(left: unknown, right: unknown): boolean {
   if (left === right) return true;
@@ -257,20 +262,21 @@ export function DataTableSection({ appId }: { appId: string }) {
   const qc = useQueryClient();
   const info = useQuery(appDataTablesQueryOptions(appId));
   const tables = useMemo(() => info.data?.tables ?? [], [info.data?.tables]);
-  const [table, setTable] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [cursorHistory, setCursorHistory] = useState<string[]>([]);
+  const [tableState, setTableState] = useState<TableViewState>({
+    table: null,
+    cursor: null,
+    history: [],
+  });
+  const nextTable = tables.some((item) => item.name === tableState.table)
+    ? tableState.table
+    : (tables[0]?.name ?? null);
+  let currentTableState = tableState;
+  if (nextTable !== tableState.table) {
+    currentTableState = { table: nextTable, cursor: null, history: [] };
+    setTableState(currentTableState);
+  }
+  const { table, cursor, history: cursorHistory } = currentTableState;
   const [showMigrations, setShowMigrations] = useState(false);
-
-  useEffect(() => {
-    const nextTable = tables.some((item) => item.name === table)
-      ? table
-      : (tables[0]?.name ?? null);
-    if (nextTable === table) return;
-    setTable(nextTable);
-    setCursor(null);
-    setCursorHistory([]);
-  }, [table, tables]);
 
   const rows = useQuery({
     queryKey: ['apps', appId, 'data-table-rows', table, cursor],
@@ -399,9 +405,7 @@ export function DataTableSection({ appId }: { appId: string }) {
               }))}
               value={table}
               onChange={(next) => {
-                setTable(next);
-                setCursor(null);
-                setCursorHistory([]);
+                setTableState({ table: next, cursor: null, history: [] });
               }}
               allowDeselect={false}
               style={{ width: 260 }}
@@ -518,8 +522,11 @@ export function DataTableSection({ appId }: { appId: string }) {
                 disabled={cursorHistory.length === 0}
                 onClick={() => {
                   const history = [...cursorHistory];
-                  setCursor(history.pop() ?? null);
-                  setCursorHistory(history);
+                  setTableState({
+                    table,
+                    cursor: history.pop() ?? null,
+                    history,
+                  });
                 }}
               >
                 <IconChevronLeft size={15} />
@@ -529,8 +536,11 @@ export function DataTableSection({ appId }: { appId: string }) {
                 aria-label="Next page"
                 disabled={!rows.data.cursor}
                 onClick={() => {
-                  setCursorHistory((history) => [...history, cursor ?? '']);
-                  setCursor(rows.data.cursor);
+                  setTableState({
+                    table,
+                    cursor: rows.data.cursor,
+                    history: [...cursorHistory, cursor ?? ''],
+                  });
                 }}
               >
                 <IconChevronRight size={15} />

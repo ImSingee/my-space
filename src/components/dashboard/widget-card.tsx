@@ -15,8 +15,9 @@ import {
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppGlyph } from '~components/apps/app-glyph';
+import { useEventCallback } from '~hooks/use-latest-committed';
 import type { DashboardLayoutItem } from '~/lib/dashboard-layout';
 import type { DashboardItem } from '~server/dashboards';
 import {
@@ -57,14 +58,11 @@ export function WidgetCard({
   const activeRefreshRequestRef = useRef<string | null>(null);
   const refreshSequenceRef = useRef(0);
   const frameGenerationRef = useRef<string | null>(null);
-  const statusRef = useRef(status);
-  statusRef.current = status;
 
   // Read the latest grid units inside the (url-keyed) load effect without
   // rebuilding the frame when only the size changes — those go down as `units`
   // messages instead, so a resize never reloads the widget.
-  const unitsRef = useRef({ w: geometry.w, h: geometry.h });
-  unitsRef.current = { w: geometry.w, h: geometry.h };
+  const getUnits = useEventCallback(() => ({ w: geometry.w, h: geometry.h }));
 
   // Fetch the (authenticated, same-origin) bundle in the host, then hand it to
   // the iframe as an inlined `data:` module. Fetching here keeps the request
@@ -130,8 +128,7 @@ export function WidgetCard({
           {
             [WIDGET_CHANNEL]: 'units',
             generation,
-            w: unitsRef.current.w,
-            h: unitsRef.current.h,
+            ...getUnits(),
           },
           '*',
         );
@@ -156,7 +153,7 @@ export function WidgetCard({
     window.addEventListener('message', onMessage);
     frame.srcdoc = widgetFrameHtml(
       toModuleDataUrl(code),
-      unitsRef.current,
+      getUnits(),
       generation,
     );
 
@@ -171,7 +168,7 @@ export function WidgetCard({
       window.removeEventListener('message', onMessage);
       frame.srcdoc = '';
     };
-  }, [code]);
+  }, [code, getUnits]);
 
   const effectiveStatus = bundle.isError ? 'error' : status;
 
@@ -196,9 +193,9 @@ export function WidgetCard({
   // Ask a refresh-capable widget to refetch in place. The request id ties the
   // loading state to this exact refresh, and the ref prevents manual, global,
   // and automatic triggers from overlapping for the same widget.
-  const requestRefresh = useCallback(() => {
+  const requestRefresh = useEventCallback(() => {
     if (
-      statusRef.current !== 'ready' ||
+      status !== 'ready' ||
       !refreshSupportedRef.current ||
       refreshingRef.current
     ) {
@@ -218,7 +215,7 @@ export function WidgetCard({
       { [WIDGET_CHANNEL]: 'refresh', generation, requestId },
       '*',
     );
-  }, [item.id]);
+  });
 
   // Fan a dashboard-wide manual or automatic refresh out to this widget. Skip
   // the first run so a freshly mounted card isn't refreshed immediately.

@@ -657,12 +657,10 @@ export const saveDashboardDraft = createServerFn({ method: 'POST' })
       const layouts = Object.fromEntries(
         DASHBOARD_BREAKPOINT_ORDER.map((breakpoint) => [
           breakpoint,
-          normalizedLayouts[breakpoint].map(
-            (item): DashboardLayoutItem => ({
-              ...item,
-              id: clientToActual.get(item.id) as string,
-            }),
-          ),
+          normalizedLayouts[breakpoint].map((item): DashboardLayoutItem => ({
+            ...item,
+            id: clientToActual.get(item.id) as string,
+          })),
         ]),
       ) as DashboardLayouts;
       const desktopOrder = new Map(

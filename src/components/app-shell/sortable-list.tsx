@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 
 type WithId = { id: string };
 
@@ -34,40 +34,31 @@ export function SortableList<T extends WithId>({
   onReorder: (orderedIds: string[]) => void;
   renderItem: (item: T) => ReactNode;
 }) {
-  const [order, setOrder] = useState<string[]>(() => items.map((i) => i.id));
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const orderRef = useRef(order);
-  orderRef.current = order;
+  const dragOrderRef = useRef<string[] | null>(null);
   const movedRef = useRef(false);
-
-  // Follow the incoming order whenever it changes (added/removed/reordered
-  // elsewhere), but never mid-drag so the optimistic move isn't disrupted.
-  useEffect(() => {
-    if (draggingId) return;
-    const ids = items.map((i) => i.id);
-    setOrder((prev) => {
-      const sameOrder =
-        prev.length === ids.length && prev.every((id, i) => id === ids[i]);
-      return sameOrder ? prev : ids;
-    });
-  }, [items, draggingId]);
+  const itemOrder = items.map((item) => item.id);
+  const order = dragOrder ?? itemOrder;
 
   const byId = new Map(items.map((i) => [i.id, i]));
   const ordered = order
     .map((id) => byId.get(id))
     .filter((x): x is T => Boolean(x));
 
-  const move = (from: string, to: string) =>
-    setOrder((prev) => {
-      const next = [...prev];
-      const fromIndex = next.indexOf(from);
-      const toIndex = next.indexOf(to);
-      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return prev;
-      next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, from);
-      movedRef.current = true;
-      return next;
-    });
+  const move = (from: string, to: string) => {
+    const current = dragOrderRef.current;
+    if (!current) return;
+    const next = [...current];
+    const fromIndex = next.indexOf(from);
+    const toIndex = next.indexOf(to);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+    next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, from);
+    dragOrderRef.current = next;
+    movedRef.current = true;
+    setDragOrder(next);
+  };
 
   return (
     <>
@@ -77,6 +68,8 @@ export function SortableList<T extends WithId>({
           draggable
           style={{ opacity: draggingId === item.id ? 0.5 : 1 }}
           onDragStart={(e) => {
+            dragOrderRef.current = itemOrder;
+            setDragOrder(itemOrder);
             setDraggingId(item.id);
             movedRef.current = false;
             e.dataTransfer.effectAllowed = 'move';
@@ -89,8 +82,11 @@ export function SortableList<T extends WithId>({
           }}
           onDragOver={(e) => e.preventDefault()}
           onDragEnd={() => {
+            const finalOrder = dragOrderRef.current;
+            dragOrderRef.current = null;
+            setDragOrder(null);
             setDraggingId(null);
-            if (movedRef.current) onReorder(orderRef.current);
+            if (movedRef.current && finalOrder) onReorder(finalOrder);
             movedRef.current = false;
           }}
         >

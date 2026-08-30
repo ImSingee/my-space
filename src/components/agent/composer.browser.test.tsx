@@ -213,7 +213,7 @@ test('waits for App lookup before submitting an unresolved mention', async () =>
   });
 });
 
-test('exposes the active App option while focus stays in the editor', async () => {
+test('resets the active App option when the query changes', async () => {
   const screen = await render(
     <MantineProvider>
       <Composer onSubmit={vi.fn<() => void>()} apps={apps} />
@@ -239,6 +239,17 @@ test('exposes the active App option while focus stays in the editor', async () =
   await expect
     .element(input)
     .toHaveAttribute('aria-activedescendant', tasks.element().id);
+
+  await userEvent.keyboard('x');
+  await expect.element(screen.getByText('No matching apps')).toBeVisible();
+  await userEvent.keyboard('{Backspace}');
+  await expect.element(notes).toHaveAttribute('aria-selected', 'true');
+  await expect
+    .element(input)
+    .toHaveAttribute('aria-activedescendant', notes.element().id);
+
+  await userEvent.keyboard('{Enter}');
+  await expect.element(screen.getByText('@Team Notes')).toBeVisible();
 });
 
 test('dismisses App suggestions when keyboard focus leaves the editor', async () => {
