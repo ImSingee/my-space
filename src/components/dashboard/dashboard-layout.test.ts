@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import {
+  applySizeConstraints,
+  defaultConstraints,
+  type ConstraintContext,
+} from 'react-grid-layout/core';
+import { DASHBOARD_MAX_HEIGHT } from '~/lib/dashboard-layout';
 import { buildWidgetLayout, snapUnits } from './dashboard-layout';
 
 const widget = (supportedSizes: { w: number; h: number }[] = []) => ({
@@ -20,22 +26,57 @@ describe('buildWidgetLayout', () => {
     expect(item.minW).toBe(2);
     expect(item.maxW).toBe(12);
     expect(item.minH).toBe(2);
-    expect(item.maxH).toBeUndefined();
+    expect(item.maxH).toBe(DASHBOARD_MAX_HEIGHT);
     expect(item.isResizable).toBeUndefined();
+
+    const context: ConstraintContext = {
+      cols: 12,
+      maxRows: Infinity,
+      containerWidth: 1200,
+      containerHeight: 0,
+      rowHeight: 80,
+      margin: [16, 16],
+      layout: [item],
+    };
+    expect(
+      applySizeConstraints(
+        defaultConstraints,
+        item,
+        5,
+        DASHBOARD_MAX_HEIGHT + 20,
+        'se',
+        context,
+      ),
+    ).toEqual({ w: 5, h: DASHBOARD_MAX_HEIGHT });
   });
 
-  it('leaves multi-footprint resizing to the grid mode', () => {
+  it('snaps multi-footprint resizing through v2 layout constraints', () => {
     const sizes = [
       { w: 3, h: 2 },
-      { w: 6, h: 4 },
-      { w: 4, h: 3 },
+      { w: 6, h: 3 },
     ];
     const [item] = buildWidgetLayout([widget(sizes)], [placement], 'desktop');
     expect(item.minW).toBe(3);
     expect(item.maxW).toBe(6);
     expect(item.minH).toBe(2);
-    expect(item.maxH).toBe(4);
+    expect(item.maxH).toBe(3);
     expect(item.isResizable).toBeUndefined();
+    expect(item.constraints?.map((constraint) => constraint.name)).toEqual([
+      'declaredWidgetFootprints',
+    ]);
+
+    const context: ConstraintContext = {
+      cols: 12,
+      maxRows: Infinity,
+      containerWidth: 1200,
+      containerHeight: 0,
+      rowHeight: 80,
+      margin: [16, 16],
+      layout: [item],
+    };
+    expect(
+      applySizeConstraints(defaultConstraints, item, 5, 3, 'se', context),
+    ).toEqual({ w: 6, h: 3 });
   });
 
   it('adapts footprints that are wider than the mobile grid', () => {
