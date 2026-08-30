@@ -155,7 +155,7 @@ export function TriggerForm({
       }
       void queryClient.invalidateQueries(workflowRunsQueryOptions(workflowId));
       void navigate({
-        to: '/workflows/$workflowId/executions/$runId',
+        to: '/workflow/$workflowId/executions/$runId',
         params: { workflowId, runId: result.runId },
       });
     },

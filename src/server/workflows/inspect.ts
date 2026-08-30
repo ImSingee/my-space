@@ -1,7 +1,10 @@
 /** Server-only: read-only workflow views for the Agent (list + detail). */
 import { db } from '~/db';
 import type { WorkflowStatus } from '~/db/schema';
-import type { NormalizedWorkflowManifest } from './manifest';
+import {
+  projectWorkflowManifestUrls,
+  type NormalizedWorkflowManifest,
+} from './manifest';
 import { listWorkflowDeployments, listWorkflowRuns } from './manage';
 import { listWorkflowCronJobs } from './scheduler';
 
@@ -98,7 +101,7 @@ export async function getWorkflowDetailForAgent(
     const manifest =
       deployment?.manifestNormalized as NormalizedWorkflowManifest | null;
     if (manifest?.triggers?.webhook) {
-      webhook = manifest.triggers.webhook;
+      webhook = projectWorkflowManifestUrls(manifest, id).triggers.webhook;
     }
   }
 

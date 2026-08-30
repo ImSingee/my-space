@@ -66,7 +66,7 @@ export function WorkflowDeploymentHistory({
           <Tooltip label="Download bundle (.js)" withArrow position="top">
             <UnstyledButton
               component="a"
-              href={`/api/workflows/${workflowId}/download?deployment=${deployment.id}`}
+              href={`/api/workflow/${workflowId}/download?deployment=${deployment.id}`}
               download
               className={metaItemClass}
             >

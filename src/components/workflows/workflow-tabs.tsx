@@ -18,7 +18,7 @@ export function WorkflowTabs({ id, active }: { id: string; active: Tab }) {
       <Button
         renderRoot={(props) => (
           <Link
-            to="/workflows/$workflowId"
+            to="/workflow/$workflowId"
             params={{ workflowId: id }}
             {...props}
           />
@@ -32,7 +32,7 @@ export function WorkflowTabs({ id, active }: { id: string; active: Tab }) {
       <Button
         renderRoot={(props) => (
           <Link
-            to="/workflows/$workflowId/executions"
+            to="/workflow/$workflowId/executions"
             params={{ workflowId: id }}
             {...props}
           />
@@ -46,7 +46,7 @@ export function WorkflowTabs({ id, active }: { id: string; active: Tab }) {
       <Button
         renderRoot={(props) => (
           <Link
-            to="/workflows/$workflowId/manage"
+            to="/workflow/$workflowId/manage"
             params={{ workflowId: id }}
             {...props}
           />

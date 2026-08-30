@@ -237,7 +237,7 @@ export function ApiPanel({ appId }: { appId: string }) {
                           ff="monospace"
                           renderRoot={(props) => (
                             <Link
-                              to="/workflows/$workflowId"
+                              to="/workflow/$workflowId"
                               params={{ workflowId: w.workflow }}
                               {...props}
                             />

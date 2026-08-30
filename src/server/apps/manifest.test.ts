@@ -200,7 +200,11 @@ describe('app route manifest', () => {
     );
     const stored = {
       ...normalized,
-      capabilities: { ...normalized.capabilities, userscripts: true },
+      capabilities: {
+        ...normalized.capabilities,
+        webhook: true,
+        userscripts: true,
+      },
       app: { url: '/api/apps/legacy-id/app/', routes: [] },
       widgets: [
         {
@@ -253,7 +257,10 @@ describe('app route manifest', () => {
     expect(projected.rpc?.url).toBe('/api/app/01authoritativeid/rpc');
     expect(projected.kv?.url).toBe('/api/app/01authoritativeid/kv');
     expect(projected.dataTable?.url).toBe('/api/app/01authoritativeid/data');
-    expect(projected.webhook).toEqual(stored.webhook);
+    expect(projected.webhook).toEqual({
+      url: '/api/app/01authoritativeid/hook',
+      auth: 'platform',
+    });
     expect(stored).toEqual(before);
   });
 

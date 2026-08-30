@@ -46,7 +46,7 @@ import {
   setWorkflowPinFn,
 } from '~server/workflows';
 
-export const Route = createFileRoute('/_app/workflows/$workflowId/manage')({
+export const Route = createFileRoute('/_app/workflow/$workflowId/manage')({
   loader: async ({ params }) => {
     const workflow = await getWorkflow({ data: params.workflowId });
     if (!workflow) throw notFound();
@@ -135,7 +135,7 @@ function WorkflowManagePage() {
               <Menu.Item
                 leftSection={<IconFileCode size={16} />}
                 component="a"
-                href={`/api/workflows/${workflow.id}/download?deployment=${
+                href={`/api/workflow/${workflow.id}/download?deployment=${
                   workflow.currentDeploymentId ?? ''
                 }`}
                 download

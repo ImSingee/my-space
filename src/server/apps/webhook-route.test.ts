@@ -30,9 +30,9 @@ vi.mock('~server/apps/runtime', () => ({
   proxyAppRequest: mocks.proxyAppRequest,
 }));
 
-import { handle } from '~/routes/api/hooks/$appId/$.ts';
+import { handle } from '~/routes/api/app/$appId/hook/$.ts';
 
-describe('App webhook compatibility gate', () => {
+describe('App webhook route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findApp.mockResolvedValue({
@@ -45,6 +45,30 @@ describe('App webhook compatibility gate', () => {
     mocks.proxyAppRequest.mockResolvedValue(new Response('proxied'));
   });
 
+  it('forwards hook subpaths through the singular App API namespace', async () => {
+    mocks.findDeployment.mockResolvedValue({
+      compatibilityVersion: 2,
+      manifestNormalized: { webhook: { auth: 'none' } },
+    });
+    const request = new Request(
+      'https://hatch.test/api/app/example/hook/github/events?delivery=1',
+    );
+
+    const response = await handle({ request });
+
+    expect(response.status).toBe(200);
+    expect(mocks.proxyAppRequest).toHaveBeenCalledWith(
+      'example',
+      request,
+      '/api/app/example/hook',
+      '/__webhook',
+      {
+        preserveAuthorization: true,
+        expectedDeploymentId: 'deployment-1',
+      },
+    );
+  });
+
   it('keeps platform authentication ahead of the compatibility response', async () => {
     mocks.findDeployment.mockResolvedValue({
       compatibilityVersion: 0,
@@ -52,12 +76,12 @@ describe('App webhook compatibility gate', () => {
     });
 
     const forbidden = await handle({
-      request: new Request('https://hatch.test/api/hooks/example/run'),
+      request: new Request('https://hatch.test/api/app/example/hook/run'),
     });
     expect(forbidden.status).toBe(403);
 
     const unsupported = await handle({
-      request: new Request('https://hatch.test/api/hooks/example/run', {
+      request: new Request('https://hatch.test/api/app/example/hook/run', {
         headers: { 'x-hatch-secret': 'webhook-secret' },
       }),
     });
@@ -73,10 +97,21 @@ describe('App webhook compatibility gate', () => {
     });
 
     const response = await handle({
-      request: new Request('https://hatch.test/api/hooks/example/run'),
+      request: new Request('https://hatch.test/api/app/example/hook/run'),
     });
 
     expect(response.status).toBe(503);
+    expect(mocks.proxyAppRequest).not.toHaveBeenCalled();
+  });
+
+  it('rejects the former hooks namespace before reading App state', async () => {
+    const response = await handle({
+      request: new Request('https://hatch.test/api/hooks/example/run'),
+    });
+
+    expect(response.status).toBe(404);
+    expect(mocks.findApp).not.toHaveBeenCalled();
+    expect(mocks.findDeployment).not.toHaveBeenCalled();
     expect(mocks.proxyAppRequest).not.toHaveBeenCalled();
   });
 });

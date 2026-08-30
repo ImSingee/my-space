@@ -27,12 +27,12 @@ import { cancelWorkflowRunFn, getWorkflowRun } from '~server/workflows';
 import type { WorkflowRunStepView } from '~server/workflows/manage';
 
 export const Route = createFileRoute(
-  '/_app/workflows/$workflowId/executions/$runId',
+  '/_app/workflow/$workflowId/executions/$runId',
 )({
   loader: async ({ params }) => {
     const run = await getWorkflowRun({ data: params.runId });
     // Scope the run to its workflow so a deep link like
-    // /workflows/<A>/executions/<run-of-B> can't render or cancel B under A.
+    // /workflow/<A>/executions/<run-of-B> can't render or cancel B under A.
     if (!run || run.workflowId !== params.workflowId) throw notFound();
     return run;
   },
@@ -151,7 +151,7 @@ function WorkflowExecutionPage() {
           <Button
             renderRoot={(props) => (
               <Link
-                to="/workflows/$workflowId/executions"
+                to="/workflow/$workflowId/executions"
                 params={{ workflowId }}
                 {...props}
               />

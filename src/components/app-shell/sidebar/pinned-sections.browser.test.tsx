@@ -201,7 +201,7 @@ async function renderSections(initialEntry = '/') {
   });
   const workflowRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/workflows/$workflowId',
+    path: '/workflow/$workflowId',
     component: () => null,
   });
   const router = createRouter({
@@ -274,6 +274,22 @@ test('uses the app slug for links and hash-aware active state', async () => {
   await expect.element(settings).toHaveAttribute('href', '/app/todo#settings');
   expect(home.element()).not.toHaveAttribute('data-active');
   expect(settings.element()).toHaveAttribute('data-active', 'true');
+});
+
+test('uses the singular workflow namespace for links and active state', async () => {
+  fixtures.workflows = [workflow('daily-digest', true)];
+
+  const { screen } = await renderSections('/workflow/daily-digest');
+
+  const workflowLink = screen.getByRole('link', {
+    name: 'Workflow daily-digest',
+  });
+  const manageLink = screen.getByRole('link', { name: 'Manage workflows' });
+  await expect
+    .element(workflowLink)
+    .toHaveAttribute('href', '/workflow/daily-digest');
+  expect(workflowLink.element()).toHaveAttribute('data-active', 'true');
+  await expect.element(manageLink).toHaveAttribute('href', '/workflows');
 });
 
 test('opens an app management page from the menu after Unpin', async () => {

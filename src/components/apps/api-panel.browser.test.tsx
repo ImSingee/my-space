@@ -56,5 +56,5 @@ test('shows declared Workflow calls independently of Agent beta features', async
     .toBeVisible();
   await expect
     .element(screen.getByRole('link', { name: 'daily-report' }))
-    .toHaveAttribute('href', '/workflows/daily-report');
+    .toHaveAttribute('href', '/workflow/daily-report');
 });

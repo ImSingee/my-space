@@ -2,7 +2,7 @@
  * Server-only: resolve a top-level workflow's external invocation config.
  *
  * Shared by the app-platform so apps can call workflows through the existing
- * external workflow API (`POST /api/workflow-hooks/<id>?secret=`). A workflow is
+ * external workflow API (`POST /api/workflow/<id>/run?secret=`). A workflow is
  * only "callable" when it is deployed AND its current deployment has the webhook
  * trigger enabled with a provisioned secret — exactly the conditions the public
  * webhook route enforces — so this mirrors that gate in one place.
