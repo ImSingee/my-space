@@ -16,6 +16,7 @@ FROM base AS deps
 # pnpm-workspace.yaml carries `allowBuilds` (incl. esbuild) — required
 # so pnpm runs esbuild's install script and fetches its native binary.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 # --- Build the platform (Nitro node server) + the Agent Runner bundle --------
