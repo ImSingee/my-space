@@ -19,7 +19,6 @@ import { Link } from '@tanstack/react-router';
 import { IconChevronRight, IconCopy } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
 import { toast } from 'sonner';
-import { WORKFLOWS_ENABLED } from '~/features';
 import type { ProtoFile, RpcServiceApi } from '~server/apps/manifest';
 import { normalizedManifestQueryOptions } from '~queries/apps';
 
@@ -176,7 +175,7 @@ export function ApiPanel({ appId }: { appId: string }) {
 
   const manifest = query.data;
   const api = manifest?.api;
-  const workflows = WORKFLOWS_ENABLED ? (manifest?.workflows ?? []) : [];
+  const workflows = manifest?.workflows ?? [];
 
   return (
     <Box component="section">

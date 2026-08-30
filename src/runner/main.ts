@@ -50,6 +50,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let offlineAbortTimer: ReturnType<typeof setTimeout> | undefined;
 let shuttingDown = false;
 let pendingResumedRunIds: string[] = [];
+let betaFeatures: readonly string[] = Object.freeze([]);
 
 function send(message: RunnerMessage): boolean {
   if (!ws || ws.readyState !== WebSocket.OPEN || !helloAcked) return false;
@@ -71,6 +72,7 @@ function send(message: RunnerMessage): boolean {
 const executor = new RunnerExecutor({
   appUrl: config.appUrl,
   tavilyApiKey: config.tavilyApiKey,
+  getBetaFeatures: () => betaFeatures,
   platform,
   send,
 });
@@ -111,6 +113,7 @@ function handleHubMessage(message: HubMessage): void {
     case 'hub.hello_ack': {
       const socket = ws;
       if (!socket) return;
+      betaFeatures = Object.freeze([...message.betaFeatures]);
       pendingResumedRunIds = message.resumedRunIds;
       for (const runId of message.staleRunIds) {
         executor.abortStale(runId);
@@ -250,6 +253,7 @@ function connect(): void {
   });
 
   socket.on('message', (data) => {
+    if (ws !== socket) return;
     try {
       handleHubMessage(
         parseHubMessage(

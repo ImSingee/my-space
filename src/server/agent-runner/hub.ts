@@ -427,7 +427,10 @@ function notifyRunFinished(runId: string): void {
  * be `runner.hello`; afterwards events/finishes are fed into agent-runs and
  * commands flow back over the same socket.
  */
-export function handleRunnerSocket(socket: WebSocket): void {
+export function handleRunnerSocket(
+  socket: WebSocket,
+  options: { betaFeatures: readonly string[] },
+): void {
   let conn: RunnerConn | null = null;
 
   const close = (code: number, reason: string) => {
@@ -467,7 +470,7 @@ export function handleRunnerSocket(socket: WebSocket): void {
           return;
         }
         try {
-          conn = await registerRunner(socket, message);
+          conn = await registerRunner(socket, message, options);
         } catch (error) {
           console.error('[runner-hub] runner registration failed:', error);
           close(1011, 'Runner registration failed.');
@@ -535,6 +538,7 @@ export function handleRunnerSocket(socket: WebSocket): void {
 async function registerRunner(
   socket: WebSocket,
   hello: Extract<RunnerMessage, { type: 'runner.hello' }>,
+  options: { betaFeatures: readonly string[] },
 ): Promise<RunnerConn | null> {
   const state = hubState();
   const existing = state.runners.get(hello.runnerId);
@@ -617,6 +621,7 @@ async function registerRunner(
   if (
     !send(conn, {
       type: 'hub.hello_ack',
+      betaFeatures: [...options.betaFeatures],
       resumedRunIds: resumed,
       staleRunIds: stale,
       staleWorkspaceSessionIds: workspace.staleSessionIds,

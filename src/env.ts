@@ -3,6 +3,7 @@ import {
   DEFAULT_INTERNAL_PORT,
   RUNNER_WS_PATH,
 } from './agent/runner-constants';
+import { parseBetaFeatures } from './beta-features';
 
 const DEV_AGENT_RUNNER_TOKEN = 'hatch-dev-runner-token';
 const PRERENDER_ONLY_SECRET =
@@ -16,6 +17,8 @@ export function isSpaShellPrerendering(): boolean {
 
 /** Immutable startup configuration for the Platform process. */
 export type PlatformEnv = Readonly<{
+  /** Beta features distributed to Agent Runners during connection setup. */
+  betaFeatures: readonly string[];
   /** Public application origin without a trailing slash. */
   appUrl: string;
   /**
@@ -91,6 +94,7 @@ function resolvePlatformEnv(): PlatformEnv {
     // importing Better Auth does not make a production build depend on runtime
     // credentials. The Nitro startup plugin separately skips all side effects.
     return Object.freeze({
+      betaFeatures: Object.freeze([]),
       appUrl: 'http://127.0.0.1',
       secret: PRERENDER_ONLY_SECRET,
       betterAuthSecret: PRERENDER_ONLY_SECRET,
@@ -120,6 +124,7 @@ function resolvePlatformEnv(): PlatformEnv {
   const agentRunnerToken = configuredAgentRunnerToken || DEV_AGENT_RUNNER_TOKEN;
 
   return Object.freeze({
+    betaFeatures: parseBetaFeatures(process.env.HATCH_BETA),
     appUrl,
     secret,
     betterAuthSecret,

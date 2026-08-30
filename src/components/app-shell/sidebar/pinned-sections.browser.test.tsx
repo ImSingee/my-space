@@ -10,10 +10,6 @@ import {
 import { beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 
-// Keep the enabled Workflow component behavior covered while the product-level
-// capability switch hides it in production.
-vi.mock('~/features', () => ({ WORKFLOWS_ENABLED: true }));
-
 type AppFixture = {
   id: string;
   slug: string;

@@ -4,7 +4,6 @@ import {
   formatSkillsForSystemPrompt,
   type Skill,
 } from '@earendil-works/pi-agent-core';
-import { WORKFLOWS_ENABLED } from '~/features';
 
 const WORKFLOW_SKILL_NAMES = new Set([
   'building-workflows',
@@ -13,21 +12,22 @@ const WORKFLOW_SKILL_NAMES = new Set([
 
 export function buildSystemPrompt(
   appUrl: string,
+  options: { workflowBetaEnabled: boolean },
   skills: Skill[] = [],
 ): string {
-  const sourceLocationGuidance = WORKFLOWS_ENABLED
+  const sourceLocationGuidance = options.workflowBetaEnabled
     ? '- App sources normally live under `apps/<id>/`; workflow sources normally live\n' +
       '  under `workflows/<id>/`. The absolute path returned by create/checkout is\n' +
       '  authoritative for every file, shell, Git, and deploy operation.'
     : '- App sources normally live under `apps/<id>/`. The absolute path returned\n' +
       '  by create/checkout is authoritative for every file, shell, Git, and\n' +
       '  deploy operation.';
-  const platformToolsGuidance = WORKFLOWS_ENABLED
+  const platformToolsGuidance = options.workflowBetaEnabled
     ? '- You have file tools, a shell, native Git, and platform tools for inspecting,\n' +
       '  creating, checking out, deploying, and rolling back apps and workflows.'
     : '- You have file tools, a shell, native Git, and platform tools for inspecting,\n' +
       '  creating, checking out, deploying, and rolling back apps.';
-  const workflowAvailabilityGuidance = WORKFLOWS_ENABLED
+  const workflowAvailabilityGuidance = options.workflowBetaEnabled
     ? `- Hatch has two kinds of buildable things: **apps** (custom UI + API) and
   **workflows** (headless periodic/repetitive tasks with a fixed trigger +
   audit UI). Pick based on the request: build a workflow when the user wants a
@@ -36,10 +36,10 @@ export function buildSystemPrompt(
     : `- Workflow capabilities are temporarily unavailable. Do not create, inspect,
   modify, import, deploy, roll back, or trigger workflows, and do not add new
   top-level Workflow calls to Apps.`;
-  const appCapabilityReferences = WORKFLOWS_ENABLED
+  const appCapabilityReferences = options.workflowBetaEnabled
     ? 'cron, webhook, storage, KV, Data Tables, long-running backends, and calling top-level workflows.'
     : 'cron, webhook, storage, KV, Data Tables, and long-running backends.';
-  const workflowContract = WORKFLOWS_ENABLED
+  const workflowContract = options.workflowBetaEnabled
     ? `
 # Workflow contract
 
@@ -228,12 +228,12 @@ ${workflowContract}
   attachments under \`attachments/\` unless the task requires another safe path.
 - After deployment, briefly describe the result and how the user can open it.`;
 
-  const visibleSkills = WORKFLOWS_ENABLED
+  const visibleSkills = options.workflowBetaEnabled
     ? skills
     : skills.filter((skill) => !WORKFLOW_SKILL_NAMES.has(skill.name));
   const skillsPrompt = formatSkillsForSystemPrompt(visibleSkills);
   if (!skillsPrompt) return basePrompt;
-  const skillsGuidance = WORKFLOWS_ENABLED
+  const skillsGuidance = options.workflowBetaEnabled
     ? 'Before creating or modifying an app or workflow, read the full matching Skill file with `read_file` before calling app/workflow platform tools or editing workspace files. Before explaining or updating an App whose compatibility is older than latest, also read the full `app-compatibility` Skill. Before importing an uploaded source ZIP, read both full matching Skills before downloading or extracting the attachment: `importing-apps` plus `building-apps` for an app, or `importing-workflows` plus `building-workflows` for a workflow. Read only the capability references linked by the selected Skill that apply to the task.'
     : 'Before creating or modifying an app, read the full `building-apps` Skill with `read_file` before calling App platform tools or editing workspace files. Before explaining or updating an App whose compatibility is older than latest, also read the full `app-compatibility` Skill. Before importing an uploaded App source ZIP, read both `importing-apps` and `building-apps` before downloading or extracting the attachment. Read only the capability references linked by the selected Skill that apply to the task.';
   return `${basePrompt}\n\n# Skills\n${skillsGuidance}\n\n${skillsPrompt}`;

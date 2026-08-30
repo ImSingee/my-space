@@ -64,6 +64,8 @@ export class RunnerExecutor {
       appUrl: string;
       /** Optional Tavily key; omission selects Tavily's keyless access mode. */
       tavilyApiKey?: string | null;
+      /** Latest Platform-owned beta features, snapshotted for each new run. */
+      getBetaFeatures: () => readonly string[];
       platform: PlatformClient;
       /** Send a message to the platform; false when offline (kept buffered). */
       send: (message: RunnerMessage) => boolean;
@@ -195,6 +197,7 @@ export class RunnerExecutor {
 
       run.done = runAgentTurn({
         appUrl: this.opts.appUrl,
+        betaFeatures: Object.freeze([...this.opts.getBetaFeatures()]),
         ...(this.opts.tavilyApiKey
           ? { tavilyApiKey: this.opts.tavilyApiKey }
           : {}),
