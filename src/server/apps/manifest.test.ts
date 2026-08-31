@@ -63,6 +63,21 @@ describe('App compatibility manifest', () => {
   );
 });
 
+describe('App manifest version', () => {
+  it('accepts the retired field without adding it to normalized manifests', () => {
+    const retiredVersion = { legacy: true };
+    const parsed = parseSourceManifest({
+      id: 'demo',
+      name: 'Demo',
+      version: retiredVersion,
+      capabilities: {},
+    });
+
+    expect(parsed.version).toEqual(retiredVersion);
+    expect(normalizeManifest(parsed)).not.toHaveProperty('version');
+  });
+});
+
 describe('backend manifest', () => {
   const source = (backend: Record<string, unknown>) => ({
     id: 'demo',
@@ -181,19 +196,19 @@ describe('app capabilities manifest', () => {
     expect(normalized).not.toHaveProperty('storage');
   });
 
-  it('accepts and strips the retired userscripts: false field', () => {
-    const parsed = parseSourceManifest(manifest({ userscripts: false }));
+  it('accepts retired userscripts fields as unknown legacy data', () => {
+    const capability = { enabled: true };
+    const declarations = [{ id: 'legacy-script' }];
+    const parsed = parseSourceManifest({
+      ...manifest({ userscripts: capability }),
+      userscripts: declarations,
+    });
     const normalized = normalizeManifest(parsed);
 
     expect(parsed.capabilities).not.toHaveProperty('userscripts');
+    expect(parsed.userscripts).toEqual(declarations);
     expect(normalized.capabilities).not.toHaveProperty('userscripts');
     expect(normalized).not.toHaveProperty('userscripts');
-  });
-
-  it('rejects the retired userscripts capability when enabled', () => {
-    expect(() => parseSourceManifest(manifest({ userscripts: true }))).toThrow(
-      /userscripts/,
-    );
   });
 
   it('requires both the backend capability and backend entry for storage', () => {
@@ -254,12 +269,11 @@ describe('app route manifest', () => {
         app: { entry: 'app/main.tsx' },
       }),
     );
-    const stored = {
+    const stored: NormalizedManifest = {
       ...normalized,
       capabilities: {
         ...normalized.capabilities,
         webhook: true,
-        userscripts: true,
       },
       app: { url: '/api/apps/legacy-id/app/', routes: [] },
       widgets: [
@@ -271,18 +285,6 @@ describe('app route manifest', () => {
           supportedSizes: [],
         },
       ],
-      userscripts: [
-        {
-          id: 'watch',
-          name: 'Watch',
-          url: '/api/apps/legacy-id/userscripts/watch.user.js',
-          matches: ['https://example.com/*'],
-          grants: [],
-          connects: [],
-          noframes: false,
-          extraMetadata: {},
-        },
-      ],
       rpc: {
         url: '/api/apps/legacy-id/rpc',
         service: 'demo.v1.DemoService',
@@ -290,11 +292,6 @@ describe('app route manifest', () => {
       kv: { url: '/api/apps/legacy-id/kv' },
       dataTable: { url: '/api/apps/legacy-id/data' },
       webhook: { url: '/api/hooks/01internalid', auth: 'platform' },
-    } as NormalizedManifest & {
-      capabilities: NormalizedManifest['capabilities'] & {
-        userscripts: boolean;
-      };
-      userscripts: unknown[];
     };
     const before = structuredClone(stored);
 
@@ -308,8 +305,6 @@ describe('app route manifest', () => {
     expect(projected.widgets[0]?.url).toBe(
       '/api/app/01authoritativeid/widget/summary',
     );
-    expect(projected).not.toHaveProperty('userscripts');
-    expect(projected.capabilities).not.toHaveProperty('userscripts');
     expect(projected.rpc?.url).toBe('/api/app/01authoritativeid/rpc');
     expect(projected.kv?.url).toBe('/api/app/01authoritativeid/kv');
     expect(projected.dataTable?.url).toBe('/api/app/01authoritativeid/data');

@@ -245,28 +245,28 @@ export const webhookConfigSchema = z.object({
   auth: z.enum(['platform', 'none']).default('platform'),
 });
 
-export const capabilitiesSchema = z
-  .object({
-    database: z.boolean().default(false),
-    frontend: z.boolean().default(false),
-    widgets: z.boolean().default(false),
-    backend: z.boolean().default(false),
-    cron: z.boolean().default(false),
-    webhook: z.boolean().default(false),
-    /** Private persistent directory exposed only to the app backend. */
-    storage: z.boolean().default(false),
-    /** Simple per-app key/value store (platform DB) for small tokens/config. */
-    kv: z.boolean().default(false),
-    /** Platform-managed typed tables with migrations and realtime queries. */
-    dataTable: z.boolean().default(false),
-    /** Accepted only so manifests from the retired scaffold remain deployable. */
-    userscripts: z.literal(false).optional(),
+const supportedCapabilitiesSchema = z.object({
+  database: z.boolean().default(false),
+  frontend: z.boolean().default(false),
+  widgets: z.boolean().default(false),
+  backend: z.boolean().default(false),
+  cron: z.boolean().default(false),
+  webhook: z.boolean().default(false),
+  /** Private persistent directory exposed only to the app backend. */
+  storage: z.boolean().default(false),
+  /** Simple per-app key/value store (platform DB) for small tokens/config. */
+  kv: z.boolean().default(false),
+  /** Platform-managed typed tables with migrations and realtime queries. */
+  dataTable: z.boolean().default(false),
+});
+
+export const capabilitiesSchema = supportedCapabilitiesSchema
+  .extend({
+    /** Removed; retained only so legacy manifests remain parseable. */
+    userscripts: z.unknown().optional(),
   })
   .strict()
-  .transform(({ userscripts: retiredUserscripts, ...capabilities }) => {
-    void retiredUserscripts;
-    return capabilities;
-  });
+  .transform((capabilities) => supportedCapabilitiesSchema.parse(capabilities));
 
 /**
  * Canonical app-id shape: lowercase alphanumerics and hyphens, safe as a path
@@ -309,7 +309,8 @@ export const sourceManifestSchema = z
         message: `name must be at most ${APP_NAME_MAX_LENGTH} characters`,
       }),
     description: z.string().default(''),
-    version: z.number().int().min(1).default(1),
+    /** Removed; retained only so legacy manifests remain parseable. */
+    version: z.unknown().optional(),
     compatibilityVersion: z.number().int().min(1).optional(),
     capabilities: capabilitiesSchema,
     backendMode: z.enum(['serverless', 'long-running']).default('serverless'),
@@ -333,6 +334,8 @@ export const sourceManifestSchema = z
       })
       .optional(),
     widgets: z.array(widgetSchema).default([]),
+    /** Removed; retained only so legacy manifests remain parseable. */
+    userscripts: z.unknown().optional(),
     cron: z.array(cronJobSchema).default([]),
     /** Inbound webhook auth mode (see webhookConfigSchema); defaults to platform. */
     webhook: webhookConfigSchema.optional(),
@@ -483,7 +486,6 @@ export type NormalizedManifest = {
   id: string;
   name: string;
   description: string;
-  version: number;
   capabilities: AppCapabilitiesShape;
   backendMode: 'serverless' | 'long-running';
   /** Backend artifact entry the platform runs, when a backend is present. */
@@ -544,20 +546,6 @@ export function appAssetUrl(id: string): string {
 }
 
 /**
- * Hide retired capability keys at API boundaries without rewriting persisted
- * JSON. Existing App rows and deployment manifests may still carry the field.
- */
-export function projectAppCapabilities<T extends object>(
-  capabilities: T | null | undefined,
-): T | null {
-  if (!capabilities) return null;
-  const { userscripts: retiredUserscripts, ...supportedCapabilities } =
-    capabilities as T & { userscripts?: unknown };
-  void retiredUserscripts;
-  return supportedCapabilities as T;
-}
-
-/**
  * Project every app-owned URL from authoritative app identity at read time.
  * Deployment manifests are immutable, may contain legacy `/api/apps/...`
  * values, and are keyed by id while slugs may change without a rebuild. Every
@@ -569,42 +557,32 @@ export function projectAppManifestUrls(
   appId: string,
   slug: string,
 ): NormalizedManifest {
-  const { userscripts: retiredUserscripts, ...supportedManifest } =
-    manifest as NormalizedManifest & { userscripts?: unknown };
-  void retiredUserscripts;
   return {
-    ...supportedManifest,
-    capabilities:
-      projectAppCapabilities(supportedManifest.capabilities) ??
-      supportedManifest.capabilities,
-    ...(supportedManifest.app
+    ...manifest,
+    ...(manifest.app
       ? {
           app: {
-            ...supportedManifest.app,
+            ...manifest.app,
             url: `/app/${slug}`,
           },
         }
       : {}),
-    ...(supportedManifest.widgets
+    ...(manifest.widgets
       ? {
-          widgets: supportedManifest.widgets.map((widget) => ({
+          widgets: manifest.widgets.map((widget) => ({
             ...widget,
             url: widgetUrl(appId, widget.id),
           })),
         }
       : {}),
-    ...(supportedManifest.rpc
-      ? { rpc: { ...supportedManifest.rpc, url: rpcUrl(appId) } }
-      : {}),
-    ...(supportedManifest.kv ? { kv: { url: kvUrl(appId) } } : {}),
-    ...(supportedManifest.dataTable
-      ? { dataTable: { url: dataTableUrl(appId) } }
-      : {}),
-    ...(supportedManifest.capabilities?.webhook || supportedManifest.webhook
+    ...(manifest.rpc ? { rpc: { ...manifest.rpc, url: rpcUrl(appId) } } : {}),
+    ...(manifest.kv ? { kv: { url: kvUrl(appId) } } : {}),
+    ...(manifest.dataTable ? { dataTable: { url: dataTableUrl(appId) } } : {}),
+    ...(manifest.capabilities?.webhook || manifest.webhook
       ? {
           webhook: {
             url: webhookUrl(appId),
-            auth: supportedManifest.webhook?.auth ?? 'platform',
+            auth: manifest.webhook?.auth ?? 'platform',
           },
         }
       : {}),
@@ -680,7 +658,6 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     id: src.id,
     name: src.name,
     description: src.description,
-    version: src.version,
     capabilities: src.capabilities,
     backendMode: src.backendMode,
     widgets: src.capabilities.widgets

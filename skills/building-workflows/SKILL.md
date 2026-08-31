@@ -153,7 +153,6 @@ time.
   "id": "star-digest",
   "name": "Star digest",
   "description": "Summarize a repo's stars",
-  "version": 1,
   "entry": "workflow.ts",
   "network": ["api.github.com:443"],
   "triggers": {

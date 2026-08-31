@@ -16,6 +16,19 @@ function manifest(network?: unknown): Record<string, unknown> {
   };
 }
 
+describe('Workflow manifest version', () => {
+  it('accepts the retired field without adding it to normalized manifests', () => {
+    const retiredVersion = { legacy: true };
+    const parsed = parseSourceWorkflowManifest({
+      ...manifest(),
+      version: retiredVersion,
+    });
+
+    expect(parsed.version).toEqual(retiredVersion);
+    expect(normalizeWorkflowManifest(parsed)).not.toHaveProperty('version');
+  });
+});
+
 describe('Workflow manifest URLs', () => {
   it('uses the singular Workflow API namespace for run webhooks', () => {
     expect(workflowWebhookUrl('daily-digest')).toBe(
@@ -28,7 +41,6 @@ describe('Workflow manifest URLs', () => {
       id: 'daily-digest',
       name: 'Daily digest',
       description: '',
-      version: 1,
       entry: 'workflow.ts',
       triggers: {
         cron: [],

@@ -11,12 +11,13 @@ async function loadDefaultManifest() {
     .replaceAll('__APP_ID__', 'demo')
     .replaceAll('__APP_NAME__', 'Demo')
     .replaceAll('__APP_DESCRIPTION__', 'Demo app');
-  return parseSourceManifest(JSON.parse(rendered));
+  const source = JSON.parse(rendered) as Record<string, unknown>;
+  return { source, manifest: parseSourceManifest(source) };
 }
 
 describe('default app template', () => {
   it('uses a managed Data Table instead of a raw App database', async () => {
-    const manifest = await loadDefaultManifest();
+    const { source, manifest } = await loadDefaultManifest();
     const template = new URL(
       '../../../templates/default-app/',
       import.meta.url,
@@ -27,6 +28,7 @@ describe('default app template', () => {
       readFile(new URL('data/schema.ts', template), 'utf8'),
     ]);
 
+    expect(source).not.toHaveProperty('version');
     expect(manifest.capabilities).toMatchObject({
       database: false,
       dataTable: true,

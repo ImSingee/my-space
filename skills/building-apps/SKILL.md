@@ -121,7 +121,6 @@ manifest is:
   "id": "generated-app-id",
   "name": "Todo",
   "description": "A simple todo list",
-  "version": 1,
   "compatibilityVersion": 2,
   "capabilities": {
     "database": false,
