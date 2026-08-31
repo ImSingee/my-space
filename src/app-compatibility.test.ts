@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_APP_COMPATIBILITY_VERSION,
   LATEST_APP_COMPATIBILITY_VERSION,
   LEGACY_APP_COMPATIBILITY_VERSION,
   MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
   appCompatibility,
   resolveAppCompatibilityVersion,
+  resolveAppDeployCompatibilityVersion,
 } from './app-compatibility';
 
 describe('App compatibility', () => {
@@ -35,5 +37,35 @@ describe('App compatibility', () => {
     );
     expect(compatibility.isSupported).toBe(false);
     expect(compatibility.isLatest).toBe(false);
+  });
+
+  it('uses a fixed v2 default for source manifests that omit compatibility', () => {
+    expect(resolveAppDeployCompatibilityVersion(undefined)).toBe(
+      DEFAULT_APP_COMPATIBILITY_VERSION,
+    );
+    expect(DEFAULT_APP_COMPATIBILITY_VERSION).toBe(2);
+  });
+
+  it.each([LEGACY_APP_COMPATIBILITY_VERSION, LATEST_APP_COMPATIBILITY_VERSION])(
+    'accepts source compatibility v%i within the platform range',
+    (version) => {
+      expect(resolveAppDeployCompatibilityVersion(version)).toBe(version);
+    },
+  );
+
+  it('rejects source compatibility below the platform minimum', () => {
+    expect(() =>
+      resolveAppDeployCompatibilityVersion(
+        MIN_SUPPORTED_APP_COMPATIBILITY_VERSION - 1,
+      ),
+    ).toThrow(/manifest\.json compatibilityVersion.*below.*minimum/);
+  });
+
+  it('rejects source compatibility newer than the platform', () => {
+    expect(() =>
+      resolveAppDeployCompatibilityVersion(
+        LATEST_APP_COMPATIBILITY_VERSION + 1,
+      ),
+    ).toThrow(/manifest\.json compatibilityVersion.*newer.*latest supported/);
   });
 });

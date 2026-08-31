@@ -121,6 +121,7 @@ manifest is:
   "name": "Todo",
   "description": "A simple todo list",
   "version": 1,
+  "compatibilityVersion": 2,
   "capabilities": {
     "database": false,
     "frontend": true,
