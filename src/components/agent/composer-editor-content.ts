@@ -27,13 +27,15 @@ function serializeInlineNode(
     const id = node.attrs?.id;
     const name = node.attrs?.label;
     const slug = node.attrs?.slug;
-    if (
-      typeof id === 'string' &&
-      id &&
-      typeof name === 'string' &&
-      typeof slug === 'string' &&
-      slug
-    ) {
+    const resourceType = node.attrs?.resourceType;
+    if (typeof id !== 'string' || !id || typeof name !== 'string') return;
+    if (resourceType === 'workflow') {
+      parts.push({ type: 'workflow', id, name });
+      return;
+    }
+    // Mentions created before resourceType existed are Apps and already carry
+    // a slug, so keep them serializable during hot reloads.
+    if (typeof slug === 'string' && slug) {
       parts.push({ type: 'app', id, name, slug });
     }
     return;
@@ -48,7 +50,7 @@ function serializeInlineNode(
   }
 }
 
-/** Convert the editor document into ordered text/App nodes for the API. */
+/** Convert the editor document into ordered text/resource nodes for the API. */
 export function serializeComposerDocument(
   document: JSONContent,
 ): ComposerInputPart[] {

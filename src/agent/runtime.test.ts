@@ -105,7 +105,7 @@ async function runWithResponses(
 }
 
 describe('runAgentTurn terminal outcomes', () => {
-  it('keeps App snapshot metadata while exposing inline text to the model', async () => {
+  it('keeps resource snapshot metadata while exposing inline text to the model', async () => {
     const composerContent: AgentComposerContentPart[] = [
       { type: 'text', text: 'Review ' },
       {
@@ -114,10 +114,17 @@ describe('runAgentTurn terminal outcomes', () => {
         name: 'Original Name',
         slug: 'original-slug',
       },
+      { type: 'text', text: ' with ' },
+      {
+        type: 'workflow',
+        id: 'workflow-stable',
+        name: 'Original Workflow',
+      },
       { type: 'text', text: ' now.' },
     ];
     const userText =
-      'Review @APP{name="Original Name" id="app-stable" slug="original-slug"} now.';
+      'Review @APP{name="Original Name" id="app-stable" slug="original-slug"}' +
+      ' with @WORKFLOW{name="Original Workflow" id="workflow-stable"} now.';
     const result = await runWithResponses(
       [
         (context) => {

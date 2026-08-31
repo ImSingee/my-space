@@ -84,6 +84,11 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('# Workflow contract');
     expect(prompt).toContain('`--import-map=.hatch/import-map.json`');
     expect(prompt).toContain('source-owned `hatch/workflow.ts` is unsupported');
+    expect(prompt).toContain('@WORKFLOW{name="..." id="..."}');
+    expect(prompt).toContain('Use its stable id with Workflow tools');
+    expect(prompt).toMatch(
+      /does not itself require\s+modifying, deploying, triggering/,
+    );
     expect(prompt).not.toContain(
       'Workflow capabilities are temporarily unavailable',
     );
@@ -96,6 +101,12 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('Use its stable id with App tools');
     expect(prompt).toContain('supplies context');
     expect(prompt).toMatch(/does not by itself require modifying,\s+deploying/);
+  });
+
+  it('does not advertise Workflow markers while the beta is disabled', () => {
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
+
+    expect(prompt).not.toContain('@WORKFLOW{');
   });
 
   it('describes safe web search and fetch usage', () => {

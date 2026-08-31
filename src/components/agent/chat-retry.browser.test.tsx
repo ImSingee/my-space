@@ -115,6 +115,13 @@ vi.mock('~queries/apps', () => ({
   },
 }));
 
+vi.mock('~queries/workflows', () => ({
+  workflowsQueryOptions: {
+    queryKey: ['test-workflows'],
+    queryFn: async () => [],
+  },
+}));
+
 function doneResponse(): Response {
   return new Response(
     `data: ${JSON.stringify({ seq: 1, event: { type: 'done' } })}\n\n`,

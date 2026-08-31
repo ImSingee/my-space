@@ -5,7 +5,7 @@ import {
 } from './composer-editor-content';
 
 describe('serializeComposerDocument', () => {
-  test('preserves inline App order and repeated references', () => {
+  test('preserves inline resource order and repeated references', () => {
     expect(
       serializeComposerDocument({
         type: 'doc',
@@ -19,6 +19,7 @@ describe('serializeComposerDocument', () => {
                 attrs: {
                   id: 'app-1',
                   label: 'Notes',
+                  resourceType: 'app',
                   slug: 'notes',
                 },
               },
@@ -26,9 +27,18 @@ describe('serializeComposerDocument', () => {
               {
                 type: 'mention',
                 attrs: {
-                  id: 'app-1',
-                  label: 'Notes',
-                  slug: 'notes',
+                  id: 'workflow-1',
+                  label: 'Nightly Digest',
+                  resourceType: 'workflow',
+                },
+              },
+              { type: 'text', text: ' and ' },
+              {
+                type: 'mention',
+                attrs: {
+                  id: 'workflow-1',
+                  label: 'Nightly Digest',
+                  resourceType: 'workflow',
                 },
               },
               { type: 'text', text: '.' },
@@ -40,9 +50,30 @@ describe('serializeComposerDocument', () => {
       { type: 'text', text: 'Compare ' },
       { type: 'app', id: 'app-1', name: 'Notes', slug: 'notes' },
       { type: 'text', text: ' with ' },
-      { type: 'app', id: 'app-1', name: 'Notes', slug: 'notes' },
+      { type: 'workflow', id: 'workflow-1', name: 'Nightly Digest' },
+      { type: 'text', text: ' and ' },
+      { type: 'workflow', id: 'workflow-1', name: 'Nightly Digest' },
       { type: 'text', text: '.' },
     ]);
+  });
+
+  test('keeps legacy App mentions without a resource type', () => {
+    expect(
+      serializeComposerDocument({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'mention',
+                attrs: { id: 'app-1', label: 'Notes', slug: 'notes' },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([{ type: 'app', id: 'app-1', name: 'Notes', slug: 'notes' }]);
   });
 
   test('preserves paragraph and hard-break newlines', () => {

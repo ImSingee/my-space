@@ -655,7 +655,7 @@ describe('startAgentRun retry', () => {
     );
   });
 
-  it('uses ordered App snapshots in inline model text', async () => {
+  it('uses ordered resource snapshots in inline model text', async () => {
     await seedAvailableModels();
     await seedSession('session-app-reference', []);
 
@@ -670,13 +670,10 @@ describe('startAgentRun retry', () => {
           slug: 'team-notes',
         },
         { type: 'text', text: ' with ' },
-        {
-          type: 'app',
-          id: 'app-notes',
-          name: 'Team Notes',
-          slug: 'team-notes',
-        },
-        { type: 'text', text: ' and summarize the gaps.' },
+        { type: 'workflow', id: 'workflow-digest', name: 'Nightly Digest' },
+        { type: 'text', text: ' and repeat ' },
+        { type: 'workflow', id: 'workflow-digest', name: 'Nightly Digest' },
+        { type: 'text', text: '.' },
       ],
       providerId: PROVIDER_A_ID,
       modelId: MODEL_A_ID,
@@ -691,18 +688,15 @@ describe('startAgentRun retry', () => {
         slug: 'team-notes',
       },
       { type: 'text', text: ' with ' },
-      {
-        type: 'app',
-        id: 'app-notes',
-        name: 'Team Notes',
-        slug: 'team-notes',
-      },
-      { type: 'text', text: ' and summarize the gaps.' },
+      { type: 'workflow', id: 'workflow-digest', name: 'Nightly Digest' },
+      { type: 'text', text: ' and repeat ' },
+      { type: 'workflow', id: 'workflow-digest', name: 'Nightly Digest' },
+      { type: 'text', text: '.' },
     ] as const;
     const modelText =
       'Compare @APP{name="Team Notes" id="app-notes" slug="team-notes"}' +
-      ' with @APP{name="Team Notes" id="app-notes" slug="team-notes"}' +
-      ' and summarize the gaps.';
+      ' with @WORKFLOW{name="Nightly Digest" id="workflow-digest"}' +
+      ' and repeat @WORKFLOW{name="Nightly Digest" id="workflow-digest"}.';
     const session = await db.query.agentSessions.findFirst({
       where: { id: 'session-app-reference' },
     });

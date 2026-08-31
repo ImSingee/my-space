@@ -31,6 +31,7 @@ import {
 import {
   composerDisplayText,
   composerModelText,
+  hasComposerReference,
   type AgentComposerContentPart,
   type ComposerInputPart,
 } from '~agent/composer-content';
@@ -160,7 +161,7 @@ function userMessage(
     ...(attachments.length > 0
       ? { attachments: attachments as unknown as JsonValue }
       : {}),
-    ...(composerContent.some((part) => part.type === 'app')
+    ...(hasComposerReference(composerContent)
       ? { composerContent: composerContent as unknown as JsonValue }
       : {}),
   };
@@ -493,12 +494,12 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         isRetry = true;
       } else {
         baseMessages = sessionMessages;
-        // App mentions are user-provided context, not capabilities. Keep the
-        // selection-time snapshot so deleting or renaming an App cannot
-        // invalidate an already-written draft.
+        // Resource mentions are user-provided context, not capabilities. Keep
+        // the selection-time snapshot so deleting or renaming a resource
+        // cannot invalidate an already-written draft.
         userText = composerModelText(input.content);
         displayText = composerDisplayText(input.content);
-        composerContent = input.content.some((part) => part.type === 'app')
+        composerContent = hasComposerReference(input.content)
           ? input.content
           : [];
         images = input.images ?? [];

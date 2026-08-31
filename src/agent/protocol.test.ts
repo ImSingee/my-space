@@ -80,8 +80,8 @@ describe('Workflow creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v16 for Workflow identity and App compatibility semantics', () => {
-    expect(PROTOCOL_VERSION).toBe(16);
+  it('uses protocol v17 for structured references and identity semantics', () => {
+    expect(PROTOCOL_VERSION).toBe(17);
   });
 
   it('parses runner.hello', () => {
@@ -345,12 +345,20 @@ describe('platform -> runner messages', () => {
   });
 
   it('parses run.start with model config', () => {
+    const composerContent = [
+      { type: 'text' as const, text: 'Review ' },
+      {
+        type: 'workflow' as const,
+        id: 'workflow-digest',
+        name: 'Nightly Digest',
+      },
+    ];
     const message = parseHubMessage({
       type: 'run.start',
       runId: 'r1',
       sessionId: 's1',
-      userText: 'hello',
-      composerContent: [{ type: 'text', text: 'hello' }],
+      userText: 'Review @WORKFLOW{name="Nightly Digest" id="workflow-digest"}',
+      composerContent,
       images: [],
       attachments: [],
       priorMessages: [],
@@ -372,7 +380,7 @@ describe('platform -> runner messages', () => {
     });
     if (message.type !== 'run.start') throw new Error('wrong type');
     expect(message.model.model.id).toBe('m1');
-    expect(message.composerContent).toEqual([{ type: 'text', text: 'hello' }]);
+    expect(message.composerContent).toEqual(composerContent);
   });
 
   it('parses run.answer and defaults selectedOptionIds', () => {

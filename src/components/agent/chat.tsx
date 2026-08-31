@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { hasComposerText } from '~agent/composer-content';
 import { appsQueryOptions } from '~queries/apps';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
+import { workflowsQueryOptions } from '~queries/workflows';
 import { uploadAgentFiles } from './attachment-api';
 import {
   Composer,
@@ -41,6 +42,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const sessionQuery = useQuery(sessionQueryOptions(sessionId));
   const appsQuery = useQuery(appsQueryOptions);
+  const workflowsQuery = useQuery(workflowsQueryOptions);
   const { groups, first, available } = useModelOptions();
 
   const [model, setModel] = useState<string | null>(null);
@@ -96,14 +98,15 @@ export function Chat({ sessionId }: { sessionId: string }) {
     void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
   }, [qc, sessionId]);
 
-  const revalidateApps = useCallback(() => {
+  const revalidateResources = useCallback(() => {
     void qc.invalidateQueries({ queryKey: appsQueryOptions.queryKey });
+    void qc.invalidateQueries({ queryKey: workflowsQueryOptions.queryKey });
   }, [qc]);
 
   const clearActiveRun = async (errorMessage?: string): Promise<boolean> => {
     clearReconnectTimer();
     reconnectAttemptsRef.current = 0;
-    revalidateApps();
+    revalidateResources();
     qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
       old
         ? {
@@ -133,7 +136,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
         old ? { ...old, activeRun: null } : old,
       );
-      revalidateApps();
+      revalidateResources();
       revalidateSession();
     },
     clearActiveRun,
@@ -556,6 +559,9 @@ export function Chat({ sessionId }: { sessionId: string }) {
             apps={appsQuery.data}
             appsLoading={appsQuery.isLoading}
             appsError={appsQuery.isError}
+            workflows={workflowsQuery.data}
+            workflowsLoading={workflowsQuery.isLoading}
+            workflowsError={workflowsQuery.isError}
             busy={busy}
             onStop={stop}
             disabled={!effectiveModel}

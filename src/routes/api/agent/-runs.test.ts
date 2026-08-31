@@ -86,6 +86,27 @@ describe('POST /api/agent/runs', () => {
     });
   });
 
+  it('accepts ordered Workflow references in a modern request', async () => {
+    const content = [
+      { type: 'text', text: 'Review ' },
+      {
+        type: 'workflow',
+        id: 'workflow-digest',
+        name: 'Nightly Digest',
+      },
+      { type: 'text', text: ' before running it.' },
+    ];
+    const response = await postAgentRun({
+      request: runRequest({ ...baseBody, content }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.startAgentRun).toHaveBeenCalledWith({
+      ...baseBody,
+      content,
+    });
+  });
+
   it('rejects requests that mix userText with content', async () => {
     const response = await postAgentRun({
       request: runRequest({
