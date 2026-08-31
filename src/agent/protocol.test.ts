@@ -4,6 +4,7 @@ import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
   createAppForSessionRequestSchema,
   createAppRequestSchema,
+  createWorkflowRequestSchema,
   deploySourceRequestSchema,
   isSafeRelativePath,
   parseHubMessage,
@@ -61,9 +62,26 @@ describe('App creation payload', () => {
   });
 });
 
+describe('Workflow creation payload', () => {
+  it('accepts a slug and no longer accepts caller-selected ids', () => {
+    expect(
+      createWorkflowRequestSchema.parse({
+        slug: 'daily-digest',
+        name: 'Daily digest',
+      }),
+    ).toEqual({ slug: 'daily-digest', name: 'Daily digest' });
+    expect(
+      createWorkflowRequestSchema.safeParse({
+        id: 'daily-digest',
+        name: 'Daily digest',
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('runner -> platform messages', () => {
-  it('uses protocol v14 for ID-only App Runner identity', () => {
-    expect(PROTOCOL_VERSION).toBe(14);
+  it('uses protocol v15 for generated Workflow ids and slug create payloads', () => {
+    expect(PROTOCOL_VERSION).toBe(15);
   });
 
   it('parses runner.hello', () => {

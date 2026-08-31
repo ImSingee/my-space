@@ -39,6 +39,7 @@ const {
   agentHomeDir,
   agentSessionDir,
   agentWorkDir,
+  agentWorkflowWorkDir,
 } = await import('./paths');
 const {
   prepareAgentSessionSandbox,
@@ -123,6 +124,12 @@ function toolText(result: {
 function appDetail(id: string, slug = id) {
   return { id, slug } as NonNullable<
     Awaited<ReturnType<PlatformClient['getApp']>>
+  >;
+}
+
+function workflowDetail(id: string, slug = id) {
+  return { id, slug } as NonNullable<
+    Awaited<ReturnType<PlatformClient['getWorkflow']>>
   >;
 }
 
@@ -404,7 +411,12 @@ describe('runner source paths', () => {
   it('creates a workflow with a generated SDK in a clean worktree', async () => {
     const sessionId = 'create-workflow-sdk';
     const createWorkflow = vi.fn<PlatformClient['createWorkflow']>(
-      async (input) => ({ id: input.id, name: input.name, files: [] }),
+      async (input) => ({
+        id: '01immutableworkflow',
+        slug: input.slug,
+        name: input.name,
+        files: [],
+      }),
     );
     const tools = createWorkflowTools({
       sessionId,
@@ -416,7 +428,7 @@ describe('runner source paths', () => {
     if (!create) throw new Error('Missing create_workflow tool.');
 
     const result = await create.execute('create-workflow', {
-      id: 'daily-digest',
+      slug: 'daily-digest',
       name: 'Daily digest',
     });
 
@@ -426,7 +438,8 @@ describe('runner source paths', () => {
       'daily-digest',
     );
     expect(result.details).toMatchObject({
-      id: 'daily-digest',
+      id: '01immutableworkflow',
+      slug: 'daily-digest',
       absolutePath: worktree,
       preparation: 'ready',
     });
@@ -517,6 +530,82 @@ describe('runner source paths', () => {
     await expect(
       checkout.execute('clone-existing', {
         id: 'immutable-app-id',
+        clone: true,
+      }),
+    ).rejects.toThrow(/already exists/);
+  });
+
+  it('separates fresh workflow clones from existing checkout updates', async () => {
+    const sessionId = 'checkout-workflow-modes';
+    const getWorkflow = vi.fn<PlatformClient['getWorkflow']>(async () =>
+      workflowDetail('01immutableworkflow', 'human-slug'),
+    );
+    const getWorkflowSource = vi.fn<PlatformClient['getWorkflowSource']>(
+      async () => ({
+        id: '01immutableworkflow',
+        masterCommit: null,
+        bundleBase64: null,
+      }),
+    );
+    const tools = createWorkflowTools({
+      sessionId,
+      platform: {
+        getWorkflow,
+        getWorkflowSource,
+      } as unknown as PlatformClient,
+      materializeSdk: async () => undefined,
+    });
+    const checkout = tools.find((tool) => tool.name === 'checkout_workflow');
+    if (!checkout) throw new Error('Missing checkout_workflow tool.');
+    expect((checkout.parameters as { required?: string[] }).required).toEqual(
+      expect.arrayContaining(['id', 'clone']),
+    );
+    expect(checkout.parameters).not.toHaveProperty('properties.target_path');
+
+    await expect(
+      checkout.execute('update-without-path', {
+        id: '01immutableworkflow',
+        clone: false,
+      }),
+    ).rejects.toThrow('source_path is required when clone is false');
+    expect(getWorkflow).not.toHaveBeenCalled();
+
+    await expect(
+      checkout.execute('update-with-force', {
+        id: '01immutableworkflow',
+        clone: false,
+        source_path: 'custom/missing',
+        force: true,
+      }),
+    ).rejects.toThrow('force is only valid when clone is true');
+    expect(getWorkflowSource).not.toHaveBeenCalled();
+
+    await expect(
+      checkout.execute('update-missing-path', {
+        id: '01immutableworkflow',
+        clone: false,
+        source_path: 'custom/missing',
+      }),
+    ).rejects.toThrow(/does not exist/);
+    await expect(
+      exists(path.join(agentWorkDir(sessionId), 'custom/missing')),
+    ).resolves.toBe(false);
+    expect(getWorkflow).not.toHaveBeenCalled();
+
+    const cloned = await checkout.execute('clone-default', {
+      id: '01immutableworkflow',
+      clone: true,
+    });
+    expect(cloned.details).toMatchObject({
+      id: '01immutableworkflow',
+      path: 'workflows/human-slug',
+      absolutePath: agentWorkflowWorkDir(sessionId, 'human-slug'),
+    });
+    expect(getWorkflow).toHaveBeenCalledWith('01immutableworkflow');
+    expect(getWorkflowSource).toHaveBeenLastCalledWith('01immutableworkflow');
+    await expect(
+      checkout.execute('clone-existing', {
+        id: '01immutableworkflow',
         clone: true,
       }),
     ).rejects.toThrow(/already exists/);
@@ -624,7 +713,8 @@ describe('runner source paths', () => {
 
     await workflow.execute('workflow-first', {
       id: 'workflow-id',
-      target_path: 'custom/sync-workflow',
+      clone: true,
+      source_path: 'custom/sync-workflow',
     });
     const workflowWorktree = path.join(
       agentWorkDir(sessionId),
@@ -658,7 +748,8 @@ describe('runner source paths', () => {
     );
     const synchronizedWorkflow = await workflow.execute('workflow-sync', {
       id: 'workflow-id',
-      target_path: 'custom/sync-workflow',
+      clone: false,
+      source_path: 'custom/sync-workflow',
     });
     expect(toolText(synchronizedWorkflow)).toContain(
       'Synchronized existing checkout',

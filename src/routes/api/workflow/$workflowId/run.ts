@@ -54,11 +54,11 @@ export async function handle({
   const url = new URL(request.url);
   const match = url.pathname.match(/^\/api\/workflow\/([^/]+)\/run\/?$/);
   if (!match) return new Response('Not found', { status: 404 });
-  const id = match[1];
+  const workflowId = match[1];
 
   const { db } = await import('~/db');
   const workflow = await db.query.workflows.findFirst({
-    where: { id },
+    where: { id: workflowId },
   });
   if (!workflow || workflow.status !== 'deployed') {
     return new Response('Not found', { status: 404 });
@@ -111,7 +111,10 @@ export async function handle({
   const { startWorkflowRun } = await import('~server/workflows/execute');
   const { AppError } = await import('~server/errors');
   try {
-    const result = await startWorkflowRun(id, { trigger: 'webhook', input });
+    const result = await startWorkflowRun(workflowId, {
+      trigger: 'webhook',
+      input,
+    });
     return new Response(
       JSON.stringify({ runId: result.runId, status: result.status }),
       { status: 202, headers: { 'content-type': 'application/json' } },
@@ -123,7 +126,10 @@ export async function handle({
     if (error instanceof AppError && error.status < 500) {
       return new Response(error.message, { status: error.status });
     }
-    console.error(`[workflow-run] workflow ${id} run failed to start:`, error);
+    console.error(
+      `[workflow-run] workflow ${workflowId} run failed to start:`,
+      error,
+    );
     return new Response('Workflow error', { status: 502 });
   }
 }

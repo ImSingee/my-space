@@ -40,6 +40,7 @@ type PinFixture = {
 
 type WorkflowFixture = {
   id: string;
+  slug: string;
   name: string;
   description: null;
   status: 'deployed';
@@ -139,9 +140,14 @@ function pin(
   };
 }
 
-function workflow(id: string, pinned: boolean): WorkflowFixture {
+function workflow(
+  id: string,
+  pinned: boolean,
+  slug = `slug-${id}`,
+): WorkflowFixture {
   return {
     id,
+    slug,
     name: `Workflow ${id}`,
     description: null,
     status: 'deployed',
@@ -201,7 +207,7 @@ async function renderSections(initialEntry = '/') {
   });
   const workflowRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/workflow/$workflowId',
+    path: '/workflow/$workflowSlug',
     component: () => null,
   });
   const router = createRouter({
@@ -277,12 +283,12 @@ test('uses the app slug for links and hash-aware active state', async () => {
 });
 
 test('uses the singular workflow namespace for links and active state', async () => {
-  fixtures.workflows = [workflow('daily-digest', true)];
+  fixtures.workflows = [workflow('01immutableworkflow', true, 'daily-digest')];
 
   const { screen } = await renderSections('/workflow/daily-digest');
 
   const workflowLink = screen.getByRole('link', {
-    name: 'Workflow daily-digest',
+    name: 'Workflow 01immutableworkflow',
   });
   const manageLink = screen.getByRole('link', { name: 'Manage workflows' });
   await expect

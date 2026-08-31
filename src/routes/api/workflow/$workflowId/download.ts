@@ -21,18 +21,18 @@ export async function handle({
   const url = new URL(request.url);
   const match = url.pathname.match(/^\/api\/workflow\/([^/]+)\/download\/?$/);
   if (!match) return new Response('Not found', { status: 404 });
-  const id = match[1];
+  const workflowId = match[1];
   const deploymentId = url.searchParams.get('deployment') ?? '';
 
   const deployment = deploymentId
     ? await db.query.workflowDeployments.findFirst({
-        where: { id: deploymentId, workflowId: id },
+        where: { id: deploymentId, workflowId },
       })
     : null;
   if (!deployment) return new Response('Not found', { status: 404 });
 
   const file = path.join(
-    workflowDeploymentArtifactDir(id, deployment.id),
+    workflowDeploymentArtifactDir(workflowId, deployment.id),
     'workflow.js',
   );
   try {
@@ -40,7 +40,7 @@ export async function handle({
     return new Response(new Uint8Array(body), {
       headers: {
         'content-type': 'text/javascript; charset=utf-8',
-        'content-disposition': `attachment; filename="${id}-v${deployment.version}.js"`,
+        'content-disposition': `attachment; filename="${workflowId}-v${deployment.version}.js"`,
         'cache-control': 'no-store',
       },
     });

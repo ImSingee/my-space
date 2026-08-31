@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
+  appWorkflowRefSchema,
   isValidAppSlug,
   type NormalizedManifest,
   normalizeManifest,
@@ -9,6 +10,25 @@ import {
   snapToSupportedSize,
   sourceManifestSchema,
 } from './manifest';
+
+describe('App Workflow references', () => {
+  it('accepts generated and legacy Workflow ids', () => {
+    expect(
+      appWorkflowRefSchema.parse({
+        workflow: '01k43s9az5t2qpy7ejf0hm6vwc',
+      }),
+    ).toEqual({ workflow: '01k43s9az5t2qpy7ejf0hm6vwc' });
+    expect(appWorkflowRefSchema.parse({ workflow: 'legacy-kebab-id' })).toEqual(
+      { workflow: 'legacy-kebab-id' },
+    );
+  });
+
+  it('rejects unsafe Workflow ids', () => {
+    expect(() =>
+      appWorkflowRefSchema.parse({ workflow: '../daily-digest' }),
+    ).toThrow(/Workflow id/);
+  });
+});
 
 describe('App identity limits', () => {
   it('accepts Unicode App names and slugs at the 64-character boundary', () => {

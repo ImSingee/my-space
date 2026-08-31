@@ -195,7 +195,7 @@ export function appStorageDir(id: string): string {
 /**
  * Workflows mirror apps but live in their own namespaces so an app and a
  * workflow may share a slug without colliding on disk, including in Agent
- * workdirs (`apps/<id>` versus `workflows/<id>`).
+ * default workdirs (`apps/<slug>` versus `workflows/<slug>`).
  */
 
 /** Git bare repositories for workflows: workspace/workflow-repos/<id>.git. */
@@ -233,8 +233,8 @@ export function workflowRepoDir(id: string): string {
 }
 
 /** Agent worktree for a workflow, namespaced separately from apps. */
-export function agentWorkflowWorkDir(sessionId: string, id: string): string {
-  return path.resolve(agentWorkDir(sessionId), 'workflows', id);
+export function agentWorkflowWorkDir(sessionId: string, slug: string): string {
+  return path.resolve(agentWorkDir(sessionId), 'workflows', slug);
 }
 
 export function workflowDeployCheckoutDir(id: string): string {

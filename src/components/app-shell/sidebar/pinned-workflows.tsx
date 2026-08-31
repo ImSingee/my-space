@@ -95,14 +95,14 @@ export function PinnedWorkflows() {
             <NavLink
               renderRoot={(props) => (
                 <Link
-                  to="/workflow/$workflowId"
-                  params={{ workflowId: w.id }}
+                  to="/workflow/$workflowSlug"
+                  params={{ workflowSlug: w.slug }}
                   {...props}
                 />
               )}
               label={w.name}
               leftSection={<AppGlyph name={w.name} seed={w.id} size="sm" />}
-              active={isActive(`/workflow/${w.id}`)}
+              active={isActive(`/workflow/${w.slug}`)}
               variant="light"
               pr={32}
             />

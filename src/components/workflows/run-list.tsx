@@ -5,7 +5,13 @@ import { formatDuration, formatRelative } from '~lib/format';
 import { workflowRunsQueryOptions } from '~queries/workflows';
 import { RunStatusBadge } from './run-status';
 
-export function WorkflowRunList({ workflowId }: { workflowId: string }) {
+export function WorkflowRunList({
+  workflowId,
+  workflowSlug,
+}: {
+  workflowId: string;
+  workflowSlug: string;
+}) {
   const navigate = useNavigate();
   const query = useQuery({
     ...workflowRunsQueryOptions(workflowId),
@@ -63,8 +69,8 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
                 style={{ cursor: 'pointer' }}
                 onClick={() =>
                   navigate({
-                    to: '/workflow/$workflowId/execution/$runId',
-                    params: { workflowId, runId: run.id },
+                    to: '/workflow/$workflowSlug/execution/$runId',
+                    params: { workflowSlug, runId: run.id },
                   })
                 }
               >
@@ -74,8 +80,8 @@ export function WorkflowRunList({ workflowId }: { workflowId: string }) {
                       modified click from ALSO firing the row's onClick and
                       navigating the current tab. */}
                   <Link
-                    to="/workflow/$workflowId/execution/$runId"
-                    params={{ workflowId, runId: run.id }}
+                    to="/workflow/$workflowSlug/execution/$runId"
+                    params={{ workflowSlug, runId: run.id }}
                     style={{ textDecoration: 'none' }}
                     onClick={(event) => event.stopPropagation()}
                   >

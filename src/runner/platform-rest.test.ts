@@ -86,6 +86,88 @@ describe('Platform REST ID-only App paths', () => {
   });
 });
 
+describe('Platform REST Workflow identity paths', () => {
+  it('creates from slug and forwards immutable ids through lifecycle routes', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createPlatformRestClient({
+      baseUrl: 'http://platform.internal',
+      token: 'runner-token',
+    });
+    const workflowId = '01immutableworkflow';
+
+    await client.createWorkflow({
+      slug: 'human-readable-slug',
+      name: 'Example Workflow',
+    });
+    await client.getWorkflow(workflowId);
+    await client.getWorkflowSource(workflowId);
+    await client.deployWorkflow(workflowId, {
+      message: 'Deploy by id',
+      generation: '2026-09-01T00:00:00.000Z',
+      bundleBase64: 'bundle',
+    });
+    await client.rollbackWorkflow(workflowId, 3);
+
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        'http://platform.internal/internal/api/workflows',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            slug: 'human-readable-slug',
+            name: 'Example Workflow',
+          }),
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/workflows/01immutableworkflow',
+        {
+          method: 'GET',
+          headers: { authorization: 'Bearer runner-token' },
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/workflows/01immutableworkflow/source',
+        {
+          method: 'GET',
+          headers: { authorization: 'Bearer runner-token' },
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/workflows/01immutableworkflow/deploy',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: 'Deploy by id',
+            generation: '2026-09-01T00:00:00.000Z',
+            bundleBase64: 'bundle',
+          }),
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/workflows/01immutableworkflow/rollback',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ version: 3 }),
+        },
+      ],
+    ]);
+  });
+});
+
 describe('Platform REST KV client', () => {
   it('sends every action to the bearer-authenticated query-kv endpoint', async () => {
     const responses: QueryAppKvResponse[] = [

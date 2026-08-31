@@ -1,12 +1,15 @@
 /** Server-only: scaffold a new workflow source tree from the template. */
 import path from 'node:path';
+import { ulid } from 'ulid';
 import { TEMPLATES_DIR } from '~agent/paths';
 import type { ScaffoldFile } from '~agent/protocol';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
+import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import { renderTemplate } from '../apps/scaffold';
+import { workflowSlugExists } from './access';
 import { ensureWorkflowRepo } from './git';
-import { parseSourceWorkflowManifest } from './manifest';
+import { isValidWorkflowSlug, parseSourceWorkflowManifest } from './manifest';
 
 /**
  * Escape a value for insertion *inside* an existing pair of JSON quotes (the
@@ -18,7 +21,8 @@ function jsonStringInner(value: string): string {
 }
 
 export type CreateWorkflowInput = {
-  id: string;
+  /** Mutable human-facing URL slug; the immutable id is generated here. */
+  slug: string;
   name: string;
   description?: string;
   /** Pin the new workflow to the sidebar (default true). */
@@ -27,37 +31,42 @@ export type CreateWorkflowInput = {
 
 export type CreateWorkflowResult = {
   id: string;
+  slug: string;
   name: string;
   /** Rendered template for the caller to write into its own worktree. */
   files: ScaffoldFile[];
 };
 
 /**
- * Register a new workflow: validate the id, create the canonical bare repo
- * and the database row, and render the scaffold template. The rendered files
- * are RETURNED, not written — the Agent Runner writes them into its own
- * checkout and commits from there.
+ * Register a new workflow: validate the slug, mint the immutable id, create the
+ * canonical bare repo and database row, and render the scaffold template. The
+ * rendered files are RETURNED, not written — the Agent Runner writes them into
+ * its own checkout and commits from there.
  */
 export async function createWorkflow(
   input: CreateWorkflowInput,
 ): Promise<CreateWorkflowResult> {
-  const { id } = input;
-  if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+  const slug = input.slug.trim();
+  if (slug.length > WORKFLOW_SLUG_MAX_LENGTH) {
     throw new Error(
-      'id must be kebab-case (lowercase letters, digits, hyphens).',
+      `slug must be at most ${WORKFLOW_SLUG_MAX_LENGTH} characters.`,
+    );
+  }
+  if (!isValidWorkflowSlug(slug)) {
+    throw new Error(
+      'slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
+        'starting with a letter).',
     );
   }
 
-  const existing = await db.query.workflows.findFirst({
-    where: { id },
-  });
-  if (existing) {
-    throw new Error(`Workflow "${id}" already exists.`);
+  if (await workflowSlugExists(slug)) {
+    throw new Error(`Slug "${slug}" is already in use.`);
   }
 
+  const id = ulid().toLowerCase();
   const repoPath = await ensureWorkflowRepo(id);
 
-  const name = input.name.trim() || id;
+  const name = input.name.trim() || slug;
   const description = (input.description ?? '').trim();
 
   const files = await renderTemplate(
@@ -68,7 +77,7 @@ export async function createWorkflow(
         __WORKFLOW_NAME__: jsonStringInner(name),
         __WORKFLOW_DESCRIPTION__: jsonStringInner(description),
       },
-      'package.json': { __WORKFLOW_ID__: id },
+      'package.json': { __WORKFLOW_ID__: slug },
     },
   );
 
@@ -84,6 +93,7 @@ export async function createWorkflow(
     .insert(schema.workflows)
     .values({
       id,
+      slug,
       name,
       description: description || null,
       status: 'draft',
@@ -96,6 +106,7 @@ export async function createWorkflow(
 
   return {
     id,
+    slug,
     name,
     files,
   };

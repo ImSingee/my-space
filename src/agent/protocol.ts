@@ -14,6 +14,7 @@ import {
   APP_SLUG_MAX_LENGTH,
   isAppNameWithinMaxLength,
 } from '~/app-identity';
+import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import type { AgentStreamEvent } from './events';
 import type { AgentAttachmentRef } from './attachments';
 import { agentComposerContentSchema } from './composer-content';
@@ -21,7 +22,7 @@ import { isReservedEnvKey } from './env-keys';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;
@@ -468,7 +469,7 @@ export const createAppForSessionRequestSchema = createAppRequestSchema.extend({
 });
 
 export const createWorkflowRequestSchema = z.object({
-  id: z.string().min(1),
+  slug: z.string().min(1).max(WORKFLOW_SLUG_MAX_LENGTH),
   name: z.string().min(1),
   description: z.string().optional(),
   pin: z.boolean().optional(),

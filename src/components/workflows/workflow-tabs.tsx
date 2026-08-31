@@ -12,14 +12,14 @@ type Tab = 'run' | 'executions' | 'manage';
  * Segmented Run / Runs / Manage navigation shared by a workflow's three
  * surfaces, mirroring how an app splits its "view" and "manage" pages.
  */
-export function WorkflowTabs({ id, active }: { id: string; active: Tab }) {
+export function WorkflowTabs({ slug, active }: { slug: string; active: Tab }) {
   return (
     <Button.Group>
       <Button
         renderRoot={(props) => (
           <Link
-            to="/workflow/$workflowId"
-            params={{ workflowId: id }}
+            to="/workflow/$workflowSlug"
+            params={{ workflowSlug: slug }}
             {...props}
           />
         )}
@@ -32,8 +32,8 @@ export function WorkflowTabs({ id, active }: { id: string; active: Tab }) {
       <Button
         renderRoot={(props) => (
           <Link
-            to="/workflow/$workflowId/executions"
-            params={{ workflowId: id }}
+            to="/workflow/$workflowSlug/executions"
+            params={{ workflowSlug: slug }}
             {...props}
           />
         )}
@@ -46,8 +46,8 @@ export function WorkflowTabs({ id, active }: { id: string; active: Tab }) {
       <Button
         renderRoot={(props) => (
           <Link
-            to="/workflow/$workflowId/manage"
-            params={{ workflowId: id }}
+            to="/workflow/$workflowSlug/manage"
+            params={{ workflowSlug: slug }}
             {...props}
           />
         )}

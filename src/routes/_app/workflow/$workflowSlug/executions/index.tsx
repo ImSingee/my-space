@@ -5,11 +5,13 @@ import { AppGlyph } from '~components/apps/app-glyph';
 import { WorkflowRunList } from '~components/workflows/run-list';
 import { StatusBadge } from '~components/system/status-badge';
 import { WorkflowTabs } from '~components/workflows/workflow-tabs';
-import { getWorkflow } from '~server/workflows';
+import { getWorkflowBySlug } from '~server/workflows';
 
-export const Route = createFileRoute('/_app/workflow/$workflowId/executions/')({
+export const Route = createFileRoute(
+  '/_app/workflow/$workflowSlug/executions/',
+)({
   loader: async ({ params }) => {
-    const workflow = await getWorkflow({ data: params.workflowId });
+    const workflow = await getWorkflowBySlug({ data: params.workflowSlug });
     if (!workflow) throw notFound();
     return workflow;
   },
@@ -29,9 +31,9 @@ function WorkflowExecutionsPage() {
         </Group>
       }
       description="Execution history"
-      actions={<WorkflowTabs id={workflow.id} active="executions" />}
+      actions={<WorkflowTabs slug={workflow.slug} active="executions" />}
     >
-      <WorkflowRunList workflowId={workflow.id} />
+      <WorkflowRunList workflowId={workflow.id} workflowSlug={workflow.slug} />
     </Page>
   );
 }

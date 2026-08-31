@@ -23,18 +23,24 @@ import {
   workflowRunQueryOptions,
   workflowRunsQueryOptions,
 } from '~queries/workflows';
-import { cancelWorkflowRunFn, getWorkflowRun } from '~server/workflows';
+import {
+  cancelWorkflowRunFn,
+  getWorkflowBySlug,
+  getWorkflowRun,
+} from '~server/workflows';
 import type { WorkflowRunStepView } from '~server/workflows/manage';
 
 export const Route = createFileRoute(
-  '/_app/workflow/$workflowId/execution/$runId',
+  '/_app/workflow/$workflowSlug/execution/$runId',
 )({
   loader: async ({ params }) => {
+    const workflow = await getWorkflowBySlug({ data: params.workflowSlug });
+    if (!workflow) throw notFound();
     const run = await getWorkflowRun({ data: params.runId });
     // Scope the run to its workflow so a deep link like
     // /workflow/<A>/execution/<run-of-B> can't render or cancel B under A.
-    if (!run || run.workflowId !== params.workflowId) throw notFound();
-    return run;
+    if (!run || run.workflowId !== workflow.id) throw notFound();
+    return { run, workflow };
   },
   component: WorkflowExecutionPage,
 });
@@ -106,18 +112,19 @@ function Section({
 
 function WorkflowExecutionPage() {
   const initial = Route.useLoaderData();
-  const { runId, workflowId } = Route.useParams();
+  const { runId } = Route.useParams();
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
     ...workflowRunQueryOptions(runId),
-    initialData: initial,
+    initialData: initial.run,
     refetchInterval: (q) => {
       const status = q.state.data?.status;
       return status === 'queued' || status === 'running' ? 1200 : false;
     },
   });
-  const run = data ?? initial;
+  const run = data ?? initial.run;
+  const { workflow } = initial;
   const active = run.status === 'queued' || run.status === 'running';
 
   const cancel = useMutation({
@@ -125,7 +132,7 @@ function WorkflowExecutionPage() {
     onSuccess: () => {
       toast.success('Execution canceled');
       void queryClient.invalidateQueries(workflowRunQueryOptions(runId));
-      void queryClient.invalidateQueries(workflowRunsQueryOptions(workflowId));
+      void queryClient.invalidateQueries(workflowRunsQueryOptions(workflow.id));
     },
   });
 
@@ -151,8 +158,8 @@ function WorkflowExecutionPage() {
           <Button
             renderRoot={(props) => (
               <Link
-                to="/workflow/$workflowId/executions"
-                params={{ workflowId }}
+                to="/workflow/$workflowSlug/executions"
+                params={{ workflowSlug: workflow.slug }}
                 {...props}
               />
             )}

@@ -98,8 +98,8 @@ function WorkflowsPage() {
                     truncate
                     renderRoot={(props) => (
                       <Link
-                        to="/workflow/$workflowId"
-                        params={{ workflowId: workflow.id }}
+                        to="/workflow/$workflowSlug"
+                        params={{ workflowSlug: workflow.slug }}
                         {...props}
                         className={[props.className, classes.primaryLink]
                           .filter(Boolean)
@@ -123,8 +123,8 @@ function WorkflowsPage() {
                   <Button
                     renderRoot={(props) => (
                       <Link
-                        to="/workflow/$workflowId/manage"
-                        params={{ workflowId: workflow.id }}
+                        to="/workflow/$workflowSlug/manage"
+                        params={{ workflowSlug: workflow.slug }}
                         {...props}
                       />
                     )}

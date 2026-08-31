@@ -16,9 +16,10 @@ import type {
   WorkflowStatus,
   WorkflowTrigger,
 } from '~/db/schema';
+import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import { workflowDeployLock } from './deploy';
 import { moveMasterToDeploymentTag } from './git';
-import { isValidWorkflowId } from './manifest';
+import { isValidWorkflowId, isValidWorkflowSlug } from './manifest';
 import { reloadWorkflowScheduler } from './scheduler';
 
 async function pathExists(p: string): Promise<boolean> {
@@ -116,6 +117,46 @@ export async function setWorkflowArchived(
   // Archived workflows must not keep firing cron; restored ones resume.
   await reloadWorkflowScheduler();
   return { status };
+}
+
+/**
+ * Change a Workflow's mutable human-facing URL slug. Technical APIs, Git,
+ * artifacts, manifests, webhooks, and foreign keys remain keyed by `id`.
+ */
+export async function renameWorkflowSlug(
+  id: string,
+  rawSlug: string,
+): Promise<{ slug: string }> {
+  const slug = rawSlug.trim();
+  if (slug.length > WORKFLOW_SLUG_MAX_LENGTH) {
+    throw new Error(
+      `Slug must be at most ${WORKFLOW_SLUG_MAX_LENGTH} characters.`,
+    );
+  }
+  if (!isValidWorkflowSlug(slug)) {
+    throw new Error(
+      'Slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
+        'starting with a letter).',
+    );
+  }
+
+  const workflow = await db.query.workflows.findFirst({
+    where: { id },
+    columns: { id: true, slug: true },
+  });
+  if (!workflow) throw new Error(`Workflow "${id}" not found.`);
+  if (workflow.slug === slug) return { slug };
+
+  const { workflowSlugExists } = await import('./access');
+  if (await workflowSlugExists(slug, id)) {
+    throw new Error(`Slug "${slug}" is already in use.`);
+  }
+
+  await db
+    .update(schema.workflows)
+    .set({ slug })
+    .where(eq(schema.workflows.id, id));
+  return { slug };
 }
 
 /**
@@ -291,6 +332,7 @@ export async function listWorkflowRuns(
 /** A run summary tagged with its owning workflow, for the global view. */
 export type WorkflowRunGlobalItem = WorkflowRunSummary & {
   workflowId: string;
+  workflowSlug: string;
   workflowName: string;
 };
 
@@ -311,7 +353,7 @@ export async function listRecentWorkflowRuns(
   for (const s of steps) counts.set(s.runId, (counts.get(s.runId) ?? 0) + 1);
 
   const workflows = await db.query.workflows.findMany();
-  const nameById = new Map(workflows.map((w) => [w.id, w.name]));
+  const workflowById = new Map(workflows.map((w) => [w.id, w]));
 
   return rows.map((r) => ({
     id: r.id,
@@ -328,7 +370,8 @@ export async function listRecentWorkflowRuns(
         : null,
     stepCount: counts.get(r.id) ?? 0,
     workflowId: r.workflowId,
-    workflowName: nameById.get(r.workflowId) ?? r.workflowId,
+    workflowSlug: workflowById.get(r.workflowId)?.slug ?? r.workflowId,
+    workflowName: workflowById.get(r.workflowId)?.name ?? r.workflowId,
   }));
 }
 

@@ -82,8 +82,11 @@ function ExecutionsPage() {
                   style={{ cursor: 'pointer' }}
                   onClick={() =>
                     navigate({
-                      to: '/workflow/$workflowId/execution/$runId',
-                      params: { workflowId: run.workflowId, runId: run.id },
+                      to: '/workflow/$workflowSlug/execution/$runId',
+                      params: {
+                        workflowSlug: run.workflowSlug,
+                        runId: run.id,
+                      },
                     })
                   }
                 >
@@ -103,9 +106,9 @@ function ExecutionsPage() {
                       renderRoot={(props) => (
                         <Link
                           {...props}
-                          to="/workflow/$workflowId/execution/$runId"
+                          to="/workflow/$workflowSlug/execution/$runId"
                           params={{
-                            workflowId: run.workflowId,
+                            workflowSlug: run.workflowSlug,
                             runId: run.id,
                           }}
                           onClick={(event) => event.stopPropagation()}

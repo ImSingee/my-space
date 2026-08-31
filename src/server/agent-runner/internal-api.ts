@@ -16,11 +16,14 @@
  *   POST /internal/api/agent-sessions/:sessionId/apps/:appId
  *                                                → { appId }
  *   GET  /internal/api/workflows                → WorkflowSummaryForAgent[]
- *   GET  /internal/api/workflows/:id            → WorkflowDetailForAgent (404)
+ *   GET  /internal/api/workflows/:workflowId    → WorkflowDetailForAgent (404)
  *   POST /internal/api/workflows                → CreateWorkflowResult
- *   GET  /internal/api/workflows/:id/source     → SourceBundleResponse
- *   POST /internal/api/workflows/:id/deploy     → WorkflowDeployResponse
- *   POST /internal/api/workflows/:id/rollback   → { version }
+ *   GET  /internal/api/workflows/:workflowId/source
+ *                                                → SourceBundleResponse
+ *   POST /internal/api/workflows/:workflowId/deploy
+ *                                                → WorkflowDeployResponse
+ *   POST /internal/api/workflows/:workflowId/rollback
+ *                                                → { version }
  */
 import type http from 'node:http';
 import {
@@ -123,14 +126,14 @@ async function requireAppGeneration(id: string): Promise<string> {
 }
 
 async function requireWorkflow(
-  id: string,
+  workflowId: string,
 ): Promise<{ id: string; generation: string }> {
   const { db } = await import('~/db');
   const row = await db.query.workflows.findFirst({
-    where: { id },
+    where: { id: workflowId },
     columns: { id: true, createdAt: true },
   });
-  if (!row) throw new AppError(`Workflow "${id}" not found.`, 404);
+  if (!row) throw new AppError(`Workflow "${workflowId}" not found.`, 404);
   return { id: row.id, generation: row.createdAt.toISOString() };
 }
 
@@ -390,27 +393,29 @@ async function handleWorkflows(
     throw new AppError('Method not allowed.', 405);
   }
 
-  const id = decodeURIComponent(rest[0]);
+  const workflowId = decodeURIComponent(rest[0]);
   const action = rest[1];
 
   if (!action) {
     if (method !== 'GET') throw new AppError('Method not allowed.', 405);
     const { getWorkflowDetailForAgent } =
       await import('~server/workflows/inspect');
-    const detail = await getWorkflowDetailForAgent(id);
-    if (!detail) throw new AppError(`Workflow "${id}" not found.`, 404);
+    const detail = await getWorkflowDetailForAgent(workflowId);
+    if (!detail) {
+      throw new AppError(`Workflow "${workflowId}" not found.`, 404);
+    }
     json(res, 200, detail);
     return;
   }
 
   if (action === 'source' && method === 'GET') {
-    await requireWorkflow(id);
+    await requireWorkflow(workflowId);
     const { workflowMasterCommit, exportWorkflowMasterBundle } =
       await import('~server/workflows/git');
-    const commit = await workflowMasterCommit(id);
-    const bundle = await exportWorkflowMasterBundle(id);
+    const commit = await workflowMasterCommit(workflowId);
+    const bundle = await exportWorkflowMasterBundle(workflowId);
     const payload: SourceBundleResponse = {
-      id,
+      id: workflowId,
       masterCommit: commit,
       bundleBase64: bundle ? bundle.toString('base64') : null,
     };
@@ -420,17 +425,22 @@ async function handleWorkflows(
 
   if (action === 'deploy' && method === 'POST') {
     const body = deploySourceRequestSchema.parse(await readJsonBody(req));
-    const workflow = await requireWorkflow(id);
-    requireGeneration('Workflow', id, body.generation, workflow.generation);
+    const workflow = await requireWorkflow(workflowId);
+    requireGeneration(
+      'Workflow',
+      workflowId,
+      body.generation,
+      workflow.generation,
+    );
     const { stageWorkflowBundleCheckout } =
       await import('~server/workflows/git');
     const staged = await stageWorkflowBundleCheckout(
-      id,
+      workflowId,
       Buffer.from(body.bundleBase64, 'base64'),
     );
     try {
       const { deployWorkflow } = await import('~server/workflows/deploy');
-      const result = await deployWorkflow(id, {
+      const result = await deployWorkflow(workflowId, {
         sourceDir: staged.dir,
         message: body.message,
         expectedGeneration: body.generation,
@@ -447,11 +457,11 @@ async function handleWorkflows(
   }
 
   if (action === 'rollback' && method === 'POST') {
-    await requireWorkflow(id);
+    await requireWorkflow(workflowId);
     const body = rollbackRequestSchema.parse(await readJsonBody(req));
     const { rollbackWorkflowToVersion } =
       await import('~server/workflows/manage');
-    json(res, 200, await rollbackWorkflowToVersion(id, body.version));
+    json(res, 200, await rollbackWorkflowToVersion(workflowId, body.version));
     return;
   }
 

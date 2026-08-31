@@ -15,9 +15,30 @@ vi.mock('~queries/apps', () => ({
     queryKey: ['test-app-manifest', appId],
     queryFn: async () => ({
       api: null,
-      workflows: [{ alias: 'daily-report', workflow: 'daily-report' }],
+      workflows: [
+        { alias: 'daily-report', workflow: '01dailyreportid' },
+        { alias: 'missing-report', workflow: '01missingreportid' },
+      ],
     }),
   }),
+}));
+
+vi.mock('~queries/workflows', () => ({
+  workflowsQueryOptions: {
+    queryKey: ['test-workflows'],
+    queryFn: async () => [
+      {
+        id: '01dailyreportid',
+        slug: 'daily-report',
+        name: 'Daily report',
+        description: null,
+        status: 'deployed',
+        pinned: true,
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      },
+    ],
+  },
 }));
 
 test('shows declared Workflow calls independently of Agent beta features', async () => {
@@ -35,7 +56,7 @@ test('shows declared Workflow calls independently of Agent beta features', async
   });
   const workflowRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/workflows/$workflowId',
+    path: '/workflow/$workflowSlug',
     component: () => null,
   });
   const router = createRouter({
@@ -55,6 +76,12 @@ test('shows declared Workflow calls independently of Agent beta features', async
     .element(screen.getByText('Workflow calls', { exact: true }))
     .toBeVisible();
   await expect
-    .element(screen.getByRole('link', { name: 'daily-report' }))
+    .element(screen.getByRole('link', { name: '01dailyreportid' }))
     .toHaveAttribute('href', '/workflow/daily-report');
+  await expect
+    .element(screen.getByText('01missingreportid', { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('link', { name: '01missingreportid' }))
+    .not.toBeInTheDocument();
 });

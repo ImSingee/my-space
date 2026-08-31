@@ -7,23 +7,48 @@ import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { workflowHatchSdkMaterializer } from '../hatch-sdk';
 import {
-  assertWorktreeAvailable,
+  assertWorkspacePathAvailable,
   bundleWorktreeForDeploy,
   checkoutFromBundle,
   initNewWorktree,
+  type LocalCheckout,
   withSourceWorkspaceLock,
 } from '../local-sources';
+import { agentWorkflowWorkDir } from '../paths';
 import type { PlatformClient } from '../platform-client';
 import { writeScaffoldFiles } from '../scaffold-files';
 import {
   materializeWorktree,
   WorktreeMaterializationError,
 } from '../worktree-materializer';
+import { resolveAgentWorkspacePath } from '../workspace-paths';
+import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function checkoutLines(id: string, checkout: LocalCheckout): string[] {
+  return [
+    checkout.replacedExisting
+      ? `Replaced existing checkout for "${id}" at ${checkout.absolutePath}. ` +
+        'All previous local work at that path was discarded.'
+      : checkout.synchronizedExisting
+        ? `Synchronized existing checkout for "${id}" at ` +
+          `${checkout.absolutePath} to remote master.`
+        : `Checked out "${id}" at ${checkout.absolutePath}.`,
+    checkout.headCommit
+      ? `HEAD: ${checkout.headCommit}`
+      : 'No commits yet. Create files, then run git add and git commit.',
+    checkout.remoteCommit
+      ? `Remote master: ${checkout.remoteCommit}`
+      : 'Remote master has no commits yet.',
+    checkout.dirty
+      ? `Worktree has local changes:\n${checkout.status}`
+      : 'Worktree is clean.',
+  ];
 }
 
 function sdkPreparationFailure(context: string, error: unknown): Error {
@@ -72,7 +97,7 @@ export function createWorkflowTools(options: {
         ]
           .filter(Boolean)
           .join(', ');
-        return `- ${w.id} · ${w.name} [${w.status}]${version}${
+        return `- ${w.name} (id: ${w.id}, slug: ${w.slug}) [${w.status}]${version}${
           triggers ? ` — ${triggers}` : ''
         }`;
       });
@@ -88,18 +113,22 @@ export function createWorkflowTools(options: {
       'network declaration, triggers (cron + webhook), recent runs, and ' +
       'deployment history. Mirrors the workflow management panel.',
     parameters: Type.Object({
-      id: Type.String({ description: 'Workflow id to inspect.' }),
+      id: Type.String({
+        description: 'Workflow id to inspect.',
+      }),
     }),
     execute: async (_id, params) => {
       requireIdSlug(params.id);
       const detail = await platform.getWorkflow(params.id);
       if (!detail) throw new Error(`Workflow "${params.id}" not found.`);
       const lines: (string | null)[] = [
-        `${detail.name} (${detail.id}) — ${detail.status}` +
+        `${detail.name} (id: ${detail.id}, slug: ${detail.slug}) — ` +
+          detail.status +
           (detail.liveVersion != null
             ? ` · v${detail.liveVersion}`
             : ' · not deployed'),
         detail.description ? `Description: ${detail.description}` : null,
+        `Workflow URL: /workflow/${detail.slug}`,
         `Network: ${formatNetworkAccess(detail.network)}`,
         detail.webhook.enabled
           ? `Webhook: ${detail.webhook.url ?? 'n/a'} [secret set]`
@@ -129,72 +158,83 @@ export function createWorkflowTools(options: {
 
   const checkoutWorkflowTool = tool({
     name: 'checkout_workflow',
-    label: 'Checkout workflow',
+    label: 'Clone or update workflow',
     description:
-      "Checkout a workflow's Git repo into this chat's persistent worktree. " +
-      'Use before reading or editing an existing workflow. An existing target ' +
-      'is synchronized only when it is the same owned checkout, clean, on ' +
-      'master, and remote master is a fast-forward; otherwise it fails unless ' +
-      'force is true.',
+      "Clone a workflow's Git repo into this conversation, or update an " +
+      'existing checkout in place. Set clone: true to create a fresh checkout ' +
+      'at source_path or workflows/<slug>. Set clone: false and provide ' +
+      'source_path to update that exact checkout; update never creates or ' +
+      'replaces a path. The platform-owned Hatch SDK is materialized before ' +
+      'returning.',
     executionMode: 'sequential',
     parameters: Type.Object({
-      id: Type.String({ description: 'Workflow id to checkout.' }),
-      target_path: Type.Optional(
+      id: Type.String({ description: 'Workflow id.' }),
+      clone: Type.Boolean({
+        description:
+          'True to create a fresh checkout; false to update the existing ' +
+          'checkout at source_path.',
+      }),
+      source_path: Type.Optional(
         Type.String({
           minLength: 1,
           description:
             'Absolute path inside this Agent workdir, or a path relative to ' +
-            'it. Defaults to workflows/<workflow-id>.',
+            'it. Required when clone is false. When clone is true, defaults ' +
+            'to workflows/<slug>.',
         }),
       ),
       force: Type.Optional(
         Type.Boolean({
           description:
-            'Replace an existing target_path with a fresh checkout. Defaults ' +
-            'to false. This permanently discards all local work at that path.',
+            'Only valid when clone is true. Replace an existing source_path ' +
+            'with a fresh checkout. Defaults to false and permanently ' +
+            'discards local work at that exact path.',
         }),
       ),
     }),
     execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
       requireIdSlug(params.id);
+      if (!params.clone && !params.source_path) {
+        throw new Error('source_path is required when clone is false.');
+      }
+      if (!params.clone && params.force) {
+        throw new Error('force is only valid when clone is true.');
+      }
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          const source = await platform.getWorkflowSource(params.id);
-          let checkout: Awaited<ReturnType<typeof checkoutFromBundle>>;
+          let sourcePath = params.source_path;
+          let sourceWorkflowId = params.id;
+          if (!sourcePath) {
+            const detail = await platform.getWorkflow(params.id);
+            if (!detail) throw new Error(`Workflow "${params.id}" not found.`);
+            sourceWorkflowId = detail.id;
+            sourcePath = agentWorkflowWorkDir(sessionId, detail.slug);
+          }
+          const source = await platform.getWorkflowSource(sourceWorkflowId);
+          const resolved = await resolveAgentWorkspacePath(
+            sessionId,
+            sourcePath,
+          );
+          let checkout: LocalCheckout;
           try {
             checkout = await checkoutFromBundle(sessionId, 'workflow', source, {
-              targetPath: params.target_path,
-              force: params.force ?? false,
+              targetPath: sourcePath,
+              force: params.clone ? (params.force ?? false) : false,
+              mode: params.clone ? 'clone' : 'update',
               materializer: sdkMaterializer,
             });
           } catch (error) {
             if (error instanceof WorktreeMaterializationError) {
-              throw sdkPreparationFailure(`Checked out "${source.id}"`, error);
+              throw sdkPreparationFailure(
+                `Checked out "${source.id}" at ${resolved.absolutePath}`,
+                error,
+              );
             }
             throw error;
           }
-          const lines = [
-            checkout.replacedExisting
-              ? `Replaced existing checkout for "${params.id}" at ` +
-                `${checkout.absolutePath}. All previous local work at that ` +
-                'path was discarded.'
-              : checkout.synchronizedExisting
-                ? `Synchronized existing checkout for "${params.id}" at ` +
-                  `${checkout.absolutePath} to remote master.`
-                : `Checked out "${params.id}" at ${checkout.absolutePath}.`,
-            checkout.headCommit
-              ? `HEAD: ${checkout.headCommit}`
-              : 'No commits yet. Create files, then run git add and git commit.',
-            checkout.remoteCommit
-              ? `Remote master: ${checkout.remoteCommit}`
-              : 'Remote master has no commits yet.',
-            checkout.dirty
-              ? `Worktree has local changes:\n${checkout.status}`
-              : 'Worktree is clean.',
-          ];
-          return text(lines.join('\n'), checkout);
+          return text(checkoutLines(source.id, checkout).join('\n'), checkout);
         },
         signal,
       );
@@ -212,8 +252,12 @@ export function createWorkflowTools(options: {
       'have no custom UI/API, only manual/cron/webhook triggers.',
     executionMode: 'sequential',
     parameters: Type.Object({
-      id: Type.String({
-        description: 'kebab-case id, e.g. "digest" or "sync-stars".',
+      slug: Type.String({
+        maxLength: WORKFLOW_SLUG_MAX_LENGTH,
+        description:
+          'kebab-case URL slug, e.g. "digest" or "sync-stars". Used in ' +
+          'the human-facing /workflow/<slug> URL and changeable later; ' +
+          'technical APIs use the generated Workflow id.',
       }),
       name: Type.String({ description: 'Human-readable name.' }),
       description: Type.Optional(
@@ -231,25 +275,20 @@ export function createWorkflowTools(options: {
           minLength: 1,
           description:
             'Absolute path inside this Agent workdir, or a path relative to ' +
-            'it. Defaults to workflows/<workflow-id>.',
+            'it. Defaults to workflows/<slug>.',
         }),
       ),
     }),
     execute: async (_id, params, signal) => {
       const sessionId = requireSessionId(options.sessionId);
-      requireIdSlug(params.id);
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          // The workflow id doubles as the local directory name; reserve it
-          // before the Platform registers the id.
-          await assertWorktreeAvailable(
-            sessionId,
-            'workflow',
-            params.id,
-            params.target_path,
-          );
-          const { target_path: targetPath, ...input } = params;
+          const { target_path: requestedTargetPath, ...input } = params;
+          const targetPath =
+            requestedTargetPath ??
+            agentWorkflowWorkDir(sessionId, input.slug.trim());
+          await assertWorkspacePathAvailable(sessionId, targetPath);
           const res = await platform.createWorkflow(input);
           const checkout = await initNewWorktree(
             sessionId,
@@ -258,21 +297,25 @@ export function createWorkflowTools(options: {
             (root) => writeScaffoldFiles(root, res.files),
             targetPath,
           );
-          const context = `Created workflow "${res.id}" at ${checkout.absolutePath}`;
+          const context =
+            `Created workflow "${res.name}" (slug: ${res.slug}, id: ` +
+            `${res.id}) at ${checkout.absolutePath}`;
           try {
             await materializeWorktree(checkout.absolutePath, sdkMaterializer);
           } catch (error) {
             throw sdkPreparationFailure(context, error);
           }
           return text(
-            `Created workflow "${res.id}". Source is at ` +
-              `${checkout.absolutePath}.\n` +
+            `Created workflow "${res.name}" (id: ${res.id}, slug: ` +
+              `${res.slug}). Source is at ${checkout.absolutePath}.\n` +
               'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
               'and manifest.json (network policy + triggers), commit with git, then call ' +
-              'deploy_workflow. The generated .hatch/ directory is platform-owned; ' +
+              `deploy_workflow with id "${res.id}" and source_path ` +
+              `"${checkout.absolutePath}". The generated .hatch/ directory is platform-owned; ` +
               'do not edit or commit it.',
             {
               id: res.id,
+              slug: res.slug,
               name: res.name,
               path: checkout.path,
               absolutePath: checkout.absolutePath,
@@ -354,7 +397,9 @@ export function createWorkflowTools(options: {
       'Roll a workflow back to a previous deployment version, restoring that ' +
       "version's bundled program and source.",
     parameters: Type.Object({
-      id: Type.String({ description: 'Workflow id to roll back.' }),
+      id: Type.String({
+        description: 'Workflow id to roll back.',
+      }),
       version: Type.Number({ description: 'Deployment version to restore.' }),
     }),
     execute: async (_id, params) => {
@@ -363,10 +408,10 @@ export function createWorkflowTools(options: {
       return text(
         `Rolled "${params.id}" back to v${res.version}. Existing Agent ` +
           'worktrees were not changed. Re-run checkout_workflow with the same ' +
-          'target_path. It synchronizes only when remote master fast-forwards ' +
-          'a clean local master; ahead or diverged work is preserved. ' +
-          'Fetch/rebase to retain that work, or use force: true only when ' +
-          'discarding and replacing the checkout is intended.',
+          'source_path and clone: false. It synchronizes only when remote ' +
+          'master fast-forwards a clean local master; ahead or diverged work ' +
+          'is preserved. To discard it, make a separate clone: true call with ' +
+          'the same source_path and force: true.',
         res,
       );
     },

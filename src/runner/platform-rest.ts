@@ -144,22 +144,29 @@ export function createPlatformRestClient(opts: {
       ),
 
     listWorkflows: () => call('GET', '/internal/api/workflows'),
-    getWorkflow: (id) =>
-      call('GET', `/internal/api/workflows/${enc(id)}`, undefined, true),
+    getWorkflow: (workflowId) =>
+      call(
+        'GET',
+        `/internal/api/workflows/${enc(workflowId)}`,
+        undefined,
+        true,
+      ),
     createWorkflow: (input) =>
       call<CreateWorkflowResult>('POST', '/internal/api/workflows', input),
-    getWorkflowSource: (id) =>
+    getWorkflowSource: (workflowId) =>
       call<SourceBundleResponse>(
         'GET',
-        `/internal/api/workflows/${enc(id)}/source`,
+        `/internal/api/workflows/${enc(workflowId)}/source`,
       ),
-    deployWorkflow: (id, body) =>
+    deployWorkflow: (workflowId, body) =>
       call<WorkflowDeployResponse>(
         'POST',
-        `/internal/api/workflows/${enc(id)}/deploy`,
+        `/internal/api/workflows/${enc(workflowId)}/deploy`,
         body,
       ),
-    rollbackWorkflow: (id, version) =>
-      call('POST', `/internal/api/workflows/${enc(id)}/rollback`, { version }),
+    rollbackWorkflow: (workflowId, version) =>
+      call('POST', `/internal/api/workflows/${enc(workflowId)}/rollback`, {
+        version,
+      }),
   };
 }
