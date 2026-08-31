@@ -1,5 +1,9 @@
 import type { Skill } from '@earendil-works/pi-agent-core';
 import { describe, expect, it } from 'vitest';
+import {
+  LATEST_APP_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+} from '~/app-compatibility';
 import { buildSystemPrompt } from './system-prompt';
 
 const appUrl = 'https://hatch.example.com';
@@ -40,6 +44,14 @@ describe('Agent system prompt skills', () => {
 
     expect(prompt).toContain(
       '# Environment\n- The platform URL is `https://hatch.example.com`.',
+    );
+  });
+
+  it('identifies the current App compatibility range', () => {
+    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
+
+    expect(prompt).toContain(
+      `minimum supported v${MIN_SUPPORTED_APP_COMPATIBILITY_VERSION};\n  latest v${LATEST_APP_COMPATIBILITY_VERSION}`,
     );
   });
 

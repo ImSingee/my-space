@@ -1,6 +1,6 @@
 ---
 name: app-compatibility
-description: Explain Hatch App deployment compatibility versions and guide handling of outdated or unsupported deployments. Use when list_apps or get_app reports a compatibility update, an App runtime is disabled by the minimum compatibility version, an older deployment was restored, or the user asks what changed between App compatibility versions.
+description: Explain Hatch App deployment compatibility versions and guide handling of outdated or unsupported deployments. Use before explaining, updating, or redeploying when list_apps or get_app reports an older compatibility version, an App runtime is disabled by the platform minimum, an older deployment was restored, or the user asks about compatibility-version differences.
 ---
 
 # App Compatibility
@@ -14,8 +14,6 @@ description: Explain Hatch App deployment compatibility versions and guide handl
 - Read the source compatibility version from `manifest.json`, defaulting to `2`
   when it is omitted; use `get_app` as the source of truth for the live
   deployment's compatibility version.
-- Latest compatibility version: `2`.
-- Minimum supported compatibility version: `1`.
 
 ## Version history
 
