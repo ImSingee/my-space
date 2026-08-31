@@ -107,7 +107,7 @@ function deployResponse(frontend: boolean): AppDeployResponse {
   };
 }
 
-function appTool(name: 'get_app' | 'deploy_app', platform: PlatformClient) {
+function appTool(name: string, platform: PlatformClient) {
   const found = createAppTools({
     platform,
     sessionId: 'session-one',
@@ -127,8 +127,11 @@ describe('Agent App lifecycle URLs', () => {
       .mockResolvedValue(appDetail(true));
     const get = appTool('get_app', { getApp } as unknown as PlatformClient);
 
-    const output = toolText(await get.execute('get', { id: 'human-slug' }));
+    const output = toolText(
+      await get.execute('get', { id: 'immutable-app-id' }),
+    );
 
+    expect(getApp).toHaveBeenCalledWith('immutable-app-id');
     expect(output).toContain('App URL: /app/human-slug');
     expect(output).not.toContain('/embed');
   });
@@ -151,7 +154,7 @@ describe('Agent App lifecycle URLs', () => {
 
     const output = toolText(
       await deploy.execute('deploy', {
-        id: 'human-slug',
+        id: 'immutable-app-id',
         source_path: 'apps/human-slug',
         message: 'Update the App',
       }),
@@ -160,6 +163,15 @@ describe('Agent App lifecycle URLs', () => {
     expect(output).toContain('App URL: /app/human-slug');
     expect(output).not.toContain('/embed');
     expect(output).not.toContain('App (iframe)');
+    expect(getApp).toHaveBeenCalledWith('immutable-app-id');
+    expect(associateSessionApp).toHaveBeenCalledWith(
+      'session-one',
+      'immutable-app-id',
+    );
+    expect(deployApp).toHaveBeenCalledWith(
+      'immutable-app-id',
+      expect.any(Object),
+    );
   });
 
   it('omits an App URL when no frontend is deployed', async () => {
@@ -168,8 +180,95 @@ describe('Agent App lifecycle URLs', () => {
       .mockResolvedValue(appDetail(false));
     const get = appTool('get_app', { getApp } as unknown as PlatformClient);
 
-    const output = toolText(await get.execute('get', { id: 'human-slug' }));
+    const output = toolText(
+      await get.execute('get', { id: 'immutable-app-id' }),
+    );
 
     expect(output).not.toContain('App URL:');
+  });
+});
+
+describe('Agent App tool identity contract', () => {
+  it('renders list_apps with immutable ids first and preserves structured identity', async () => {
+    const listApps = vi.fn<PlatformClient['listApps']>().mockResolvedValue([
+      {
+        id: 'immutable-app-id',
+        slug: 'human-slug',
+        name: 'Example App',
+        description: null,
+        status: 'deployed',
+        currentVersion: 2,
+        compatibility: null,
+        capabilities: ['frontend'],
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      },
+    ]);
+    const list = appTool('list_apps', {
+      listApps,
+    } as unknown as PlatformClient);
+
+    const result = await list.execute('list', {});
+    const output = toolText(result);
+
+    expect(output).toContain(
+      '- Example App (id: immutable-app-id, slug: human-slug)',
+    );
+    expect(result.details).toEqual({
+      apps: [
+        expect.objectContaining({ id: 'immutable-app-id', slug: 'human-slug' }),
+      ],
+    });
+  });
+
+  it('forwards immutable ids for rollback and database queries', async () => {
+    const associateSessionApp = vi
+      .fn<PlatformClient['associateSessionApp']>()
+      .mockResolvedValue({ appId: 'immutable-app-id' });
+    const rollbackApp = vi
+      .fn<PlatformClient['rollbackApp']>()
+      .mockResolvedValue({
+        version: 3,
+        dataSchemaMismatch: false,
+        compatibility: {
+          version: 2,
+          latestVersion: 2,
+          minimumSupportedVersion: 1,
+          isSupported: true,
+          isLatest: true,
+        },
+      });
+    const queryAppDb = vi.fn<PlatformClient['queryAppDb']>().mockResolvedValue({
+      text: '[]',
+      rowCount: 0,
+    });
+    const platform = {
+      associateSessionApp,
+      rollbackApp,
+      queryAppDb,
+    } as unknown as PlatformClient;
+    const rollback = appTool('rollback_app', platform);
+    const queryDb = appTool('query_app_db', platform);
+    const abort = new AbortController();
+
+    await rollback.execute('rollback', {
+      id: 'immutable-app-id',
+      version: 3,
+    });
+    await queryDb.execute(
+      'query',
+      { id: 'immutable-app-id', sql: 'select 1' },
+      abort.signal,
+    );
+
+    expect(associateSessionApp).toHaveBeenCalledWith(
+      'session-one',
+      'immutable-app-id',
+    );
+    expect(rollbackApp).toHaveBeenCalledWith('immutable-app-id', 3);
+    expect(queryAppDb).toHaveBeenCalledWith(
+      'immutable-app-id',
+      'select 1',
+      abort.signal,
+    );
   });
 });

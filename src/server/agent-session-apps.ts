@@ -7,7 +7,7 @@ import { AppError } from './errors';
  */
 export function associateAgentSessionApp(
   sessionId: string,
-  handle: string,
+  appId: string,
 ): Promise<{ appId: string }> {
   return db.transaction(async (tx) => {
     const session = await tx.query.agentSessions.findFirst({
@@ -16,17 +16,11 @@ export function associateAgentSessionApp(
     });
     if (!session) throw new AppError('Agent session not found.', 404);
 
-    const byId = await tx.query.apps.findFirst({
-      where: { id: handle },
+    const app = await tx.query.apps.findFirst({
+      where: { id: appId },
       columns: { id: true },
     });
-    const app =
-      byId ??
-      (await tx.query.apps.findFirst({
-        where: { slug: handle },
-        columns: { id: true },
-      }));
-    if (!app) throw new AppError(`App "${handle}" not found.`, 404);
+    if (!app) throw new AppError(`App "${appId}" not found.`, 404);
 
     await tx
       .insert(schema.agentSessionApps)

@@ -20,7 +20,8 @@ workflow in order and load only the capability references needed for the task.
    `/api/app/<id>/...` URLs.
 2. For an existing App, inspect it with `list_apps` and `get_app`. If this
    conversation does not have a checkout yet, call `checkout_app` with
-   `clone: true`; it clones into `source_path` or defaults to `apps/<slug>`.
+   `clone: true`; it clones into `source_path` or defaults to
+   `apps/<current-slug>`.
    To update an existing checkout, call `checkout_app` with `clone: false` and
    its exact `source_path`. Update mode never creates a missing path. Use
    `force: true` only with `clone: true` when intentionally discarding the

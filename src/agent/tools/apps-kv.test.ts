@@ -48,18 +48,18 @@ describe('query_app_kv', () => {
     const query = queryKvTool({ queryAppKv } as unknown as PlatformClient);
 
     await expect(
-      query.execute('missing-key', { id: 'demo-app', action: 'get' }),
+      query.execute('missing-key', { id: 'immutable-app-id', action: 'get' }),
     ).rejects.toThrow(/key/);
     await expect(
       query.execute('fractional-limit', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'list',
         limit: 1.5,
       }),
     ).rejects.toThrow(/expected int/);
     await expect(
       query.execute('set-reveal', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'set',
         key: 'token',
         value: 'value',
@@ -68,7 +68,7 @@ describe('query_app_kv', () => {
     ).rejects.toThrow(/unrecognized/i);
     await expect(
       query.execute('delete-reveal', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'delete',
         key: 'token',
         reveal_secrets: true,
@@ -125,7 +125,7 @@ describe('query_app_kv', () => {
     );
 
     const list = await query.execute('list', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'list',
       limit: 10,
     });
@@ -134,7 +134,7 @@ describe('query_app_kv', () => {
     expect(toolText(list)).toContain('Continue with cursor: "api-token"');
 
     const revealed = await query.execute('revealed-get', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'get',
       key: 'api-token',
       reveal_secrets: true,
@@ -142,14 +142,14 @@ describe('query_app_kv', () => {
     expect(toolText(revealed)).toContain('plain-secret');
 
     const get = await query.execute('get', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'get',
       key: 'missing',
     });
     expect(toolText(get)).toBe('KV key "missing" is not set.');
 
     const set = await query.execute('set', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'set',
       key: 'mode',
       value: 'production',
@@ -157,25 +157,31 @@ describe('query_app_kv', () => {
     expect(toolText(set)).toContain('"value": "production"');
 
     const deleted = await query.execute('delete', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'delete',
       key: 'mode',
     });
     expect(toolText(deleted)).toBe('Deleted KV key "mode" permanently.');
 
     expect(queryAppKv.mock.calls.map(([id, input]) => [id, input])).toEqual([
-      ['demo-app', { action: 'list', limit: 10, revealSecrets: false }],
-      ['demo-app', { action: 'get', key: 'api-token', revealSecrets: true }],
-      ['demo-app', { action: 'get', key: 'missing', revealSecrets: false }],
+      ['immutable-app-id', { action: 'list', limit: 10, revealSecrets: false }],
       [
-        'demo-app',
+        'immutable-app-id',
+        { action: 'get', key: 'api-token', revealSecrets: true },
+      ],
+      [
+        'immutable-app-id',
+        { action: 'get', key: 'missing', revealSecrets: false },
+      ],
+      [
+        'immutable-app-id',
         {
           action: 'set',
           key: 'mode',
           value: 'production',
         },
       ],
-      ['demo-app', { action: 'delete', key: 'mode' }],
+      ['immutable-app-id', { action: 'delete', key: 'mode' }],
     ]);
     expect(associateSessionApp).not.toHaveBeenCalled();
   });

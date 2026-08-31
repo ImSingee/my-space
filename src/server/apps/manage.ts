@@ -224,14 +224,11 @@ export async function renameAppSlug(
   if (!app) throw new Error(`App "${id}" not found.`);
   if (app.slug === slug) return { slug };
 
-  // Reject a slug that matches any other app's id OR slug: internal Agent
-  // handles still accept either form and resolve ids first, so their namespace
-  // must stay unambiguous even though human-facing routes use only slugs.
-  const { slugConflictExists } = await import('./access');
-  if (await slugConflictExists(slug, id)) {
-    throw new Error(
-      `Slug "${slug}" conflicts with an existing app's id or slug.`,
-    );
+  // Slugs are unique only within the human-facing URL namespace. App ids are
+  // addressed independently at every technical boundary.
+  const { appSlugExists } = await import('./access');
+  if (await appSlugExists(slug, id)) {
+    throw new Error(`Slug "${slug}" is already in use.`);
   }
 
   await db.update(schema.apps).set({ slug }).where(eq(schema.apps.id, id));

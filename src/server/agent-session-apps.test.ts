@@ -15,7 +15,27 @@ beforeEach(async () => {
 });
 
 describe('Agent conversation App associations', () => {
-  it('resolves a slug to the canonical App id and inserts idempotently', async () => {
+  it('associates a legacy kebab-case App id and inserts idempotently', async () => {
+    await db
+      .insert(schema.agentSessions)
+      .values({ id: 'session-one', title: 'Session one' });
+    await db.insert(schema.apps).values({
+      id: 'canonical-app',
+      slug: 'mutable-slug',
+      name: 'Mutable App',
+    });
+
+    await expect(
+      associateAgentSessionApp('session-one', 'canonical-app'),
+    ).resolves.toEqual({ appId: 'canonical-app' });
+    await associateAgentSessionApp('session-one', 'canonical-app');
+
+    await expect(db.select().from(schema.agentSessionApps)).resolves.toEqual([
+      { sessionId: 'session-one', appId: 'canonical-app' },
+    ]);
+  });
+
+  it('returns 404 when the supplied value matches only an App slug', async () => {
     await db
       .insert(schema.agentSessions)
       .values({ id: 'session-one', title: 'Session one' });
@@ -27,12 +47,10 @@ describe('Agent conversation App associations', () => {
 
     await expect(
       associateAgentSessionApp('session-one', 'mutable-slug'),
-    ).resolves.toEqual({ appId: 'canonical-app' });
-    await associateAgentSessionApp('session-one', 'canonical-app');
-
-    await expect(db.select().from(schema.agentSessionApps)).resolves.toEqual([
-      { sessionId: 'session-one', appId: 'canonical-app' },
-    ]);
+    ).rejects.toThrow('App "mutable-slug" not found.');
+    await expect(db.select().from(schema.agentSessionApps)).resolves.toEqual(
+      [],
+    );
   });
 
   it('does not create an association until both targets resolve', async () => {

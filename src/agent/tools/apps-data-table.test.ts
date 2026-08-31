@@ -110,27 +110,27 @@ describe('query_app_data_table', () => {
 
     await expect(
       query.execute('query-missing-table', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'query',
       }),
     ).rejects.toThrow(/table/i);
     await expect(
       query.execute('inspect-with-limit', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'inspect',
         limit: 10,
       }),
     ).rejects.toThrow(/unrecognized/i);
     await expect(
       query.execute('raw-blank', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'raw_sql',
         sql: '   ',
       }),
     ).rejects.toThrow(/must not be blank/i);
     await expect(
       query.execute('raw-timeout-too-large', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'raw_sql',
         sql: 'select 1',
         timeout_ms: 1_800_001,
@@ -138,7 +138,7 @@ describe('query_app_data_table', () => {
     ).rejects.toThrow(/too big|<=1800000/i);
     await expect(
       query.execute('mutate-missing-id', {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'mutate',
         operations: [{ type: 'delete', table: 'todos' }],
       }),
@@ -175,7 +175,7 @@ describe('query_app_data_table', () => {
     await query.execute(
       'query',
       {
-        id: 'demo-app',
+        id: 'immutable-app-id',
         action: 'query',
         table: 'todos',
         where: [{ field: 'completed', op: 'eq', value: false }],
@@ -185,7 +185,7 @@ describe('query_app_data_table', () => {
       controller.signal,
     );
     await query.execute('raw', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'raw_sql',
       sql: 'select count(*) from data.todos',
       timeout_ms: 120_000,
@@ -193,7 +193,7 @@ describe('query_app_data_table', () => {
 
     expect(queryAppDataTable.mock.calls).toEqual([
       [
-        'demo-app',
+        'immutable-app-id',
         {
           action: 'query',
           table: 'todos',
@@ -204,7 +204,7 @@ describe('query_app_data_table', () => {
         controller.signal,
       ],
       [
-        'demo-app',
+        'immutable-app-id',
         {
           action: 'raw_sql',
           sql: 'select count(*) from data.todos',
@@ -230,7 +230,7 @@ describe('query_app_data_table', () => {
     } as unknown as PlatformClient);
 
     const result = await query.execute('empty-page', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'query',
       table: 'todos',
       cursor: 'sensitive-cursor-value',
@@ -293,15 +293,15 @@ describe('query_app_data_table', () => {
     );
 
     const inspection = await query.execute('inspect', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'inspect',
     });
     expect(toolText(inspection)).toBe(
-      'App "demo-app" has no live Data Table schema.',
+      'App "immutable-app-id" has no live Data Table schema.',
     );
 
     const summarizedInspection = await query.execute('inspect-summary', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'inspect',
     });
     expect(toolText(summarizedInspection)).toContain(
@@ -309,7 +309,7 @@ describe('query_app_data_table', () => {
     );
 
     const rows = await query.execute('query', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'query',
       table: 'todos',
     });
@@ -319,7 +319,7 @@ describe('query_app_data_table', () => {
     expect(toolText(rows)).toContain('Output was truncated');
 
     const mutation = await query.execute('mutate', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'mutate',
       operations: [
         { type: 'insert', table: 'todos', value: { title: 'Created' } },
@@ -333,7 +333,7 @@ describe('query_app_data_table', () => {
     );
 
     const raw = await query.execute('raw', {
-      id: 'demo-app',
+      id: 'immutable-app-id',
       action: 'raw_sql',
       sql: 'update data.todos set completed = true; select count(*) from data.todos',
     });
@@ -341,7 +341,7 @@ describe('query_app_data_table', () => {
     expect(toolText(raw)).toContain('"command": "SELECT"');
     expect(toolText(raw)).toContain('Rerun raw_sql with narrower columns');
     expect(queryAppDataTable).toHaveBeenLastCalledWith(
-      'demo-app',
+      'immutable-app-id',
       {
         action: 'raw_sql',
         sql: 'update data.todos set completed = true; select count(*) from data.todos',

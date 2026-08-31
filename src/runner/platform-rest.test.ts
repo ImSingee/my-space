@@ -10,6 +10,82 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('Platform REST ID-only App paths', () => {
+  it('forwards the immutable App id through every lifecycle path', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createPlatformRestClient({
+      baseUrl: 'http://platform.internal',
+      token: 'runner-token',
+    });
+    const appId = '01immutableid';
+
+    await client.getApp(appId);
+    await client.getAppSource(appId);
+    await client.deployApp(appId, {
+      message: 'Deploy by id',
+      generation: '2026-09-01T00:00:00.000Z',
+      bundleBase64: 'bundle',
+    });
+    await client.rollbackApp(appId, 3);
+    await client.queryAppDb(appId, 'select 1');
+
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        'http://platform.internal/internal/api/apps/01immutableid',
+        {
+          method: 'GET',
+          headers: { authorization: 'Bearer runner-token' },
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/apps/01immutableid/source',
+        {
+          method: 'GET',
+          headers: { authorization: 'Bearer runner-token' },
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/apps/01immutableid/deploy',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: 'Deploy by id',
+            generation: '2026-09-01T00:00:00.000Z',
+            bundleBase64: 'bundle',
+          }),
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/apps/01immutableid/rollback',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ version: 3 }),
+        },
+      ],
+      [
+        'http://platform.internal/internal/api/apps/01immutableid/query-db',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer runner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ sql: 'select 1' }),
+        },
+      ],
+    ]);
+  });
+});
+
 describe('Platform REST KV client', () => {
   it('sends every action to the bearer-authenticated query-kv endpoint', async () => {
     const responses: QueryAppKvResponse[] = [
@@ -49,13 +125,13 @@ describe('Platform REST KV client', () => {
     ];
 
     for (const input of inputs) {
-      await client.queryAppKv('demo-app', input);
+      await client.queryAppKv('immutable-app-id', input);
     }
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
       expect(call[0]).toBe(
-        'http://platform.internal/internal/api/apps/demo-app/query-kv',
+        'http://platform.internal/internal/api/apps/immutable-app-id/query-kv',
       );
       expect(call[1]).toMatchObject({
         method: 'POST',
@@ -73,8 +149,8 @@ describe('Platform REST App association client', () => {
   it('sends association and session-bound create requests', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
-      return url.endsWith('/apps/mutable-slug')
-        ? Response.json({ appId: 'canonical-app' })
+      return url.endsWith('/apps/immutable-app-id')
+        ? Response.json({ appId: 'immutable-app-id' })
         : Response.json({
             id: 'created-app',
             slug: 'created-app',
@@ -89,8 +165,8 @@ describe('Platform REST App association client', () => {
     });
 
     await expect(
-      client.associateSessionApp('session-one', 'mutable-slug'),
-    ).resolves.toEqual({ appId: 'canonical-app' });
+      client.associateSessionApp('session-one', 'immutable-app-id'),
+    ).resolves.toEqual({ appId: 'immutable-app-id' });
     await client.createApp(
       { slug: 'created-app', name: 'Created App' },
       'session-one',
@@ -98,7 +174,7 @@ describe('Platform REST App association client', () => {
 
     expect(fetchMock.mock.calls).toEqual([
       [
-        'http://platform.internal/internal/api/agent-sessions/session-one/apps/mutable-slug',
+        'http://platform.internal/internal/api/agent-sessions/session-one/apps/immutable-app-id',
         {
           method: 'POST',
           headers: { authorization: 'Bearer runner-token' },
@@ -170,13 +246,13 @@ describe('Platform REST Data Table client', () => {
     ] satisfies QueryAppDataTableRequest[];
 
     for (const input of inputs) {
-      await client.queryAppDataTable('demo-app', input);
+      await client.queryAppDataTable('immutable-app-id', input);
     }
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
       expect(call[0]).toBe(
-        'http://platform.internal/internal/api/apps/demo-app/query-data-table',
+        'http://platform.internal/internal/api/apps/immutable-app-id/query-data-table',
       );
       expect(call[1]).toMatchObject({
         method: 'POST',
@@ -205,7 +281,7 @@ describe('Platform REST Data Table client', () => {
     const abort = new AbortController();
 
     await client.queryAppDataTable(
-      'demo-app',
+      'immutable-app-id',
       { action: 'raw_sql', sql: 'select pg_sleep(1)' },
       abort.signal,
     );
