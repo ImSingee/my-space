@@ -37,7 +37,7 @@
     "@connectrpc/connect": "^2.1.2",
     "@connectrpc/connect-node": "^2.1.2",
     "@connectrpc/connect-web": "^2.1.2",
-    "@earendil-works/pi-agent-core": "^0.83.0",
+    "@earendil-works/pi-agent-core": "^0.84.3",
     "@earendil-works/pi-ai": "^0.83.0",
     "@floating-ui/dom": "^1.8.0",
     "@lobehub/icons": "^5.16.0",
