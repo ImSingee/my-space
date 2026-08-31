@@ -8,6 +8,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
 
 const mocks = vi.hoisted(() => ({
   findApp: vi.fn<
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   >(),
   findDeployment:
     vi.fn<() => Promise<{ compatibilityVersion: number | null } | undefined>>(),
+  ensureAppDatabase: vi.fn<() => Promise<string>>(),
 }));
 
 vi.mock('~/db', () => ({
@@ -34,7 +36,7 @@ vi.mock('~/db', () => ({
   schema: {},
 }));
 vi.mock('./provision', () => ({
-  ensureAppDatabase: vi.fn<() => Promise<string>>(),
+  ensureAppDatabase: mocks.ensureAppDatabase,
 }));
 
 const {
@@ -84,6 +86,7 @@ describe('long-running backend compatibility checks', () => {
   beforeEach(() => {
     mocks.findApp.mockReset();
     mocks.findDeployment.mockReset();
+    mocks.ensureAppDatabase.mockReset();
     mocks.findApp.mockResolvedValue({
       status: 'deployed',
       capabilities: { backend: true },
@@ -111,6 +114,37 @@ describe('long-running backend compatibility checks', () => {
       status: 503,
     });
     expect(getBackendRuntimeView(KEEP_ALIVE_APP_ID).keepAlive).toBe(false);
+  });
+
+  it('rejects a newer deployment before backend startup begins', async () => {
+    const appId = 'newer-backend';
+    const deploymentId = 'newer-deployment';
+    mocks.findApp.mockResolvedValueOnce({
+      status: 'deployed',
+      capabilities: { backend: true },
+      currentDeploymentId: deploymentId,
+    });
+    mocks.findDeployment.mockResolvedValueOnce({
+      compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION + 1,
+    });
+
+    await expect(ensureAppRunning(appId, deploymentId)).rejects.toMatchObject({
+      status: 503,
+      message: expect.stringMatching(
+        new RegExp(
+          `newer than this platform's latest supported v${LATEST_APP_COMPATIBILITY_VERSION}.*Update the platform`,
+        ),
+      ),
+    });
+    expect(mocks.findApp).toHaveBeenCalledOnce();
+    expect(mocks.findDeployment).toHaveBeenCalledOnce();
+    expect(mocks.ensureAppDatabase).not.toHaveBeenCalled();
+    expect(getBackendRuntimeView(appId)).toMatchObject({
+      state: 'stopped',
+      pid: null,
+      port: null,
+      keepAlive: false,
+    });
   });
 });
 

@@ -1,5 +1,8 @@
 import { ZodError } from 'zod';
-import { APP_COMPATIBILITY_UPDATE_MESSAGE } from '~/app-compatibility';
+import {
+  appCompatibilityRuntimeMessage,
+  type AppCompatibility,
+} from '~/app-compatibility';
 import { auth } from '~auth/server';
 import { db } from '~/db';
 import {
@@ -98,7 +101,13 @@ async function authorize(
 async function liveDataAppState(
   id: string,
   expectedDeploymentId: string,
-): Promise<'missing' | 'activating' | 'stale' | 'unsupported' | 'live'> {
+): Promise<
+  | 'missing'
+  | 'activating'
+  | 'stale'
+  | 'live'
+  | { state: 'unsupported'; compatibility: AppCompatibility | null }
+> {
   const app = await db.query.apps.findFirst({
     where: { id },
     columns: {
@@ -121,7 +130,9 @@ async function liveDataAppState(
   const compatibility = await readDeploymentCompatibility(
     app.currentDeploymentId,
   );
-  return compatibility?.isSupported ? 'live' : 'unsupported';
+  return compatibility?.isSupported
+    ? 'live'
+    : { state: 'unsupported', compatibility };
 }
 
 function eventStream(
@@ -276,8 +287,10 @@ export async function handleDataRequest({
       { status: 409 },
     );
   }
-  if (state === 'unsupported') {
-    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
+  if (typeof state === 'object' && state.state === 'unsupported') {
+    return new Response(appCompatibilityRuntimeMessage(state.compatibility), {
+      status: 503,
+    });
   }
 
   const rawBody =

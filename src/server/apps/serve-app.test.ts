@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
 
 const mocks = vi.hoisted(() => ({
   liveAppDeployment:
@@ -22,12 +23,12 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-it('returns 503 before reading files for an unsupported frontend', async () => {
+it('returns a newer-platform 503 before reading frontend files', async () => {
   mocks.liveAppDeployment.mockResolvedValue({
     state: 'unsupported',
     compatibility: {
-      version: 0,
-      latestVersion: 2,
+      version: LATEST_APP_COMPATIBILITY_VERSION + 1,
+      latestVersion: LATEST_APP_COMPATIBILITY_VERSION,
       minimumSupportedVersion: 1,
       isSupported: false,
       isLatest: false,
@@ -37,6 +38,8 @@ it('returns 503 before reading files for an unsupported frontend', async () => {
   const response = await serveAppAppFile('example', 'index.html');
 
   expect(response.status).toBe(503);
-  await expect(response.text()).resolves.toContain('cannot run');
+  await expect(response.text()).resolves.toMatch(
+    /newer than this platform's latest supported.*Update the platform/,
+  );
   expect(mocks.readLiveBuildFile).not.toHaveBeenCalled();
 });

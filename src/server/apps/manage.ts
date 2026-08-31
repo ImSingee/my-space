@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import {
-  APP_COMPATIBILITY_ROLLBACK_MESSAGE,
   appCompatibility,
+  appCompatibilityRollbackMessage,
   type AppCompatibility,
 } from '~/app-compatibility';
 import {
@@ -275,7 +275,7 @@ async function rollbackAppInner(
   }
   const compatibility = appCompatibility(deployment.compatibilityVersion);
   if (!compatibility.isSupported && !options.allowUnsupportedCompatibility) {
-    throw new AppError(APP_COMPATIBILITY_ROLLBACK_MESSAGE, 409);
+    throw new AppError(appCompatibilityRollbackMessage(compatibility), 409);
   }
   if (deployment.status !== 'deployed') {
     throw new Error('Only successful deployments can be restored.');

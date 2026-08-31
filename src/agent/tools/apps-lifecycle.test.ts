@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppDetail } from '~server/apps/inspect';
+import {
+  LATEST_APP_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+  type AppCompatibility,
+} from '~/app-compatibility';
+import type { AppDetail, AppSummary } from '~server/apps/inspect';
 import type { NormalizedManifest } from '~server/apps/manifest';
 import type { AppDeployResponse, PlatformClient } from '../platform-client';
 
@@ -106,6 +111,36 @@ function deployResponse(frontend: boolean): AppDeployResponse {
   };
 }
 
+function compatibility(version: number): AppCompatibility {
+  return {
+    version,
+    latestVersion: LATEST_APP_COMPATIBILITY_VERSION,
+    minimumSupportedVersion: MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+    isSupported:
+      version >= MIN_SUPPORTED_APP_COMPATIBILITY_VERSION &&
+      version <= LATEST_APP_COMPATIBILITY_VERSION,
+    isLatest: version === LATEST_APP_COMPATIBILITY_VERSION,
+  };
+}
+
+function appSummary(
+  id: string,
+  name: string,
+  appCompatibility: AppCompatibility,
+): AppSummary {
+  return {
+    id,
+    slug: id,
+    name,
+    description: null,
+    status: 'deployed',
+    currentVersion: 1,
+    compatibility: appCompatibility,
+    capabilities: [],
+    updatedAt: '2026-09-01T00:00:00.000Z',
+  };
+}
+
 function appTool(name: string, platform: PlatformClient) {
   const found = createAppTools({
     platform,
@@ -184,6 +219,79 @@ describe('Agent App lifecycle URLs', () => {
     );
 
     expect(output).not.toContain('App URL:');
+  });
+});
+
+describe('Agent App compatibility guidance', () => {
+  it('keeps recovery directions distinct at both unsupported boundaries', async () => {
+    const belowMinimum = compatibility(
+      MIN_SUPPORTED_APP_COMPATIBILITY_VERSION - 1,
+    );
+    const aboveLatest = compatibility(LATEST_APP_COMPATIBILITY_VERSION + 1);
+    const listApps = vi
+      .fn<PlatformClient['listApps']>()
+      .mockResolvedValue([
+        appSummary('old-contract', 'Old Contract App', belowMinimum),
+        appSummary('future-contract', 'Future Contract App', aboveLatest),
+      ]);
+    const list = appTool('list_apps', {
+      listApps,
+    } as unknown as PlatformClient);
+
+    const output = toolText(await list.execute('list', {}));
+
+    expect(output).toContain(
+      `compatibility v${belowMinimum.version} (runtime disabled; read the \`app-compatibility\` Skill before updating and redeploying)`,
+    );
+    expect(output).toContain(
+      `compatibility v${aboveLatest.version} (runtime disabled; update the platform before running this deployment)`,
+    );
+    expect(output).not.toContain(
+      `compatibility v${aboveLatest.version} (update available`,
+    );
+  });
+
+  it('keeps inspection and restore on the platform-upgrade path for newer deployments', async () => {
+    const aboveLatest = compatibility(LATEST_APP_COMPATIBILITY_VERSION + 1);
+    const getApp = vi
+      .fn<PlatformClient['getApp']>()
+      .mockResolvedValue({ ...appDetail(false), compatibility: aboveLatest });
+    const associateSessionApp = vi
+      .fn<PlatformClient['associateSessionApp']>()
+      .mockResolvedValue({ appId: 'immutable-app-id' });
+    const rollbackApp = vi
+      .fn<PlatformClient['rollbackApp']>()
+      .mockResolvedValue({
+        version: 1,
+        dataSchemaMismatch: false,
+        compatibility: aboveLatest,
+      });
+    const platform = {
+      getApp,
+      associateSessionApp,
+      rollbackApp,
+    } as unknown as PlatformClient;
+    const get = appTool('get_app', platform);
+    const rollback = appTool('rollback_app', platform);
+
+    const inspection = toolText(
+      await get.execute('get', { id: 'immutable-app-id' }),
+    );
+    const restoration = toolText(
+      await rollback.execute('rollback', {
+        id: 'immutable-app-id',
+        version: 1,
+      }),
+    );
+
+    expect(inspection).toContain(
+      'runtime disabled; update the platform before running this deployment',
+    );
+    expect(restoration).toContain(
+      'This App cannot run until the platform is updated.',
+    );
+    expect(inspection).not.toContain('before updating and redeploying');
+    expect(restoration).not.toContain('below the platform minimum');
   });
 });
 

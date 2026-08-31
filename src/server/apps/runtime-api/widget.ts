@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { APP_COMPATIBILITY_UPDATE_MESSAGE } from '~/app-compatibility';
+import { appCompatibilityRuntimeMessage } from '~/app-compatibility';
 import { appBuildDir } from '~agent/paths';
 import { auth } from '~auth/server';
 import { parseAppApiPath } from './path';
@@ -31,7 +31,9 @@ export async function handleWidgetRequest({
     return new Response('Not found', { status: 404 });
   }
   if (live.state === 'unsupported') {
-    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
+    return new Response(appCompatibilityRuntimeMessage(live.compatibility), {
+      status: 503,
+    });
   }
   if (!live.manifest.widgets.some((w) => w.id === widgetId)) {
     return new Response('Not found', { status: 404 });

@@ -1,7 +1,7 @@
 /** Server-only helpers for enforcing the App runtime compatibility boundary. */
 import {
-  APP_COMPATIBILITY_UPDATE_MESSAGE,
   appCompatibility,
+  appCompatibilityRuntimeMessage,
   type AppCompatibility,
 } from '~/app-compatibility';
 import { db, type DB } from '~/db';
@@ -35,7 +35,9 @@ export async function assertSupportedDeployment(
     );
   }
   if (!compatibility.isSupported) {
-    throw new AppDeploymentCompatibilityError(APP_COMPATIBILITY_UPDATE_MESSAGE);
+    throw new AppDeploymentCompatibilityError(
+      appCompatibilityRuntimeMessage(compatibility),
+    );
   }
   return compatibility;
 }

@@ -22,7 +22,7 @@ import { isReservedEnvKey } from './env-keys';
 
 export { DEFAULT_INTERNAL_PORT, RUNNER_WS_PATH } from './runner-constants';
 
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 /** How long a run lease stays valid without renewal (heartbeat/events renew). */
 export const RUN_LEASE_TTL_MS = 90_000;

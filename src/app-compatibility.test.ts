@@ -5,6 +5,8 @@ import {
   LEGACY_APP_COMPATIBILITY_VERSION,
   MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
   appCompatibility,
+  appCompatibilityRollbackMessage,
+  appCompatibilityRuntimeMessage,
   resolveAppCompatibilityVersion,
   resolveAppDeployCompatibilityVersion,
 } from './app-compatibility';
@@ -37,6 +39,28 @@ describe('App compatibility', () => {
     );
     expect(compatibility.isSupported).toBe(false);
     expect(compatibility.isLatest).toBe(false);
+  });
+
+  it('marks versions newer than the platform latest as unsupported', () => {
+    const compatibility = appCompatibility(
+      LATEST_APP_COMPATIBILITY_VERSION + 1,
+    );
+
+    expect(compatibility).toMatchObject({
+      version: LATEST_APP_COMPATIBILITY_VERSION + 1,
+      isSupported: false,
+      isLatest: false,
+    });
+    expect(appCompatibilityRuntimeMessage(compatibility)).toMatch(
+      new RegExp(
+        `newer than this platform's latest supported v${LATEST_APP_COMPATIBILITY_VERSION}.*Update the platform`,
+      ),
+    );
+    expect(appCompatibilityRollbackMessage(compatibility)).toMatch(
+      new RegExp(
+        `newer than this platform's latest supported v${LATEST_APP_COMPATIBILITY_VERSION}.*Update the platform`,
+      ),
+    );
   });
 
   it('uses a fixed v2 default for source manifests that omit compatibility', () => {

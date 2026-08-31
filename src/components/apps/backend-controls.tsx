@@ -155,7 +155,7 @@ export function BackendControls({
         label={
           runtimeSupported
             ? 'Start'
-            : 'Update and redeploy this App before starting its backend'
+            : 'Resolve this App deployment compatibility before starting its backend'
         }
         withArrow
       >
@@ -196,7 +196,7 @@ export function BackendControls({
         label={
           runtimeSupported
             ? 'Restart'
-            : 'Update and redeploy this App before restarting its backend'
+            : 'Resolve this App deployment compatibility before restarting its backend'
         }
         withArrow
       >
