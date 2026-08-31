@@ -12,7 +12,7 @@ import {
 } from '~agent/paths';
 import {
   appHatchDataPackageDir,
-  appHatchImportMapPath,
+  hatchImportMapPath,
   materializeAppHatchSdk,
 } from '~agent/hatch-sdk';
 import { PLATFORM_APP_BUF_GEN_YAML } from '~agent/app-codegen';
@@ -344,7 +344,7 @@ async function checkAppSource(
     '--config=deno.json',
     '--no-remote',
     '--node-modules-dir=auto',
-    `--import-map=${appHatchImportMapPath(src)}`,
+    `--import-map=${hatchImportMapPath(src)}`,
     '--lock=deno.lock',
     '--frozen',
     '--',
@@ -698,7 +698,7 @@ async function describeDataSchema(
     '--config=deno.json',
     '--no-remote',
     '--node-modules-dir=auto',
-    `--import-map=${appHatchImportMapPath(src)}`,
+    `--import-map=${hatchImportMapPath(src)}`,
     '--lock=deno.lock',
     '--frozen',
     `--allow-read=${src}`,
@@ -994,7 +994,7 @@ export async function buildApp(
         '--platform=deno',
         '--packages=bundle',
         '--node-modules-dir=auto',
-        `--import-map=${appHatchImportMapPath(src)}`,
+        `--import-map=${hatchImportMapPath(src)}`,
         '--lock=deno.lock',
         '--frozen',
         '-o',

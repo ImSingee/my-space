@@ -77,6 +77,8 @@ COPY templates ./templates
 COPY skills ./skills
 COPY --from=build /app/packages/hatch-data/package.json ./packages/hatch-data/package.json
 COPY --from=build /app/packages/hatch-data/dist ./packages/hatch-data/dist
+COPY --from=build /app/packages/hatch-workflow/package.json ./packages/hatch-workflow/package.json
+COPY --from=build /app/packages/hatch-workflow/dist ./packages/hatch-workflow/dist
 
 # Runtime data lives in /app/workspace; dependency/tool caches live in /cache.
 RUN mkdir -p /app/workspace /cache/deno

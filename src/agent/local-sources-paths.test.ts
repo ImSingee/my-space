@@ -66,6 +66,17 @@ function appSdkImportMap(worktree: string): string {
   return path.join(worktree, '.hatch', 'import-map.json');
 }
 
+function workflowSdkManifest(worktree: string): string {
+  return path.join(
+    worktree,
+    '.hatch',
+    'sdk',
+    '@hatch',
+    'workflow',
+    'package.json',
+  );
+}
+
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const relative = path.relative(AGENTS_DIR, cwd);
   const sessionId =
@@ -390,6 +401,47 @@ describe('runner source paths', () => {
     ).resolves.toContain('app-immutable-app-id.bundle');
   });
 
+  it('creates a workflow with a generated SDK in a clean worktree', async () => {
+    const sessionId = 'create-workflow-sdk';
+    const createWorkflow = vi.fn<PlatformClient['createWorkflow']>(
+      async (input) => ({ id: input.id, name: input.name, files: [] }),
+    );
+    const tools = createWorkflowTools({
+      sessionId,
+      platform: { createWorkflow } as unknown as PlatformClient,
+    });
+    const create = tools.find(
+      (candidate) => candidate.name === 'create_workflow',
+    );
+    if (!create) throw new Error('Missing create_workflow tool.');
+
+    const result = await create.execute('create-workflow', {
+      id: 'daily-digest',
+      name: 'Daily digest',
+    });
+
+    const worktree = path.join(
+      agentWorkDir(sessionId),
+      'workflows',
+      'daily-digest',
+    );
+    expect(result.details).toMatchObject({
+      id: 'daily-digest',
+      absolutePath: worktree,
+      preparation: 'ready',
+    });
+    await expect(
+      readFile(workflowSdkManifest(worktree), 'utf8'),
+    ).resolves.toContain('"name": "@hatch/workflow"');
+    await expect(
+      readFile(appSdkImportMap(worktree), 'utf8'),
+    ).resolves.toContain('"./sdk/@hatch/workflow/dist/workflow.js"');
+    await expect(git(worktree, 'status', '--short')).resolves.toBe('');
+    await expect(
+      readFile(path.join(worktree, '.git', 'info', 'exclude'), 'utf8'),
+    ).resolves.toContain('/.hatch/');
+  });
+
   it('separates fresh app clones from existing checkout updates', async () => {
     const sessionId = 'checkout-app-modes';
     const getApp = vi.fn<PlatformClient['getApp']>(async () =>
@@ -574,20 +626,36 @@ describe('runner source paths', () => {
       id: 'workflow-id',
       target_path: 'custom/sync-workflow',
     });
+    const workflowWorktree = path.join(
+      agentWorkDir(sessionId),
+      'custom/sync-workflow',
+    );
     await expect(
-      exists(
-        appSdkManifest(
-          path.join(agentWorkDir(sessionId), 'custom/sync-workflow'),
-        ),
-      ),
-    ).resolves.toBe(false);
+      readFile(workflowSdkManifest(workflowWorktree), 'utf8'),
+    ).resolves.toContain('"name": "@hatch/workflow"');
+    await expect(exists(appSdkManifest(workflowWorktree))).resolves.toBe(false);
     await expect(
-      exists(
-        appSdkImportMap(
-          path.join(agentWorkDir(sessionId), 'custom/sync-workflow'),
-        ),
-      ),
-    ).resolves.toBe(false);
+      readFile(appSdkImportMap(workflowWorktree), 'utf8'),
+    ).resolves.toContain('"./sdk/@hatch/workflow/dist/workflow.js"');
+    await expect(git(workflowWorktree, 'status', '--short')).resolves.toBe('');
+    const workflowExcludePath = path.join(
+      workflowWorktree,
+      '.git',
+      'info',
+      'exclude',
+    );
+    const workflowExclude = await readFile(workflowExcludePath, 'utf8');
+    expect(workflowExclude.match(/^\/\.hatch\/$/gm)).toHaveLength(1);
+    expect(workflowExclude.match(/^\/node_modules\/$/gm)).toHaveLength(1);
+    expect(workflowExclude).not.toContain('/gen/');
+
+    await writeFile(
+      workflowExcludePath,
+      workflowExclude.replace('/.hatch/\n', ''),
+    );
+    await expect(git(workflowWorktree, 'status', '--short')).resolves.toContain(
+      '?? .hatch/',
+    );
     const synchronizedWorkflow = await workflow.execute('workflow-sync', {
       id: 'workflow-id',
       target_path: 'custom/sync-workflow',
@@ -599,6 +667,10 @@ describe('runner source paths', () => {
       replacedExisting: false,
       synchronizedExisting: true,
     });
+    await expect(git(workflowWorktree, 'status', '--short')).resolves.toBe('');
+    await expect(readFile(workflowExcludePath, 'utf8')).resolves.toContain(
+      '/.hatch/\n',
+    );
   }, 15_000);
 
   it('force replaces only the exact target and preserves unrelated checkout state', async () => {

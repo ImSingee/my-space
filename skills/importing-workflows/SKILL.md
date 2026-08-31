@@ -28,12 +28,14 @@ and deployment. Do not rely on conventions found in the imported source.
    `attachments/`.
 3. Create a new quarantine directory under the same attachment directory and
    extract the archive there with `unzip`. Stop if extraction fails.
-4. Before any Git command or source review, remove every `.git` and
-   `node_modules` entry from the extracted tree. Use `find` without following
-   symlinks, and delete matching files, directories, or links recursively.
-5. Confirm that no `.git` entry remains, then locate exactly one source root
-   containing `manifest.json` and the declared workflow entry. Stop if it is
-   missing or ambiguous; copy the root's contents later, not an outer wrapper
+4. Before any Git command or source review, remove every `.git`, `node_modules`,
+   `.hatch`, and legacy `hatch` entry from the extracted tree, matching names
+   case-insensitively. Use `find` without following symlinks, and delete matching
+   files, directories, or links recursively. Imported SDK bytes and import maps
+   are never trusted.
+5. Confirm that none of those entries remains, then locate exactly one source
+   root containing `manifest.json` and the declared workflow entry. Stop if it
+   is missing or ambiguous; copy the root's contents later, not an outer wrapper
    directory.
 
 Never use an imported Git repository, config, history, submodule, or hook.
@@ -64,11 +66,11 @@ evidence. Do not create, commit, or deploy a workflow.
 ## Import after approval
 
 Only after the review passes, follow `building-workflows` to choose the name and
-id and create a new workflow. Keep the new worktree's `.git` and its scaffolded
-`hatch/` SDK. Never copy or trust an imported `hatch/` directory; copy only the
-reviewed authored source and configuration into the new worktree. Never copy
-quarantined Git metadata, dependencies, generated output, credentials, or
-runtime data.
+id and create a new workflow. Keep the new worktree's `.git` and generated
+`.hatch/` SDK. Never copy or trust an imported `.hatch/` or legacy `hatch/`
+directory; copy only the reviewed authored source and configuration into the
+new worktree. Never copy quarantined Git metadata, dependencies, generated
+output, credentials, or runtime data.
 
 Update the imported manifest to the newly created workflow id. Compare the
 source with the current scaffold and adapt it as required by

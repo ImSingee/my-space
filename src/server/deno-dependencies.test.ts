@@ -149,7 +149,43 @@ describe('validateDenoDependencySource', () => {
     });
 
     await expect(validateDenoDependencySource(dir, 'app')).rejects.toThrow(
-      /stale App-managed Hatch SDK entry.*deno install/s,
+      /stale platform-managed Hatch SDK entry.*deno install/s,
+    );
+  });
+
+  it.each([
+    [
+      'package.json dependency',
+      { dependencies: { '@hatch/workflow': '1.0.0' } },
+      { allowScripts: [] },
+    ],
+    [
+      'deno.json import',
+      {},
+      {
+        imports: { '@hatch/workflow': './hatch/workflow.ts' },
+        allowScripts: [],
+      },
+    ],
+    [
+      'deno.json scoped import',
+      {},
+      {
+        scopes: {
+          './': { '@hatch/workflow': './hatch/workflow.ts' },
+        },
+        allowScripts: [],
+      },
+    ],
+  ])('rejects a source-owned Workflow SDK %s', async (_label, pkg, deno) => {
+    const dir = await source({
+      'package.json': pkg,
+      'deno.json': deno,
+      'deno.lock': { version: '5', npm: {} },
+    });
+
+    await expect(validateDenoDependencySource(dir, 'workflow')).rejects.toThrow(
+      /@hatch\/workflow.*provided by Hatch.*must not/s,
     );
   });
 

@@ -14,7 +14,8 @@ async function makeWorkflowSource(): Promise<{
   tempDirs.push(root);
   const sourceDir = path.join(root, 'src');
   const outputDir = path.join(root, 'out');
-  await fs.mkdir(path.join(sourceDir, 'hatch'), { recursive: true });
+  const templateDir = path.resolve('templates/default-workflow');
+  await fs.mkdir(path.join(sourceDir, '.HATCH'), { recursive: true });
   await Promise.all([
     fs.writeFile(
       path.join(sourceDir, 'manifest.json'),
@@ -26,43 +27,29 @@ async function makeWorkflowSource(): Promise<{
       }),
       'utf8',
     ),
-    fs.writeFile(
-      path.join(sourceDir, 'package.json'),
-      JSON.stringify({ private: true, type: 'module' }),
-      'utf8',
-    ),
-    fs.writeFile(
-      path.join(sourceDir, 'deno.json'),
-      JSON.stringify({
-        imports: { '@hatch/workflow': './hatch/workflow.ts' },
-        allowScripts: [],
-      }),
-      'utf8',
-    ),
-    fs.writeFile(
-      path.join(sourceDir, 'deno.lock'),
-      JSON.stringify({
-        version: '5',
-        specifiers: {},
-        npm: {},
-        workspace: { packageJson: { dependencies: [] } },
-      }),
-      'utf8',
+    ...['package.json', 'deno.json', 'deno.lock'].map((file) =>
+      fs.copyFile(path.join(templateDir, file), path.join(sourceDir, file)),
     ),
     fs.writeFile(
       path.join(sourceDir, 'workflow.ts'),
       "import { defineWorkflow } from '@hatch/workflow';\n" +
-        'export default defineWorkflow({ run: () => ({ ok: true }) });\n',
+        "import { z } from 'zod';\n" +
+        'export default defineWorkflow({\n' +
+        '  input: z.object({ name: z.string() }),\n' +
+        '  run: (_ctx, input) => ({ greeting: `Hello, ${input.name}!` }),\n' +
+        '});\n',
       'utf8',
     ),
     fs.writeFile(
-      path.join(sourceDir, 'hatch', 'workflow.ts'),
-      'export function defineWorkflow<T>(workflow: T): T { return workflow; }\n' +
-        'export async function runCli(): Promise<void> {\n' +
-        "  if (Deno.env.get('HATCH_MODE') === 'describe') {\n" +
-        "    console.log('[[hatch]]' + JSON.stringify({ t: 'schema', schema: { type: 'object' } }));\n" +
-        '  }\n' +
-        '}\n',
+      path.join(sourceDir, '.HATCH', 'import-map.json'),
+      JSON.stringify({
+        imports: { '@hatch/workflow': './attacker-controlled.ts' },
+      }),
+      'utf8',
+    ),
+    fs.writeFile(
+      path.join(sourceDir, '.HATCH', 'attacker-controlled.ts'),
+      'throw new Error("untrusted SDK executed");\n',
       'utf8',
     ),
   ]);
@@ -84,10 +71,32 @@ describe('buildWorkflow dependencies', () => {
     const result = await buildWorkflow('demo', { sourceDir, outputDir });
 
     await expect(fs.access(result.bundlePath)).resolves.toBeUndefined();
-    expect(result.inputSchema).toEqual({ type: 'object' });
+    expect(result.inputSchema).toMatchObject({
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    });
     expect(result.log).toContain(
       'deno install --package-json --node-modules-dir=auto --lock=deno.lock --frozen',
     );
     expect(result.log).toContain('--import-map');
+    await expect(fs.readFile(result.bundlePath, 'utf8')).resolves.not.toContain(
+      'untrusted SDK executed',
+    );
+  });
+
+  it('rejects the retired source-owned hatch/workflow.ts SDK', async () => {
+    const { sourceDir, outputDir } = await makeWorkflowSource();
+    const legacyDir = path.join(sourceDir, 'hatch');
+    await fs.mkdir(legacyDir);
+    await fs.writeFile(
+      path.join(legacyDir, 'workflow.ts'),
+      'export const legacy = true;\n',
+      'utf8',
+    );
+
+    await expect(
+      buildWorkflow('demo', { sourceDir, outputDir }),
+    ).rejects.toThrow(/retired hatch\/workflow\.ts SDK/);
   });
 });

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   chmod,
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -26,12 +27,15 @@ const [hatchSdkModule, pathsModule, sandboxModule] = await Promise.all([
   import('./shell-sandbox'),
 ]);
 const {
+  APP_HATCH_SDK_IMPORTS,
   appHatchDataPackageDir,
-  appHatchImportMapPath,
+  hatchImportMapPath,
   HATCH_BUF_GEN_CONFIG,
   HATCH_SDK_IMPORT_MAP,
-  HATCH_SDK_IMPORTS,
   materializeAppHatchSdk,
+  materializeWorkflowHatchSdk,
+  workflowHatchPackageDir,
+  WORKFLOW_HATCH_SDK_IMPORTS,
 } = hatchSdkModule;
 const { agentSessionDir, agentWorkDir } = pathsModule;
 const { prepareAgentSessionSandbox, setAgentOwned } = sandboxModule;
@@ -99,8 +103,8 @@ describe('App Hatch SDK materialization', () => {
     await materializeAppHatchSdk(root);
 
     await expect(
-      readFile(appHatchImportMapPath(root), 'utf8').then(JSON.parse),
-    ).resolves.toEqual({ imports: HATCH_SDK_IMPORTS });
+      readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
+    ).resolves.toEqual({ imports: APP_HATCH_SDK_IMPORTS });
   });
 
   it.each([
@@ -141,12 +145,12 @@ describe('App Hatch SDK materialization', () => {
       readFile(path.join(packageDir, 'dist', 'data-react.js'), 'utf8'),
     ).resolves.toContain('@ts-self-types="./data-react.d.ts"');
     const importMap = JSON.parse(
-      await readFile(appHatchImportMapPath(root), 'utf8'),
+      await readFile(hatchImportMapPath(root), 'utf8'),
     ) as Record<string, unknown>;
     expect(HATCH_SDK_IMPORT_MAP).toBe('.hatch/import-map.json');
     expect(HATCH_BUF_GEN_CONFIG).toBe('.hatch/buf.gen.yaml');
-    expect(importMap).toEqual({ imports: HATCH_SDK_IMPORTS });
-    expect(HATCH_SDK_IMPORTS).toEqual({
+    expect(importMap).toEqual({ imports: APP_HATCH_SDK_IMPORTS });
+    expect(APP_HATCH_SDK_IMPORTS).toEqual({
       '@hatch/data': './sdk/@hatch/data/dist/data.js',
       '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
     });
@@ -165,17 +169,17 @@ describe('App Hatch SDK materialization', () => {
     );
     await Promise.all([
       chmod(generated, 0o644),
-      chmod(appHatchImportMapPath(root), 0o644),
+      chmod(hatchImportMapPath(root), 0o644),
     ]);
     await writeFile(generated, 'stale', 'utf8');
-    await writeFile(appHatchImportMapPath(root), 'stale', 'utf8');
+    await writeFile(hatchImportMapPath(root), 'stale', 'utf8');
 
     await materializeAppHatchSdk(root);
 
     await expect(readFile(generated, 'utf8')).resolves.not.toBe('stale');
-    await expect(
-      readFile(appHatchImportMapPath(root), 'utf8'),
-    ).resolves.not.toBe('stale');
+    await expect(readFile(hatchImportMapPath(root), 'utf8')).resolves.not.toBe(
+      'stale',
+    );
   });
 
   it('refreshes an Agent-owned generation with unreadable stale contents', async () => {
@@ -195,7 +199,7 @@ describe('App Hatch SDK materialization', () => {
       ),
     ).toEqual([]);
     await expect(
-      readFile(appHatchImportMapPath(root), 'utf8').then(JSON.parse),
+      readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
     ).resolves.toHaveProperty('imports');
   });
 
@@ -210,8 +214,8 @@ describe('App Hatch SDK materialization', () => {
     await materializeAppHatchSdk(root);
 
     await expect(
-      readFile(appHatchImportMapPath(root), 'utf8').then(JSON.parse),
-    ).resolves.toEqual({ imports: HATCH_SDK_IMPORTS });
+      readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
+    ).resolves.toEqual({ imports: APP_HATCH_SDK_IMPORTS });
   });
 
   it('provides Deno types without a package or lockfile entry', async () => {
@@ -264,9 +268,9 @@ describe('App Hatch SDK materialization', () => {
       ),
     ).resolves.toBeDefined();
     const importMap = JSON.parse(
-      await readFile(appHatchImportMapPath(root), 'utf8'),
+      await readFile(hatchImportMapPath(root), 'utf8'),
     );
-    expect(importMap).toEqual({ imports: HATCH_SDK_IMPORTS });
+    expect(importMap).toEqual({ imports: APP_HATCH_SDK_IMPORTS });
     const lock = await readFile(path.join(root, 'deno.lock'), 'utf8');
     expect(lock).not.toContain('@hatch/data');
   });
@@ -292,17 +296,17 @@ describe('App Hatch SDK materialization', () => {
   it('replaces an untrusted import map symlink without touching its target', async () => {
     const root = await tempRoot();
     const outside = await tempRoot();
-    await mkdir(path.dirname(appHatchImportMapPath(root)), { recursive: true });
+    await mkdir(path.dirname(hatchImportMapPath(root)), { recursive: true });
     const target = path.join(outside, 'import-map.json');
     await writeFile(target, 'keep me', 'utf8');
-    await symlink(target, appHatchImportMapPath(root));
+    await symlink(target, hatchImportMapPath(root));
 
     await materializeAppHatchSdk(root);
 
     await expect(readFile(target, 'utf8')).resolves.toBe('keep me');
     await expect(
-      readFile(appHatchImportMapPath(root), 'utf8').then(JSON.parse),
-    ).resolves.toEqual({ imports: HATCH_SDK_IMPORTS });
+      readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
+    ).resolves.toEqual({ imports: APP_HATCH_SDK_IMPORTS });
   });
 
   it('refuses a symlinked platform directory', async () => {
@@ -311,7 +315,7 @@ describe('App Hatch SDK materialization', () => {
     await symlink(outside, path.join(root, '.hatch'));
 
     await expect(materializeAppHatchSdk(root)).rejects.toThrow(
-      '@hatch/data SDK: .hatch is a symbolic link',
+      'platform-owned Hatch SDK: .hatch is a symbolic link',
     );
     await expect(
       readFile(
@@ -319,5 +323,109 @@ describe('App Hatch SDK materialization', () => {
         'utf8',
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('Workflow Hatch SDK materialization', () => {
+  it('creates a versionless package and workflow-only import map', async () => {
+    const root = await tempRoot();
+
+    await materializeWorkflowHatchSdk(root);
+
+    const packageDir = workflowHatchPackageDir(root);
+    const manifest = JSON.parse(
+      await readFile(path.join(packageDir, 'package.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: '@hatch/workflow',
+      private: true,
+      type: 'module',
+    });
+    expect(manifest).not.toHaveProperty('version');
+    await expect(
+      readFile(path.join(packageDir, 'dist', 'workflow.js'), 'utf8'),
+    ).resolves.toContain('function defineWorkflow');
+    await expect(
+      readFile(path.join(packageDir, 'dist', 'workflow.d.ts'), 'utf8'),
+    ).resolves.toContain('export declare function defineWorkflow');
+    await expect(
+      readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
+    ).resolves.toEqual({ imports: WORKFLOW_HATCH_SDK_IMPORTS });
+    expect(WORKFLOW_HATCH_SDK_IMPORTS).toEqual({
+      '@hatch/workflow': './sdk/@hatch/workflow/dist/workflow.js',
+    });
+    await expect(
+      readFile(path.join(root, HATCH_BUF_GEN_CONFIG), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refreshes an Agent-owned generation without trusting stale SDK bytes', async () => {
+    const root = await tempAgentRoot();
+    await materializeWorkflowHatchSdk(root);
+    const generated = path.join(
+      workflowHatchPackageDir(root),
+      'dist',
+      'workflow.js',
+    );
+    await writeFile(generated, 'stale', 'utf8');
+
+    await materializeWorkflowHatchSdk(root);
+
+    await expect(readFile(generated, 'utf8')).resolves.not.toBe('stale');
+    await expect(
+      readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
+    ).resolves.toEqual({ imports: WORKFLOW_HATCH_SDK_IMPORTS });
+  });
+
+  it('provides inferred Workflow types through the generated import map', async () => {
+    const root = await tempRoot();
+    const denoDir = await tempRoot();
+    const templateDir = path.resolve('templates/default-workflow');
+    await Promise.all([
+      ...['package.json', 'deno.json', 'deno.lock'].map((file) =>
+        copyFile(path.join(templateDir, file), path.join(root, file)),
+      ),
+      writeFile(
+        path.join(root, 'workflow.ts'),
+        `
+          import { defineWorkflow } from '@hatch/workflow';
+          import { z } from 'zod';
+          export default defineWorkflow({
+            input: z.object({ count: z.number() }),
+            run: async (ctx, input) => {
+              await ctx.step('format', () => input.count.toFixed(2));
+              // @ts-expect-error The generated SDK must infer the zod input.
+              input.missing;
+              return { count: input.count };
+            },
+          });
+        `,
+        'utf8',
+      ),
+    ]);
+    await materializeWorkflowHatchSdk(root);
+
+    await expect(
+      exec(
+        'deno',
+        [
+          'check',
+          '--node-modules-dir=auto',
+          `--import-map=${HATCH_SDK_IMPORT_MAP}`,
+          '--lock=deno.lock',
+          '--frozen',
+          'workflow.ts',
+        ],
+        { cwd: root, env: { ...process.env, DENO_DIR: denoDir } },
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      readFile(
+        path.join(workflowHatchPackageDir(root), 'dist', 'workflow.js'),
+        'utf8',
+      ),
+    ).resolves.toContain('@ts-self-types="./workflow.d.ts"');
+    const lock = await readFile(path.join(root, 'deno.lock'), 'utf8');
+    expect(lock).not.toContain('@hatch/workflow');
   });
 });

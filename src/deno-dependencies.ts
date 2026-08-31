@@ -174,8 +174,9 @@ function assertFixedAppConfiguration(
   }
 }
 
-function assertNoAppManagedHatchSdk(
+function assertNoManagedHatchSdk(
   packageJson: JsonObject,
+  config: JsonObject,
   lock: JsonObject,
 ): void {
   for (const section of [
@@ -192,6 +193,27 @@ function assertNoAppManagedHatchSdk(
         `${name} is provided by Hatch and must not be declared in ` +
           `${section}. Remove it from package.json and regenerate deno.lock ` +
           'with `deno install`.',
+      );
+    }
+  }
+
+  const configuredImports = [config.imports];
+  if (
+    config.scopes &&
+    typeof config.scopes === 'object' &&
+    !Array.isArray(config.scopes)
+  ) {
+    configuredImports.push(...Object.values(config.scopes));
+  }
+  for (const imports of configuredImports) {
+    if (!imports || typeof imports !== 'object' || Array.isArray(imports)) {
+      continue;
+    }
+    const name = Object.keys(imports).find(isHatchPackage);
+    if (name) {
+      throw new Error(
+        `${name} is provided by Hatch and must not be mapped in deno.json. ` +
+          'Use the platform-owned .hatch/import-map.json.',
       );
     }
   }
@@ -227,7 +249,7 @@ function assertNoAppManagedHatchSdk(
   ].find(isHatchPackage);
   if (lockedName) {
     throw new Error(
-      `${lockedName} is a stale App-managed Hatch SDK entry in deno.lock. ` +
+      `${lockedName} is a stale platform-managed Hatch SDK entry in deno.lock. ` +
         'Run `deno install` after removing @hatch/* from package.json, then ' +
         'commit the regenerated lockfile.',
     );
@@ -318,7 +340,7 @@ export async function validateDenoDependencySource(
     readJson(lockSource as string, 'deno.lock'),
     'deno.lock',
   );
-  assertNoAppManagedHatchSdk(packageJson, lock);
+  assertNoManagedHatchSdk(packageJson, config, lock);
 
   if (kind === 'app') {
     assertStandaloneAppDependencySource(packageJson, config);
