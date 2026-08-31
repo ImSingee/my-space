@@ -630,8 +630,36 @@ button.stepHeader:hover {
 }
 
 .mentionMenuItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   max-height: 280px;
   overflow-y: auto;
+}
+
+.mentionMenuHeader {
+  margin: -4px -4px 4px;
+  padding: 5px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-default);
+}
+
+.mentionMenuBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.mentionMenuBack:hover,
+.mentionMenuBack[data-selected] {
+  background: var(--mantine-color-default-hover);
+}
+
+.mentionMenuSection {
+  padding: 7px 10px 3px;
 }
 
 .mentionMenuItem {
@@ -649,6 +677,19 @@ button.stepHeader:hover {
 .mentionMenuIdentity {
   flex: 1;
   min-width: 0;
+}
+
+.mentionMenuCategoryCount,
+.mentionMenuChevron {
+  flex-shrink: 0;
+}
+
+.mentionMenuChevron {
+  color: var(--mantine-color-dimmed);
+}
+
+.mentionMenuStatuses {
+  border-top: 1px solid var(--mantine-color-default-border);
 }
 
 .composerBar {

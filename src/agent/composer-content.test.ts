@@ -4,11 +4,12 @@ import {
   composerDisplayText,
   composerInputSchema,
   composerModelText,
+  hasComposerReference,
   hasComposerText,
 } from './composer-content';
 
 describe('Agent Composer content', () => {
-  it('serializes App references differently for the UI and model', () => {
+  it('serializes resource references differently for the UI and model', () => {
     const content = [
       { type: 'text' as const, text: 'Match ' },
       {
@@ -17,26 +18,25 @@ describe('Agent Composer content', () => {
         name: 'Meal "Planner"',
         slug: 'meal-planner',
       },
-      { type: 'text' as const, text: '\nthen compare it with ' },
+      { type: 'text' as const, text: '\nthen run ' },
       {
-        type: 'app' as const,
-        id: 'app-1',
-        name: 'Meal "Planner"',
-        slug: 'meal-planner',
+        type: 'workflow' as const,
+        id: 'workflow-1',
+        name: 'Nightly "Digest"',
       },
     ];
 
     expect(composerDisplayText(content)).toBe(
-      'Match @Meal "Planner"\nthen compare it with @Meal "Planner"',
+      'Match @Meal "Planner"\nthen run @Nightly "Digest"',
     );
     expect(composerModelText(content)).toBe(
       'Match @APP{name="Meal \\"Planner\\"" id="app-1" slug="meal-planner"}' +
-        '\nthen compare it with ' +
-        '@APP{name="Meal \\"Planner\\"" id="app-1" slug="meal-planner"}',
+        '\nthen run ' +
+        '@WORKFLOW{name="Nightly \\"Digest\\"" id="workflow-1"}',
     );
   });
 
-  it('keeps App order while compacting only adjacent text', () => {
+  it('keeps reference order while compacting only adjacent text', () => {
     expect(
       compactComposerInput([
         { type: 'text', text: 'one' },
@@ -44,47 +44,61 @@ describe('Agent Composer content', () => {
         { type: 'text', text: ' two' },
         { type: 'app', id: 'app-1', name: 'App One', slug: 'app-one' },
         { type: 'text', text: ' three' },
+        { type: 'workflow', id: 'workflow-1', name: 'Workflow One' },
       ]),
     ).toEqual([
       { type: 'text', text: 'one two' },
       { type: 'app', id: 'app-1', name: 'App One', slug: 'app-one' },
       { type: 'text', text: ' three' },
+      { type: 'workflow', id: 'workflow-1', name: 'Workflow One' },
     ]);
   });
 
-  it('does not treat an App reference alone as a request', () => {
+  it('does not treat resource references alone as a request', () => {
     const app = {
       type: 'app' as const,
       id: 'app-1',
       name: 'App One',
       slug: 'app-one',
     };
-    expect(hasComposerText([app])).toBe(false);
-    expect(hasComposerText([{ type: 'text', text: '  ' }, app])).toBe(false);
-    expect(hasComposerText([app, { type: 'text', text: 'Update this' }])).toBe(
-      true,
+    const workflow = {
+      type: 'workflow' as const,
+      id: 'workflow-1',
+      name: 'Workflow One',
+    };
+    expect(hasComposerReference([app, workflow])).toBe(true);
+    expect(hasComposerText([app, workflow])).toBe(false);
+    expect(hasComposerText([{ type: 'text', text: '  ' }, app, workflow])).toBe(
+      false,
     );
+    expect(
+      hasComposerText([workflow, { type: 'text', text: 'Update this' }]),
+    ).toBe(true);
   });
 
-  it('bounds App references independently from ordinary text', () => {
+  it('bounds App and Workflow references together', () => {
+    const references = Array.from({ length: 32 }, (_, index) =>
+      index % 2 === 0
+        ? {
+            type: 'app' as const,
+            id: `app-${index}`,
+            name: `App ${index}`,
+            slug: `app-${index}`,
+          }
+        : {
+            type: 'workflow' as const,
+            id: `workflow-${index}`,
+            name: `Workflow ${index}`,
+          },
+    );
+    expect(composerInputSchema.safeParse(references).success).toBe(true);
     expect(
       composerInputSchema.safeParse(
-        Array.from({ length: 32 }, (_, index) => ({
-          type: 'app' as const,
-          id: `app-${index}`,
-          name: `App ${index}`,
-          slug: `app-${index}`,
-        })),
-      ).success,
-    ).toBe(true);
-    expect(
-      composerInputSchema.safeParse(
-        Array.from({ length: 33 }, (_, index) => ({
-          type: 'app' as const,
-          id: `app-${index}`,
-          name: `App ${index}`,
-          slug: `app-${index}`,
-        })),
+        references.concat({
+          type: 'workflow',
+          id: 'workflow-over-limit',
+          name: 'Workflow over limit',
+        }),
       ).success,
     ).toBe(false);
   });

@@ -368,9 +368,10 @@ test('renders a persisted file attachment with a download link', async () => {
   await expect.element(screen.getByText('See the file')).toBeVisible();
 });
 
-test('renders the App snapshot as an @ mention instead of internal model text', async () => {
+test('renders resource snapshots as @ mentions instead of internal model text', async () => {
   const internal =
-    'Review @APP{name="Original Name" id="app-stable" slug="original-slug"} now.';
+    'Review @APP{name="Original Name" id="app-stable" slug="original-slug"}' +
+    ' with @WORKFLOW{name="Original Workflow" id="workflow-stable"} now.';
   const screen = await renderMessage({
     role: 'user',
     content: [{ type: 'text', text: internal }],
@@ -382,13 +383,20 @@ test('renders the App snapshot as an @ mention instead of internal model text', 
         name: 'Original Name',
         slug: 'original-slug',
       },
+      { type: 'text', text: ' with ' },
+      {
+        type: 'workflow',
+        id: 'workflow-stable',
+        name: 'Original Workflow',
+      },
       { type: 'text', text: ' now.' },
     ],
   });
 
   await expect.element(screen.getByText('@Original Name')).toBeVisible();
+  await expect.element(screen.getByText('@Original Workflow')).toBeVisible();
   expect(screen.getByTestId('message-shell').element().textContent).toBe(
-    'Review @Original Name now.',
+    'Review @Original Name with @Original Workflow now.',
   );
   expect(document.body.textContent).not.toContain(internal);
 });

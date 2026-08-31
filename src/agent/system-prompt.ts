@@ -36,7 +36,11 @@ export function buildSystemPrompt(
   **workflows** (headless periodic/repetitive tasks with a fixed trigger +
   audit UI). Pick based on the request: build a workflow when the user wants a
   scheduled job, an inbound-webhook automation, or a repeatable task with no
-  custom UI; build an app otherwise. See the building-workflows skill.`
+  custom UI; build an app otherwise. See the building-workflows skill.
+- An inline \`@WORKFLOW{name="..." id="..."}\` marker identifies a Workflow
+  the user selected in the Composer. Use its stable id with Workflow tools when
+  needed. Like an App marker, it supplies context but does not itself require
+  modifying, deploying, triggering, or limiting changes to that Workflow.`
     : `- Workflow capabilities are temporarily unavailable. Do not create, inspect,
   modify, import, deploy, roll back, or trigger workflows, and do not add new
   top-level Workflow calls to Apps.`;
