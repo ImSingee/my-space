@@ -20,7 +20,8 @@
     "service": "app.v1.CounterService"
   },
   "backend": {
-    "entry": "backend/main.ts"
+    "entry": "backend/main.ts",
+    "network": []
   },
   "app": {
     "entry": "app/main.tsx",

@@ -1,9 +1,11 @@
 /** Server-only: read-only workflow views for the Agent (list + detail). */
 import { db } from '~/db';
 import type { WorkflowStatus } from '~/db/schema';
+import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import {
   projectWorkflowManifestUrls,
   type NormalizedWorkflowManifest,
+  workflowNetworkPolicyFromManifest,
 } from './manifest';
 import { listWorkflowDeployments, listWorkflowRuns } from './manage';
 import { listWorkflowCronJobs } from './scheduler';
@@ -69,6 +71,8 @@ export type WorkflowDetailForAgent = {
   status: WorkflowStatus;
   liveVersion: number | null;
   inputSchema: unknown;
+  /** Declaration from the active deployment; null before first deployment. */
+  network: NetworkAccessView | null;
   webhook: { enabled: boolean; url: string | null };
   cron: { name: string; schedule: string; nextRun: string | null }[];
   recentRuns: {
@@ -93,6 +97,7 @@ export async function getWorkflowDetailForAgent(
     enabled: false,
     url: null,
   };
+  let network: NetworkAccessView | null = null;
   if (w.currentDeploymentId) {
     const deployment = await db.query.workflowDeployments.findFirst({
       where: { id: w.currentDeploymentId as string },
@@ -100,6 +105,11 @@ export async function getWorkflowDetailForAgent(
     liveVersion = deployment?.version ?? null;
     const manifest =
       deployment?.manifestNormalized as NormalizedWorkflowManifest | null;
+    if (deployment) {
+      network = networkAccessView(
+        workflowNetworkPolicyFromManifest(deployment.manifestNormalized),
+      );
+    }
     if (manifest?.triggers?.webhook) {
       webhook = projectWorkflowManifestUrls(manifest, id).triggers.webhook;
     }
@@ -117,6 +127,7 @@ export async function getWorkflowDetailForAgent(
     status: w.status,
     liveVersion,
     inputSchema: w.inputSchema ?? null,
+    network,
     webhook,
     cron,
     recentRuns: runs.map((r) => ({

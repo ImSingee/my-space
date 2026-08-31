@@ -8,6 +8,7 @@ import {
   BackendTime,
   backendLastExitLabel,
 } from '~components/apps/backend-controls';
+import { NetworkAccessDetails } from '~components/system/network-access';
 import { appBackendsQueryOptions, appOpsQueryOptions } from '~queries/apps';
 import type { AppOps } from '~server/apps';
 import { CronSection } from './cron-section';
@@ -83,6 +84,9 @@ function BackendSection({
           ? 'Kept warm by the platform and restarted automatically if it exits.'
           : 'Started on demand, then reused by later requests in this platform process; not kept warm.'}
       </Text>
+      <RuntimeFact label="Network">
+        <NetworkAccessDetails access={backend.network} appPlatformChannels />
+      </RuntimeFact>
       {runtime ? (
         <Stack gap={6} mt={4}>
           <RuntimeFact label="PID / Port">

@@ -66,6 +66,8 @@ function routes(router: ConnectRouter) {
 
 const port = Number(Deno.env.get('PORT') ?? '8080');
 
-http.createServer(connectNodeAdapter({ routes })).listen(port, () => {
-  console.log(`app backend listening on :${port}`);
-});
+http
+  .createServer(connectNodeAdapter({ routes }))
+  .listen(port, '127.0.0.1', () => {
+    console.log(`app backend listening on 127.0.0.1:${port}`);
+  });

@@ -137,6 +137,44 @@ describe('app backend runtime artifacts', () => {
     });
   });
 
+  it('reads and validates the deployment network policy', () => {
+    const blockedDir = runtimeDir();
+    const restrictedDir = runtimeDir();
+    const blockedEntry = writeBackendEntry(
+      blockedDir,
+      'backend/main.bundle.js',
+    );
+    const restrictedEntry = writeBackendEntry(
+      restrictedDir,
+      'backend/main.bundle.js',
+    );
+    writeManifest(blockedDir, {
+      backend: {
+        entry: 'backend/main.bundle.js',
+        format: 'bundle-v1',
+        network: [],
+      },
+    });
+    writeManifest(restrictedDir, {
+      backend: {
+        entry: 'backend/main.bundle.js',
+        format: 'bundle-v1',
+        network: ['API.EXAMPLE.COM:0443'],
+      },
+    });
+
+    expect(resolveBackendArtifact(blockedDir)).toEqual({
+      entryPath: blockedEntry,
+      format: 'bundle-v1',
+      network: [],
+    });
+    expect(resolveBackendArtifact(restrictedDir)).toEqual({
+      entryPath: restrictedEntry,
+      format: 'bundle-v1',
+      network: ['api.example.com:443'],
+    });
+  });
+
   it('keeps the legacy default when old manifests omit backend metadata', () => {
     const missingManifestDir = runtimeDir();
     const oldManifestDir = runtimeDir();
@@ -178,6 +216,13 @@ describe('app backend runtime artifacts', () => {
       'bundle without an entry',
       JSON.stringify({ backend: { format: 'bundle-v1' } }),
       /backend\.entry must be a non-empty string/,
+    ],
+    [
+      'invalid network policy',
+      JSON.stringify({
+        backend: { entry: 'backend/main.ts', network: ['https://example.com'] },
+      }),
+      /backend\.network is invalid/,
     ],
   ])('rejects %s instead of treating it as legacy', (_label, raw, expected) => {
     const dir = runtimeDir();
@@ -358,5 +403,66 @@ describe('app backend runtime artifacts', () => {
     expect(args).not.toContain('--node-modules-dir=none');
     expect(args).not.toContain('--lock=deno.lock');
     expect(args).not.toContain('--frozen');
+  });
+
+  it('scopes network access to automatic platform targets and declarations', () => {
+    const args = buildBackendDenoArgs({
+      artifact: {
+        entryPath: '/build/backend/main.bundle.js',
+        format: 'bundle-v1',
+        network: ['api.example.com:443'],
+      },
+      buildDir: '/build',
+      storageDir: null,
+      cacheDir: '/deno-cache',
+      certPaths: [],
+      automaticNetworkDestinations: [
+        '127.0.0.1:4100',
+        'localhost:3700',
+        'localhost:3700',
+      ],
+      hasLock: true,
+    });
+
+    expect(args).toContain(
+      '--allow-net=127.0.0.1:4100,localhost:3700,api.example.com:443',
+    );
+    expect(args).not.toContain('--allow-net');
+  });
+
+  it('omits network permission for an empty policy without platform targets', () => {
+    const args = buildBackendDenoArgs({
+      artifact: {
+        entryPath: '/build/backend/main.bundle.js',
+        format: 'bundle-v1',
+        network: [],
+      },
+      buildDir: '/build',
+      storageDir: null,
+      cacheDir: null,
+      certPaths: [],
+      hasLock: false,
+    });
+
+    expect(args.some((arg) => arg.startsWith('--allow-net'))).toBe(false);
+  });
+
+  it('keeps explicit unrestricted access equivalent to the legacy default', () => {
+    const args = buildBackendDenoArgs({
+      artifact: {
+        entryPath: '/build/backend/main.bundle.js',
+        format: 'bundle-v1',
+        network: 'unrestricted',
+      },
+      buildDir: '/build',
+      storageDir: null,
+      cacheDir: null,
+      certPaths: [],
+      automaticNetworkDestinations: ['127.0.0.1:4100'],
+      hasLock: false,
+    });
+
+    expect(args).toContain('--allow-net');
+    expect(args.some((arg) => arg.startsWith('--allow-net='))).toBe(false);
   });
 });

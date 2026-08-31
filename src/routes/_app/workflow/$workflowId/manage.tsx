@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { WorkflowDeploymentHistory } from '~components/workflows/deployment-history';
+import { WorkflowNetworkPermissionsPanel } from '~components/workflows/network-permissions-panel';
 import { Field } from '~components/system/field';
 import { StatusBadge } from '~components/system/status-badge';
 import { WorkflowTriggersPanel } from '~components/workflows/triggers-panel';
@@ -203,6 +204,10 @@ function WorkflowManagePage() {
             .
           </Text>
         </Box>
+
+        <Divider />
+
+        <WorkflowNetworkPermissionsPanel workflowId={workflow.id} />
 
         <Divider />
 

@@ -19,6 +19,7 @@ import {
   materializeWorktree,
   WorktreeMaterializationError,
 } from '../worktree-materializer';
+import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 function errorMessage(error: unknown): string {
@@ -84,8 +85,8 @@ export function createWorkflowTools(options: {
     label: 'Get workflow details',
     description:
       "Get one workflow's details: status, live version, input JSON Schema, " +
-      'triggers (cron + webhook), recent runs, and deployment history. ' +
-      'Mirrors the workflow management panel.',
+      'network declaration, triggers (cron + webhook), recent runs, and ' +
+      'deployment history. Mirrors the workflow management panel.',
     parameters: Type.Object({
       id: Type.String({ description: 'Workflow id to inspect.' }),
     }),
@@ -99,6 +100,7 @@ export function createWorkflowTools(options: {
             ? ` · v${detail.liveVersion}`
             : ' · not deployed'),
         detail.description ? `Description: ${detail.description}` : null,
+        `Network: ${formatNetworkAccess(detail.network)}`,
         detail.webhook.enabled
           ? `Webhook: ${detail.webhook.url ?? 'n/a'} [secret set]`
           : null,
@@ -266,7 +268,7 @@ export function createWorkflowTools(options: {
             `Created workflow "${res.id}". Source is at ` +
               `${checkout.absolutePath}.\n` +
               'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
-              'and manifest.json (triggers), commit with git, then call ' +
+              'and manifest.json (network policy + triggers), commit with git, then call ' +
               'deploy_workflow. The generated .hatch/ directory is platform-owned; ' +
               'do not edit or commit it.',
             {

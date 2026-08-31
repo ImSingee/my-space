@@ -2,9 +2,13 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { db } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
+import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { authMiddleware } from './auth';
 import { idAndDeploymentSchema, idSchema } from './validation';
-import { workflowWebhookUrl } from './workflows/manifest';
+import {
+  workflowNetworkPolicyFromManifest,
+  workflowWebhookUrl,
+} from './workflows/manifest';
 
 /** Public list projection: never includes `webhookSecret`/`repoPath`/manifest. */
 export type WorkflowListItem = {
@@ -163,6 +167,8 @@ export type WorkflowCronJobView = {
 
 export type WorkflowOps = {
   status: string;
+  /** Declaration from the active deployment; null before first deployment. */
+  network: NetworkAccessView | null;
   webhook: { enabled: boolean; url: string | null; secret: string | null };
   cron: { enabled: boolean; jobs: WorkflowCronJobView[] };
 };
@@ -177,6 +183,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
     if (!workflow) {
       return {
         status: 'draft',
+        network: null,
         webhook: { enabled: false, url: null, secret: null },
         cron: { enabled: false, jobs: [] },
       };
@@ -184,13 +191,22 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
     const { listWorkflowCronJobs } = await import('./workflows/scheduler');
     const jobs = await listWorkflowCronJobs(id);
     let webhookEnabled = false;
+    let network: NetworkAccessView | null = null;
+    const deployment = workflow.currentDeploymentId
+      ? await db.query.workflowDeployments.findFirst({
+          where: { id: workflow.currentDeploymentId as string },
+          columns: { manifestNormalized: true },
+        })
+      : null;
+    if (deployment) {
+      network = networkAccessView(
+        workflowNetworkPolicyFromManifest(deployment.manifestNormalized),
+      );
+    }
     // Only advertise the webhook when the workflow is actually live: the public
     // handler rejects anything other than `deployed`, so an archived workflow
     // must not surface a URL/secret that would 404.
     if (workflow.status === 'deployed' && workflow.currentDeploymentId) {
-      const deployment = await db.query.workflowDeployments.findFirst({
-        where: { id: workflow.currentDeploymentId as string },
-      });
       const manifest = deployment?.manifestNormalized as {
         triggers?: { webhook?: { enabled?: boolean } };
       } | null;
@@ -198,6 +214,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
     }
     return {
       status: workflow.status,
+      network,
       webhook: {
         enabled: webhookEnabled,
         url: webhookEnabled ? workflowWebhookUrl(id) : null,

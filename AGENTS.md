@@ -56,9 +56,13 @@ Before declaring any Agent task complete, re-run `pnpm check:types` and `pnpm fo
 
 `src/app-compatibility.ts` owns the platform compatibility constants.
 
-- Increment `LATEST_APP_COMPATIBILITY_VERSION` only when a platform change
-  introduces a new deployed-App compatibility contract and every successful
-  final deployment must record that new version. Do not increment it for
+- Prefer backward-compatible implementations. Keep currently supported behavior
+  working and record proposed removals under `Next (proposal)` in
+  `skills/app-compatibility/SKILL.md`.
+- Never increment `LATEST_APP_COMPATIBILITY_VERSION` unless the user explicitly
+  requests an App compatibility version bump. When requested, increment it only
+  if the platform change introduces a new deployed-App compatibility contract
+  that every successful final deployment must record. Do not increment it for
   backward-compatible features, refactors, or UI-only changes.
 - Increment `MIN_SUPPORTED_APP_COMPATIBILITY_VERSION` only when the platform
   intentionally stops running deployments created for an older contract.

@@ -20,7 +20,7 @@ serving the webhook.
 
 ```
 workflows/<id>/
-  manifest.json        declares id, name, description, entry, triggers
+  manifest.json        declares id, name, description, entry, network, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
   package.json         npm dependencies (installed only with Deno)
   deno.json            reviewed npm lifecycle-script allowlist
@@ -78,8 +78,9 @@ export default defineWorkflow({
 
 ### Runtime constraints
 
-- Runs on Deno with **net + env + read** only (no write/run/ffi). `fetch` works;
-  there is no per-workflow database or storage yet.
+- Runs on Deno with **env + scoped read** and only the network access declared
+  by `manifest.network` (no write/run/ffi). There is no per-workflow database
+  or storage yet.
 - **No AI calls** during a run.
 - Keep the result JSON-serializable. Do all real work inside `ctx.step` so the
   inspector is useful.
@@ -143,8 +144,9 @@ it reports a skipped lifecycle script, do not enable it blindly:
 
 ## Manifest & triggers
 
-`manifest.json` declares the id/name and the triggers. The input schema is NOT
-in the manifest — it is derived from your zod schema at deploy time.
+`manifest.json` declares the id/name, network policy, and triggers. The input
+schema is NOT in the manifest — it is derived from your zod schema at deploy
+time.
 
 ```json
 {
@@ -153,6 +155,7 @@ in the manifest — it is derived from your zod schema at deploy time.
   "description": "Summarize a repo's stars",
   "version": 1,
   "entry": "workflow.ts",
+  "network": ["api.github.com:443"],
   "triggers": {
     "cron": [
       {
@@ -165,6 +168,34 @@ in the manifest — it is derived from your zod schema at deploy time.
   }
 }
 ```
+
+Every authored Workflow must declare `network`. New Workflows start with `[]`,
+which denies all networking. Supply every hostname, wildcard subdomain, IPv4
+address, or bracketed IPv6 address the Workflow needs, with an optional port:
+
+```json
+{
+  "network": [
+    "api.example.com:443",
+    "*.services.example.com",
+    "192.0.2.10:8443",
+    "[2001:db8::10]:443"
+  ]
+}
+```
+
+A hostname without a port allows all ports for that hostname. Do not include a
+scheme, path, query, CIDR range, Unix socket, comma, or unbracketed IPv6
+address. Hostnames do not include their subdomains unless you use the wildcard
+form. Set `"network": "unrestricted"` only when arbitrary networking is
+required. Omitting the field is reserved for compatibility with older
+deployments and also runs unrestricted; never omit it from new source.
+
+Deno uses one network permission for HTTP, HTTPS, raw TCP and UDP, DNS
+resolution, and TCP/UDP listeners. Workflow describe mode and real runs use the
+same declaration, and Workflows receive no automatic platform destinations.
+Explicit policies also run the deployed single-file bundle with ambient config,
+lockfile, npm, and remote module resolution disabled.
 
 - **Manual**: always available from the workflow page; the form is inferred from
   the input JSON Schema.
@@ -202,8 +233,8 @@ files), then `git fetch origin master`, rebase, resolve, and deploy again.
 ## Inspect, run & roll back
 
 - `list_workflows` shows every workflow (id, status, live version, triggers).
-- `get_workflow <id>` shows the input schema, triggers, recent runs, and
-  deployment history.
+- `get_workflow <id>` shows the network declaration, input schema, triggers,
+  recent runs, and deployment history.
 - `rollback_workflow` with the `id` and `version` restores that version's bundle
   and source but does not modify existing Agent worktrees. To preserve local
   work, refresh with the same checkout target and fetch/rebase; to exactly
@@ -216,7 +247,7 @@ files), then `git fetch origin master`, rebase, resolve, and deploy again.
 1. New workflow → confirm name/slug → `create_workflow`. Existing →
    `checkout_workflow` and retain its returned source path.
 2. Read the files, edit `workflow.ts` (input + steps) and `manifest.json`
-   (triggers), keeping the zod schema authoritative.
+   (network policy + triggers), keeping the zod schema authoritative.
 3. Commit with git.
 4. `deploy_workflow` with that `source_path` and a `message`. On failure, read
    the build/describe output, fix the source, commit, and deploy again.

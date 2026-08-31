@@ -84,6 +84,32 @@ describe('backend manifest', () => {
       format: 'bundle-v1',
     });
   });
+
+  it('preserves blocked, restricted, unrestricted, and legacy policies', () => {
+    expect(normalizeManifest(parseSourceManifest(source({}))).backend).toEqual({
+      entry: 'backend/main.ts',
+    });
+    expect(
+      normalizeManifest(parseSourceManifest(source({ network: [] }))).backend,
+    ).toEqual({ entry: 'backend/main.ts', network: [] });
+    expect(
+      normalizeManifest(
+        parseSourceManifest(
+          source({
+            network: ['API.EXAMPLE.COM:0443', 'api.example.com:443'],
+          }),
+        ),
+      ).backend,
+    ).toEqual({
+      entry: 'backend/main.ts',
+      network: ['api.example.com:443'],
+    });
+    expect(
+      normalizeManifest(
+        parseSourceManifest(source({ network: 'unrestricted' })),
+      ).backend,
+    ).toEqual({ entry: 'backend/main.ts', network: 'unrestricted' });
+  });
 });
 
 describe('app capabilities manifest', () => {

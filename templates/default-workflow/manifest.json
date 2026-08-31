@@ -4,6 +4,7 @@
   "description": "__WORKFLOW_DESCRIPTION__",
   "version": 1,
   "entry": "workflow.ts",
+  "network": [],
   "triggers": {
     "cron": [],
     "webhook": false

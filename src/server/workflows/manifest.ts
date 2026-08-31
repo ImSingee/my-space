@@ -3,11 +3,12 @@
  *
  * Dependency-light (only zod) so it can be shared by server infrastructure and
  * client UI. A workflow manifest is much smaller than an app manifest: it
- * declares the entry file and the triggers (cron + webhook). The input schema
- * is NOT in the manifest — it is derived from the workflow's zod schema at build
- * time and persisted separately.
+ * declares the entry file, network policy, and triggers (cron + webhook). The
+ * input schema is NOT in the manifest — it is derived from the workflow's zod
+ * schema at build time and persisted separately.
  */
 import { z } from 'zod';
+import { type NetworkPolicy, networkPolicySchema } from '~/network-policy';
 
 /**
  * Reject manifest-provided paths that would escape the workflow source tree once
@@ -84,6 +85,8 @@ export const sourceWorkflowManifestSchema = z.object({
   version: z.number().int().min(1).default(1),
   /** Entry module exporting `defineWorkflow(...)` as default. */
   entry: sourceRelativePath.default('workflow.ts'),
+  /** Missing only for legacy deployments, which retain unrestricted access. */
+  network: networkPolicySchema.optional(),
   triggers: workflowTriggersSchema.default({ cron: [], webhook: false }),
 });
 
@@ -97,6 +100,8 @@ export type NormalizedWorkflowManifest = {
   description: string;
   version: number;
   entry: string;
+  /** Missing only for legacy deployments, which retain unrestricted access. */
+  network?: NetworkPolicy;
   triggers: {
     cron: WorkflowCronJob[];
     /** Inbound webhook URL, when the webhook trigger is enabled. */
@@ -146,6 +151,7 @@ export function normalizeWorkflowManifest(
     description: src.description,
     version: src.version,
     entry: src.entry,
+    ...(src.network === undefined ? {} : { network: src.network }),
     triggers: {
       cron: src.triggers.cron,
       webhook: {
@@ -154,4 +160,23 @@ export function normalizeWorkflowManifest(
       },
     },
   };
+}
+
+/** Read the policy from an immutable normalized deployment manifest. */
+export function workflowNetworkPolicyFromManifest(
+  raw: unknown,
+): NetworkPolicy | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('Invalid workflow deployment manifest.');
+  }
+  if (!Object.hasOwn(raw, 'network')) return undefined;
+  const result = networkPolicySchema.safeParse(
+    (raw as Record<string, unknown>).network,
+  );
+  if (!result.success) {
+    throw new Error(
+      `Invalid workflow network policy: ${result.error.issues[0]?.message ?? 'unknown policy error'}`,
+    );
+  }
+  return result.data;
 }

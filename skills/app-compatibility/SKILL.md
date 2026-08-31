@@ -33,6 +33,20 @@ final deployment. It does not introduce an App source or runtime behavior change
 so there are no compatibility-specific source edits or upgrade instructions from
 v1 to v2. Redeploying successfully through the current platform records v2.
 
+## Next (proposal)
+
+This section records behavior that current compatibility versions still support
+but the next compatibility version proposes to remove. These proposals are not
+active platform policy and do not change the latest or minimum supported version
+until they are promoted into the version history above.
+
+- `backend.network` will become required. To migrate, add a hostname/IP
+  allowlist, `[]`, or `"unrestricted"`, and bind the backend with
+  `.listen(port, '127.0.0.1', ...)`. Do not declare the listener or enabled
+  Database, Data Tables, KV, and Workflow endpoints; the platform grants them
+  automatically. A missing declaration will be rejected, and a restricted
+  backend bound elsewhere will fail to start.
+
 ## Handling an older version
 
 - When the user only asks about version differences, explain the relevant

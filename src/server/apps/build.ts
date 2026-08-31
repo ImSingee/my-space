@@ -1032,6 +1032,7 @@ export async function buildApp(
     const normalized = normalizeManifest(manifest);
     if (bundledBackendEntry && normalized.backend) {
       normalized.backend = {
+        ...normalized.backend,
         entry: bundledBackendEntry,
         format: 'bundle-v1',
       };

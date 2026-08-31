@@ -12,6 +12,7 @@ import {
   APP_SLUG_MAX_LENGTH,
   isAppNameWithinMaxLength,
 } from '~/app-identity';
+import { type NetworkPolicy, networkPolicySchema } from '~/network-policy';
 
 /**
  * Reject manifest-provided paths that would escape the app source tree once
@@ -317,6 +318,8 @@ export const sourceManifestSchema = z
     backend: z
       .object({
         entry: backendEntryPath,
+        /** Unified Deno network permission for the deployed backend. */
+        network: networkPolicySchema.optional(),
       })
       .strict()
       .optional(),
@@ -487,6 +490,8 @@ export type NormalizedManifest = {
     entry: string;
     /** Absent on legacy source artifacts; set by the bundle build path. */
     format?: 'bundle-v1';
+    /** Absent on legacy deployments, which retain unrestricted access. */
+    network?: NetworkPolicy;
   };
   /**
    * Full-App URL and discoverable routes, when present. Stored deployment
@@ -683,7 +688,12 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
     cron: src.capabilities.cron ? src.cron : [],
   };
   if (src.capabilities.backend && src.backend) {
-    out.backend = { entry: src.backend.entry };
+    out.backend = {
+      entry: src.backend.entry,
+      ...(src.backend.network === undefined
+        ? {}
+        : { network: src.backend.network }),
+    };
   }
   if (src.capabilities.frontend && src.app) {
     out.app = { url: appAssetUrl(src.id), routes: src.app.routes };
