@@ -93,51 +93,51 @@ export function createPlatformRestClient(opts: {
     },
 
     listApps: () => call('GET', '/internal/api/apps'),
-    getApp: (handle) =>
-      call('GET', `/internal/api/apps/${enc(handle)}`, undefined, true),
-    associateSessionApp: (sessionId, handle) =>
+    getApp: (appId) =>
+      call('GET', `/internal/api/apps/${enc(appId)}`, undefined, true),
+    associateSessionApp: (sessionId, appId) =>
       call(
         'POST',
-        `/internal/api/agent-sessions/${enc(sessionId)}/apps/${enc(handle)}`,
+        `/internal/api/agent-sessions/${enc(sessionId)}/apps/${enc(appId)}`,
       ),
     createApp: (input, sessionId) =>
       call<CreateAppResult>('POST', '/internal/api/apps', {
         ...input,
         sessionId,
       }),
-    getAppSource: (handle) =>
+    getAppSource: (appId) =>
       call<SourceBundleResponse>(
         'GET',
-        `/internal/api/apps/${enc(handle)}/source`,
+        `/internal/api/apps/${enc(appId)}/source`,
       ),
-    deployApp: (id, body) =>
+    deployApp: (appId, body) =>
       call<AppDeployResponse>(
         'POST',
-        `/internal/api/apps/${enc(id)}/deploy`,
+        `/internal/api/apps/${enc(appId)}/deploy`,
         body,
       ),
-    rollbackApp: (handle, version) =>
-      call('POST', `/internal/api/apps/${enc(handle)}/rollback`, { version }),
-    queryAppDb: (handle, sql, signal) =>
+    rollbackApp: (appId, version) =>
+      call('POST', `/internal/api/apps/${enc(appId)}/rollback`, { version }),
+    queryAppDb: (appId, sql, signal) =>
       call<QueryAppDbResponse>(
         'POST',
-        `/internal/api/apps/${enc(handle)}/query-db`,
+        `/internal/api/apps/${enc(appId)}/query-db`,
         { sql },
         false,
         signal,
       ),
-    queryAppKv: (handle, input, signal) =>
+    queryAppKv: (appId, input, signal) =>
       call<QueryAppKvResponse>(
         'POST',
-        `/internal/api/apps/${enc(handle)}/query-kv`,
+        `/internal/api/apps/${enc(appId)}/query-kv`,
         input,
         false,
         signal,
       ),
-    queryAppDataTable: (handle, input, signal) =>
+    queryAppDataTable: (appId, input, signal) =>
       call<QueryAppDataTableResponse>(
         'POST',
-        `/internal/api/apps/${enc(handle)}/query-data-table`,
+        `/internal/api/apps/${enc(appId)}/query-data-table`,
         input,
         false,
         signal,

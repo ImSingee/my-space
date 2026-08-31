@@ -102,8 +102,7 @@ export function createAppTools(options: {
     label: 'List apps',
     description:
       'List every app on the platform with its status, live version, and ' +
-      'enabled capabilities. Use this to discover existing apps before ' +
-      'calling get_app or checkout_app.',
+      'enabled capabilities.',
     parameters: Type.Object({}),
     execute: async () => {
       const apps = await platform.listApps();
@@ -124,7 +123,7 @@ export function createAppTools(options: {
                 : ' (update available; read the `app-compatibility` Skill)'
             }`
           : '';
-        return `- ${a.slug} · ${a.name} (id: ${a.id}) [${a.status}]${version}${compatibility}${caps}`;
+        return `- ${a.name} (id: ${a.id}, slug: ${a.slug}) [${a.status}]${version}${compatibility}${caps}`;
       });
       return text(lines.join('\n'), { apps });
     },
@@ -139,7 +138,9 @@ export function createAppTools(options: {
       '(backend running, network declaration, cron jobs), and deployment ' +
       'history. Mirrors the app management panel.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug to inspect.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
     }),
     execute: async (_id, params) => {
       requireIdSlug(params.id);
@@ -233,7 +234,9 @@ export function createAppTools(options: {
       'that require npm lifecycle scripts are rejected.',
     executionMode: 'sequential',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug to checkout.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
       clone: Type.Boolean({
         description:
           'True to create a fresh checkout; false to update the existing ' +
@@ -270,16 +273,16 @@ export function createAppTools(options: {
         sessionId,
         async () => {
           let sourcePath = params.source_path;
-          let sourceHandle = params.id;
+          let sourceAppId = params.id;
           if (!sourcePath) {
             const detail = await platform.getApp(params.id);
             if (!detail) throw new Error(`App "${params.id}" not found.`);
-            sourceHandle = detail.id;
+            sourceAppId = detail.id;
             sourcePath = agentAppWorkDir(sessionId, detail.slug);
           }
           const { appId } = await platform.associateSessionApp(
             sessionId,
-            sourceHandle,
+            sourceAppId,
           );
           const source = await platform.getAppSource(appId);
           const resolved = await resolveAgentWorkspacePath(
@@ -409,7 +412,7 @@ export function createAppTools(options: {
           }
           return text(
             [
-              `Created app "${res.name}" (slug: ${res.slug}, id: ${res.id}). ` +
+              `Created app "${res.name}" (id: ${res.id}, slug: ${res.slug}). ` +
                 `Source is at ${checkout.absolutePath}.`,
               'Preparation is ready: dependencies, Connect stubs, and the Hatch ' +
                 'SDK are available. Continue using this checkout; do not clone ' +
@@ -447,7 +450,9 @@ export function createAppTools(options: {
       'widget/RPC URLs.',
     executionMode: 'sequential',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug to deploy.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
       source_path: Type.String({
         minLength: 1,
         description:
@@ -529,7 +534,9 @@ export function createAppTools(options: {
       'restored. Agent can restore versions below the platform minimum, but ' +
       'their runtime stays disabled until the app is updated and redeployed.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug to rollback.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
       version: Type.Number({
         description: 'Deployment version to restore, e.g. 4 for v4.',
       }),
@@ -569,7 +576,9 @@ export function createAppTools(options: {
       "Run SQL against an app's own Postgres database (provisioned on first " +
       'use). Use to create tables and inspect data. Returns up to 100 rows.',
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
       sql: Type.String({ description: 'SQL statement to execute.' }),
     }),
     execute: async (_id, params, signal) => {
@@ -592,7 +601,9 @@ export function createAppTools(options: {
     // Keep the root object-shaped: the Anthropic adapter forwards root
     // properties/required fields and would discard a root anyOf schema.
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
       action: Type.Union([
         Type.Literal('list'),
         Type.Literal('get'),
@@ -704,7 +715,9 @@ export function createAppTools(options: {
     // Keep the root object-shaped: the Anthropic adapter forwards root
     // properties/required fields and would discard a root anyOf schema.
     parameters: Type.Object({
-      id: Type.String({ description: 'App id or slug.' }),
+      id: Type.String({
+        description: 'App id.',
+      }),
       action: Type.Union([
         Type.Literal('inspect'),
         Type.Literal('query'),

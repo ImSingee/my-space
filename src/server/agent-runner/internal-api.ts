@@ -4,16 +4,16 @@
  *
  * Routes (all JSON):
  *   GET  /internal/api/apps                     → AppSummary[]
- *   GET  /internal/api/apps/:handle             → AppDetail (404 when absent)
+ *   GET  /internal/api/apps/:appId              → AppDetail (404 when absent)
  *   POST /internal/api/apps                     → CreateAppResult (scaffold files)
- *   GET  /internal/api/apps/:handle/source      → SourceBundleResponse
- *   POST /internal/api/apps/:handle/deploy      → AppDeployResponse
- *   POST /internal/api/apps/:handle/rollback    → { version }
- *   POST /internal/api/apps/:handle/query-db    → { text, rowCount }
- *   POST /internal/api/apps/:handle/query-kv    → QueryAppKvResponse
- *   POST /internal/api/apps/:handle/query-data-table
+ *   GET  /internal/api/apps/:appId/source       → SourceBundleResponse
+ *   POST /internal/api/apps/:appId/deploy       → AppDeployResponse
+ *   POST /internal/api/apps/:appId/rollback     → { version }
+ *   POST /internal/api/apps/:appId/query-db     → { text, rowCount }
+ *   POST /internal/api/apps/:appId/query-kv     → QueryAppKvResponse
+ *   POST /internal/api/apps/:appId/query-data-table
  *                                                → QueryAppDataTableResponse
- *   POST /internal/api/agent-sessions/:id/apps/:handle
+ *   POST /internal/api/agent-sessions/:sessionId/apps/:appId
  *                                                → { appId }
  *   GET  /internal/api/workflows                → WorkflowSummaryForAgent[]
  *   GET  /internal/api/workflows/:id            → WorkflowDetailForAgent (404)
@@ -34,9 +34,6 @@ import {
   type SourceBundleResponse,
 } from '~agent/protocol';
 import { AppError } from '~server/errors';
-
-/** Handle shape guard before a value flows into paths/repos/db names. */
-const HANDLE_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * JSON body cap. Deploy bundles ride in as base64 (~4/3 of the packfile), so
@@ -105,19 +102,14 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function requireHandle(raw: string): string {
-  const handle = decodeURIComponent(raw);
-  if (!HANDLE_RE.test(handle)) {
-    throw new AppError(`Invalid handle "${handle}".`, 400);
-  }
-  return handle;
-}
-
-async function resolveApp(handle: string): Promise<string> {
-  const { resolveAppId } = await import('~server/apps/access');
-  const id = await resolveAppId(handle);
-  if (!id) throw new AppError(`App "${handle}" not found.`, 404);
-  return id;
+async function requireExistingAppId(appId: string): Promise<string> {
+  const { db } = await import('~/db');
+  const app = await db.query.apps.findFirst({
+    where: { id: appId },
+    columns: { id: true },
+  });
+  if (!app) throw new AppError(`App "${appId}" not found.`, 404);
+  return app.id;
 }
 
 async function requireAppGeneration(id: string): Promise<string> {
@@ -199,10 +191,10 @@ async function handleAgentSessions(
 ): Promise<void> {
   if (method === 'POST' && rest.length === 3 && rest[1] === 'apps') {
     const sessionId = decodeURIComponent(rest[0]);
-    const handle = requireHandle(rest[2]);
+    const appId = decodeURIComponent(rest[2]);
     const { associateAgentSessionApp } =
       await import('~server/agent-session-apps');
-    json(res, 200, await associateAgentSessionApp(sessionId, handle));
+    json(res, 200, await associateAgentSessionApp(sessionId, appId));
     return;
   }
   if (method !== 'GET' || rest.length !== 3 || rest[1] !== 'attachments') {
@@ -245,23 +237,20 @@ async function handleApps(
     throw new AppError('Method not allowed.', 405);
   }
 
-  const handle = requireHandle(rest[0]);
+  const appId = decodeURIComponent(rest[0]);
   const action = rest[1];
 
   if (!action) {
     if (method !== 'GET') throw new AppError('Method not allowed.', 405);
-    const { resolveAppId } = await import('~server/apps/access');
-    const id = await resolveAppId(handle);
-    if (!id) throw new AppError(`App "${handle}" not found.`, 404);
     const { getAppDetailForAgent } = await import('~server/apps/inspect');
-    const detail = await getAppDetailForAgent(id);
-    if (!detail) throw new AppError(`App "${handle}" not found.`, 404);
+    const detail = await getAppDetailForAgent(appId);
+    if (!detail) throw new AppError(`App "${appId}" not found.`, 404);
     json(res, 200, detail);
     return;
   }
 
   if (action === 'source' && method === 'GET') {
-    const id = await resolveApp(handle);
+    const id = await requireExistingAppId(appId);
     const { appMasterCommit, exportAppMasterBundle } =
       await import('~server/apps/git');
     const commit = await appMasterCommit(id);
@@ -276,7 +265,7 @@ async function handleApps(
   }
 
   if (action === 'deploy' && method === 'POST') {
-    const id = await resolveApp(handle);
+    const id = appId;
     const body = deploySourceRequestSchema.parse(await readJsonBody(req));
     requireGeneration(
       'App',
@@ -317,7 +306,7 @@ async function handleApps(
   }
 
   if (action === 'rollback' && method === 'POST') {
-    const id = await resolveApp(handle);
+    const id = await requireExistingAppId(appId);
     const body = rollbackRequestSchema.parse(await readJsonBody(req));
     const { rollbackAppToVersion } = await import('~server/apps/manage');
     json(res, 200, await rollbackAppToVersion(id, body.version));
@@ -325,7 +314,7 @@ async function handleApps(
   }
 
   if (action === 'query-db' && method === 'POST') {
-    const id = await resolveApp(handle);
+    const id = await requireExistingAppId(appId);
     const body = queryAppDbRequestSchema.parse(await readJsonBody(req));
     const { queryAppDatabase } = await import('~server/apps/query-db');
     // When the runner aborts the request (run cancelled), tear down the
@@ -339,7 +328,7 @@ async function handleApps(
   }
 
   if (action === 'query-kv' && method === 'POST') {
-    const id = await resolveApp(handle);
+    const id = await requireExistingAppId(appId);
     const body = queryAppKvRequestSchema.parse(await readJsonBody(req));
     const { queryAppKv } = await import('~server/apps/query-kv');
     json(res, 200, await queryAppKv(id, body));
@@ -356,7 +345,7 @@ async function handleApps(
     res.once('close', onClose);
     const bodyPromise = readJsonBody(req);
     const [id, rawBody, { queryAppDataTable }] = await Promise.all([
-      resolveApp(handle),
+      requireExistingAppId(appId),
       bodyPromise,
       import('~server/apps/query-data-table'),
     ]);
@@ -401,7 +390,7 @@ async function handleWorkflows(
     throw new AppError('Method not allowed.', 405);
   }
 
-  const id = requireHandle(rest[0]);
+  const id = decodeURIComponent(rest[0]);
   const action = rest[1];
 
   if (!action) {

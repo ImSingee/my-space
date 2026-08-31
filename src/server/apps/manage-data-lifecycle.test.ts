@@ -4,7 +4,7 @@ import { APP_NAME_MAX_LENGTH } from '~/app-identity';
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
   updates: [] as Array<Record<string, unknown>>,
-  findApp: vi.fn<() => Promise<unknown>>(),
+  findApp: vi.fn<(query?: unknown) => Promise<unknown>>(),
   findDeployment: vi.fn<() => Promise<unknown>>(),
   findDeployments: vi.fn<() => Promise<unknown[]>>(),
   update: vi.fn<() => unknown>(),
@@ -143,6 +143,7 @@ vi.mock('~server/platform-events', () => ({
 import {
   deleteApp,
   listDeployments,
+  renameAppSlug,
   rollbackApp,
   rollbackAppToVersion,
   setAppArchived,
@@ -196,6 +197,34 @@ describe('App Data lifecycle recovery', () => {
     mocks.fsCp.mockResolvedValue();
     mocks.fsWriteFile.mockResolvedValue();
     mocks.fsReaddir.mockResolvedValue([]);
+  });
+
+  it('keeps slug uniqueness independent from the App id namespace', async () => {
+    mocks.findApp
+      .mockResolvedValueOnce({ id: APP_ID, slug: 'old-slug' })
+      .mockResolvedValueOnce(undefined);
+
+    await expect(renameAppSlug(APP_ID, 'legacy-kebab-id')).resolves.toEqual({
+      slug: 'legacy-kebab-id',
+    });
+
+    expect(mocks.updateSet).toHaveBeenCalledWith({ slug: 'legacy-kebab-id' });
+    expect(mocks.findApp.mock.calls[1]?.[0]).toMatchObject({
+      where: {
+        AND: [{ slug: 'legacy-kebab-id' }, { id: { ne: APP_ID } }],
+      },
+    });
+  });
+
+  it('rejects renaming to another App slug', async () => {
+    mocks.findApp
+      .mockResolvedValueOnce({ id: APP_ID, slug: 'old-slug' })
+      .mockResolvedValueOnce({ id: 'other-app' });
+
+    await expect(renameAppSlug(APP_ID, 'taken-slug')).rejects.toThrow(
+      'Slug "taken-slug" is already in use.',
+    );
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it('requires rollback confirmation while Data activation is pending', async () => {

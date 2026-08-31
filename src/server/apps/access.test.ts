@@ -10,10 +10,10 @@ vi.mock('~/db', async () => {
 const { db, schema } = await import('~/db');
 const {
   appIdForSlug,
+  appSlugExists,
   liveAppDeployment,
   liveAppManifests,
   normalizedManifestFor,
-  resolveAppId,
 } = await import('./access');
 
 beforeEach(async () => {
@@ -47,12 +47,16 @@ describe('appIdForSlug', () => {
   });
 });
 
-describe('resolveAppId', () => {
-  it('keeps accepting ids and slugs for internal Agent APIs', async () => {
-    await expect(resolveAppId('01immutableid')).resolves.toBe('01immutableid');
-    await expect(resolveAppId('human-readable-slug')).resolves.toBe(
-      '01immutableid',
-    );
+describe('appSlugExists', () => {
+  it('checks only the mutable slug namespace', async () => {
+    await expect(appSlugExists('human-readable-slug')).resolves.toBe(true);
+    await expect(appSlugExists('01immutableid')).resolves.toBe(false);
+  });
+
+  it('excludes the App being renamed', async () => {
+    await expect(
+      appSlugExists('human-readable-slug', '01immutableid'),
+    ).resolves.toBe(false);
   });
 });
 

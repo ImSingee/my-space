@@ -71,6 +71,27 @@ describe('renderTemplate', () => {
 });
 
 describe('createApp', () => {
+  it('rejects a duplicate slug but allows a slug equal to another App id', async () => {
+    await db.insert(schema.apps).values({
+      id: 'legacy-kebab-id',
+      slug: 'taken-slug',
+      name: 'Existing App',
+    });
+
+    await expect(
+      createApp({ slug: 'taken-slug', name: 'Duplicate', pin: false }),
+    ).rejects.toThrow('Slug "taken-slug" is already in use.');
+
+    const created = await createApp({
+      slug: 'legacy-kebab-id',
+      name: 'Independent namespaces',
+      pin: false,
+    });
+
+    expect(created.slug).toBe('legacy-kebab-id');
+    expect(created.id).not.toBe('legacy-kebab-id');
+  });
+
   it.each([
     {
       input: {

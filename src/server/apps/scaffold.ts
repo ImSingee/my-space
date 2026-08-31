@@ -12,7 +12,7 @@ import {
 } from '~/app-identity';
 import { db, schema } from '~/db';
 import { AppError } from '~server/errors';
-import { slugConflictExists } from './access';
+import { appSlugExists } from './access';
 import { ensureAppRepo } from './git';
 import { isValidAppSlug } from './manifest';
 
@@ -140,10 +140,8 @@ export async function createApp(
     throw new Error(`name must be at most ${APP_NAME_MAX_LENGTH} characters.`);
   }
 
-  if (await slugConflictExists(slug)) {
-    throw new Error(
-      `Slug "${slug}" conflicts with an existing app's id or slug.`,
-    );
+  if (await appSlugExists(slug)) {
+    throw new Error(`Slug "${slug}" is already in use.`);
   }
 
   if (context.sessionId) {

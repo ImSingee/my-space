@@ -74,12 +74,12 @@ export type PlatformClient = {
   ): Promise<DownloadedAttachment>;
 
   listApps(): Promise<AppSummary[]>;
-  /** Resolves an id-or-slug handle; null when no app matches. */
-  getApp(handle: string): Promise<AppDetail | null>;
+  /** Looks up an App by its immutable id; null when no App matches. */
+  getApp(appId: string): Promise<AppDetail | null>;
   /** Idempotently associate a conversation with one canonical App. */
   associateSessionApp(
     sessionId: string,
-    handle: string,
+    appId: string,
   ): Promise<{ appId: string }>;
   createApp(
     input: {
@@ -91,9 +91,9 @@ export type PlatformClient = {
     sessionId: string,
   ): Promise<CreateAppResult>;
   /** Canonical repo master as a git bundle (null bundle when empty). */
-  getAppSource(handle: string): Promise<SourceBundleResponse>;
+  getAppSource(appId: string): Promise<SourceBundleResponse>;
   deployApp(
-    id: string,
+    appId: string,
     opts: {
       message: string;
       generation: string;
@@ -103,7 +103,7 @@ export type PlatformClient = {
     },
   ): Promise<AppDeployResponse>;
   rollbackApp(
-    handle: string,
+    appId: string,
     version: number,
   ): Promise<{
     version: number;
@@ -112,17 +112,17 @@ export type PlatformClient = {
   }>;
   /** `signal` aborts the platform request (and the running statement). */
   queryAppDb(
-    handle: string,
+    appId: string,
     sql: string,
     signal?: AbortSignal,
   ): Promise<QueryAppDbResponse>;
   queryAppKv(
-    handle: string,
+    appId: string,
     input: QueryAppKvRequest,
     signal?: AbortSignal,
   ): Promise<QueryAppKvResponse>;
   queryAppDataTable(
-    handle: string,
+    appId: string,
     input: QueryAppDataTableRequest,
     signal?: AbortSignal,
   ): Promise<QueryAppDataTableResponse>;

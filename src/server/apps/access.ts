@@ -8,24 +8,6 @@ import {
   projectAppManifestUrls,
 } from './manifest';
 
-/**
- * Resolve an internal Agent handle that may be either an app's immutable `id`
- * or its mutable `slug` to the canonical id. Tries id first and returns null
- * when neither matches. Human-facing routes must use {@link appIdForSlug}.
- */
-export async function resolveAppId(idOrSlug: string): Promise<string | null> {
-  const byId = await db.query.apps.findFirst({
-    where: { id: idOrSlug },
-    columns: { id: true },
-  });
-  if (byId) return byId.id;
-  const bySlug = await db.query.apps.findFirst({
-    where: { slug: idOrSlug },
-    columns: { id: true },
-  });
-  return bySlug?.id ?? null;
-}
-
 /** Resolve an app's current public slug to its immutable internal id. */
 export async function appIdForSlug(slug: string): Promise<string | null> {
   if (!isValidAppSlug(slug)) return null;
@@ -45,27 +27,14 @@ export async function appSlug(id: string): Promise<string | null> {
   return app?.slug ?? null;
 }
 
-/**
- * True when `candidate` would collide with another app's id or slug. Internal
- * Agent APIs use {@link resolveAppId}, which matches an id before a slug, so
- * reserving ids during create/rename keeps those handles unambiguous.
- *
- * Pass `selfId` when renaming so an app can keep (or restore) a slug equal to
- * its own id without tripping the check.
- */
-export async function slugConflictExists(
+export async function appSlugExists(
   candidate: string,
   selfId?: string,
 ): Promise<boolean> {
   const conflict = await db.query.apps.findFirst({
     where: selfId
-      ? {
-          AND: [
-            { OR: [{ slug: candidate }, { id: candidate }] },
-            { id: { ne: selfId } },
-          ],
-        }
-      : { OR: [{ slug: candidate }, { id: candidate }] },
+      ? { AND: [{ slug: candidate }, { id: { ne: selfId } }] }
+      : { slug: candidate },
     columns: { id: true },
   });
   return Boolean(conflict);
