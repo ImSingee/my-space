@@ -118,6 +118,7 @@ describe('createApp', () => {
       id: result.id,
       name: 'Hello "World"',
       description: 'First line\nSecond line',
+      compatibilityVersion: 2,
       backendMode: 'serverless',
       capabilities: {
         frontend: true,

@@ -2,9 +2,15 @@
 export const LEGACY_APP_COMPATIBILITY_VERSION = 1;
 
 /**
- * Compatibility version produced by every new App deployment. Bump this when
- * final deployment output changes in a way that existing releases do not gain
- * until Agent redeploys them.
+ * Compatibility version used when an existing App source manifest omits its
+ * declaration. Keep this independent from latest: a future version must not
+ * silently opt old source into a newer contract.
+ */
+export const DEFAULT_APP_COMPATIBILITY_VERSION = 2;
+
+/**
+ * Highest compatibility contract implemented by this platform. Bump this when
+ * a new contract is available to App source manifests.
  */
 export const LATEST_APP_COMPATIBILITY_VERSION = 2;
 
@@ -27,6 +33,28 @@ export function resolveAppCompatibilityVersion(
   version: number | null | undefined,
 ): number {
   return version ?? LEGACY_APP_COMPATIBILITY_VERSION;
+}
+
+/** Resolve and validate the compatibility contract selected for a new deploy. */
+export function resolveAppDeployCompatibilityVersion(
+  version: number | undefined,
+): number {
+  const resolved = version ?? DEFAULT_APP_COMPATIBILITY_VERSION;
+  if (resolved < MIN_SUPPORTED_APP_COMPATIBILITY_VERSION) {
+    throw new Error(
+      `manifest.json compatibilityVersion v${resolved} is below the platform ` +
+        `minimum v${MIN_SUPPORTED_APP_COMPATIBILITY_VERSION}. Update the App ` +
+        'source to a supported compatibility contract before deploying.',
+    );
+  }
+  if (resolved > LATEST_APP_COMPATIBILITY_VERSION) {
+    throw new Error(
+      `manifest.json compatibilityVersion v${resolved} is newer than this ` +
+        `platform's latest supported v${LATEST_APP_COMPATIBILITY_VERSION}. ` +
+        'Deploy this source with a platform version that supports that contract.',
+    );
+  }
+  return resolved;
 }
 
 /** Build the stable compatibility read model shared by server and UI code. */

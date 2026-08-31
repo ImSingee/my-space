@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
-import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
+import { resolveAppDeployCompatibilityVersion } from '~/app-compatibility';
 import {
   BUILD_WORK_DIR,
   appBuildDir,
@@ -526,6 +526,7 @@ async function deployAppInner(
   let dataFenceClaimed = false;
   let keepDataFenceOnFailure = Boolean(app.dataActivationId);
   let build: BuildResult | undefined;
+  let compatibilityVersion: number | null = null;
   let version = 0;
   let markedBuildingByThisAttempt = false;
 
@@ -535,6 +536,9 @@ async function deployAppInner(
       outputDir: tempBuild,
       deploymentId,
     });
+    compatibilityVersion = resolveAppDeployCompatibilityVersion(
+      build.source.compatibilityVersion,
+    );
 
     // Validate declared outbound workflow calls before recording the release:
     // each must reference a top-level workflow that is currently callable
@@ -839,7 +843,7 @@ async function deployAppInner(
           id: deploymentId,
           appId: id,
           version,
-          compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION,
+          compatibilityVersion,
           status: 'deployed',
           message,
           manifestNormalized: releaseBuild.normalized as unknown as JsonObject,
@@ -902,7 +906,7 @@ async function deployAppInner(
     return {
       deploymentId,
       version,
-      compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION,
+      compatibilityVersion,
       normalized: build.normalized,
       log: build.log,
     };
@@ -918,7 +922,10 @@ async function deployAppInner(
       // `undefined` means the lock/read itself never completed. Once the read
       // completed its result is authoritative even if closing the surrounding
       // read-only transaction later reports a connection error.
-      let committedVersion: number | null | undefined;
+      let committedRelease:
+        | { version: number; compatibilityVersion: number | null }
+        | null
+        | undefined;
       try {
         await db.transaction(async (tx) => {
           // A disconnected client can receive a COMMIT error while PostgreSQL
@@ -929,18 +936,27 @@ async function deployAppInner(
           await appDeployLock.acquire(tx, id);
           const committed = await tx.query.deployments.findFirst({
             where: { id: deploymentId },
-            columns: { id: true, version: true },
+            columns: { id: true, version: true, compatibilityVersion: true },
           });
-          committedVersion = committed?.version ?? null;
+          committedRelease = committed
+            ? {
+                version: committed.version,
+                compatibilityVersion: committed.compatibilityVersion,
+              }
+            : null;
         });
       } catch {
         // Preserve files on uncertainty; later reconciliation can clean an
         // orphan, but deleting a committed release would break rollback.
       }
-      if (committedVersion !== undefined) {
-        recorded = committedVersion !== null;
-        if (committedVersion !== null) version = committedVersion;
-        releaseAbsenceConfirmed = committedVersion === null;
+      if (committedRelease !== undefined) {
+        recorded = committedRelease !== null;
+        if (committedRelease !== null) {
+          version = committedRelease.version;
+          compatibilityVersion =
+            committedRelease.compatibilityVersion ?? compatibilityVersion;
+        }
+        releaseAbsenceConfirmed = committedRelease === null;
       }
     }
     const releaseOutcomeUnknown =
@@ -951,7 +967,7 @@ async function deployAppInner(
       // visible or a later deploy/explicit rollback reconciles the exact id.
       keepDataFenceOnFailure = true;
     }
-    if (recorded && build) {
+    if (recorded && build && compatibilityVersion !== null) {
       // The release transaction committed and is already live. Finish the same
       // idempotent post-commit work as the ordinary success path and report
       // success instead of falling through to destructive failure cleanup.
@@ -965,7 +981,7 @@ async function deployAppInner(
       return {
         deploymentId,
         version,
-        compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION,
+        compatibilityVersion,
         normalized: build.normalized,
         log: build.log,
       };

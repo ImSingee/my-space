@@ -31,6 +31,7 @@ describe('default app template', () => {
       database: false,
       dataTable: true,
     });
+    expect(manifest.compatibilityVersion).toBe(2);
     expect(manifest.backend?.network).toEqual([]);
     expect(backend).toContain('createDataClient<typeof schema>');
     expect(backend).toContain("Deno.env.get('HATCH_DATA_URL')");

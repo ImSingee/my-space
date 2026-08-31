@@ -310,6 +310,7 @@ export const sourceManifestSchema = z
       }),
     description: z.string().default(''),
     version: z.number().int().min(1).default(1),
+    compatibilityVersion: z.number().int().min(1).optional(),
     capabilities: capabilitiesSchema,
     backendMode: z.enum(['serverless', 'long-running']).default('serverless'),
     rpc: z

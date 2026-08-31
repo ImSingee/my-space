@@ -1,6 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  LATEST_APP_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+} from '~/app-compatibility';
 
 type Row = Record<string, unknown>;
 type Predicate =
@@ -434,6 +438,18 @@ async function stageFrontendBuild(
   };
 }
 
+function stageFrontendBuildAt(
+  compatibilityVersion: number,
+): (id: string, options: unknown) => Promise<unknown> {
+  return async (id, options) => {
+    const build = (await stageFrontendBuild(id, options)) as {
+      source: Row;
+    };
+    build.source.compatibilityVersion = compatibilityVersion;
+    return build;
+  };
+}
+
 async function arrangeSupersededPendingArtifact(id: string): Promise<{
   app: Row;
   pendingArtifact: string;
@@ -537,6 +553,68 @@ describe('App deployment activation recovery', () => {
     });
   });
 
+  it('records the compatibility version declared by App source', async () => {
+    const id = 'source-compatibility';
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuildAt(1));
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+
+    const result = await deployApp(id, {
+      message: 'Deploy source compatibility',
+      sourceDir: '/source',
+    });
+
+    expect(result.compatibilityVersion).toBe(1);
+    expect(mocks.deployments.get(result.deploymentId)).toMatchObject({
+      compatibilityVersion: 1,
+    });
+    expect(app.manifest).toMatchObject({ compatibilityVersion: 1 });
+  });
+
+  it.each([
+    [MIN_SUPPORTED_APP_COMPATIBILITY_VERSION - 1, /below the platform minimum/],
+    [
+      LATEST_APP_COMPATIBILITY_VERSION + 1,
+      /newer than this platform's latest supported/,
+    ],
+  ] as const)(
+    'rejects source compatibility v%i before deployment side effects',
+    async (compatibilityVersion, expectedError) => {
+      const id = `rejected-compatibility-${compatibilityVersion}`;
+      const app = appState(id, {
+        status: 'draft',
+        currentDeploymentId: null,
+        capabilities: null,
+        backendMode: null,
+        dataActivationId: null,
+      });
+      mocks.apps.set(id, app);
+      mocks.buildApp.mockImplementationOnce(
+        stageFrontendBuildAt(compatibilityVersion),
+      );
+
+      await expect(
+        deployApp(id, {
+          message: 'Reject unsupported compatibility',
+          sourceDir: '/source',
+        }),
+      ).rejects.toThrow(expectedError);
+
+      expect(app.status).toBe('draft');
+      expect(mocks.deployments.size).toBe(0);
+      expect(mocks.publishDeploymentSource).not.toHaveBeenCalled();
+      expect(mocks.applyDataMigration).not.toHaveBeenCalled();
+      expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not publish an activation event when a normal build fails', async () => {
     const id = 'normal-build-failure';
     const failure = new Error('build failed');
@@ -569,7 +647,7 @@ describe('App deployment activation recovery', () => {
       dataActivationId: null,
     });
     mocks.apps.set(id, app);
-    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuildAt(1));
     mocks.releaseCommitAckFailure = new Error('connection lost after COMMIT');
     await fs.mkdir(`${mocks.root}/live`, { recursive: true });
 
@@ -578,6 +656,10 @@ describe('App deployment activation recovery', () => {
       sourceDir: '/source',
     });
 
+    expect(result.compatibilityVersion).toBe(1);
+    expect(mocks.deployments.get(result.deploymentId)).toMatchObject({
+      compatibilityVersion: 1,
+    });
     expect(app.currentDeploymentId).toBe(result.deploymentId);
     expect(mocks.publishPlatformEvent).toHaveBeenCalledOnce();
     expect(mocks.publishPlatformEvent).toHaveBeenCalledWith({

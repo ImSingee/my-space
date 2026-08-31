@@ -33,6 +33,36 @@ describe('App identity limits', () => {
   });
 });
 
+describe('App compatibility manifest', () => {
+  const manifest = (compatibilityVersion?: unknown) => ({
+    id: 'demo',
+    name: 'Demo',
+    ...(compatibilityVersion === undefined ? {} : { compatibilityVersion }),
+    capabilities: {},
+  });
+
+  it.each([1, 2])('preserves declared compatibility v%i', (version) => {
+    expect(parseSourceManifest(manifest(version)).compatibilityVersion).toBe(
+      version,
+    );
+  });
+
+  it('keeps compatibility absent for deploy-time defaulting', () => {
+    expect(
+      parseSourceManifest(manifest()).compatibilityVersion,
+    ).toBeUndefined();
+  });
+
+  it.each([0, -1, 1.5, '2', null])(
+    'rejects invalid compatibilityVersion %j',
+    (version) => {
+      expect(() => parseSourceManifest(manifest(version))).toThrow(
+        /compatibilityVersion/,
+      );
+    },
+  );
+});
+
 describe('backend manifest', () => {
   const source = (backend: Record<string, unknown>) => ({
     id: 'demo',
