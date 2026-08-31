@@ -6,7 +6,10 @@ import { buildWorkflow } from './build';
 
 const tempDirs: string[] = [];
 
-async function makeWorkflowSource(): Promise<{
+async function makeWorkflowSource(options?: {
+  network?: unknown;
+  workflowSource?: string;
+}): Promise<{
   sourceDir: string;
   outputDir: string;
 }> {
@@ -23,6 +26,9 @@ async function makeWorkflowSource(): Promise<{
         id: 'demo',
         name: 'Demo',
         entry: 'workflow.ts',
+        ...(options && Object.hasOwn(options, 'network')
+          ? { network: options.network }
+          : {}),
         triggers: { cron: [], webhook: false },
       }),
       'utf8',
@@ -32,12 +38,13 @@ async function makeWorkflowSource(): Promise<{
     ),
     fs.writeFile(
       path.join(sourceDir, 'workflow.ts'),
-      "import { defineWorkflow } from '@hatch/workflow';\n" +
-        "import { z } from 'zod';\n" +
-        'export default defineWorkflow({\n' +
-        '  input: z.object({ name: z.string() }),\n' +
-        '  run: (_ctx, input) => ({ greeting: `Hello, ${input.name}!` }),\n' +
-        '});\n',
+      options?.workflowSource ??
+        "import { defineWorkflow } from '@hatch/workflow';\n" +
+          "import { z } from 'zod';\n" +
+          'export default defineWorkflow({\n' +
+          '  input: z.object({ name: z.string() }),\n' +
+          '  run: (_ctx, input) => ({ greeting: `Hello, ${input.name}!` }),\n' +
+          '});\n',
       'utf8',
     ),
     fs.writeFile(
@@ -98,5 +105,30 @@ describe('buildWorkflow dependencies', () => {
     await expect(
       buildWorkflow('demo', { sourceDir, outputDir }),
     ).rejects.toThrow(/retired hatch\/workflow\.ts SDK/);
+  });
+
+  it('persists the network policy used while describing the bundle', async () => {
+    const { sourceDir, outputDir } = await makeWorkflowSource({ network: [] });
+
+    const result = await buildWorkflow('demo', { sourceDir, outputDir });
+
+    expect(result.normalized.network).toEqual([]);
+    await expect(
+      fs.readFile(path.join(outputDir, 'manifest.normalized.json'), 'utf8'),
+    ).resolves.toContain('"network": []');
+  });
+
+  it('enforces the declared policy while describing author code', async () => {
+    const { sourceDir, outputDir } = await makeWorkflowSource({
+      network: [],
+      workflowSource:
+        "import { defineWorkflow } from '@hatch/workflow';\n" +
+        "await fetch('http://127.0.0.1:45122');\n" +
+        'export default defineWorkflow({ run: () => ({ ok: true }) });\n',
+    });
+
+    await expect(
+      buildWorkflow('demo', { sourceDir, outputDir }),
+    ).rejects.toThrow(/Requires net access/);
   });
 });

@@ -2,6 +2,7 @@
 import { appCompatibility, type AppCompatibility } from '~/app-compatibility';
 import { db } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
+import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { listDeployments } from './manage';
 import {
   type NormalizedManifest,
@@ -100,6 +101,8 @@ export type AppRuntimeOps = {
     capable: boolean;
     mode: 'serverless' | 'long-running' | null;
     running: boolean;
+    /** Declaration from the active deployment; null before first deployment. */
+    network: NetworkAccessView | null;
   };
   cron: {
     enabled: boolean;
@@ -209,6 +212,9 @@ export async function getAppDetailForAgent(
         capable: Boolean(caps?.backend),
         mode: app.backendMode ?? null,
         running: isAppRunning(id),
+        network: manifest?.backend
+          ? networkAccessView(manifest.backend.network)
+          : null,
       },
       cron: { enabled: Boolean(caps?.cron), jobs: cronJobs },
       webhook: {

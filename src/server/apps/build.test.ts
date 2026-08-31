@@ -95,7 +95,10 @@ describe('buildApp backend', () => {
         id: 'demo',
         name: 'Demo',
         capabilities: { backend: true },
-        backend: { entry: 'backend/main.ts' },
+        backend: {
+          entry: 'backend/main.ts',
+          network: ['api.example.com:443'],
+        },
       },
       {
         'backend/main.ts':
@@ -159,6 +162,7 @@ describe('buildApp backend', () => {
     expect(result.normalized.backend).toEqual({
       entry: 'backend/main.bundle.js',
       format: 'bundle-v1',
+      network: ['api.example.com:443'],
     });
     expect(result.log).toContain(
       'deno install --no-config --package-json --node-modules-dir=auto ' +

@@ -8,6 +8,7 @@ import { db } from '~/db';
 // would survive the client transform and drag postgres-js into the browser
 // bundle (crashing the app with "Buffer is not defined").
 import type { AppCapabilities, AppStatus } from '~/db/schema';
+import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { normalizedManifestFor } from './apps/access';
 import {
   projectAppCapabilities,
@@ -232,6 +233,8 @@ export type AppOps = {
   backend: {
     capable: boolean;
     mode: 'serverless' | 'long-running' | null;
+    /** Declaration from the active deployment; null before first deployment. */
+    network: NetworkAccessView | null;
   };
   cron: { enabled: boolean; jobs: CronJobView[] };
   webhook: {
@@ -261,7 +264,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
     });
     if (!app) {
       return {
-        backend: { capable: false, mode: null },
+        backend: { capable: false, mode: null, network: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false },
@@ -279,6 +282,9 @@ export const getAppOps = createServerFn({ method: 'GET' })
       backend: {
         capable: Boolean(caps?.backend),
         mode: app.backendMode ?? null,
+        network: manifest?.backend
+          ? networkAccessView(manifest.backend.network)
+          : null,
       },
       cron: { enabled: Boolean(caps?.cron), jobs: cronJobs },
       webhook: {

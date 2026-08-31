@@ -15,6 +15,7 @@ import {
   normalizeWorkflowManifest,
   parseSourceWorkflowManifest,
 } from './manifest';
+import { buildWorkflowDenoArgs } from './runtime-permissions';
 import { workflowSandboxEnv } from './sandbox-env';
 
 export type WorkflowBuildResult = {
@@ -198,9 +199,13 @@ export async function buildWorkflow(
     // 3) Run the bundle in describe mode to capture the input JSON Schema.
     const describe = await run(
       'deno',
-      // Scope FS reads to the bundle's own output dir; describe-mode runs the
-      // same untrusted code, so it must not be able to read arbitrary host files.
-      ['run', '--allow-env', `--allow-read=${out}`, '--allow-net', bundlePath],
+      // Describe mode imports and evaluates the same author-written bundle as a
+      // real run, so it must use the identical network permission contract.
+      buildWorkflowDenoArgs({
+        bundlePath,
+        artifactDir: out,
+        network: manifest.network,
+      }),
       { cwd: tempSrc, env: workflowSandboxEnv({ HATCH_MODE: 'describe' }) },
     );
     if (describe.code !== 0) {

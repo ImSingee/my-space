@@ -137,7 +137,10 @@ manifest is:
     "proto": "proto/service.proto",
     "service": "app.v1.TodoService"
   },
-  "backend": { "entry": "backend/main.ts" },
+  "backend": {
+    "entry": "backend/main.ts",
+    "network": []
+  },
   "app": {
     "entry": "app/main.tsx",
     "html": "app/index.html",
@@ -158,6 +161,43 @@ Use the generated immutable App id. `rpc.service` is the fully qualified proto
 service name. Each `app.routes` item is discoverability metadata and uses
 TanStack Router `$param` syntax for dynamic paths. Widget ids are stable URL and
 dashboard identifiers.
+
+### Backend network access
+
+Every authored backend must declare `backend.network`. New Apps start with an
+empty list, which denies external destinations by default:
+
+```json
+{
+  "backend": {
+    "entry": "backend/main.ts",
+    "network": [
+      "api.example.com:443",
+      "*.services.example.com",
+      "192.0.2.10:8443",
+      "[2001:db8::10]:443"
+    ]
+  }
+}
+```
+
+Each item is a hostname, wildcard subdomain, IPv4 address, or bracketed IPv6
+address, optionally followed by a port. A hostname without a port allows all
+ports for that hostname. Do not include a scheme, path, query, CIDR range, Unix
+socket, comma, or unbracketed IPv6 address. Hostnames do not include their
+subdomains; declare each subdomain or use `*.example.com`.
+
+The declaration controls Deno's single network permission category: HTTP,
+HTTPS, raw TCP and UDP, DNS resolution, and network listeners are not separate
+permissions. Set `"network": "unrestricted"` only when the App genuinely needs
+arbitrary networking. Omitting `network` is reserved for compatibility with
+older deployments and also runs unrestricted; never omit it from new source.
+
+The platform automatically adds only the backend's exact
+`127.0.0.1:${PORT}` listener plus enabled Database, Data Tables, KV, and
+Workflow endpoints. These platform channels do not need to appear in the
+manifest. Bind the HTTP backend to `127.0.0.1`, not `0.0.0.0`, `::`, or an
+unspecified host. Every other destination must be declared.
 
 ## Dependencies
 

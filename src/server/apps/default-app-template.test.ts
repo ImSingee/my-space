@@ -31,9 +31,11 @@ describe('default app template', () => {
       database: false,
       dataTable: true,
     });
+    expect(manifest.backend?.network).toEqual([]);
     expect(backend).toContain('createDataClient<typeof schema>');
     expect(backend).toContain("Deno.env.get('HATCH_DATA_URL')");
     expect(backend).not.toContain('DATABASE_URL');
+    expect(backend).toContain(".listen(port, '127.0.0.1'");
     expect(backend).toContain(
       "data.increment('counters', id, 'value', amount)",
     );

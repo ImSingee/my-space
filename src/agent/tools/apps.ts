@@ -34,6 +34,7 @@ import {
   WorktreeMaterializationError,
 } from '../worktree-materializer';
 import { resolveAgentWorkspacePath } from '../workspace-paths';
+import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
 function checkoutLines(id: string, checkout: LocalCheckout): string[] {
@@ -135,8 +136,8 @@ export function createAppTools(options: {
     description:
       "Get one app's details: status, live version, capabilities, the " +
       'user-facing App URL, normalized widget/RPC/webhook URLs, runtime state ' +
-      '(backend running, cron jobs), and deployment history. Mirrors the app ' +
-      'management panel.',
+      '(backend running, network declaration, cron jobs), and deployment ' +
+      'history. Mirrors the app management panel.',
     parameters: Type.Object({
       id: Type.String({ description: 'App id or slug to inspect.' }),
     }),
@@ -167,6 +168,9 @@ export function createAppTools(options: {
               }`
             : 'none'
         }`,
+        detail.ops.backend.capable
+          ? `Network: ${formatNetworkAccess(detail.ops.backend.network)}`
+          : null,
         `Database: ${detail.dbName ?? 'not provisioned'}`,
         detail.ops.dataTable.enabled
           ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +

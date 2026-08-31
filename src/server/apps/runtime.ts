@@ -12,6 +12,12 @@ import {
 } from '~agent/paths';
 import { HATCH_SDK_IMPORT_MAP } from '~agent/hatch-sdk';
 import { db, schema } from '~/db';
+import {
+  effectiveNetworkAllowlist,
+  type NetworkPolicy,
+  networkDestinationFromUrl,
+  networkPolicySchema,
+} from '~/network-policy';
 import { internalPlatformUrl } from '../internal-platform-url';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import {
@@ -44,6 +50,8 @@ export type BackendArtifact = {
   /** Validated absolute path to the runtime entry inside artifact/backend/. */
   entryPath: string;
   format?: 'bundle-v1';
+  /** Missing only for legacy deployments, which retain unrestricted access. */
+  network?: NetworkPolicy;
 };
 
 const LEGACY_BACKEND_ENTRY = 'backend/main.ts';
@@ -138,6 +146,7 @@ function validateBackendEntryPath(buildDir: string, entry: string): string {
 function readBackendArtifactMetadata(buildDir: string): {
   entry: string;
   format?: 'bundle-v1';
+  network?: NetworkPolicy;
 } {
   const manifestPath = path.join(buildDir, NORMALIZED_MANIFEST);
   let manifestStat;
@@ -190,13 +199,28 @@ function readBackendArtifactMetadata(buildDir: string): {
   }
   const entry = metadata.entry;
 
-  if (!Object.hasOwn(metadata, 'format')) return { entry };
+  let network: NetworkPolicy | undefined;
+  if (Object.hasOwn(metadata, 'network')) {
+    const parsedNetwork = networkPolicySchema.safeParse(metadata.network);
+    if (!parsedNetwork.success) {
+      throw invalidBackendArtifact(
+        `backend.network is invalid: ${parsedNetwork.error.issues[0]?.message ?? 'unknown policy error'}`,
+      );
+    }
+    network = parsedNetwork.data;
+  }
+  const base = {
+    entry,
+    ...(network === undefined ? {} : { network }),
+  };
+
+  if (!Object.hasOwn(metadata, 'format')) return base;
   if (metadata.format !== 'bundle-v1') {
     throw invalidBackendArtifact(
       `unsupported backend format: ${JSON.stringify(metadata.format)}`,
     );
   }
-  return { entry, format: 'bundle-v1' };
+  return { ...base, format: 'bundle-v1' };
 }
 
 export function backendArtifactEnv(
@@ -224,9 +248,11 @@ export function backendStorageEnv(
 export function resolveBackendArtifact(buildDir: string): BackendArtifact {
   const metadata = readBackendArtifactMetadata(buildDir);
   const entryPath = validateBackendEntryPath(buildDir, metadata.entry);
+  const network =
+    metadata.network === undefined ? {} : { network: metadata.network };
   return metadata.format === 'bundle-v1'
-    ? { entryPath, format: 'bundle-v1' }
-    : { entryPath };
+    ? { entryPath, format: 'bundle-v1', ...network }
+    : { entryPath, ...network };
 }
 
 /** Outbound workflow calls the app declared, read from the staged manifest. */
@@ -268,7 +294,9 @@ function runtimeBuildDir(id: string, deploymentId: string): string {
  * in this injected env (never in the normalized manifest shipped to the
  * browser). Returns null when the app declares no callable workflows.
  */
-async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
+async function buildWorkflowsEnv(
+  buildDir: string,
+): Promise<{ env: string; urls: string[] } | null> {
   const refs = readWorkflowRefs(buildDir);
   if (refs.length === 0) return null;
   const { getCallableWorkflow } = await import('../workflows/external');
@@ -288,7 +316,12 @@ async function buildWorkflowsEnv(buildDir: string): Promise<string | null> {
       secret: callable.secret,
     };
   }
-  return Object.keys(map).length > 0 ? JSON.stringify(map) : null;
+  return Object.keys(map).length > 0
+    ? {
+        env: JSON.stringify(map),
+        urls: Object.values(map).map((value) => value.url),
+      }
+    : null;
 }
 
 /**
@@ -317,6 +350,7 @@ type BackendDenoArgsOptions = {
   storageDir: string | null;
   cacheDir: string | null;
   certPaths: readonly string[];
+  automaticNetworkDestinations?: readonly string[];
   importMap?: string | null;
   hasLock: boolean;
 };
@@ -328,6 +362,7 @@ export function buildBackendDenoArgs({
   storageDir,
   cacheDir,
   certPaths,
+  automaticNetworkDestinations = [],
   importMap,
   hasLock,
 }: BackendDenoArgsOptions): string[] {
@@ -354,7 +389,16 @@ export function buildBackendDenoArgs({
   }
   denoArgs.push(`--allow-read=${allowRead.join(',')}`);
   if (storageDir) denoArgs.push(`--allow-write=${storageDir}`);
-  denoArgs.push('--allow-net', '--allow-env', '--no-prompt');
+  const allowNet = effectiveNetworkAllowlist(
+    artifact.network,
+    automaticNetworkDestinations,
+  );
+  if (allowNet === null) {
+    denoArgs.push('--allow-net');
+  } else if (allowNet.length > 0) {
+    denoArgs.push(`--allow-net=${allowNet.join(',')}`);
+  }
+  denoArgs.push('--allow-env', '--no-prompt');
   if (!bundled && importMap) {
     denoArgs.push(`--import-map=${importMap}`);
   }
@@ -705,7 +749,7 @@ async function startBackend(
   }
   // Resolve invocation config (URL + secret) for each declared workflow call so
   // the backend can trigger top-level workflows through the external API.
-  const workflowsEnv = await buildWorkflowsEnv(buildDir);
+  const workflowsConfig = await buildWorkflowsEnv(buildDir);
 
   // Per-app HMAC key so the backend can verify platform-originated requests
   // (cron RPC calls) AND sign its own calls into platform APIs (KV). Absent for
@@ -762,6 +806,15 @@ async function startBackend(
   const dataBaseUrl = appRow.capabilities?.dataTable
     ? internalPlatformUrl(dataTableUrl(id))
     : null;
+  const automaticNetworkDestinations = [
+    `127.0.0.1:${port}`,
+    ...(databaseEnv.DATABASE_URL
+      ? [networkDestinationFromUrl(databaseEnv.DATABASE_URL)]
+      : []),
+    ...(kvBaseUrl ? [networkDestinationFromUrl(kvBaseUrl)] : []),
+    ...(dataBaseUrl ? [networkDestinationFromUrl(dataBaseUrl)] : []),
+    ...(workflowsConfig?.urls.map(networkDestinationFromUrl) ?? []),
+  ];
 
   // Bundles may read only their fixed asset directory and, when enabled, the
   // app's persistent storage. Legacy source artifacts retain build/cache access
@@ -784,6 +837,7 @@ async function startBackend(
     storageDir,
     cacheDir,
     certPaths,
+    automaticNetworkDestinations,
     importMap: existsSync(path.join(buildDir, HATCH_SDK_IMPORT_MAP))
       ? HATCH_SDK_IMPORT_MAP
       : null,
@@ -800,7 +854,7 @@ async function startBackend(
       ...databaseEnv,
       ...backendStorageEnv(storageDir),
       ...backendArtifactEnv(buildDir, backendArtifact),
-      ...(workflowsEnv ? { HATCH_WORKFLOWS: workflowsEnv } : {}),
+      ...(workflowsConfig ? { HATCH_WORKFLOWS: workflowsConfig.env } : {}),
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
       ...(kvBaseUrl ? { HATCH_KV_URL: kvBaseUrl } : {}),
       ...(dataBaseUrl ? { HATCH_DATA_URL: dataBaseUrl } : {}),

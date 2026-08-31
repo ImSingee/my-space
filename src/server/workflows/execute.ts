@@ -12,6 +12,8 @@ import type {
   WorkflowRunStepStatus,
   WorkflowTrigger,
 } from '~/db/schema';
+import { workflowNetworkPolicyFromManifest } from './manifest';
+import { buildWorkflowDenoArgs } from './runtime-permissions';
 import { workflowSandboxEnv } from './sandbox-env';
 import { validateWorkflowInput } from './validate';
 
@@ -236,6 +238,37 @@ async function executeRun(
   deploymentId: string,
   input: unknown,
 ): Promise<void> {
+  const deployment = await db.query.workflowDeployments.findFirst({
+    where: { id: deploymentId, workflowId },
+    columns: { manifestNormalized: true },
+  });
+  if (!deployment) {
+    await db
+      .update(schema.workflowRuns)
+      .set({
+        status: 'failed',
+        error: 'The workflow deployment record is unavailable.',
+        finishedAt: new Date(),
+      })
+      .where(eq(schema.workflowRuns.id, runId));
+    return;
+  }
+
+  let network;
+  try {
+    network = workflowNetworkPolicyFromManifest(deployment.manifestNormalized);
+  } catch (error) {
+    await db
+      .update(schema.workflowRuns)
+      .set({
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        finishedAt: new Date(),
+      })
+      .where(eq(schema.workflowRuns.id, runId));
+    return;
+  }
+
   // Run the exact immutable artifact this run was queued against, so a
   // concurrent deploy/rollback can never swap in a different version than the
   // run row and its validated input claim.
@@ -275,7 +308,7 @@ async function executeRun(
     // Scope FS reads to this run's own artifact dir so untrusted workflow code
     // can't read host files (.env, ~/.ssh, other apps' artifacts). The main
     // module load is exempt from --allow-read, and input arrives over stdin.
-    ['run', '--allow-net', '--allow-env', `--allow-read=${dir}`, bundle],
+    buildWorkflowDenoArgs({ bundlePath: bundle, artifactDir: dir, network }),
     {
       cwd: dir,
       // Never inherit the platform's process.env: with --allow-env the workflow
