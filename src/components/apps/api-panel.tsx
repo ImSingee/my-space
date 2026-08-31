@@ -21,6 +21,7 @@ import copy from 'copy-to-clipboard';
 import { toast } from 'sonner';
 import type { ProtoFile, RpcServiceApi } from '~server/apps/manifest';
 import { normalizedManifestQueryOptions } from '~queries/apps';
+import { workflowsQueryOptions } from '~queries/workflows';
 
 /** Local-name of a fully-qualified proto type (drops the package prefix). */
 function shortType(fqName: string): string {
@@ -159,6 +160,7 @@ function ProtoSource({ file }: { file: ProtoFile }) {
  */
 export function ApiPanel({ appId }: { appId: string }) {
   const query = useQuery(normalizedManifestQueryOptions(appId));
+  const workflowsQuery = useQuery(workflowsQueryOptions);
 
   if (query.isLoading) {
     return (
@@ -176,6 +178,9 @@ export function ApiPanel({ appId }: { appId: string }) {
   const manifest = query.data;
   const api = manifest?.api;
   const workflows = manifest?.workflows ?? [];
+  const workflowById = new Map(
+    (workflowsQuery.data ?? []).map((workflow) => [workflow.id, workflow]),
+  );
 
   return (
     <Box component="section">
@@ -224,30 +229,39 @@ export function ApiPanel({ appId }: { appId: string }) {
               </Text>
               <Table withTableBorder verticalSpacing={6} highlightOnHover>
                 <Table.Tbody>
-                  {workflows.map((w) => (
-                    <Table.Tr key={w.alias}>
-                      <Table.Td>
-                        <Text size="sm" fw={500} ff="monospace">
-                          {w.alias}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Anchor
-                          size="xs"
-                          ff="monospace"
-                          renderRoot={(props) => (
-                            <Link
-                              to="/workflow/$workflowId"
-                              params={{ workflowId: w.workflow }}
-                              {...props}
-                            />
+                  {workflows.map((w) => {
+                    const workflow = workflowById.get(w.workflow);
+                    return (
+                      <Table.Tr key={w.alias}>
+                        <Table.Td>
+                          <Text size="sm" fw={500} ff="monospace">
+                            {w.alias}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {workflow ? (
+                            <Anchor
+                              size="xs"
+                              ff="monospace"
+                              renderRoot={(props) => (
+                                <Link
+                                  to="/workflow/$workflowSlug"
+                                  params={{ workflowSlug: workflow.slug }}
+                                  {...props}
+                                />
+                              )}
+                            >
+                              {w.workflow}
+                            </Anchor>
+                          ) : (
+                            <Text size="xs" ff="monospace">
+                              {w.workflow}
+                            </Text>
                           )}
-                        >
-                          {w.workflow}
-                        </Anchor>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
                 </Table.Tbody>
               </Table>
             </Stack>

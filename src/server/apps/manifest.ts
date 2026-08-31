@@ -184,13 +184,16 @@ export type CronJob = z.infer<typeof cronJobSchema>;
  */
 export const appWorkflowRefSchema = z.object({
   /**
-   * Target workflow id (kebab-case slug, mirrors WORKFLOW_ID_RE in the workflow
-   * module). Kept as an inline literal so this manifest stays isomorphic.
+   * Target Workflow id (generated ULID or legacy kebab id). Kept as an inline
+   * literal so this manifest stays isomorphic.
    */
   workflow: z
     .string()
     .min(1)
-    .regex(/^[a-z][a-z0-9-]*$/, 'workflow must be a workflow id (kebab-case)'),
+    .regex(
+      /^[a-z0-9][a-z0-9-]*$/,
+      'workflow must be a Workflow id (ULID or legacy kebab id)',
+    ),
   /**
    * Optional stable key the app code uses to look the workflow up in the
    * injected `HATCH_WORKFLOWS` map. Defaults to the workflow id.

@@ -322,34 +322,46 @@ export const appKv = snakeCase.table(
 /**
  * A workflow is a first-class, code-defined task the Agent authors. Unlike apps
  * it has no custom UI/API — the platform provides a fixed UI to trigger it
- * (manually, on a cron, or via webhook) and to audit its runs. `id` is a
- * human-readable kebab-case slug used in URLs and the workflow's Git repo.
+ * (manually, on a cron, or via webhook) and to audit its runs.
+ *
+ * `id` is an immutable internal key (a ULID for workflows created after the
+ * id/slug split; legacy workflows keep their original kebab id). It keys the
+ * Git repo, artifacts, runs, webhooks, manifests, and every foreign key.
+ *
+ * `slug` is the mutable, unique, human-facing URL segment used in
+ * `/workflow/<slug>`. Renaming it does not rebuild or move technical state.
  */
-export const workflows = snakeCase.table('workflows', {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text(),
-  status: text().$type<WorkflowStatus>().notNull().default('draft'),
-  /** Latest source manifest.json (as authored by the Agent). */
-  manifest: jsonb().$type<JsonObject>(),
-  /**
-   * JSON Schema (draft 2020-12) of the workflow input, derived from the
-   * workflow's zod schema at deploy time and validated against before each run.
-   */
-  inputSchema: jsonb().$type<JsonObject>(),
-  /** Git bare repository path for this workflow's source. */
-  repoPath: text(),
-  /** Current commit of the authoritative master branch. */
-  currentSourceCommit: text(),
-  currentDeploymentId: ulid(),
-  /** Shared secret for verifying inbound webhook calls (webhook trigger). */
-  webhookSecret: text(),
-  /** Whether this workflow is pinned to the sidebar for quick access. */
-  pinned: boolean().notNull().default(true),
-  sortOrder: integer().notNull().default(0),
-  createdAt,
-  updatedAt,
-});
+export const workflows = snakeCase.table(
+  'workflows',
+  {
+    id: text().primaryKey(),
+    /** Mutable, unique URL slug for `/workflow/<slug>`. */
+    slug: text().notNull(),
+    name: text().notNull(),
+    description: text(),
+    status: text().$type<WorkflowStatus>().notNull().default('draft'),
+    /** Latest source manifest.json (as authored by the Agent). */
+    manifest: jsonb().$type<JsonObject>(),
+    /**
+     * JSON Schema (draft 2020-12) of the workflow input, derived from the
+     * workflow's zod schema at deploy time and validated against before each run.
+     */
+    inputSchema: jsonb().$type<JsonObject>(),
+    /** Git bare repository path for this workflow's source. */
+    repoPath: text(),
+    /** Current commit of the authoritative master branch. */
+    currentSourceCommit: text(),
+    currentDeploymentId: ulid(),
+    /** Shared secret for verifying inbound webhook calls (webhook trigger). */
+    webhookSecret: text(),
+    /** Whether this workflow is pinned to the sidebar for quick access. */
+    pinned: boolean().notNull().default(true),
+    sortOrder: integer().notNull().default(0),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [uniqueIndex('workflows_slug_idx').on(table.slug)],
+);
 
 export const workflowDeployments = snakeCase.table(
   'workflow_deployments',

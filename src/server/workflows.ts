@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
 import { type NetworkAccessView, networkAccessView } from '~/network-policy';
+import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import { authMiddleware } from './auth';
 import { idAndDeploymentSchema, idSchema } from './validation';
 import {
@@ -13,6 +14,7 @@ import {
 /** Public list projection: never includes `webhookSecret`/`repoPath`/manifest. */
 export type WorkflowListItem = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: WorkflowStatus;
@@ -37,6 +39,7 @@ export const listWorkflows = createServerFn({ method: 'GET' })
       orderBy: { updatedAt: 'desc' },
       columns: {
         id: true,
+        slug: true,
         name: true,
         description: true,
         status: true,
@@ -55,6 +58,7 @@ export const listWorkflows = createServerFn({ method: 'GET' })
 /** Public detail projection for the manage/run pages (no secret/repo fields). */
 export type WorkflowDetail = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: WorkflowStatus;
@@ -66,14 +70,17 @@ export type WorkflowDetail = {
   updatedAt: string;
 };
 
-export const getWorkflow = createServerFn({ method: 'GET' })
+export const getWorkflowBySlug = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .validator((id: string) => idSchema.parse(id))
-  .handler(async ({ data: id }): Promise<WorkflowDetail | null> => {
+  .validator((slug: string) =>
+    z.string().min(1).max(WORKFLOW_SLUG_MAX_LENGTH).parse(slug),
+  )
+  .handler(async ({ data: slug }): Promise<WorkflowDetail | null> => {
     const row = await db.query.workflows.findFirst({
-      where: { id },
+      where: { slug },
       columns: {
         id: true,
+        slug: true,
         name: true,
         description: true,
         status: true,
@@ -93,7 +100,9 @@ export const getWorkflow = createServerFn({ method: 'GET' })
     };
   });
 
-export type WorkflowRow = NonNullable<Awaited<ReturnType<typeof getWorkflow>>>;
+export type WorkflowRow = NonNullable<
+  Awaited<ReturnType<typeof getWorkflowBySlug>>
+>;
 
 export const listWorkflowDeployments = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
@@ -155,6 +164,21 @@ export const setWorkflowPinFn = createServerFn({ method: 'POST' })
       .set({ pinned: data.pinned })
       .where(eq(schema.workflows.id, data.id));
     return { pinned: data.pinned };
+  });
+
+export const setWorkflowSlugFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; slug: string }) =>
+    z
+      .object({
+        id: idSchema,
+        slug: z.string().max(WORKFLOW_SLUG_MAX_LENGTH),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { renameWorkflowSlug } = await import('./workflows/manage');
+    return renameWorkflowSlug(data.id, data.slug);
   });
 
 /* ------------------------------- triggers --------------------------------- */

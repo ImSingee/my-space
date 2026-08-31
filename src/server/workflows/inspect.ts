@@ -12,6 +12,7 @@ import { listWorkflowCronJobs } from './scheduler';
 
 export type WorkflowSummaryForAgent = {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   status: WorkflowStatus;
@@ -52,6 +53,7 @@ export async function listWorkflowsForAgent(): Promise<
     }
     result.push({
       id: w.id,
+      slug: w.slug,
       name: w.name,
       description: w.description,
       status: w.status,
@@ -65,6 +67,7 @@ export async function listWorkflowsForAgent(): Promise<
 
 export type WorkflowDetailForAgent = {
   id: string;
+  slug: string;
   createdAt: string;
   name: string;
   description: string | null;
@@ -121,6 +124,7 @@ export async function getWorkflowDetailForAgent(
 
   return {
     id: w.id,
+    slug: w.slug,
     createdAt: w.createdAt.toISOString(),
     name: w.name,
     description: w.description,

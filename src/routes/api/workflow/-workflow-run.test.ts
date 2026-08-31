@@ -29,20 +29,32 @@ vi.mock('~server/workflows/execute', () => ({
 
 const { handle } = await import('./$workflowId/run');
 
+const WORKFLOW_ID = '01immutableworkflow';
+const WORKFLOW_SLUG = 'daily-digest';
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.findWorkflow.mockResolvedValue({
-    id: 'daily-digest',
-    status: 'deployed',
-    webhookSecret: 'workflow-secret',
-    currentDeploymentId: 'deployment-1',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'integer' },
-        dryRun: { type: 'boolean' },
+  mocks.findWorkflow.mockImplementation(async (options) => {
+    if (
+      (options as { where?: { id?: string } } | undefined)?.where?.id !==
+      WORKFLOW_ID
+    ) {
+      return undefined;
+    }
+    return {
+      id: WORKFLOW_ID,
+      slug: WORKFLOW_SLUG,
+      status: 'deployed',
+      webhookSecret: 'workflow-secret',
+      currentDeploymentId: 'deployment-1',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer' },
+          dryRun: { type: 'boolean' },
+        },
       },
-    },
+    };
   });
   mocks.findDeployment.mockResolvedValue({
     manifestNormalized: {
@@ -58,14 +70,17 @@ beforeEach(() => {
 describe('Workflow webhook run route', () => {
   it('starts a run from JSON at the singular Workflow API URL', async () => {
     const response = await handle({
-      request: new Request('https://hatch.test/api/workflow/daily-digest/run', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-hatch-secret': 'workflow-secret',
+      request: new Request(
+        `https://hatch.test/api/workflow/${WORKFLOW_ID}/run`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-hatch-secret': 'workflow-secret',
+          },
+          body: JSON.stringify({ limit: 5 }),
         },
-        body: JSON.stringify({ limit: 5 }),
-      }),
+      ),
     });
 
     expect(response.status).toBe(202);
@@ -73,7 +88,7 @@ describe('Workflow webhook run route', () => {
       runId: 'run-1',
       status: 'queued',
     });
-    expect(mocks.startWorkflowRun).toHaveBeenCalledWith('daily-digest', {
+    expect(mocks.startWorkflowRun).toHaveBeenCalledWith(WORKFLOW_ID, {
       trigger: 'webhook',
       input: { limit: 5 },
     });
@@ -82,21 +97,33 @@ describe('Workflow webhook run route', () => {
   it('keeps coercing GET query input at the new URL', async () => {
     const response = await handle({
       request: new Request(
-        'https://hatch.test/api/workflow/daily-digest/run?' +
+        `https://hatch.test/api/workflow/${WORKFLOW_ID}/run?` +
           'secret=workflow-secret&limit=7&dryRun=true',
       ),
     });
 
     expect(response.status).toBe(202);
-    expect(mocks.startWorkflowRun).toHaveBeenCalledWith('daily-digest', {
+    expect(mocks.startWorkflowRun).toHaveBeenCalledWith(WORKFLOW_ID, {
       trigger: 'webhook',
       input: { limit: 7, dryRun: true },
     });
   });
 
+  it('does not resolve the mutable slug at the technical run URL', async () => {
+    const response = await handle({
+      request: new Request(
+        `https://hatch.test/api/workflow/${WORKFLOW_SLUG}/run?` +
+          'secret=workflow-secret',
+      ),
+    });
+
+    expect(response.status).toBe(404);
+    expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
+  });
+
   it.each([
-    'https://hatch.test/api/workflow-hooks/daily-digest',
-    'https://hatch.test/api/workflow/daily-digest/run/extra',
+    `https://hatch.test/api/workflow-hooks/${WORKFLOW_ID}`,
+    `https://hatch.test/api/workflow/${WORKFLOW_ID}/run/extra`,
   ])('rejects non-canonical run URL %s before reading state', async (url) => {
     const response = await handle({ request: new Request(url) });
 

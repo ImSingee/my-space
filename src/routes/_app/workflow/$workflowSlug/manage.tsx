@@ -7,6 +7,8 @@ import {
   Menu,
   Stack,
   Text,
+  TextInput,
+  Tooltip,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -20,14 +22,19 @@ import {
 import {
   IconArchive,
   IconArchiveOff,
+  IconCheck,
   IconDotsVertical,
   IconFileCode,
+  IconPencil,
   IconPin,
   IconPinnedOff,
   IconTrash,
+  IconX,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { WorkflowDeploymentHistory } from '~components/workflows/deployment-history';
@@ -43,13 +50,14 @@ import {
 import {
   archiveWorkflowFn,
   deleteWorkflowFn,
-  getWorkflow,
+  getWorkflowBySlug,
   setWorkflowPinFn,
+  setWorkflowSlugFn,
 } from '~server/workflows';
 
-export const Route = createFileRoute('/_app/workflow/$workflowId/manage')({
+export const Route = createFileRoute('/_app/workflow/$workflowSlug/manage')({
   loader: async ({ params }) => {
-    const workflow = await getWorkflow({ data: params.workflowId });
+    const workflow = await getWorkflowBySlug({ data: params.workflowSlug });
     if (!workflow) throw notFound();
     return workflow;
   },
@@ -121,10 +129,10 @@ function WorkflowManagePage() {
           <StatusBadge status={workflow.status} />
         </Group>
       }
-      description={workflow.description || `Workflow · ${workflow.id}`}
+      description={workflow.description || `Workflow · ${workflow.slug}`}
       actions={
         <>
-          <WorkflowTabs id={workflow.id} active="manage" />
+          <WorkflowTabs slug={workflow.slug} active="manage" />
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <ActionIcon variant="default" size="lg" aria-label="More actions">
@@ -185,8 +193,9 @@ function WorkflowManagePage() {
             Overview
           </Text>
           <Stack gap="sm">
+            <WorkflowSlugField id={workflow.id} slug={workflow.slug} />
             <Field
-              label="Identifier"
+              label="Workflow ID"
               value={workflow.id}
               mono
               copyValue={workflow.id}
@@ -218,5 +227,119 @@ function WorkflowManagePage() {
         <WorkflowDeploymentHistory workflowId={workflow.id} />
       </Stack>
     </Page>
+  );
+}
+
+function WorkflowSlugField({ id, slug }: { id: string; slug: string }) {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(slug);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const save = useMutation({
+    mutationFn: (next: string) =>
+      setWorkflowSlugFn({ data: { id, slug: next } }),
+    onSuccess: (result) => {
+      toast.success(`URL slug is now "${result.slug}"`);
+      setEditing(false);
+      void navigate({
+        to: '/workflow/$workflowSlug/manage',
+        params: { workflowSlug: result.slug },
+        search: true,
+        hash: true,
+        replace: true,
+      }).then(async () => {
+        await queryClient.invalidateQueries(workflowsQueryOptions);
+        await router.invalidate();
+      });
+    },
+  });
+
+  const submit = () => {
+    const next = draft.trim();
+    if (next === slug) {
+      setEditing(false);
+      return;
+    }
+    save.mutate(next);
+  };
+
+  return (
+    <Group gap="md" wrap="nowrap" align="center">
+      <Text size="sm" c="dimmed" style={{ width: 96, flex: 'none' }}>
+        URL slug
+      </Text>
+      {editing ? (
+        <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            ref={inputRef}
+            value={draft}
+            maxLength={WORKFLOW_SLUG_MAX_LENGTH}
+            onChange={(event) => setDraft(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') submit();
+              if (event.key === 'Escape') {
+                setDraft(slug);
+                setEditing(false);
+              }
+            }}
+            size="xs"
+            disabled={save.isPending}
+            styles={{ input: { fontFamily: 'monospace' } }}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Tooltip label="Save" withArrow position="top">
+            <ActionIcon
+              variant="light"
+              color="green"
+              onClick={submit}
+              loading={save.isPending}
+              aria-label="Save slug"
+            >
+              <IconCheck size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Cancel" withArrow position="top">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={() => {
+                setDraft(slug);
+                setEditing(false);
+              }}
+              disabled={save.isPending}
+              aria-label="Cancel"
+            >
+              <IconX size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      ) : (
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text size="sm" ff="monospace" truncate>
+            {slug}
+          </Text>
+          <Tooltip label="Edit slug" withArrow position="top">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={() => {
+                setDraft(slug);
+                setEditing(true);
+              }}
+              aria-label="Edit slug"
+            >
+              <IconPencil size={15} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      )}
+    </Group>
   );
 }

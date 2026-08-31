@@ -6,11 +6,11 @@ import { AppGlyph } from '~components/apps/app-glyph';
 import { StatusBadge } from '~components/system/status-badge';
 import { TriggerForm } from '~components/workflows/trigger-form';
 import { WorkflowTabs } from '~components/workflows/workflow-tabs';
-import { getWorkflow } from '~server/workflows';
+import { getWorkflowBySlug } from '~server/workflows';
 
-export const Route = createFileRoute('/_app/workflow/$workflowId/')({
+export const Route = createFileRoute('/_app/workflow/$workflowSlug/')({
   loader: async ({ params }) => {
-    const workflow = await getWorkflow({ data: params.workflowId });
+    const workflow = await getWorkflowBySlug({ data: params.workflowSlug });
     if (!workflow) throw notFound();
     return workflow;
   },
@@ -35,12 +35,13 @@ function WorkflowRunPage() {
           <StatusBadge status={workflow.status} />
         </Group>
       }
-      description={workflow.description || `Workflow · ${workflow.id}`}
-      actions={<WorkflowTabs id={workflow.id} active="run" />}
+      description={workflow.description || `Workflow · ${workflow.slug}`}
+      actions={<WorkflowTabs slug={workflow.slug} active="run" />}
     >
       {isDeployed ? (
         <TriggerForm
           workflowId={workflow.id}
+          workflowSlug={workflow.slug}
           inputSchema={workflow.inputSchema}
         />
       ) : (

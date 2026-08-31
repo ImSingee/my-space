@@ -111,19 +111,24 @@ loops. Hatch starts it at deploy and restarts it after an exit. The default
 ## Calling top-level Workflows
 
 Apps call Workflows created in the Workflow module; they do not define
-Workflows themselves. Declare allowed targets at the manifest top level:
+Workflows themselves. Use `list_workflows` and copy each target's exact
+`id` into `workflow`; a Workflow slug does not resolve here. Add a readable
+`alias` for the stable key used by backend code:
 
 ```json
 {
   "workflows": [
-    { "workflow": "daily-digest" },
-    { "workflow": "send-report", "alias": "report" }
+    {
+      "workflow": "01k43s9az5t2qpy7ejf0hm6vwc",
+      "alias": "dailyDigest"
+    }
   ]
 }
 ```
 
 Each target must already be deployed with its webhook trigger enabled. The
-platform injects `HATCH_WORKFLOWS`, a JSON map from alias to
+platform injects `HATCH_WORKFLOWS`, a JSON map from alias (or the Workflow id
+when no alias is declared) to
 `{ workflow, name, url, secret }`.
 
 ```ts

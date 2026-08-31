@@ -12,14 +12,14 @@ workflow is pure code: a single Deno program (npm imports allowed) that the
 platform **bundles into one file** at deploy time and runs on each trigger.
 
 Call `checkout_workflow` before modifying an existing workflow; the source
-defaults to `workflows/<id>/`, but the returned absolute path is authoritative.
+defaults to `workflows/<slug>/`, but the returned absolute path is authoritative.
 The platform handles bundling, versioning (git + artifact), scheduling, and
 serving the webhook.
 
 ## Source layout
 
 ```
-workflows/<id>/
+workflows/<slug>/
   manifest.json        declares id, name, description, entry, network, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
   package.json         npm dependencies (installed only with Deno)
@@ -150,7 +150,7 @@ time.
 
 ```json
 {
-  "id": "star-digest",
+  "id": "01k43s9az5t2qpy7ejf0hm6vwc",
   "name": "Star digest",
   "description": "Summarize a repo's stars",
   "entry": "workflow.ts",
@@ -209,14 +209,17 @@ lockfile, npm, and remote module resolution disabled.
 
 ## Git workflow
 
-1. For a new workflow, confirm the name + slug with the user via `ask` (the name
-   is editable later; the slug is permanent — it keys the URL, repo, and webhook).
-   Only then call `create_workflow`. Pass `pin: true` (default) to pin it to the
-   sidebar.
-2. For an existing workflow, call `checkout_workflow` and keep the returned
-   source path. Checkout only creates a missing target by default; use the
-   existing path or another `target_path` on conflict. Pass the same path with
-   `force: true` only to permanently discard and replace it.
+1. For a new workflow, confirm the name + slug with the user via `ask`. Both are
+   editable later. The slug is the human-facing `/workflow/<slug>` segment;
+   Hatch generates a separate id for the manifest, Git repository, runs,
+   webhook, and all technical APIs. Only then call `create_workflow`.
+   Pass `pin: true` (default) to pin it to the sidebar.
+2. For an existing workflow with no checkout in this conversation, inspect it
+   with `list_workflows` / `get_workflow`, then call `checkout_workflow` with
+   its `id` and `clone: true`. To refresh an existing checkout, call it with
+   `clone: false` and the exact returned `source_path`; update mode never creates
+   or replaces a path. Use a separate `clone: true` call with the same
+   `source_path` and `force: true` only to permanently discard and replace it.
 3. Edit files under the exact returned source path.
 4. `git status`, `git add ...`, `git commit -m "message"` there.
 5. Call `deploy_workflow` with that `source_path` and a required `message`.
@@ -226,18 +229,20 @@ lockfile, npm, and remote module resolution disabled.
 
 Do not push branches or tags — the platform Git server rejects Agent pushes. If
 deploy says `master` advanced, call `checkout_workflow` with the same
-`target_path` to refresh its origin bundle (the existing-target error preserves
-files), then `git fetch origin master`, rebase, resolve, and deploy again.
+`source_path` and `clone: false` to refresh its origin bundle, then `git fetch
+origin master`, rebase, resolve, and deploy again.
 
 ## Inspect, run & roll back
 
-- `list_workflows` shows every workflow (id, status, live version, triggers).
+- `list_workflows` shows every workflow (name, id, slug, status, live version,
+  triggers).
 - `get_workflow <id>` shows the network declaration, input schema, triggers,
   recent runs, and deployment history.
 - `rollback_workflow` with the `id` and `version` restores that version's bundle
   and source but does not modify existing Agent worktrees. To preserve local
-  work, refresh with the same checkout target and fetch/rebase; to exactly
-  replace it with rollback source, use the same `target_path` and `force: true`.
+  work, refresh with `clone: false` and the same `source_path`, then fetch/rebase;
+  to exactly replace it with rollback source, use `clone: true`, the same
+  `source_path`, and `force: true`.
 - Users trigger manual runs and inspect run history (steps, logs, output, errors)
   from the workflow page; you don't run workflows yourself.
 

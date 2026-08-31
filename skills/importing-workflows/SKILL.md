@@ -66,8 +66,9 @@ evidence. Do not create, commit, or deploy a workflow.
 ## Import after approval
 
 Only after the review passes, follow `building-workflows` to choose the name and
-id and create a new workflow. Keep the new worktree's `.git` and generated
-`.hatch/` SDK. Never copy or trust an imported `.hatch/` or legacy `hatch/`
+slug and create a new workflow. Hatch generates its id. Keep the new
+worktree's `.git` and generated `.hatch/` SDK. Never copy or trust an imported
+`.hatch/` or legacy `hatch/`
 directory; copy only the reviewed authored source and configuration into the
 new worktree. Never copy quarantined Git metadata, dependencies, generated
 output, credentials, or runtime data.

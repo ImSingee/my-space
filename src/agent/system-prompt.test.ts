@@ -32,10 +32,10 @@ describe('Agent system prompt skills', () => {
   it('keeps existing checkout synchronization non-destructive', () => {
     const prompt = buildSystemPrompt(appUrl, workflowDisabled);
 
-    expect(prompt).toMatch(/clean `master` checkout may\s+fast-forward/);
-    expect(prompt).toContain('otherwise checkout preserves the target');
+    expect(prompt).toMatch(/checkout, call it with `clone: false`/);
+    expect(prompt).toContain('update mode never creates or replaces a path');
     expect(prompt).toMatch(
-      /Use `force: true` only when permanently discarding/,
+      /Use\s+`force: true` only with `clone: true` when permanently discarding/,
     );
   });
 
@@ -70,7 +70,7 @@ describe('Agent system prompt skills', () => {
       'deploy_workflow',
       'building-workflows',
       'importing-workflows',
-      'workflows/<id>',
+      'workflows/<slug>',
     ]) {
       expect(prompt).not.toContain(capability);
     }

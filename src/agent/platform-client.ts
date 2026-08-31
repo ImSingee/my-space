@@ -34,6 +34,7 @@ export type CreateAppResult = {
 
 export type CreateWorkflowResult = {
   id: string;
+  slug: string;
   name: string;
   files: ScaffoldFile[];
 };
@@ -128,17 +129,21 @@ export type PlatformClient = {
   ): Promise<QueryAppDataTableResponse>;
 
   listWorkflows(): Promise<WorkflowSummaryForAgent[]>;
-  getWorkflow(id: string): Promise<WorkflowDetailForAgent | null>;
+  /** Looks up a Workflow by its immutable id; null when no Workflow matches. */
+  getWorkflow(workflowId: string): Promise<WorkflowDetailForAgent | null>;
   createWorkflow(input: {
-    id: string;
+    slug: string;
     name: string;
     description?: string;
     pin?: boolean;
   }): Promise<CreateWorkflowResult>;
-  getWorkflowSource(id: string): Promise<SourceBundleResponse>;
+  getWorkflowSource(workflowId: string): Promise<SourceBundleResponse>;
   deployWorkflow(
-    id: string,
+    workflowId: string,
     opts: { message: string; generation: string; bundleBase64: string },
   ): Promise<WorkflowDeployResponse>;
-  rollbackWorkflow(id: string, version: number): Promise<{ version: number }>;
+  rollbackWorkflow(
+    workflowId: string,
+    version: number,
+  ): Promise<{ version: number }>;
 };

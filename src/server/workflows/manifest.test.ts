@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isValidWorkflowId,
+  isValidWorkflowSlug,
   normalizeWorkflowManifest,
   type NormalizedWorkflowManifest,
   parseSourceWorkflowManifest,
@@ -7,6 +9,25 @@ import {
   workflowNetworkPolicyFromManifest,
   workflowWebhookUrl,
 } from './manifest';
+
+describe('Workflow identity manifest', () => {
+  it('accepts generated and legacy immutable Workflow ids', () => {
+    const generatedId = '01k43s9az5t2qpy7ejf0hm6vwc';
+
+    expect(isValidWorkflowId(generatedId)).toBe(true);
+    expect(isValidWorkflowId('legacy-kebab-id')).toBe(true);
+    expect(
+      parseSourceWorkflowManifest({ id: generatedId, name: 'Demo' }).id,
+    ).toBe(generatedId);
+  });
+
+  it('keeps mutable slug validation separate from immutable id validation', () => {
+    expect(isValidWorkflowId('01k43s9az5t2qpy7ejf0hm6vwc')).toBe(true);
+    expect(isValidWorkflowSlug('01k43s9az5t2qpy7ejf0hm6vwc')).toBe(false);
+    expect(isValidWorkflowSlug('daily-digest')).toBe(true);
+    expect(isValidWorkflowId('../daily-digest')).toBe(false);
+  });
+});
 
 function manifest(network?: unknown): Record<string, unknown> {
   return {

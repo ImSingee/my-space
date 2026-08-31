@@ -110,10 +110,12 @@ function initialValues(fields: Field[]): Record<string, unknown> {
 
 export function TriggerForm({
   workflowId,
+  workflowSlug,
   inputSchema,
   disabled,
 }: {
   workflowId: string;
+  workflowSlug: string;
   inputSchema: unknown;
   disabled?: boolean;
 }) {
@@ -155,8 +157,8 @@ export function TriggerForm({
       }
       void queryClient.invalidateQueries(workflowRunsQueryOptions(workflowId));
       void navigate({
-        to: '/workflow/$workflowId/execution/$runId',
-        params: { workflowId, runId: result.runId },
+        to: '/workflow/$workflowSlug/execution/$runId',
+        params: { workflowSlug, runId: result.runId },
       });
     },
   });
