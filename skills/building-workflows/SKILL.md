@@ -25,11 +25,13 @@ workflows/<id>/
   package.json         npm dependencies (installed only with Deno)
   deno.json            reviewed npm lifecycle-script allowlist
   deno.lock            Deno dependency lock (commit this file)
-  hatch/workflow.ts    the platform SDK — DO NOT EDIT
+  .hatch/              generated platform SDK + import map — DO NOT COMMIT
 ```
 
-`create_workflow` scaffolds a runnable greeting example you adapt in place. Read
-the exact files before editing.
+`create_workflow` and `checkout_workflow` materialize `.hatch/` before returning.
+They also add the generated paths to the repository-local Git exclude file, so
+the authored tree stays clean without changing `.gitignore`. Read the exact
+files before editing.
 
 ## The workflow program
 
@@ -81,12 +83,14 @@ export default defineWorkflow({
 - **No AI calls** during a run.
 - Keep the result JSON-serializable. Do all real work inside `ctx.step` so the
   inspector is useful.
-- Do **not** edit `hatch/` — it's the platform SDK, bundled automatically.
+- Treat `.hatch` as reserved case-insensitively. Do **not** edit, replace,
+  depend on, copy, or commit `.hatch/`; do not create variants such as
+  `.HATCH`. Create/checkout refresh it, and deploy generates a fresh trusted
+  copy instead of accepting SDK bytes from workflow source.
 - Extra npm deps go in `package.json` `dependencies`, then use a bare import such
-  as `import dayjs from 'dayjs'`. Keep the scaffolded `@hatch/workflow` →
-  `./hatch/workflow.ts` mapping in `deno.json` so local Deno tooling resolves the
-  SDK; do not add the SDK to `package.json` or change/remove that mapping. The
-  platform injects the same authoritative mapping again during deploy.
+  as `import dayjs from 'dayjs'`. Never add `@hatch/*` to `package.json`,
+  `deno.json`, or `deno.lock`. Local Deno tooling resolves `@hatch/workflow`
+  through the generated `.hatch/import-map.json`.
 
 ### Dependencies and lifecycle scripts
 
@@ -103,6 +107,18 @@ Commit `package.json`, `deno.json`, and the resulting `deno.lock`; never commit
 stale files fail deploy. If deploy reports a legacy deno.json-only source, load
 this Skill, move every `npm:` import into `package.json`, run the command above,
 and commit all three files before deploying again.
+
+For local Deno commands that load workflow source, always select the generated
+import map explicitly:
+
+```bash
+deno check --import-map=.hatch/import-map.json workflow.ts
+deno test --import-map=.hatch/import-map.json
+deno run --import-map=.hatch/import-map.json <local-harness.ts>
+```
+
+If `.hatch/` is missing or stale, run `create_workflow` or `checkout_workflow`
+again for the same source path. Do not recreate the SDK or import map yourself.
 
 Deno skips npm `preinstall`, `install`, and `postinstall` scripts by default. If
 it reports a skipped lifecycle script, do not enable it blindly:

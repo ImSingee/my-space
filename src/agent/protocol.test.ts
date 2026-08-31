@@ -63,7 +63,7 @@ describe('App creation payload', () => {
 
 describe('runner -> platform messages', () => {
   it('uses protocol v12 for Platform-owned beta feature delivery', () => {
-    expect(PROTOCOL_VERSION).toBe(12);
+    expect(PROTOCOL_VERSION).toBe(13);
   });
 
   it('parses runner.hello', () => {

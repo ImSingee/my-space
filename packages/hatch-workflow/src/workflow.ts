@@ -1,10 +1,5 @@
-/**
- * @hatch/workflow — the tiny SDK a Hatch workflow is written against.
- *
- * This file is platform-managed: it is bundled into the workflow's single-file
- * program at deploy time and provides `defineWorkflow` plus the runner the
- * platform invokes. Do not edit it — write your workflow in `workflow.ts`.
- */
+// @ts-self-types="./workflow.d.ts"
+/** @hatch/workflow — the SDK a Hatch workflow is written against. */
 import { z } from 'zod';
 
 export type RetryOptions = {
@@ -23,27 +18,20 @@ export type StepOptions = {
 export type WorkflowContext = {
   /** Stable id of the current run, for correlating external logs. */
   readonly runId: string;
-  /**
-   * Run an observable, optionally-retried step. The platform records each
-   * step's start/finish (and every retry) and shows them in the run inspector.
-   * Use steps for the meaningful units of work so failures are easy to locate.
-   */
+  /** Run an observable, optionally retried unit of work. */
   step<T>(
     name: string,
     fn: () => Promise<T> | T,
     options?: StepOptions,
   ): Promise<T>;
-  /** Log a line to the run log (visible in the inspector). */
+  /** Log a line to the run log. */
   log(...args: unknown[]): void;
 };
 
 export type WorkflowDefinition<TInput> = {
-  /**
-   * zod schema describing the trigger input. Persisted as JSON Schema on deploy
-   * and used to render the manual-run form and validate every trigger.
-   */
+  /** Zod schema used for trigger forms and input validation. */
   input?: z.ZodType<TInput>;
-  /** The workflow body. Return a JSON-serializable result. */
+  /** The workflow body. Its result must be JSON serializable. */
   run: (ctx: WorkflowContext, input: TInput) => Promise<unknown> | unknown;
 };
 
@@ -53,25 +41,28 @@ export function defineWorkflow<TInput = Record<string, never>>(
   return definition;
 }
 
-/* ----------------------------- runner internals --------------------------- */
-
 const SENTINEL = '[[hatch]]';
 
-/**
- * Structured events share stdout with user logs. The platform parses lines
- * prefixed with the sentinel as events and treats everything else as run log.
- */
+type DenoRuntime = {
+  stdin: { readable: ReadableStream<Uint8Array> };
+  env: { get(name: string): string | undefined };
+  exit(code?: number): never;
+};
+
+function denoRuntime(): DenoRuntime {
+  return (globalThis as typeof globalThis & { Deno: DenoRuntime }).Deno;
+}
+
 function emit(event: Record<string, unknown>): void {
   console.log(SENTINEL + JSON.stringify(event));
 }
 
-/** JSON-safe snapshot of a value, truncated to keep events small. */
 function safeValue(value: unknown): unknown {
   try {
     const json = JSON.stringify(value);
     if (json === undefined) return undefined;
-    if (json.length > 20000) {
-      return { truncated: true, preview: json.slice(0, 20000) };
+    if (json.length > 20_000) {
+      return { truncated: true, preview: json.slice(0, 20_000) };
     }
     return JSON.parse(json);
   } catch {
@@ -79,16 +70,16 @@ function safeValue(value: unknown): unknown {
   }
 }
 
-function errMessage(err: unknown): string {
-  if (err instanceof Error) return err.stack ?? err.message;
-  return String(err);
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.stack ?? error.message;
+  return String(error);
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function readStdin(): Promise<string> {
   try {
-    return await new Response(Deno.stdin.readable).text();
+    return await new Response(denoRuntime().stdin.readable).text();
   } catch {
     return '';
   }
@@ -96,17 +87,13 @@ async function readStdin(): Promise<string> {
 
 function envVar(name: string): string | undefined {
   try {
-    return Deno.env.get(name) ?? undefined;
+    return denoRuntime().env.get(name);
   } catch {
     return undefined;
   }
 }
 
-/**
- * Entrypoint invoked by the generated bundle wrapper. Dispatches on HATCH_MODE:
- * - "describe": print the input JSON Schema and exit.
- * - "run" (default): read input from stdin, validate, run, stream events.
- */
+/** Entrypoint invoked by the platform-generated bundle wrapper. */
 export async function runCli(
   definition: WorkflowDefinition<unknown>,
 ): Promise<void> {
@@ -141,7 +128,7 @@ export async function runCli(
         status: 'failed',
         error: 'Run input was not valid JSON.',
       });
-      Deno.exit(1);
+      denoRuntime().exit(1);
     }
   }
 
@@ -154,13 +141,13 @@ export async function runCli(
         error:
           'Input validation failed: ' + JSON.stringify(parsed.error.issues),
       });
-      Deno.exit(1);
+      denoRuntime().exit(1);
     }
     input = parsed.data;
   }
 
-  let seq = 0;
-  const ctx: WorkflowContext = {
+  let sequence = 0;
+  const context: WorkflowContext = {
     runId,
     log: (...args: unknown[]) => console.log(...args),
     async step<T>(
@@ -168,37 +155,43 @@ export async function runCli(
       fn: () => Promise<T> | T,
       options?: StepOptions,
     ): Promise<T> {
-      const mySeq = ++seq;
+      const stepSequence = ++sequence;
       const maxAttempts = Math.max(1, options?.retry?.maxAttempts ?? 1);
       const backoffMs = Math.max(0, options?.retry?.backoffMs ?? 0);
       const factor = options?.retry?.factor ?? 2;
       let lastError: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const startedAt = new Date().toISOString();
-        emit({ t: 'step:start', seq: mySeq, name, attempt, startedAt });
+        emit({
+          t: 'step:start',
+          seq: stepSequence,
+          name,
+          attempt,
+          startedAt,
+        });
         try {
-          const out = await fn();
+          const output = await fn();
           emit({
             t: 'step:end',
-            seq: mySeq,
+            seq: stepSequence,
             name,
             attempt,
             status: 'succeeded',
-            output: safeValue(out),
+            output: safeValue(output),
             startedAt,
             finishedAt: new Date().toISOString(),
           });
-          return out;
-        } catch (err) {
-          lastError = err;
+          return output;
+        } catch (error) {
+          lastError = error;
           const willRetry = attempt < maxAttempts;
           emit({
             t: 'step:end',
-            seq: mySeq,
+            seq: stepSequence,
             name,
             attempt,
             status: willRetry ? 'retrying' : 'failed',
-            error: errMessage(err),
+            error: errorMessage(error),
             startedAt,
             finishedAt: new Date().toISOString(),
           });
@@ -213,10 +206,14 @@ export async function runCli(
 
   emit({ t: 'run:start', startedAt: new Date().toISOString() });
   try {
-    const output = await definition.run(ctx, input);
+    const output = await definition.run(context, input);
     emit({ t: 'run:end', status: 'succeeded', output: safeValue(output) });
-  } catch (err) {
-    emit({ t: 'run:end', status: 'failed', error: errMessage(err) });
-    Deno.exit(1);
+  } catch (error) {
+    emit({
+      t: 'run:end',
+      status: 'failed',
+      error: errorMessage(error),
+    });
+    denoRuntime().exit(1);
   }
 }

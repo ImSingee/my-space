@@ -1,4 +1,4 @@
-/** Platform-owned SDK materialization for Hatch Apps. */
+/** Platform-owned SDK materialization for Hatch source worktrees. */
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import {
@@ -28,30 +28,89 @@ import {
 import { resolveAgentOwnershipSession, sandboxSpawn } from './shell-sandbox';
 
 const HATCH_DATA_SOURCE_DIR = path.join(REPO_ROOT, 'packages', 'hatch-data');
+const HATCH_WORKFLOW_SOURCE_DIR = path.join(
+  REPO_ROOT,
+  'packages',
+  'hatch-workflow',
+);
 
 export const HATCH_SDK_IMPORT_MAP = '.hatch/import-map.json';
 export const HATCH_BUF_GEN_CONFIG = '.hatch/buf.gen.yaml';
 
-export const HATCH_SDK_IMPORTS = {
+export const APP_HATCH_SDK_IMPORTS = {
   '@hatch/data': './sdk/@hatch/data/dist/data.js',
   '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
+} as const;
+
+export const WORKFLOW_HATCH_SDK_IMPORTS = {
+  '@hatch/workflow': './sdk/@hatch/workflow/dist/workflow.js',
 } as const;
 
 export function appHatchDataPackageDir(root: string): string {
   return path.join(root, '.hatch', 'sdk', '@hatch', 'data');
 }
 
-export function appHatchImportMapPath(root: string): string {
+export function workflowHatchPackageDir(root: string): string {
+  return path.join(root, '.hatch', 'sdk', '@hatch', 'workflow');
+}
+
+export function hatchImportMapPath(root: string): string {
   return path.join(root, ...HATCH_SDK_IMPORT_MAP.split('/'));
 }
 
 function managedPathError(target: string, reason: string): Error {
   return new Error(
-    `Cannot materialize the platform-owned @hatch/data SDK: ${path.basename(
+    `Cannot materialize the platform-owned Hatch SDK: ${path.basename(
       target,
     )} ${reason}.`,
   );
 }
+
+type HatchSdkPackage = {
+  sourceDir: string;
+  targetName: string;
+  buildFiles: readonly string[];
+};
+
+type HatchSdkGeneration = {
+  label: string;
+  sourceRootLabel: string;
+  imports: Readonly<Record<string, string>>;
+  packages: readonly HatchSdkPackage[];
+  extraFiles?: Readonly<Record<string, string>>;
+};
+
+const APP_HATCH_SDK_GENERATION: HatchSdkGeneration = {
+  label: '@hatch/data',
+  sourceRootLabel: 'App source root',
+  imports: APP_HATCH_SDK_IMPORTS,
+  packages: [
+    {
+      sourceDir: HATCH_DATA_SOURCE_DIR,
+      targetName: 'data',
+      buildFiles: [
+        'dist/data.js',
+        'dist/data.d.ts',
+        'dist/data-react.js',
+        'dist/data-react.d.ts',
+      ],
+    },
+  ],
+  extraFiles: { 'buf.gen.yaml': PLATFORM_APP_BUF_GEN_YAML },
+};
+
+const WORKFLOW_HATCH_SDK_GENERATION: HatchSdkGeneration = {
+  label: '@hatch/workflow',
+  sourceRootLabel: 'Workflow source root',
+  imports: WORKFLOW_HATCH_SDK_IMPORTS,
+  packages: [
+    {
+      sourceDir: HATCH_WORKFLOW_SOURCE_DIR,
+      targetName: 'workflow',
+      buildFiles: ['dist/workflow.js', 'dist/workflow.d.ts'],
+    },
+  ],
+};
 
 async function assertReplaceableManagedDirectory(
   target: string,
@@ -85,12 +144,17 @@ async function assertCanonicalManagedDirectoryName(
   }
 }
 
-async function assertSdkBuildExists(): Promise<void> {
+async function assertSdkBuildExists(
+  generation: HatchSdkGeneration,
+): Promise<void> {
   try {
-    await access(path.join(HATCH_DATA_SOURCE_DIR, 'dist', 'data.js'));
-    await access(path.join(HATCH_DATA_SOURCE_DIR, 'dist', 'data.d.ts'));
-    await access(path.join(HATCH_DATA_SOURCE_DIR, 'dist', 'data-react.js'));
-    await access(path.join(HATCH_DATA_SOURCE_DIR, 'dist', 'data-react.d.ts'));
+    await Promise.all(
+      generation.packages.flatMap((sdkPackage) =>
+        sdkPackage.buildFiles.map((file) =>
+          access(path.join(sdkPackage.sourceDir, ...file.split('/'))),
+        ),
+      ),
+    );
   } catch {
     throw new Error(
       'Hatch SDK build output is missing. Run `pnpm hatch-sdk:build`.',
@@ -131,12 +195,12 @@ if (!Array.isArray(files) || files.length === 0 || files.some((file) =>
   throw new Error('Invalid SDK payload manifest.');
 }
 if (await realpath('.') !== expectedRoot || await realpath(root) !== expectedRoot) {
-  throw new Error('App source root changed during SDK install.');
+  throw new Error('Source root changed during SDK install.');
 }
 for (const entry of await readdir(root, { withFileTypes: true })) {
   if (entry.name.toLowerCase() === '.hatch' && entry.name !== '.hatch') {
     throw new Error(
-      'Cannot materialize the platform-owned @hatch/data SDK: ' + entry.name +
+      'Cannot materialize the platform-owned Hatch SDK: ' + entry.name +
       ' is a non-canonical case variant of the reserved .hatch directory.'
     );
   }
@@ -167,7 +231,7 @@ async function removeTree(target) {
 try {
   const rootEntry = await lstat(root);
   if (rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) {
-    throw new Error('App source root must be a real directory.');
+    throw new Error('Source root must be a real directory.');
   }
   await mkdir(temporary, { mode: 0o700 });
   for (const relative of files) {
@@ -420,17 +484,67 @@ async function removePlatformGeneration(target: string): Promise<void> {
   await rm(target, { recursive: true, force: true });
 }
 
+async function stageSdkGeneration(
+  target: string,
+  generation: HatchSdkGeneration,
+): Promise<void> {
+  await mkdir(target, { recursive: true });
+  const tasks: Promise<unknown>[] = [
+    writeFile(
+      path.join(target, 'import-map.json'),
+      `${JSON.stringify({ imports: generation.imports }, null, 2)}\n`,
+      { encoding: 'utf8', flag: 'wx' },
+    ),
+  ];
+  for (const sdkPackage of generation.packages) {
+    const packageTarget = path.join(
+      target,
+      'sdk',
+      '@hatch',
+      sdkPackage.targetName,
+    );
+    await mkdir(packageTarget, { recursive: true });
+    tasks.push(
+      cp(
+        path.join(sdkPackage.sourceDir, 'package.json'),
+        path.join(packageTarget, 'package.json'),
+      ),
+      cp(
+        path.join(sdkPackage.sourceDir, 'dist'),
+        path.join(packageTarget, 'dist'),
+        {
+          recursive: true,
+        },
+      ),
+    );
+  }
+  for (const [file, contents] of Object.entries(generation.extraFiles ?? {})) {
+    tasks.push(
+      writeFile(path.join(target, file), contents, {
+        encoding: 'utf8',
+        flag: 'wx',
+      }),
+    );
+  }
+  await Promise.all(tasks);
+}
+
 /**
- * Refresh the generated SDK package without trusting anything already present
- * in the App checkout. The package is deliberately outside the App dependency
- * graph: Deno resolves it through the platform-owned import map generated next
- * to the package.
+ * Refresh one generated SDK without trusting anything already present in the
+ * source checkout. SDK packages stay outside the authored dependency graph and
+ * resolve through the platform-owned import map generated beside them.
  */
-export async function materializeAppHatchSdk(root: string): Promise<void> {
-  await assertSdkBuildExists();
+async function materializeHatchSdk(
+  root: string,
+  generation: HatchSdkGeneration,
+): Promise<void> {
+  await assertSdkBuildExists(generation);
   const agentWorktree = isInside(AGENTS_DIR, path.resolve(root));
   const destination = path.join(root, '.hatch');
-  const rootIdentity = await trustedDirectoryIdentity(root, 'App source root');
+  const rootIdentity = await trustedDirectoryIdentity(
+    root,
+    generation.sourceRootLabel,
+  );
   await assertCanonicalManagedDirectoryName(rootIdentity.realPath);
   await ensureTrustedStagingRoot();
   const operation = await mkdtemp(
@@ -438,31 +552,9 @@ export async function materializeAppHatchSdk(root: string): Promise<void> {
   );
   const temporary = path.join(operation, 'next');
   const backup = path.join(operation, 'previous');
-  const temporaryPackage = path.join(temporary, 'sdk', '@hatch', 'data');
   let preserveBackup = false;
   try {
-    await mkdir(temporaryPackage, { recursive: true });
-    await Promise.all([
-      cp(
-        path.join(HATCH_DATA_SOURCE_DIR, 'package.json'),
-        path.join(temporaryPackage, 'package.json'),
-      ),
-      cp(
-        path.join(HATCH_DATA_SOURCE_DIR, 'dist'),
-        path.join(temporaryPackage, 'dist'),
-        { recursive: true },
-      ),
-      writeFile(
-        path.join(temporary, 'import-map.json'),
-        `${JSON.stringify({ imports: HATCH_SDK_IMPORTS }, null, 2)}\n`,
-        { encoding: 'utf8', flag: 'wx' },
-      ),
-      writeFile(
-        path.join(temporary, 'buf.gen.yaml'),
-        PLATFORM_APP_BUF_GEN_YAML,
-        { encoding: 'utf8', flag: 'wx' },
-      ),
-    ]);
+    await stageSdkGeneration(temporary, generation);
     // Normalize every staged entry before it can become visible. Agent
     // worktrees receive these bytes through the sandbox-UID helper below;
     // non-Agent build roots make the installed generation read-only.
@@ -489,29 +581,41 @@ export async function materializeAppHatchSdk(root: string): Promise<void> {
 
     // Replace the platform-owned directory as one unit so the SDK and its
     // import map always move to the same generation. Staging and rollback stay
-    // outside the Agent-writable App root. Revalidate the complete root path at
+    // outside the Agent-writable source root. Revalidate the complete root path at
     // the replacement boundary; rename moves the `.hatch` entry itself and
     // never traverses a symlink stored at that entry.
-    await assertUnchangedDirectory(root, rootIdentity, 'App source root');
+    await assertUnchangedDirectory(
+      root,
+      rootIdentity,
+      generation.sourceRootLabel,
+    );
     const hadDestination = await assertReplaceableManagedDirectory(destination);
     if (hadDestination) {
       await chmod(destination, 0o755);
       await rename(destination, backup);
     }
     try {
-      await assertUnchangedDirectory(root, rootIdentity, 'App source root');
+      await assertUnchangedDirectory(
+        root,
+        rootIdentity,
+        generation.sourceRootLabel,
+      );
       await rename(temporary, destination);
       await makePlatformReadOnly(destination);
     } catch (error) {
       if (hadDestination) {
         try {
-          await assertUnchangedDirectory(root, rootIdentity, 'App source root');
+          await assertUnchangedDirectory(
+            root,
+            rootIdentity,
+            generation.sourceRootLabel,
+          );
           await rename(backup, destination);
         } catch (restoreError) {
           preserveBackup = true;
           throw new AggregateError(
             [error, restoreError],
-            `Cannot install the platform-owned @hatch/data SDK. The previous generated directory remains in protected staging at ${backup}.`,
+            `Cannot install the platform-owned ${generation.label} SDK. The previous generated directory remains in protected staging at ${backup}.`,
           );
         }
       }
@@ -526,13 +630,27 @@ export async function materializeAppHatchSdk(root: string): Promise<void> {
   }
 }
 
+export function materializeAppHatchSdk(root: string): Promise<void> {
+  return materializeHatchSdk(root, APP_HATCH_SDK_GENERATION);
+}
+
+export function materializeWorkflowHatchSdk(root: string): Promise<void> {
+  return materializeHatchSdk(root, WORKFLOW_HATCH_SDK_GENERATION);
+}
+
+const COMMON_HATCH_SDK_EXCLUDES = [
+  '/.hatch/',
+  '/.hatch-install-*/',
+  '/.hatch-backup-*/',
+  '/node_modules/',
+] as const;
+
 export const appHatchSdkMaterializer = {
-  gitExcludePatterns: [
-    '/.hatch/',
-    '/.hatch-install-*/',
-    '/.hatch-backup-*/',
-    '/node_modules/',
-    '/gen/',
-  ],
+  gitExcludePatterns: [...COMMON_HATCH_SDK_EXCLUDES, '/gen/'],
   materialize: materializeAppHatchSdk,
+} satisfies WorktreeMaterializer;
+
+export const workflowHatchSdkMaterializer = {
+  gitExcludePatterns: COMMON_HATCH_SDK_EXCLUDES,
+  materialize: materializeWorkflowHatchSdk,
 } satisfies WorktreeMaterializer;

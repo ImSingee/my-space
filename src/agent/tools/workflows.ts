@@ -5,6 +5,7 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import { workflowHatchSdkMaterializer } from '../hatch-sdk';
 import {
   assertWorktreeAvailable,
   bundleWorktreeForDeploy,
@@ -14,13 +15,39 @@ import {
 } from '../local-sources';
 import type { PlatformClient } from '../platform-client';
 import { writeScaffoldFiles } from '../scaffold-files';
+import {
+  materializeWorktree,
+  WorktreeMaterializationError,
+} from '../worktree-materializer';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function sdkPreparationFailure(context: string, error: unknown): Error {
+  const stageError =
+    error instanceof WorktreeMaterializationError && error.cause !== undefined
+      ? error.cause
+      : error;
+  return new Error(
+    `${context}, but Workflow preparation failed during SDK materialization: ` +
+      errorMessage(stageError),
+  );
+}
 
 export function createWorkflowTools(options: {
   sessionId?: string;
   platform: PlatformClient;
+  /** Test seam for platform-owned SDK materialization. */
+  materializeSdk?: (root: string) => Promise<void>;
 }): AgentTool[] {
   const { platform } = options;
+  const sdkMaterializer = {
+    gitExcludePatterns: workflowHatchSdkMaterializer.gitExcludePatterns,
+    materialize:
+      options.materializeSdk ?? workflowHatchSdkMaterializer.materialize,
+  };
 
   const listWorkflowsTool = tool({
     name: 'list_workflows',
@@ -133,15 +160,19 @@ export function createWorkflowTools(options: {
         sessionId,
         async () => {
           const source = await platform.getWorkflowSource(params.id);
-          const checkout = await checkoutFromBundle(
-            sessionId,
-            'workflow',
-            source,
-            {
+          let checkout: Awaited<ReturnType<typeof checkoutFromBundle>>;
+          try {
+            checkout = await checkoutFromBundle(sessionId, 'workflow', source, {
               targetPath: params.target_path,
               force: params.force ?? false,
-            },
-          );
+              materializer: sdkMaterializer,
+            });
+          } catch (error) {
+            if (error instanceof WorktreeMaterializationError) {
+              throw sdkPreparationFailure(`Checked out "${source.id}"`, error);
+            }
+            throw error;
+          }
           const lines = [
             checkout.replacedExisting
               ? `Replaced existing checkout for "${params.id}" at ` +
@@ -173,8 +204,9 @@ export function createWorkflowTools(options: {
     label: 'Create workflow',
     description:
       "Scaffold a new workflow from the platform template in this chat's " +
-      'worktree (manifest, a `workflow.ts` defining a zod input + steps, and ' +
-      'the @hatch/workflow SDK). Workflows run periodic/repetitive tasks; they ' +
+      'worktree (manifest and a `workflow.ts` defining a zod input + steps). ' +
+      'The platform-owned @hatch/workflow SDK is generated before returning. ' +
+      'Workflows run periodic/repetitive tasks; they ' +
       'have no custom UI/API, only manual/cron/webhook triggers.',
     executionMode: 'sequential',
     parameters: Type.Object({
@@ -224,17 +256,25 @@ export function createWorkflowTools(options: {
             (root) => writeScaffoldFiles(root, res.files),
             targetPath,
           );
+          const context = `Created workflow "${res.id}" at ${checkout.absolutePath}`;
+          try {
+            await materializeWorktree(checkout.absolutePath, sdkMaterializer);
+          } catch (error) {
+            throw sdkPreparationFailure(context, error);
+          }
           return text(
             `Created workflow "${res.id}". Source is at ` +
               `${checkout.absolutePath}.\n` +
               'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
               'and manifest.json (triggers), commit with git, then call ' +
-              'deploy_workflow. Do not edit hatch/ (the platform SDK).',
+              'deploy_workflow. The generated .hatch/ directory is platform-owned; ' +
+              'do not edit or commit it.',
             {
               id: res.id,
               name: res.name,
               path: checkout.path,
               absolutePath: checkout.absolutePath,
+              preparation: 'ready',
             },
           );
         },

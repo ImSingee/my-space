@@ -2,6 +2,10 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+  hatchImportMapPath,
+  materializeWorkflowHatchSdk,
+} from '~agent/hatch-sdk';
 import { WORKFLOW_BUILD_WORK_DIR } from '~agent/paths';
 import { validateDenoDependencySource } from '../deno-dependencies';
 import { run } from '../subprocess';
@@ -86,13 +90,29 @@ export async function buildWorkflow(
   await fs.mkdir(path.dirname(tempSrc), { recursive: true });
   await fs.cp(originalSrc, tempSrc, {
     recursive: true,
-    filter: (s) => path.basename(s) !== '.git',
+    // Reproduce dependencies from committed metadata and replace generated
+    // roots below. Never trust an SDK or node_modules supplied by source.
+    filter: (source) => {
+      const relative = path
+        .relative(originalSrc, source)
+        .split(path.sep)
+        .join('/');
+      const rootEntry = relative.split('/', 1)[0]?.toLowerCase();
+      return !['.git', '.hatch', 'node_modules'].includes(rootEntry);
+    },
   });
 
   try {
     const manifest = await readManifest(tempSrc);
 
     await validateDenoDependencySource(tempSrc, 'workflow');
+
+    if (await pathExists(path.join(tempSrc, 'hatch', 'workflow.ts'))) {
+      throw new Error(
+        'Workflow source contains the retired hatch/workflow.ts SDK. Remove ' +
+          'the source-owned SDK and use the platform-generated .hatch SDK.',
+      );
+    }
 
     const entry = path.join(tempSrc, manifest.entry);
     if (!(await pathExists(entry))) {
@@ -102,15 +122,10 @@ export async function buildWorkflow(
     await fs.rm(out, { recursive: true, force: true });
     await fs.mkdir(out, { recursive: true });
 
-    // Generate the platform-owned SDK import map and runner wrapper so users
-    // keep the stable @hatch/workflow import without declaring the SDK as an npm
-    // dependency or maintaining a deno.json import map.
-    const importMap = path.join(tempSrc, '__hatch_import_map.json');
-    await fs.writeFile(
-      importMap,
-      JSON.stringify({ imports: { '@hatch/workflow': './hatch/workflow.ts' } }),
-      'utf8',
-    );
+    // Materialize the authoritative SDK and generate only the per-build runner
+    // wrapper. User source keeps the stable @hatch/workflow import without
+    // owning the SDK implementation or its import map.
+    await materializeWorkflowHatchSdk(tempSrc);
     const entryImport = `./${manifest.entry.replace(/\\/g, '/')}`;
     const wrapper = path.join(tempSrc, '__hatch_main.ts');
     await fs.writeFile(
@@ -160,7 +175,7 @@ export async function buildWorkflow(
       '--lock=deno.lock',
       '--frozen',
       '--import-map',
-      importMap,
+      hatchImportMapPath(tempSrc),
       '-o',
       bundlePath,
       wrapper,

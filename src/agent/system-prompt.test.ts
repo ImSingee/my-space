@@ -70,6 +70,8 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('Hatch has two kinds of buildable things');
     expect(prompt).toContain('building-workflows');
     expect(prompt).toContain('# Workflow contract');
+    expect(prompt).toContain('`--import-map=.hatch/import-map.json`');
+    expect(prompt).toContain('source-owned `hatch/workflow.ts` is unsupported');
     expect(prompt).not.toContain(
       'Workflow capabilities are temporarily unavailable',
     );

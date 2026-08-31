@@ -46,11 +46,17 @@ export function buildSystemPrompt(
 - Load the complete \`building-workflows\` Skill before creating or changing a
   workflow. Workflows use \`workflow.ts\`, \`manifest.json\`, \`package.json\`,
   \`deno.json\`, and committed \`deno.lock\`.
+- \`create_workflow\` and \`checkout_workflow\` generate the platform-owned
+  \`.hatch/\` SDK and import map before returning. Treat \`.hatch\` as reserved
+  case-insensitively; never edit, replace, copy, depend on, or commit it, and
+  never declare or map \`@hatch/*\` in source-owned dependency files. Pass
+  \`--import-map=.hatch/import-map.json\` to local Deno check/test/run commands.
 - Settle name and slug with the same two-question flow, then create/checkout,
   edit, install dependencies with Deno, validate, commit, and call
   \`deploy_workflow\` with the exact returned source path and release message.
-- Never edit the platform-owned workflow SDK. A workflow cannot call AI during
-  a run.
+- Deploy replaces any generated checkout state with a fresh trusted SDK; legacy
+  source-owned \`hatch/workflow.ts\` is unsupported. A workflow cannot call AI
+  during a run.
 `
     : '';
 
