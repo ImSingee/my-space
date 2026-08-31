@@ -66,7 +66,9 @@ export function appCompatibility(
     version: resolved,
     latestVersion: LATEST_APP_COMPATIBILITY_VERSION,
     minimumSupportedVersion: MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
-    isSupported: resolved >= MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+    isSupported:
+      resolved >= MIN_SUPPORTED_APP_COMPATIBILITY_VERSION &&
+      resolved <= LATEST_APP_COMPATIBILITY_VERSION,
     isLatest: resolved === LATEST_APP_COMPATIBILITY_VERSION,
   };
 }
@@ -76,3 +78,31 @@ export const APP_COMPATIBILITY_UPDATE_MESSAGE =
 
 export const APP_COMPATIBILITY_ROLLBACK_MESSAGE =
   'This deployment is below the minimum supported compatibility version. Use Agent to restore it, then update and redeploy the App.';
+
+/** Actionable runtime guidance for either side of the supported range. */
+export function appCompatibilityRuntimeMessage(
+  compatibility: AppCompatibility | null | undefined,
+): string {
+  if (compatibility && compatibility.version > compatibility.latestVersion) {
+    return (
+      `This App cannot run because deployment compatibility v${compatibility.version} ` +
+      `is newer than this platform's latest supported v${compatibility.latestVersion}. ` +
+      'Update the platform before running it.'
+    );
+  }
+  return APP_COMPATIBILITY_UPDATE_MESSAGE;
+}
+
+/** Recovery guidance for an ordinary rollback outside the supported range. */
+export function appCompatibilityRollbackMessage(
+  compatibility: AppCompatibility,
+): string {
+  if (compatibility.version > compatibility.latestVersion) {
+    return (
+      `This deployment uses compatibility v${compatibility.version}, newer than ` +
+      `this platform's latest supported v${compatibility.latestVersion}. Update ` +
+      'the platform before restoring it.'
+    );
+  }
+  return APP_COMPATIBILITY_ROLLBACK_MESSAGE;
+}

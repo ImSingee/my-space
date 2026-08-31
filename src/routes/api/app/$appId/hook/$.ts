@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import {
-  APP_COMPATIBILITY_UPDATE_MESSAGE,
   appCompatibility,
+  appCompatibilityRuntimeMessage,
 } from '~/app-compatibility';
 import type { NormalizedManifest } from '~server/apps/manifest';
 
@@ -71,7 +71,9 @@ export async function handle({
 
   if (auth === 'none') {
     if (!compatibility?.isSupported) {
-      return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
+      return new Response(appCompatibilityRuntimeMessage(compatibility), {
+        status: 503,
+      });
     }
     // Unauthenticated passthrough. The app self-secures; proxyAppRequest still
     // strips platform headers (x-hatch-*) so a caller can't forge a signature,
@@ -97,7 +99,9 @@ export async function handle({
     return new Response('Forbidden', { status: 403 });
   }
   if (!compatibility?.isSupported) {
-    return new Response(APP_COMPATIBILITY_UPDATE_MESSAGE, { status: 503 });
+    return new Response(appCompatibilityRuntimeMessage(compatibility), {
+      status: 503,
+    });
   }
 
   try {

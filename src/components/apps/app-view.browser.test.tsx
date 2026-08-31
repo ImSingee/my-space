@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
+import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
 import type { AppDetail } from '~server/apps';
 import { appTheme } from '~/ui/theme';
 
@@ -164,6 +165,28 @@ test('replaces an unsupported frontend with an Agent update state', async () => 
   expect(screen.container.querySelector('iframe')).toBeNull();
   await expect
     .element(screen.getByRole('link', { name: 'Open Agent' }))
+    .toBeVisible();
+});
+
+test('directs a newer frontend deployment to a platform update', async () => {
+  mocks.app = app({
+    compatibility: {
+      version: LATEST_APP_COMPATIBILITY_VERSION + 1,
+      latestVersion: LATEST_APP_COMPATIBILITY_VERSION,
+      minimumSupportedVersion: 1,
+      isSupported: false,
+      isLatest: false,
+    },
+  });
+
+  const screen = await renderAppView();
+
+  expect(screen.container.querySelector('iframe')).toBeNull();
+  await expect
+    .element(screen.getByText('Platform update required'))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('link', { name: 'Manage app' }))
     .toBeVisible();
 });
 

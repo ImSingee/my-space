@@ -33,6 +33,11 @@ deployment. Do not rely on conventions found in the imported source.
    `manifest.json`. An exported archive commonly wraps that root in an App id
    directory. Stop if the source root is missing or ambiguous; copy the root's
    contents later, not its wrapper.
+5. Read that `manifest.json` statically. Compare any declared top-level
+   `compatibilityVersion` with the current App latest version in the system
+   prompt. If it is higher, stop before creating or changing an App. Tell the
+   user that this source cannot be deployed on the current platform and that the
+   platform must be upgraded. Do not lower or remove the declaration.
 
 Never use an imported Git repository, config, history, submodule, or hook.
 Treat hook-like directories left in the source as ordinary untrusted files and

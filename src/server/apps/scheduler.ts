@@ -1,7 +1,7 @@
 /** Server-only: cron scheduler that triggers app backends on schedule. */
 import {
-  APP_COMPATIBILITY_UPDATE_MESSAGE,
   appCompatibility,
+  appCompatibilityRuntimeMessage,
 } from '~/app-compatibility';
 import { db, schema } from '~/db';
 import { createCronScheduler } from '~server/cron-scheduler';
@@ -111,7 +111,7 @@ async function cronInvokeContext(appId: string): Promise<{
   if (!deployment) return {};
   const compatibility = appCompatibility(deployment.compatibilityVersion);
   if (!compatibility.isSupported) {
-    throw new AppError(APP_COMPATIBILITY_UPDATE_MESSAGE, 503);
+    throw new AppError(appCompatibilityRuntimeMessage(compatibility), 503);
   }
   const manifest = deployment?.manifestNormalized as NormalizedManifest | null;
   return {

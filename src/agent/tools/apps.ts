@@ -7,6 +7,7 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import type { AppCompatibility } from '~/app-compatibility';
 import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
   AppPreparationError,
@@ -60,6 +61,16 @@ function checkoutLines(id: string, checkout: LocalCheckout): string[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function appCompatibilitySummary(compatibility: AppCompatibility): string {
+  if (compatibility.isLatest) return '';
+  if (compatibility.isSupported) {
+    return ' (update available; read the `app-compatibility` Skill)';
+  }
+  return compatibility.version > compatibility.latestVersion
+    ? ' (runtime disabled; update the platform before running this deployment)'
+    : ' (runtime disabled; read the `app-compatibility` Skill before updating and redeploying)';
 }
 
 function preparationFailure(
@@ -117,11 +128,7 @@ export function createAppTools(options: {
         const caps =
           a.capabilities.length > 0 ? ` — ${a.capabilities.join(', ')}` : '';
         const compatibility = a.compatibility
-          ? ` · compatibility v${a.compatibility.version}${
-              a.compatibility.isLatest
-                ? ''
-                : ' (update available; read the `app-compatibility` Skill)'
-            }`
+          ? ` · compatibility v${a.compatibility.version}${appCompatibilitySummary(a.compatibility)}`
           : '';
         return `- ${a.name} (id: ${a.id}, slug: ${a.slug}) [${a.status}]${version}${compatibility}${caps}`;
       });
@@ -160,7 +167,10 @@ export function createAppTools(options: {
               ? detail.compatibility.isLatest
                 ? ''
                 : ' — read the `app-compatibility` Skill, then redeploy to update'
-              : ' — runtime disabled; read the `app-compatibility` Skill before updating and redeploying')
+              : detail.compatibility.version >
+                  detail.compatibility.latestVersion
+                ? ' — runtime disabled; update the platform before running this deployment'
+                : ' — runtime disabled; read the `app-compatibility` Skill before updating and redeploying')
           : null,
         `Backend: ${
           detail.ops.backend.capable
@@ -531,8 +541,9 @@ export function createAppTools(options: {
       "version's artifact and moves the app repo master branch to its " +
       'deployment tag commit. Pass the version number shown by get_app ' +
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
-      'restored. Agent can restore versions below the platform minimum, but ' +
-      'their runtime stays disabled until the app is updated and redeployed.',
+      "restored. Agent can restore versions outside the platform's supported " +
+      'compatibility range, but their runtime stays disabled until the App or ' +
+      'platform is updated.',
     parameters: Type.Object({
       id: Type.String({
         description: 'App id.',
@@ -555,7 +566,9 @@ export function createAppTools(options: {
             ? 'Warning: the managed Data Table schema was not rolled back and differs from this code version. '
             : '') +
           (!res.compatibility.isSupported
-            ? `Warning: compatibility v${res.compatibility.version} is below the platform minimum v${res.compatibility.minimumSupportedVersion}; read the \`app-compatibility\` Skill. This App cannot run until it is updated and redeployed. `
+            ? res.compatibility.version > res.compatibility.latestVersion
+              ? `Warning: compatibility v${res.compatibility.version} is newer than this platform's latest supported v${res.compatibility.latestVersion}. This App cannot run until the platform is updated. `
+              : `Warning: compatibility v${res.compatibility.version} is below the platform minimum v${res.compatibility.minimumSupportedVersion}; read the \`app-compatibility\` Skill. This App cannot run until it is updated and redeployed. `
             : !res.compatibility.isLatest
               ? `Compatibility v${res.compatibility.version} is older than latest v${res.compatibility.latestVersion}; read the \`app-compatibility\` Skill, then redeploy to update it. `
               : '') +

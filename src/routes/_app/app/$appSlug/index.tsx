@@ -68,6 +68,11 @@ export function AppView() {
       hasFrontend,
       runtimeSupported: app.compatibility?.isSupported ?? false,
     });
+  const platformUpdateRequired = Boolean(
+    isCompatibilityBlocked &&
+    app.compatibility &&
+    app.compatibility.version > app.compatibility.latestVersion,
+  );
   const { updateAvailable } = useAppDeploymentUpdate({
     appId: app.id,
     deploymentRevision: app.deploymentRevision,
@@ -347,14 +352,18 @@ export function AppView() {
             </ThemeIcon>
             <Text fw={600} mt="xs">
               {isCompatibilityBlocked
-                ? 'App update required'
+                ? platformUpdateRequired
+                  ? 'Platform update required'
+                  : 'App update required'
                 : hasLiveDeployment
                   ? 'Backend-only app'
                   : 'Not deployed yet'}
             </Text>
             <Text size="sm" c="dimmed" ta="center">
               {isCompatibilityBlocked
-                ? 'This App cannot run on the current platform. Use Agent to update and redeploy it.'
+                ? platformUpdateRequired
+                  ? 'This App deployment is newer than the current platform. Update the platform before running it.'
+                  : 'This App cannot run on the current platform. Use Agent to update and redeploy it.'
                 : hasLiveDeployment
                   ? 'This app has no frontend — it runs a backend (cron or webhook). Open Manage to inspect its capabilities.'
                   : 'Deploy this app to use it here. You can build and deploy it from the Manage page.'}
@@ -363,14 +372,14 @@ export function AppView() {
               variant="default"
               mt="sm"
               leftSection={
-                isCompatibilityBlocked ? (
+                isCompatibilityBlocked && !platformUpdateRequired ? (
                   <IconRocket size={16} stroke={1.7} />
                 ) : (
                   <IconSettings size={16} stroke={1.7} />
                 )
               }
               renderRoot={(props) =>
-                isCompatibilityBlocked ? (
+                isCompatibilityBlocked && !platformUpdateRequired ? (
                   <Link to="/agent" {...props} />
                 ) : (
                   <Link
@@ -381,7 +390,9 @@ export function AppView() {
                 )
               }
             >
-              {isCompatibilityBlocked ? 'Open Agent' : 'Manage app'}
+              {isCompatibilityBlocked && !platformUpdateRequired
+                ? 'Open Agent'
+                : 'Manage app'}
             </Button>
           </Stack>
         </Box>

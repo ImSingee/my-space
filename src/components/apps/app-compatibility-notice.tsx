@@ -11,6 +11,21 @@ export function AppCompatibilityNotice({
   if (!compatibility || compatibility.isLatest) return null;
 
   if (!compatibility.isSupported) {
+    if (compatibility.version > compatibility.latestVersion) {
+      return (
+        <Alert
+          color="red"
+          variant="light"
+          icon={<IconAlertTriangle size={18} />}
+          title="Platform update required"
+        >
+          <Text size="sm">
+            {`This App uses compatibility v${compatibility.version}, newer than this platform's latest supported v${compatibility.latestVersion}. Its runtime is disabled. Update the platform before running it.`}
+          </Text>
+        </Alert>
+      );
+    }
+
     return (
       <Alert
         color="red"

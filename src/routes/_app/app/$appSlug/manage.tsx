@@ -429,7 +429,7 @@ function SlugField({
             </Tooltip>
           ) : (
             <Tooltip
-              label="Update and redeploy this App before opening it"
+              label="Resolve this App deployment compatibility before opening it"
               withArrow
               position="top"
             >

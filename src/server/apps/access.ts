@@ -69,8 +69,8 @@ export async function normalizedManifestFor(
  * isn't servable.
  *
  * Returns null when the app doesn't exist, is archived, has never been deployed
- * (no `currentDeploymentId`), lacks the requested capability, or is below the
- * runtime compatibility minimum — so retired or unusable apps cannot be
+ * (no `currentDeploymentId`), lacks the requested capability, or is outside the
+ * supported runtime compatibility range — so retired or unusable apps cannot be
  * reached through stale URLs and leftover files. `building` (a redeploy of an
  * already-live app) is allowed because the previous build keeps serving until
  * the swap.

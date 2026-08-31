@@ -105,10 +105,18 @@ export function DeploymentHistory({ appId }: { appId: string }) {
           </Badge>
         )
       }
-      renderRollbackAction={(deployment, defaultAction) =>
-        requiresAgentRollback(deployment) ? (
+      renderRollbackAction={(deployment, defaultAction) => {
+        if (!requiresAgentRollback(deployment)) return defaultAction;
+        const requiresNewerPlatform =
+          deployment.compatibility.version >
+          deployment.compatibility.latestVersion;
+        return (
           <Tooltip
-            label="Only Agent can restore a deployment below the minimum supported compatibility version"
+            label={
+              requiresNewerPlatform
+                ? 'Only Agent can restore a deployment newer than this platform; its runtime stays disabled until the platform is updated'
+                : 'Only Agent can restore a deployment below the minimum supported compatibility version'
+            }
             withArrow
           >
             <Button
@@ -120,7 +128,9 @@ export function DeploymentHistory({ appId }: { appId: string }) {
                 <Link
                   to="/agent"
                   search={{
-                    prompt: `Restore App ${appId} to v${deployment.version}, then update and redeploy it for the latest platform compatibility.`,
+                    prompt: requiresNewerPlatform
+                      ? `Restore App ${appId} to v${deployment.version}. Its compatibility is newer than this platform, so keep its runtime disabled until the platform is updated.`
+                      : `Restore App ${appId} to v${deployment.version}, then update and redeploy it for the latest platform compatibility.`,
                   }}
                   {...props}
                 />
@@ -129,10 +139,8 @@ export function DeploymentHistory({ appId }: { appId: string }) {
               Use Agent
             </Button>
           </Tooltip>
-        ) : (
-          defaultAction
-        )
-      }
+        );
+      }}
       renderArtifact={(deployment) =>
         deployment.hasArtifact ? (
           <Tooltip label="Download artifact (.tar.gz)" withArrow position="top">

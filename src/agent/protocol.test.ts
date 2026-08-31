@@ -80,8 +80,8 @@ describe('Workflow creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v15 for generated Workflow ids and slug create payloads', () => {
-    expect(PROTOCOL_VERSION).toBe(15);
+  it('uses protocol v16 for Workflow identity and App compatibility semantics', () => {
+    expect(PROTOCOL_VERSION).toBe(16);
   });
 
   it('parses runner.hello', () => {

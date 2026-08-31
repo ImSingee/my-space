@@ -35,7 +35,7 @@ describe('app rollback notifications', () => {
 });
 
 describe('requiresAgentRollback', () => {
-  it('routes rollback below the minimum through Agent', () => {
+  it('routes rollback outside the supported range through Agent', () => {
     expect(
       requiresAgentRollback({
         canRollback: true,
