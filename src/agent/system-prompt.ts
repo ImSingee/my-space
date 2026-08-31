@@ -4,6 +4,10 @@ import {
   formatSkillsForSystemPrompt,
   type Skill,
 } from '@earendil-works/pi-agent-core';
+import {
+  LATEST_APP_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+} from '~/app-compatibility';
 
 const WORKFLOW_SKILL_NAMES = new Set([
   'building-workflows',
@@ -113,10 +117,9 @@ buf.gen.yaml
 gen/                    # generated RPC code
 \`\`\`
 
+- Current App compatibility: minimum supported v${MIN_SUPPORTED_APP_COMPATIBILITY_VERSION};
+  latest v${LATEST_APP_COMPATIBILITY_VERSION}.
 - Load the complete \`building-apps\` Skill before creating or modifying an App.
-- When \`list_apps\` or \`get_app\` reports an older compatibility version, or
-  the user asks about compatibility-version differences, load the complete
-  \`app-compatibility\` Skill before explaining or redeploying the App.
 - \`create_app\` and \`checkout_app\` prepare npm dependencies, RPC codegen, and
   the platform SDK before returning. Treat the \`.hatch\` path segment as
   reserved case-insensitively; never create spelling variants such as
@@ -240,7 +243,7 @@ ${workflowContract}
   const skillsPrompt = formatSkillsForSystemPrompt(visibleSkills);
   if (!skillsPrompt) return basePrompt;
   const skillsGuidance = options.workflowBetaEnabled
-    ? 'Before creating or modifying an app or workflow, read the full matching Skill file with `read_file` before calling app/workflow platform tools or editing workspace files. Before explaining or updating an App whose compatibility is older than latest, also read the full `app-compatibility` Skill. Before importing an uploaded source ZIP, read both full matching Skills before downloading or extracting the attachment: `importing-apps` plus `building-apps` for an app, or `importing-workflows` plus `building-workflows` for a workflow. Read only the capability references linked by the selected Skill that apply to the task.'
-    : 'Before creating or modifying an app, read the full `building-apps` Skill with `read_file` before calling App platform tools or editing workspace files. Before explaining or updating an App whose compatibility is older than latest, also read the full `app-compatibility` Skill. Before importing an uploaded App source ZIP, read both `importing-apps` and `building-apps` before downloading or extracting the attachment. Read only the capability references linked by the selected Skill that apply to the task.';
+    ? 'Before creating or modifying an app or workflow, read the full matching Skill file with `read_file` before calling app/workflow platform tools or editing workspace files. Before importing an uploaded source ZIP, read both full matching Skills before downloading or extracting the attachment: `importing-apps` plus `building-apps` for an app, or `importing-workflows` plus `building-workflows` for a workflow. Read only the capability references linked by the selected Skill that apply to the task.'
+    : 'Before creating or modifying an app, read the full `building-apps` Skill with `read_file` before calling App platform tools or editing workspace files. Before importing an uploaded App source ZIP, read both `importing-apps` and `building-apps` before downloading or extracting the attachment. Read only the capability references linked by the selected Skill that apply to the task.';
   return `${basePrompt}\n\n# Skills\n${skillsGuidance}\n\n${skillsPrompt}`;
 }
