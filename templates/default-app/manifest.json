@@ -2,7 +2,6 @@
   "id": "__APP_ID__",
   "name": "__APP_NAME__",
   "description": "__APP_DESCRIPTION__",
-  "version": 1,
   "compatibilityVersion": 2,
   "capabilities": {
     "database": false,

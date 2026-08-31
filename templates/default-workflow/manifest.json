@@ -2,7 +2,6 @@
   "id": "__WORKFLOW_ID__",
   "name": "__WORKFLOW_NAME__",
   "description": "__WORKFLOW_DESCRIPTION__",
-  "version": 1,
   "entry": "workflow.ts",
   "network": [],
   "triggers": {

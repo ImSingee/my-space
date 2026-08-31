@@ -15,9 +15,9 @@ describe('default workflow template', () => {
       .replaceAll('__WORKFLOW_ID__', 'demo')
       .replaceAll('__WORKFLOW_NAME__', 'Demo')
       .replaceAll('__WORKFLOW_DESCRIPTION__', 'Demo workflow');
+    const source = JSON.parse(rendered) as Record<string, unknown>;
 
-    expect(parseSourceWorkflowManifest(JSON.parse(rendered)).network).toEqual(
-      [],
-    );
+    expect(source).not.toHaveProperty('version');
+    expect(parseSourceWorkflowManifest(source).network).toEqual([]);
   });
 });

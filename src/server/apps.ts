@@ -10,11 +10,7 @@ import { db } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { normalizedManifestFor } from './apps/access';
-import {
-  projectAppCapabilities,
-  type NormalizedManifest,
-  type WebhookAuth,
-} from './apps/manifest';
+import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
 import type { AppCronRunView } from './apps/scheduler';
 import { authMiddleware } from './auth';
 import { AppError } from './errors';
@@ -63,7 +59,6 @@ export const listApps = createServerFn({ method: 'GET' })
     });
     return rows.map((r) => ({
       ...r,
-      capabilities: projectAppCapabilities(r.capabilities),
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     }));
@@ -121,7 +116,6 @@ export const getAppBySlug = createServerFn({ method: 'GET' })
       : null;
     return {
       ...detail,
-      capabilities: projectAppCapabilities(detail.capabilities),
       deploymentRevision: currentDeploymentId,
       compatibility: deployment
         ? appCompatibility(deployment.compatibilityVersion)

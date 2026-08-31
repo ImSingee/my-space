@@ -82,7 +82,8 @@ export const sourceWorkflowManifestSchema = z.object({
     ),
   name: z.string().min(1),
   description: z.string().default(''),
-  version: z.number().int().min(1).default(1),
+  /** Removed; retained only so legacy manifests remain parseable. */
+  version: z.unknown().optional(),
   /** Entry module exporting `defineWorkflow(...)` as default. */
   entry: sourceRelativePath.default('workflow.ts'),
   /** Missing only for legacy deployments, which retain unrestricted access. */
@@ -98,7 +99,6 @@ export type NormalizedWorkflowManifest = {
   id: string;
   name: string;
   description: string;
-  version: number;
   entry: string;
   /** Missing only for legacy deployments, which retain unrestricted access. */
   network?: NetworkPolicy;
@@ -149,7 +149,6 @@ export function normalizeWorkflowManifest(
     id: src.id,
     name: src.name,
     description: src.description,
-    version: src.version,
     entry: src.entry,
     ...(src.network === undefined ? {} : { network: src.network }),
     triggers: {

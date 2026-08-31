@@ -31,7 +31,6 @@ function manifest(frontend: boolean): NormalizedManifest {
     id: 'immutable-app-id',
     name: 'Example App',
     description: '',
-    version: 1,
     capabilities: {
       database: false,
       frontend,

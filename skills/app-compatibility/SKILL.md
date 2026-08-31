@@ -5,13 +5,15 @@ description: Explain Hatch App deployment compatibility versions and guide handl
 
 # App Compatibility
 
-Use `get_app` as the source of truth for the live deployment's compatibility.
-
 ## Version meanings
 
-- Deployment version, App manifest `version`, and manifest
-  `compatibilityVersion` are independent values.
-- App source declares the target compatibility in `manifest.json`.
+- Deployment version and manifest `compatibilityVersion` are independent values:
+  the former is the deployed App version, which automatically increments with
+  each deployment; the latter is the compatibility version set manually in
+  `manifest.json`.
+- Read the source compatibility version from `manifest.json`, defaulting to `2`
+  when it is omitted; use `get_app` as the source of truth for the live
+  deployment's compatibility version.
 - Latest compatibility version: `2`.
 - Minimum supported compatibility version: `1`.
 
@@ -49,6 +51,10 @@ above.
 
   Preserve an existing declaration during ordinary edits and choose a newer
   value only after applying that version's guidance.
+
+- Historical fields in `manifest.json` will no longer be accepted. Remove the
+  top-level `version` and `userscripts` fields, and remove
+  `capabilities.userscripts`, before targeting a newer compatibility version.
 
 - `backend.network` will become required. To migrate, add a hostname/IP
   allowlist, `[]`, or `"unrestricted"`, and bind the backend with
