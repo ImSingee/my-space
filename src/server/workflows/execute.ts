@@ -12,6 +12,10 @@ import type {
   WorkflowRunStepStatus,
   WorkflowTrigger,
 } from '~/db/schema';
+import {
+  assertSupportedWorkflowCompatibility,
+  WorkflowDeploymentCompatibilityError,
+} from './compatibility';
 import { workflowNetworkPolicyFromManifest } from './manifest';
 import { buildWorkflowDenoArgs } from './runtime-permissions';
 import { workflowSandboxEnv } from './sandbox-env';
@@ -70,7 +74,13 @@ export async function startWorkflowRun(
   const deployment = await db.query.workflowDeployments.findFirst({
     where: { id: workflow.currentDeploymentId as string },
   });
-  const version = deployment?.version ?? null;
+  if (!deployment) {
+    throw new WorkflowDeploymentCompatibilityError(
+      'The active Workflow deployment record is unavailable.',
+    );
+  }
+  assertSupportedWorkflowCompatibility(deployment.compatibilityVersion);
+  const version = deployment.version;
 
   const validation = validateWorkflowInput(
     workflow.inputSchema,

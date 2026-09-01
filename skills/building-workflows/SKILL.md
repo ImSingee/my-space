@@ -20,7 +20,7 @@ serving the webhook.
 
 ```
 workflows/<slug>/
-  manifest.json        declares id, name, description, entry, network, triggers
+  manifest.json        declares id, name, compatibilityVersion, entry, network, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
   package.json         npm dependencies (installed only with Deno)
   deno.json            reviewed npm lifecycle-script allowlist
@@ -153,6 +153,7 @@ time.
   "id": "01k43s9az5t2qpy7ejf0hm6vwc",
   "name": "Star digest",
   "description": "Summarize a repo's stars",
+  "compatibilityVersion": 1,
   "entry": "workflow.ts",
   "network": ["api.github.com:443"],
   "triggers": {
@@ -167,6 +168,11 @@ time.
   }
 }
 ```
+
+Every Workflow manifest must explicitly declare `compatibilityVersion`; there
+is no default or legacy fallback. Preserve the existing value during ordinary
+edits. Load the `workflow-compatibility` Skill and apply its version guidance
+before changing the value.
 
 Every authored Workflow must declare `network`. New Workflows start with `[]`,
 which denies all networking. Supply every hostname, wildcard subdomain, IPv4

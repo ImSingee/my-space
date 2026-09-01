@@ -39,6 +39,7 @@ import { Page } from '~components/app-shell/page';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { WorkflowDeploymentHistory } from '~components/workflows/deployment-history';
 import { WorkflowNetworkPermissionsPanel } from '~components/workflows/network-permissions-panel';
+import { WorkflowCompatibilityNotice } from '~components/workflows/workflow-compatibility-notice';
 import { Field } from '~components/system/field';
 import { StatusBadge } from '~components/system/status-badge';
 import { WorkflowTriggersPanel } from '~components/workflows/triggers-panel';
@@ -188,6 +189,8 @@ function WorkflowManagePage() {
       }
     >
       <Stack gap="xl">
+        <WorkflowCompatibilityNotice compatibility={workflow.compatibility} />
+
         <Box component="section">
           <Text fw={600} fz="lg" mb="md">
             Overview

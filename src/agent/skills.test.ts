@@ -45,7 +45,11 @@ describe('Agent skills', () => {
       ]),
     );
     expect(names).not.toEqual(
-      expect.arrayContaining(['building-workflows', 'importing-workflows']),
+      expect.arrayContaining([
+        'building-workflows',
+        'importing-workflows',
+        'workflow-compatibility',
+      ]),
     );
   });
 
@@ -57,7 +61,11 @@ describe('Agent skills', () => {
     });
 
     expect(skills.map((skill) => skill.name)).toEqual(
-      expect.arrayContaining(['building-workflows', 'importing-workflows']),
+      expect.arrayContaining([
+        'building-workflows',
+        'importing-workflows',
+        'workflow-compatibility',
+      ]),
     );
   });
 

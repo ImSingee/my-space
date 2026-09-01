@@ -7,7 +7,6 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
-import type { AppCompatibility } from '~/app-compatibility';
 import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
   AppPreparationError,
@@ -35,8 +34,18 @@ import {
   WorktreeMaterializationError,
 } from '../worktree-materializer';
 import { resolveAgentWorkspacePath } from '../workspace-paths';
+import {
+  compatibilityDetailGuidance,
+  compatibilityListSummary,
+  compatibilityRollbackWarning,
+} from './compatibility';
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
+
+const APP_COMPATIBILITY_COPY = {
+  resourceName: 'App',
+  skillName: 'app-compatibility',
+} as const;
 
 function checkoutLines(id: string, checkout: LocalCheckout): string[] {
   return [
@@ -61,16 +70,6 @@ function checkoutLines(id: string, checkout: LocalCheckout): string[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function appCompatibilitySummary(compatibility: AppCompatibility): string {
-  if (compatibility.isLatest) return '';
-  if (compatibility.isSupported) {
-    return ' (update available; read the `app-compatibility` Skill)';
-  }
-  return compatibility.version > compatibility.latestVersion
-    ? ' (runtime disabled; update the platform before running this deployment)'
-    : ' (runtime disabled; read the `app-compatibility` Skill before updating and redeploying)';
 }
 
 function preparationFailure(
@@ -128,7 +127,7 @@ export function createAppTools(options: {
         const caps =
           a.capabilities.length > 0 ? ` — ${a.capabilities.join(', ')}` : '';
         const compatibility = a.compatibility
-          ? ` · compatibility v${a.compatibility.version}${appCompatibilitySummary(a.compatibility)}`
+          ? ` · compatibility v${a.compatibility.version}${compatibilityListSummary(a.compatibility, APP_COMPATIBILITY_COPY)}`
           : '';
         return `- ${a.name} (id: ${a.id}, slug: ${a.slug}) [${a.status}]${version}${compatibility}${caps}`;
       });
@@ -163,14 +162,10 @@ export function createAppTools(options: {
         detail.compatibility
           ? `Compatibility: v${detail.compatibility.version} ` +
             `(latest v${detail.compatibility.latestVersion}, minimum v${detail.compatibility.minimumSupportedVersion})` +
-            (detail.compatibility.isSupported
-              ? detail.compatibility.isLatest
-                ? ''
-                : ' — read the `app-compatibility` Skill, then redeploy to update'
-              : detail.compatibility.version >
-                  detail.compatibility.latestVersion
-                ? ' — runtime disabled; update the platform before running this deployment'
-                : ' — runtime disabled; read the `app-compatibility` Skill before updating and redeploying')
+            compatibilityDetailGuidance(
+              detail.compatibility,
+              APP_COMPATIBILITY_COPY,
+            )
           : null,
         `Backend: ${
           detail.ops.backend.capable
@@ -560,18 +555,16 @@ export function createAppTools(options: {
         params.id,
       );
       const res = await platform.rollbackApp(appId, params.version);
+      const compatibilityWarning = compatibilityRollbackWarning(
+        res.compatibility,
+        APP_COMPATIBILITY_COPY,
+      );
       return text(
         `Rolled back "${params.id}" to v${res.version}. ` +
           (res.dataSchemaMismatch
             ? 'Warning: the managed Data Table schema was not rolled back and differs from this code version. '
             : '') +
-          (!res.compatibility.isSupported
-            ? res.compatibility.version > res.compatibility.latestVersion
-              ? `Warning: compatibility v${res.compatibility.version} is newer than this platform's latest supported v${res.compatibility.latestVersion}. This App cannot run until the platform is updated. `
-              : `Warning: compatibility v${res.compatibility.version} is below the platform minimum v${res.compatibility.minimumSupportedVersion}; read the \`app-compatibility\` Skill. This App cannot run until it is updated and redeployed. `
-            : !res.compatibility.isLatest
-              ? `Compatibility v${res.compatibility.version} is older than latest v${res.compatibility.latestVersion}; read the \`app-compatibility\` Skill, then redeploy to update it. `
-              : '') +
+          (compatibilityWarning ? `${compatibilityWarning} ` : '') +
           'Existing Agent worktrees were not changed. Re-run checkout_app with ' +
           'clone: false and the same source_path. It synchronizes only when ' +
           'remote master fast-forwards a clean local master; ahead or diverged ' +

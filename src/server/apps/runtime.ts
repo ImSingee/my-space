@@ -299,16 +299,19 @@ async function buildWorkflowsEnv(
 ): Promise<{ env: string; urls: string[] } | null> {
   const refs = readWorkflowRefs(buildDir);
   if (refs.length === 0) return null;
-  const { getCallableWorkflow } = await import('../workflows/external');
+  const { getWorkflowCallability } = await import('../workflows/external');
   const map: Record<
     string,
     { workflow: string; name: string; url: string; secret: string }
   > = {};
   for (const ref of refs) {
-    const callable = await getCallableWorkflow(ref.workflow);
+    const callability = await getWorkflowCallability(ref.workflow);
     // Skip workflows that became un-callable since deploy (e.g. webhook
-    // disabled); the app handles a missing alias the same as any other error.
-    if (!callable) continue;
+    // disabled). Keep compatibility-blocked targets injected so an attempted
+    // call reaches the Workflow boundary and receives its actionable 503
+    // instead of looking like a missing alias inside the App runtime.
+    if (callability.state === 'unavailable') continue;
+    const callable = callability.workflow;
     map[ref.alias] = {
       workflow: callable.id,
       name: callable.name,

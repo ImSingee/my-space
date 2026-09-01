@@ -557,10 +557,19 @@ async function deployAppInner(
       );
     }
     if (build.normalized.workflows && build.normalized.workflows.length > 0) {
-      const { getCallableWorkflow } = await import('../workflows/external');
+      const { getWorkflowCallability } = await import('../workflows/external');
+      const { workflowCompatibilityRuntimeMessage } =
+        await import('~/workflow-compatibility');
       for (const ref of build.normalized.workflows) {
-        const callable = await getCallableWorkflow(ref.workflow);
-        if (!callable) {
+        const callability = await getWorkflowCallability(ref.workflow);
+        if (callability.state === 'unsupported') {
+          throw new Error(
+            `This app declares a call to workflow "${ref.workflow}" (alias ` +
+              `"${ref.alias}"), but that workflow is not callable. ` +
+              workflowCompatibilityRuntimeMessage(callability.compatibility),
+          );
+        }
+        if (callability.state === 'unavailable') {
           throw new Error(
             `This app declares a call to workflow "${ref.workflow}" (alias ` +
               `"${ref.alias}"), but that workflow is not callable. Deploy the ` +

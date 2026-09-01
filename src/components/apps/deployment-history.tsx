@@ -16,6 +16,7 @@ import {
   DeploymentHistoryView,
   metaItemClass,
 } from '~components/deployments/deployment-history';
+import { requiresAgentRollback } from '~components/deployments/deployment-history-policy';
 import {
   appOpsQueryOptions,
   deploymentBuildLogQueryOptions,
@@ -25,7 +26,6 @@ import {
 import { rollbackAppFn } from '~server/apps';
 import {
   requiresDataSchemaConfirmation,
-  requiresAgentRollback,
   rollbackNotification,
 } from './deployment-history-policy';
 

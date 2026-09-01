@@ -144,9 +144,19 @@ beforeEach(() => {
   mocks.deployWorkflow.mockResolvedValue({
     deploymentId: 'deployment-one',
     version: 1,
+    compatibilityVersion: 1,
     normalized: { id: '01immutableworkflow' },
   });
-  mocks.rollbackWorkflowToVersion.mockResolvedValue({ version: 1 });
+  mocks.rollbackWorkflowToVersion.mockResolvedValue({
+    version: 1,
+    compatibility: {
+      version: 1,
+      latestVersion: 1,
+      minimumSupportedVersion: 1,
+      isSupported: true,
+      isLatest: true,
+    },
+  });
 });
 
 describe('Agent Runner Workflow collection API', () => {
@@ -285,5 +295,43 @@ describe('Agent Runner ID-only Workflow paths', () => {
     expect(res.writeHead).toHaveBeenCalledWith(200, {
       'content-type': 'application/json',
     });
+  });
+
+  it('returns compatibility in deploy and rollback protocol responses', async () => {
+    const deploy = await callRoute(
+      '/internal/api/workflows/01immutableworkflow/deploy',
+      'POST',
+      {
+        message: 'Deploy by id',
+        generation: '2026-09-01T00:00:00.000Z',
+        bundleBase64: Buffer.from('bundle').toString('base64'),
+      },
+    );
+    const rollback = await callRoute(
+      '/internal/api/workflows/01immutableworkflow/rollback',
+      'POST',
+      { version: 1 },
+    );
+
+    expect(deploy.end).toHaveBeenCalledWith(
+      JSON.stringify({
+        deploymentId: 'deployment-one',
+        version: 1,
+        compatibilityVersion: 1,
+        normalized: { id: '01immutableworkflow' },
+      }),
+    );
+    expect(rollback.end).toHaveBeenCalledWith(
+      JSON.stringify({
+        version: 1,
+        compatibility: {
+          version: 1,
+          latestVersion: 1,
+          minimumSupportedVersion: 1,
+          isSupported: true,
+          isLatest: true,
+        },
+      }),
+    );
   });
 });

@@ -110,6 +110,8 @@ export async function handle({
 
   const { startWorkflowRun } = await import('~server/workflows/execute');
   const { AppError } = await import('~server/errors');
+  const { WorkflowDeploymentCompatibilityError } =
+    await import('~server/workflows/compatibility');
   try {
     const result = await startWorkflowRun(workflowId, {
       trigger: 'webhook',
@@ -123,7 +125,10 @@ export async function handle({
     // Structured 4xx errors (e.g. input validation) are written for the
     // caller; anything else is internal detail this unauthenticated-ish
     // endpoint must not echo. Log it server-side instead.
-    if (error instanceof AppError && error.status < 500) {
+    if (
+      error instanceof WorkflowDeploymentCompatibilityError ||
+      (error instanceof AppError && error.status < 500)
+    ) {
       return new Response(error.message, { status: error.status });
     }
     console.error(

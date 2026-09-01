@@ -37,6 +37,16 @@ and deployment. Do not rely on conventions found in the imported source.
    root containing `manifest.json` and the declared workflow entry. Stop if it
    is missing or ambiguous; copy the root's contents later, not an outer wrapper
    directory.
+6. Read that `manifest.json` statically. Require an explicit top-level
+   `compatibilityVersion` that is a positive integer, then compare it with the
+   current Workflow minimum and latest versions in the system prompt. If it is
+   missing, invalid, or outside that inclusive range, stop before creating or
+   changing a Workflow. For a version newer than the platform latest, tell the
+   user that the platform must be upgraded; do not lower or remove the
+   declaration. Otherwise, tell the user that the source must be updated to an
+   explicitly supported contract. Never infer or default a missing value, and
+   do not create or modify a Workflow until the reviewed manifest declares a
+   supported value.
 
 Never use an imported Git repository, config, history, submodule, or hook.
 Treat hook-like directories left in the source as ordinary untrusted files and
@@ -75,7 +85,10 @@ output, credentials, or runtime data.
 
 Update the imported manifest to the newly created workflow id. Compare the
 source with the current scaffold and adapt it as required by
-`building-workflows`, including sources from older or newer platform versions.
+`building-workflows`, including sources from older platform versions.
+Ensure the manifest explicitly declares a compatibility version supported by
+the current platform; never infer or default a missing value. Load the
+`workflow-compatibility` Skill before changing an imported compatibility value.
 Before the first Agent Git command, verify the new repository has no configured
 `core.hooksPath`; do not configure a hook path from imported files.
 

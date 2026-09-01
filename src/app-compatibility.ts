@@ -1,3 +1,13 @@
+import {
+  compatibilityBelowMinimumRollbackMessage,
+  compatibilityRollbackMessage,
+  compatibilityRuntimeMessage,
+  compatibilityUpdateMessage,
+  deploymentCompatibility,
+  type DeploymentCompatibility,
+  validateDeployCompatibilityVersion,
+} from './deployment-compatibility';
+
 /** Compatibility version assigned to deployments recorded before this field existed. */
 export const LEGACY_APP_COMPATIBILITY_VERSION = 1;
 
@@ -20,13 +30,13 @@ export const LATEST_APP_COMPATIBILITY_VERSION = 2;
  */
 export const MIN_SUPPORTED_APP_COMPATIBILITY_VERSION = 1;
 
-export type AppCompatibility = {
-  version: number;
-  latestVersion: number;
-  minimumSupportedVersion: number;
-  isSupported: boolean;
-  isLatest: boolean;
-};
+export type AppCompatibility = DeploymentCompatibility;
+
+const APP_COMPATIBILITY_POLICY = {
+  resourceName: 'App',
+  latestVersion: LATEST_APP_COMPATIBILITY_VERSION,
+  minimumSupportedVersion: MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
+} as const;
 
 /** Resolve legacy deployment rows without mutating or backfilling history. */
 export function resolveAppCompatibilityVersion(
@@ -40,69 +50,35 @@ export function resolveAppDeployCompatibilityVersion(
   version: number | undefined,
 ): number {
   const resolved = version ?? DEFAULT_APP_COMPATIBILITY_VERSION;
-  if (resolved < MIN_SUPPORTED_APP_COMPATIBILITY_VERSION) {
-    throw new Error(
-      `manifest.json compatibilityVersion v${resolved} is below the platform ` +
-        `minimum v${MIN_SUPPORTED_APP_COMPATIBILITY_VERSION}. Update the App ` +
-        'source to a supported compatibility contract before deploying.',
-    );
-  }
-  if (resolved > LATEST_APP_COMPATIBILITY_VERSION) {
-    throw new Error(
-      `manifest.json compatibilityVersion v${resolved} is newer than this ` +
-        `platform's latest supported v${LATEST_APP_COMPATIBILITY_VERSION}. ` +
-        'Deploy this source with a platform version that supports that contract.',
-    );
-  }
-  return resolved;
+  return validateDeployCompatibilityVersion(resolved, APP_COMPATIBILITY_POLICY);
 }
 
 /** Build the stable compatibility read model shared by server and UI code. */
 export function appCompatibility(
   version: number | null | undefined,
 ): AppCompatibility {
-  const resolved = resolveAppCompatibilityVersion(version);
-  return {
-    version: resolved,
-    latestVersion: LATEST_APP_COMPATIBILITY_VERSION,
-    minimumSupportedVersion: MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
-    isSupported:
-      resolved >= MIN_SUPPORTED_APP_COMPATIBILITY_VERSION &&
-      resolved <= LATEST_APP_COMPATIBILITY_VERSION,
-    isLatest: resolved === LATEST_APP_COMPATIBILITY_VERSION,
-  };
+  return deploymentCompatibility(
+    resolveAppCompatibilityVersion(version),
+    APP_COMPATIBILITY_POLICY,
+  );
 }
 
 export const APP_COMPATIBILITY_UPDATE_MESSAGE =
-  'This App cannot run on the current platform compatibility policy. Use Agent to update and redeploy it.';
+  compatibilityUpdateMessage('App');
 
 export const APP_COMPATIBILITY_ROLLBACK_MESSAGE =
-  'This deployment is below the minimum supported compatibility version. Use Agent to restore it, then update and redeploy the App.';
+  compatibilityBelowMinimumRollbackMessage('App');
 
 /** Actionable runtime guidance for either side of the supported range. */
 export function appCompatibilityRuntimeMessage(
   compatibility: AppCompatibility | null | undefined,
 ): string {
-  if (compatibility && compatibility.version > compatibility.latestVersion) {
-    return (
-      `This App cannot run because deployment compatibility v${compatibility.version} ` +
-      `is newer than this platform's latest supported v${compatibility.latestVersion}. ` +
-      'Update the platform before running it.'
-    );
-  }
-  return APP_COMPATIBILITY_UPDATE_MESSAGE;
+  return compatibilityRuntimeMessage('App', compatibility);
 }
 
 /** Recovery guidance for an ordinary rollback outside the supported range. */
 export function appCompatibilityRollbackMessage(
   compatibility: AppCompatibility,
 ): string {
-  if (compatibility.version > compatibility.latestVersion) {
-    return (
-      `This deployment uses compatibility v${compatibility.version}, newer than ` +
-      `this platform's latest supported v${compatibility.latestVersion}. Update ` +
-      'the platform before restoring it.'
-    );
-  }
-  return APP_COMPATIBILITY_ROLLBACK_MESSAGE;
+  return compatibilityRollbackMessage('App', compatibility);
 }

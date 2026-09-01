@@ -25,6 +25,7 @@ async function makeWorkflowSource(options?: {
       JSON.stringify({
         id: 'demo',
         name: 'Demo',
+        compatibilityVersion: 1,
         entry: 'workflow.ts',
         ...(options && Object.hasOwn(options, 'network')
           ? { network: options.network }

@@ -23,8 +23,18 @@ import {
 } from '../worktree-materializer';
 import { resolveAgentWorkspacePath } from '../workspace-paths';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
+import {
+  compatibilityDetailGuidance,
+  compatibilityListSummary,
+  compatibilityRollbackWarning,
+} from './compatibility';
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
+
+const WORKFLOW_COMPATIBILITY_COPY = {
+  resourceName: 'Workflow',
+  skillName: 'workflow-compatibility',
+} as const;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -91,13 +101,16 @@ export function createWorkflowTools(options: {
       const lines = workflows.map((w) => {
         const version =
           w.liveVersion != null ? ` v${w.liveVersion}` : ' (not deployed)';
+        const compatibility = w.compatibility
+          ? ` · compatibility v${w.compatibility.version}${compatibilityListSummary(w.compatibility, WORKFLOW_COMPATIBILITY_COPY)}`
+          : '';
         const triggers = [
           w.cronCount > 0 ? `${w.cronCount} cron` : null,
           w.webhook ? 'webhook' : null,
         ]
           .filter(Boolean)
           .join(', ');
-        return `- ${w.name} (id: ${w.id}, slug: ${w.slug}) [${w.status}]${version}${
+        return `- ${w.name} (id: ${w.id}, slug: ${w.slug}) [${w.status}]${version}${compatibility}${
           triggers ? ` — ${triggers}` : ''
         }`;
       });
@@ -129,6 +142,14 @@ export function createWorkflowTools(options: {
             : ' · not deployed'),
         detail.description ? `Description: ${detail.description}` : null,
         `Workflow URL: /workflow/${detail.slug}`,
+        detail.compatibility
+          ? `Compatibility: v${detail.compatibility.version} ` +
+            `(latest v${detail.compatibility.latestVersion}, minimum v${detail.compatibility.minimumSupportedVersion})` +
+            compatibilityDetailGuidance(
+              detail.compatibility,
+              WORKFLOW_COMPATIBILITY_COPY,
+            )
+          : null,
         `Network: ${formatNetworkAccess(detail.network)}`,
         detail.webhook.enabled
           ? `Webhook: ${detail.webhook.url ?? 'n/a'} [secret set]`
@@ -150,7 +171,18 @@ export function createWorkflowTools(options: {
         'Deployments (newest first):',
         ...detail.deployments
           .slice(0, 10)
-          .map((d) => `  v${d.version} · ${d.message ?? ''} · ${d.createdAt}`),
+          .map(
+            (d) =>
+              `  v${d.version} — ${d.status} · compatibility v${d.compatibility.version}${d.isCurrent ? ' (current)' : ''}${
+                d.canRollback ? ' [rollbackable]' : ''
+              }${
+                !d.compatibility.isSupported
+                  ? ' [Agent restore only; runtime disabled]'
+                  : ''
+              } · ${d.createdAt}${d.message ? ` · ${d.message}` : ''}${
+                d.error ? ` · error: ${d.error}` : ''
+              }`,
+          ),
       ];
       return text(lines.filter((l) => l !== null).join('\n'), detail);
     },
@@ -309,7 +341,8 @@ export function createWorkflowTools(options: {
             `Created workflow "${res.name}" (id: ${res.id}, slug: ` +
               `${res.slug}). Source is at ${checkout.absolutePath}.\n` +
               'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
-              'and manifest.json (network policy + triggers), commit with git, then call ' +
+              'and manifest.json (compatibility version + network policy + triggers), ' +
+              'commit with git, then call ' +
               `deploy_workflow with id "${res.id}" and source_path ` +
               `"${checkout.absolutePath}". The generated .hatch/ directory is platform-owned; ` +
               'do not edit or commit it.',
@@ -335,8 +368,9 @@ export function createWorkflowTools(options: {
       'Bundle the workflow into a single Deno program, capture its input JSON ' +
       'Schema, and deploy it so it can be triggered. Requires package.json, ' +
       'deno.json, and a committed deno.lock; load the building-workflows Skill ' +
-      'to repair dependency configuration errors. Reports the version and ' +
-      'webhook URL (if enabled).',
+      'to repair dependency configuration errors. manifest.json must explicitly ' +
+      'declare a supported compatibilityVersion. Reports the deployment and ' +
+      'compatibility versions plus the webhook URL (if enabled).',
     executionMode: 'sequential',
     parameters: Type.Object({
       id: Type.String({ description: 'Workflow id to deploy.' }),
@@ -373,7 +407,7 @@ export function createWorkflowTools(options: {
             bundleBase64,
           });
           const lines = [
-            `Deployed "${detail.id}" (v${res.version}).`,
+            `Deployed "${detail.id}" (v${res.version}, compatibility v${res.compatibilityVersion}).`,
             res.normalized.triggers.webhook.enabled
               ? `Webhook: ${res.normalized.triggers.webhook.url}`
               : null,
@@ -395,7 +429,9 @@ export function createWorkflowTools(options: {
     label: 'Rollback workflow',
     description:
       'Roll a workflow back to a previous deployment version, restoring that ' +
-      "version's bundled program and source.",
+      "version's bundled program and source. Agent restore remains available " +
+      "outside the platform's supported compatibility range, but that " +
+      'Workflow cannot run until the Workflow or platform is updated.',
     parameters: Type.Object({
       id: Type.String({
         description: 'Workflow id to roll back.',
@@ -405,8 +441,14 @@ export function createWorkflowTools(options: {
     execute: async (_id, params) => {
       requireIdSlug(params.id);
       const res = await platform.rollbackWorkflow(params.id, params.version);
+      const compatibilityWarning = compatibilityRollbackWarning(
+        res.compatibility,
+        WORKFLOW_COMPATIBILITY_COPY,
+      );
       return text(
-        `Rolled "${params.id}" back to v${res.version}. Existing Agent ` +
+        `Rolled "${params.id}" back to v${res.version}.` +
+          (compatibilityWarning ? ` ${compatibilityWarning}` : '') +
+          ' Existing Agent ' +
           'worktrees were not changed. Re-run checkout_workflow with the same ' +
           'source_path and clone: false. It synchronizes only when remote ' +
           'master fast-forwards a clean local master; ahead or diverged work ' +

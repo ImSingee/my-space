@@ -77,6 +77,33 @@ Before declaring any Agent task complete, re-run `pnpm check:types` and `pnpm fo
   required Platform/Runner REST fields change, also increment
   `PROTOCOL_VERSION`.
 
+## Workflow Compatibility Versions
+
+`src/workflow-compatibility.ts` owns the Workflow compatibility constants.
+
+- Workflow manifests must explicitly declare `compatibilityVersion`. Do not
+  introduce a source default, legacy resolver, nullable deployment field, or
+  runtime fallback. A migration may use a transient database default only to
+  backfill pre-existing rows, and must remove it in the same migration.
+- Prefer backward-compatible implementations. Keep currently supported behavior
+  working and record proposed removals under `Next (proposal)` in
+  `skills/workflow-compatibility/SKILL.md`.
+- Never increment `LATEST_WORKFLOW_COMPATIBILITY_VERSION` unless the user
+  explicitly requests a Workflow compatibility version bump. Increment it only
+  for a new deployed-Workflow contract that every successful final deployment
+  must record, not for backward-compatible features, refactors, or UI changes.
+- Increment `MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION` only when the
+  platform intentionally stops executing an older contract. Update the manual,
+  cron, webhook, and App-call gates, UI/API rollback restrictions, Agent restore
+  path, scheduler filtering, and durable boundary tests in the same change.
+- Keep all history and upgrade guidance in the single
+  `skills/workflow-compatibility/SKILL.md` file. Append future versions there;
+  do not create per-version files.
+- Whenever either constant changes, synchronize the default Workflow template,
+  building/importing Skills, system prompt, compatibility history, runtime/UI
+  policy, and final-deployment recording. If required Platform/Runner REST
+  fields change, also increment `PROTOCOL_VERSION`.
+
 ## Oxlint
 
 Oxlint config lives in `.oxlintrc.json` and enables TypeScript, React, accessibility, Vitest, import, unicorn, and oxc checks.

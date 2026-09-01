@@ -12,11 +12,13 @@ const REQUIRED_SKILL_NAMES = [
   'importing-apps',
   'importing-workflows',
   'app-compatibility',
+  'workflow-compatibility',
 ] as const;
 
 const WORKFLOW_SKILL_NAMES = new Set([
   'building-workflows',
   'importing-workflows',
+  'workflow-compatibility',
 ]);
 
 function formatDiagnostic(diagnostic: SkillDiagnostic): string {

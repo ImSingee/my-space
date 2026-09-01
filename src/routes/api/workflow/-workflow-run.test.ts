@@ -121,6 +121,44 @@ describe('Workflow webhook run route', () => {
     expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
   });
 
+  it('authenticates before returning the compatibility boundary', async () => {
+    const { WorkflowDeploymentCompatibilityError } =
+      await import('~server/workflows/compatibility');
+    mocks.startWorkflowRun.mockRejectedValue(
+      new WorkflowDeploymentCompatibilityError(
+        'This Workflow cannot run on the current platform compatibility policy.',
+      ),
+    );
+
+    const forbidden = await handle({
+      request: new Request(
+        `https://hatch.test/api/workflow/${WORKFLOW_ID}/run`,
+        { method: 'POST', body: '{}' },
+      ),
+    });
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.text()).resolves.not.toMatch(/cannot run/);
+    expect(mocks.startWorkflowRun).not.toHaveBeenCalled();
+
+    const response = await handle({
+      request: new Request(
+        `https://hatch.test/api/workflow/${WORKFLOW_ID}/run`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-hatch-secret': 'workflow-secret',
+          },
+          body: '{}',
+        },
+      ),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toMatch(/cannot run/);
+    expect(mocks.startWorkflowRun).toHaveBeenCalledOnce();
+  });
+
   it.each([
     `https://hatch.test/api/workflow-hooks/${WORKFLOW_ID}`,
     `https://hatch.test/api/workflow/${WORKFLOW_ID}/run/extra`,

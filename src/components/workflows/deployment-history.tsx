@@ -1,13 +1,14 @@
-import { Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { Badge, Button, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from '@tanstack/react-router';
-import { IconDownload, IconFileCode } from '@tabler/icons-react';
+import { Link, useRouter } from '@tanstack/react-router';
+import { IconDownload, IconFileCode, IconRobot } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import {
   BuildLogContent,
   DeploymentHistoryView,
   metaItemClass,
 } from '~components/deployments/deployment-history';
+import { requiresAgentRollback } from '~components/deployments/deployment-history-policy';
 import {
   workflowDeploymentBuildLogQueryOptions,
   workflowDeploymentsQueryOptions,
@@ -61,6 +62,49 @@ export function WorkflowDeploymentHistory({
       emptyNoun="workflow"
       onRollback={(deploymentId) => rollback.mutate(deploymentId)}
       rollingId={rollback.isPending ? (rollback.variables ?? null) : null}
+      renderVersionMeta={(deployment) =>
+        deployment.compatibility.isLatest ? null : (
+          <Badge size="xs" variant="light" color="orange">
+            Compatibility v{deployment.compatibility.version}
+          </Badge>
+        )
+      }
+      renderRollbackAction={(deployment, defaultAction) => {
+        if (!requiresAgentRollback(deployment)) return defaultAction;
+        const requiresNewerPlatform =
+          deployment.compatibility.version >
+          deployment.compatibility.latestVersion;
+        return (
+          <Tooltip
+            label={
+              requiresNewerPlatform
+                ? 'Only Agent can restore a deployment newer than this platform; its runtime stays disabled until the platform is updated'
+                : 'Only Agent can restore a deployment below the minimum supported compatibility version'
+            }
+            withArrow
+          >
+            <Button
+              size="compact-sm"
+              variant="light"
+              color="orange"
+              leftSection={<IconRobot size={14} />}
+              renderRoot={(props) => (
+                <Link
+                  to="/agent"
+                  search={{
+                    prompt: requiresNewerPlatform
+                      ? `Restore Workflow ${workflowId} to v${deployment.version}. Its compatibility is newer than this platform, so keep its runtime disabled until the platform is updated.`
+                      : `Restore Workflow ${workflowId} to v${deployment.version}, then update and redeploy it for the latest platform compatibility.`,
+                  }}
+                  {...props}
+                />
+              )}
+            >
+              Use Agent
+            </Button>
+          </Tooltip>
+        );
+      }}
       renderArtifact={(deployment) =>
         deployment.hasArtifact ? (
           <Tooltip label="Download bundle (.js)" withArrow position="top">
