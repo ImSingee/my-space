@@ -1,7 +1,11 @@
 /** Server-only: read-only workflow views for the Agent (list + detail). */
 import { db } from '~/db';
-import type { WorkflowStatus } from '~/db/schema';
+import type { WorkflowDeploymentStatus, WorkflowStatus } from '~/db/schema';
 import { type NetworkAccessView, networkAccessView } from '~/network-policy';
+import {
+  type WorkflowCompatibility,
+  workflowCompatibility,
+} from '~/workflow-compatibility';
 import {
   projectWorkflowManifestUrls,
   type NormalizedWorkflowManifest,
@@ -17,6 +21,7 @@ export type WorkflowSummaryForAgent = {
   description: string | null;
   status: WorkflowStatus;
   liveVersion: number | null;
+  compatibility: WorkflowCompatibility | null;
   webhook: boolean;
   cronCount: number;
 };
@@ -35,17 +40,26 @@ export async function listWorkflowsForAgent(): Promise<
       ? []
       : await db.query.workflowDeployments.findMany({
           where: { id: { in: deploymentIds } },
-          columns: { id: true, version: true, manifestNormalized: true },
+          columns: {
+            id: true,
+            version: true,
+            compatibilityVersion: true,
+            manifestNormalized: true,
+          },
         });
   const deploymentById = new Map(deployments.map((d) => [d.id, d]));
   const result: WorkflowSummaryForAgent[] = [];
   for (const w of rows) {
     let liveVersion: number | null = null;
+    let compatibility: WorkflowCompatibility | null = null;
     let webhook = false;
     let cronCount = 0;
     if (w.currentDeploymentId) {
       const deployment = deploymentById.get(w.currentDeploymentId);
       liveVersion = deployment?.version ?? null;
+      compatibility = deployment
+        ? workflowCompatibility(deployment.compatibilityVersion)
+        : null;
       const manifest =
         deployment?.manifestNormalized as NormalizedWorkflowManifest | null;
       webhook = Boolean(manifest?.triggers?.webhook?.enabled);
@@ -58,6 +72,7 @@ export async function listWorkflowsForAgent(): Promise<
       description: w.description,
       status: w.status,
       liveVersion,
+      compatibility,
       webhook,
       cronCount,
     });
@@ -73,6 +88,7 @@ export type WorkflowDetailForAgent = {
   description: string | null;
   status: WorkflowStatus;
   liveVersion: number | null;
+  compatibility: WorkflowCompatibility | null;
   inputSchema: unknown;
   /** Declaration from the active deployment; null before first deployment. */
   network: NetworkAccessView | null;
@@ -84,7 +100,16 @@ export type WorkflowDetailForAgent = {
     trigger: string;
     createdAt: string;
   }[];
-  deployments: { version: number; message: string | null; createdAt: string }[];
+  deployments: {
+    version: number;
+    status: WorkflowDeploymentStatus;
+    error: string | null;
+    isCurrent: boolean;
+    canRollback: boolean;
+    compatibility: WorkflowCompatibility;
+    message: string | null;
+    createdAt: string;
+  }[];
 };
 
 export async function getWorkflowDetailForAgent(
@@ -96,6 +121,7 @@ export async function getWorkflowDetailForAgent(
   if (!w) return null;
 
   let liveVersion: number | null = null;
+  let compatibility: WorkflowCompatibility | null = null;
   let webhook: { enabled: boolean; url: string | null } = {
     enabled: false,
     url: null,
@@ -106,6 +132,9 @@ export async function getWorkflowDetailForAgent(
       where: { id: w.currentDeploymentId as string },
     });
     liveVersion = deployment?.version ?? null;
+    compatibility = deployment
+      ? workflowCompatibility(deployment.compatibilityVersion)
+      : null;
     const manifest =
       deployment?.manifestNormalized as NormalizedWorkflowManifest | null;
     if (deployment) {
@@ -130,6 +159,7 @@ export async function getWorkflowDetailForAgent(
     description: w.description,
     status: w.status,
     liveVersion,
+    compatibility,
     inputSchema: w.inputSchema ?? null,
     network,
     webhook,
@@ -142,6 +172,11 @@ export async function getWorkflowDetailForAgent(
     })),
     deployments: deployments.map((d) => ({
       version: d.version,
+      status: d.status,
+      error: d.error,
+      isCurrent: d.isCurrent,
+      canRollback: d.canRollback,
+      compatibility: d.compatibility,
       message: d.message,
       createdAt: d.createdAt,
     })),

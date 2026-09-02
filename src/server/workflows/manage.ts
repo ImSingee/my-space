@@ -17,6 +17,12 @@ import type {
   WorkflowTrigger,
 } from '~/db/schema';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
+import {
+  type WorkflowCompatibility,
+  workflowCompatibility,
+  workflowCompatibilityRollbackMessage,
+} from '~/workflow-compatibility';
+import { AppError } from '~server/errors';
 import { workflowDeployLock } from './deploy';
 import { moveMasterToDeploymentTag } from './git';
 import { isValidWorkflowId, isValidWorkflowSlug } from './manifest';
@@ -44,6 +50,12 @@ export type WorkflowDeploymentSummary = {
   sourceTag: string | null;
   hasArtifact: boolean;
   hasBuildLog: boolean;
+  compatibility: WorkflowCompatibility;
+};
+
+export type WorkflowRollbackResult = {
+  version: number;
+  compatibility: WorkflowCompatibility;
 };
 
 export async function listWorkflowDeployments(
@@ -75,6 +87,7 @@ export async function listWorkflowDeployments(
         sourceTag: d.sourceTag,
         hasArtifact,
         hasBuildLog: Boolean(d.buildLog),
+        compatibility: workflowCompatibility(d.compatibilityVersion),
         canRollback:
           !isCurrent &&
           d.status === 'deployed' &&
@@ -168,16 +181,19 @@ export async function renameWorkflowSlug(
 export function rollbackWorkflow(
   id: string,
   deploymentId: string,
-): Promise<{ version: number }> {
+): Promise<WorkflowRollbackResult> {
   return workflowDeployLock.withLock(id, () =>
-    rollbackWorkflowInner(id, deploymentId),
+    rollbackWorkflowInner(id, deploymentId, {
+      allowUnsupportedCompatibility: false,
+    }),
   );
 }
 
 async function rollbackWorkflowInner(
   id: string,
   deploymentId: string,
-): Promise<{ version: number }> {
+  options: { allowUnsupportedCompatibility: boolean },
+): Promise<WorkflowRollbackResult> {
   const workflow = await db.query.workflows.findFirst({
     where: { id },
   });
@@ -188,6 +204,13 @@ async function rollbackWorkflowInner(
   });
   if (!deployment || deployment.workflowId !== id) {
     throw new Error('Deployment not found for this workflow.');
+  }
+  const compatibility = workflowCompatibility(deployment.compatibilityVersion);
+  if (!compatibility.isSupported && !options.allowUnsupportedCompatibility) {
+    throw new AppError(
+      workflowCompatibilityRollbackMessage(compatibility),
+      409,
+    );
   }
   if (deployment.status !== 'deployed') {
     throw new Error('Only successful deployments can be restored.');
@@ -237,27 +260,31 @@ async function rollbackWorkflowInner(
   });
 
   await reloadWorkflowScheduler();
-  return { version: deployment.version };
+  return { version: deployment.version, compatibility };
 }
 
 export async function rollbackWorkflowToVersion(
   id: string,
   version: number,
-): Promise<{ version: number }> {
+): Promise<WorkflowRollbackResult> {
   const deployment = await db.query.workflowDeployments.findFirst({
     where: { workflowId: id, version },
   });
   if (!deployment) {
     throw new Error(`Workflow "${id}" has no deployment v${version}.`);
   }
-  return rollbackWorkflow(id, deployment.id);
+  return workflowDeployLock.withLock(id, () =>
+    rollbackWorkflowInner(id, deployment.id, {
+      allowUnsupportedCompatibility: true,
+    }),
+  );
 }
 
 /** Permanently delete a workflow's Platform-owned state. */
 export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   // The id flows into `fs.rm(..., { force: true })` on several per-workflow
   // dirs (whose helpers `path.resolve`), so reject anything that isn't a valid
-  // slug before touching the filesystem. Otherwise a crafted id like
+  // id before touching the filesystem. Otherwise a crafted id like
   // "../../src" (which matches no DB row) would still resolve outside the
   // workflow namespace and delete arbitrary directories.
   if (!isValidWorkflowId(id)) {

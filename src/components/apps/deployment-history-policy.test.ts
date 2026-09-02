@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  requiresAgentRollback,
   requiresDataSchemaConfirmation,
   rollbackNotification,
 } from './deployment-history-policy';
@@ -31,22 +30,5 @@ describe('app rollback notifications', () => {
       false,
     );
     expect(requiresDataSchemaConfirmation(undefined)).toBe(false);
-  });
-});
-
-describe('requiresAgentRollback', () => {
-  it('routes rollback outside the supported range through Agent', () => {
-    expect(
-      requiresAgentRollback({
-        canRollback: true,
-        compatibility: { isSupported: false },
-      }),
-    ).toBe(true);
-    expect(
-      requiresAgentRollback({
-        canRollback: true,
-        compatibility: { isSupported: true },
-      }),
-    ).toBe(false);
   });
 });

@@ -17,7 +17,11 @@ describe('Workflow identity manifest', () => {
     expect(isValidWorkflowId(generatedId)).toBe(true);
     expect(isValidWorkflowId('legacy-kebab-id')).toBe(true);
     expect(
-      parseSourceWorkflowManifest({ id: generatedId, name: 'Demo' }).id,
+      parseSourceWorkflowManifest({
+        id: generatedId,
+        name: 'Demo',
+        compatibilityVersion: 1,
+      }).id,
     ).toBe(generatedId);
   });
 
@@ -33,11 +37,35 @@ function manifest(network?: unknown): Record<string, unknown> {
   return {
     id: 'demo',
     name: 'Demo',
+    compatibilityVersion: 1,
     ...(network === undefined ? {} : { network }),
   };
 }
 
-describe('Workflow manifest version', () => {
+describe('Workflow manifest compatibility version', () => {
+  it('requires an explicit positive integer', () => {
+    const { compatibilityVersion: _compatibilityVersion, ...missing } =
+      manifest();
+
+    expect(() => parseSourceWorkflowManifest(missing)).toThrow(
+      /compatibilityVersion/,
+    );
+    for (const compatibilityVersion of [0, -1, 1.5, '1', null]) {
+      expect(() =>
+        parseSourceWorkflowManifest({
+          ...manifest(),
+          compatibilityVersion,
+        }),
+      ).toThrow(/compatibilityVersion/);
+    }
+  });
+
+  it('preserves the declared version in the source manifest', () => {
+    expect(parseSourceWorkflowManifest(manifest()).compatibilityVersion).toBe(
+      1,
+    );
+  });
+
   it('accepts the retired field without adding it to normalized manifests', () => {
     const retiredVersion = { legacy: true };
     const parsed = parseSourceWorkflowManifest({

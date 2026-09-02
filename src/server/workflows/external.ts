@@ -3,11 +3,16 @@
  *
  * Shared by the app-platform so apps can call workflows through the existing
  * external workflow API (`POST /api/workflow/<id>/run?secret=`). A workflow is
- * only "callable" when it is deployed AND its current deployment has the webhook
- * trigger enabled with a provisioned secret — exactly the conditions the public
- * webhook route enforces — so this mirrors that gate in one place.
+ * only externally addressable when it is deployed AND its current deployment
+ * has the webhook trigger enabled with a provisioned secret. Compatibility is
+ * reported separately so callers can preserve the target while the public
+ * webhook route remains the final runtime gate.
  */
 import { db } from '~/db';
+import {
+  type WorkflowCompatibility,
+  workflowCompatibility,
+} from '~/workflow-compatibility';
 import { workflowWebhookUrl } from './manifest';
 
 export type CallableWorkflow = {
@@ -19,13 +24,19 @@ export type CallableWorkflow = {
   path: string;
 };
 
-/**
- * Return the invocation config for a workflow that can be triggered externally,
- * or null when it does not exist / is not deployed / has no enabled webhook.
- */
-export async function getCallableWorkflow(
+export type WorkflowCallability =
+  | { state: 'callable'; workflow: CallableWorkflow }
+  | { state: 'unavailable' }
+  | {
+      state: 'unsupported';
+      workflow: CallableWorkflow;
+      compatibility: WorkflowCompatibility;
+    };
+
+/** Preserve an unsupported deployment separately from ordinary unavailability. */
+export async function getWorkflowCallability(
   id: string,
-): Promise<CallableWorkflow | null> {
+): Promise<WorkflowCallability> {
   const workflow = await db.query.workflows.findFirst({
     where: { id },
     columns: {
@@ -42,24 +53,37 @@ export async function getCallableWorkflow(
     !workflow.webhookSecret ||
     !workflow.currentDeploymentId
   ) {
-    return null;
+    return { state: 'unavailable' };
   }
   // The secret persists even if a later redeploy disables the webhook trigger,
   // so confirm the LIVE deployment still enables it (the public route checks the
   // same field, and would otherwise 404 the call).
   const deployment = await db.query.workflowDeployments.findFirst({
     where: { id: workflow.currentDeploymentId as string },
-    columns: { manifestNormalized: true },
+    columns: { manifestNormalized: true, compatibilityVersion: true },
   });
+  if (!deployment) return { state: 'unavailable' };
   const manifest = deployment?.manifestNormalized as {
     triggers?: { webhook?: { enabled?: boolean } };
   } | null;
-  if (!manifest?.triggers?.webhook?.enabled) return null;
+  if (!manifest?.triggers?.webhook?.enabled) {
+    return { state: 'unavailable' };
+  }
 
-  return {
+  const compatibility = workflowCompatibility(deployment.compatibilityVersion);
+  const invocationTarget: CallableWorkflow = {
     id: workflow.id,
     name: workflow.name,
     secret: workflow.webhookSecret,
     path: workflowWebhookUrl(workflow.id),
   };
+  if (!compatibility.isSupported) {
+    return {
+      state: 'unsupported',
+      workflow: invocationTarget,
+      compatibility,
+    };
+  }
+
+  return { state: 'callable', workflow: invocationTarget };
 }

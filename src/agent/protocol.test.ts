@@ -80,8 +80,8 @@ describe('Workflow creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v17 for structured references and identity semantics', () => {
-    expect(PROTOCOL_VERSION).toBe(17);
+  it('uses protocol v18 for structured references and compatibility responses', () => {
+    expect(PROTOCOL_VERSION).toBe(18);
   });
 
   it('parses runner.hello', () => {

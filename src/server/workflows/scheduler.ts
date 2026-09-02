@@ -1,5 +1,6 @@
 /** Server-only: cron scheduler that starts workflow runs on schedule. */
 import { db } from '~/db';
+import { workflowCompatibility } from '~/workflow-compatibility';
 import { nextRun, parseCron } from '~server/apps/cron-expr';
 import { createCronScheduler } from '~server/cron-scheduler';
 import { startWorkflowRun } from './execute';
@@ -36,6 +37,50 @@ async function fire(workflowId: string, job: WorkflowCronJob): Promise<void> {
   }
 }
 
+/** Load only compatibility-supported deployments into the automatic timer set. */
+export async function loadWorkflowCronSchedule(): Promise<
+  { ownerId: string; jobs: WorkflowCronJob[] }[]
+> {
+  const workflows = await db.query.workflows.findMany({
+    where: { status: 'deployed' },
+    columns: { id: true, currentDeploymentId: true },
+  });
+  const deployed = workflows.filter((workflow) =>
+    Boolean(workflow.currentDeploymentId),
+  );
+  if (deployed.length === 0) return [];
+
+  const deployments = await db.query.workflowDeployments.findMany({
+    where: {
+      id: {
+        in: deployed.map((workflow) => workflow.currentDeploymentId as string),
+      },
+    },
+    columns: {
+      id: true,
+      manifestNormalized: true,
+      compatibilityVersion: true,
+    },
+  });
+  const manifestByDeploymentId = new Map(
+    deployments
+      .filter(
+        (deployment) =>
+          workflowCompatibility(deployment.compatibilityVersion).isSupported,
+      )
+      .map((deployment) => [
+        deployment.id,
+        deployment.manifestNormalized as NormalizedWorkflowManifest | null,
+      ]),
+  );
+  return deployed.map((workflow) => ({
+    ownerId: workflow.id,
+    jobs:
+      manifestByDeploymentId.get(workflow.currentDeploymentId as string)
+        ?.triggers?.cron ?? [],
+  }));
+}
+
 const scheduler = createCronScheduler<WorkflowCronJob>({
   globalKey: '__hatchWorkflowScheduler__',
   // Index is part of the key so two cron jobs that share a `name` get distinct
@@ -43,35 +88,7 @@ const scheduler = createCronScheduler<WorkflowCronJob>({
   jobKey: (workflowId, job, index) => `${workflowId}::${index}::${job.name}`,
   schedule: (job) => job.schedule,
   fire,
-  loadJobs: async () => {
-    const workflows = await db.query.workflows.findMany({
-      where: { status: 'deployed' },
-      columns: { id: true, currentDeploymentId: true },
-    });
-    const deployed = workflows.filter((w) => w.currentDeploymentId);
-    if (deployed.length === 0) return [];
-    // One batched manifest lookup instead of cronJobsFor()'s 2 queries per flow.
-    const deployments = await db.query.workflowDeployments.findMany({
-      where: {
-        id: {
-          in: deployed.map((w) => w.currentDeploymentId as string),
-        },
-      },
-      columns: { id: true, manifestNormalized: true },
-    });
-    const manifestByDeploymentId = new Map(
-      deployments.map((d) => [
-        d.id,
-        d.manifestNormalized as NormalizedWorkflowManifest | null,
-      ]),
-    );
-    return deployed.map((workflow) => ({
-      ownerId: workflow.id,
-      jobs:
-        manifestByDeploymentId.get(workflow.currentDeploymentId as string)
-          ?.triggers?.cron ?? [],
-    }));
-  },
+  loadJobs: loadWorkflowCronSchedule,
 });
 
 /** Start the scheduler once (idempotent). Safe to call from any server entry. */

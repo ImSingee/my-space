@@ -10,6 +10,7 @@ import {
 } from '~agent/paths';
 import { db, schema } from '~/db';
 import type { JsonObject } from '~/db/schema';
+import { resolveWorkflowDeployCompatibilityVersion } from '~/workflow-compatibility';
 import { validateCron } from '~server/apps/cron-expr';
 import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
 import { AppError } from '~server/errors';
@@ -27,6 +28,7 @@ import { validateWorkflowInput } from './validate';
 export type DeployWorkflowResult = {
   deploymentId: string;
   version: number;
+  compatibilityVersion: number;
   normalized: NormalizedWorkflowManifest;
   inputSchema: Record<string, unknown>;
   log: string;
@@ -147,6 +149,9 @@ async function deployWorkflowInner(
           `being deployed ("${id}"). Set "id": "${id}" in manifest.json.`,
       );
     }
+    const compatibilityVersion = resolveWorkflowDeployCompatibilityVersion(
+      build.source.compatibilityVersion,
+    );
 
     // Fail the deploy on cron triggers that would silently never fire (the
     // scheduler skips an unparseable schedule) or always fail at runtime (input
@@ -213,6 +218,7 @@ async function deployWorkflowInner(
         id: deploymentId,
         workflowId: id,
         version,
+        compatibilityVersion,
         status: 'deployed',
         message,
         manifestNormalized: build.normalized as unknown as JsonObject,
@@ -251,6 +257,7 @@ async function deployWorkflowInner(
     return {
       deploymentId,
       version,
+      compatibilityVersion,
       normalized: build.normalized,
       inputSchema: build.inputSchema,
       log: build.log,

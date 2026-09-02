@@ -23,7 +23,7 @@
  *   POST /internal/api/workflows/:workflowId/deploy
  *                                                → WorkflowDeployResponse
  *   POST /internal/api/workflows/:workflowId/rollback
- *                                                → { version }
+ *                                                → { version, compatibility }
  */
 import type http from 'node:http';
 import {
@@ -448,6 +448,7 @@ async function handleWorkflows(
       json(res, 200, {
         deploymentId: result.deploymentId,
         version: result.version,
+        compatibilityVersion: result.compatibilityVersion,
         normalized: result.normalized,
       });
     } finally {

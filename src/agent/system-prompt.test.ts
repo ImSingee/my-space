@@ -4,6 +4,10 @@ import {
   LATEST_APP_COMPATIBILITY_VERSION,
   MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
 } from '~/app-compatibility';
+import {
+  LATEST_WORKFLOW_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION,
+} from '~/workflow-compatibility';
 import { buildSystemPrompt } from './system-prompt';
 
 const appUrl = 'https://hatch.example.com';
@@ -70,6 +74,7 @@ describe('Agent system prompt skills', () => {
       'deploy_workflow',
       'building-workflows',
       'importing-workflows',
+      'workflow-compatibility',
       'workflows/<slug>',
     ]) {
       expect(prompt).not.toContain(capability);
@@ -82,6 +87,11 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('Hatch has two kinds of buildable things');
     expect(prompt).toContain('building-workflows');
     expect(prompt).toContain('# Workflow contract');
+    expect(prompt).toContain('must explicitly declare `compatibilityVersion`');
+    expect(prompt).toContain('There is no default');
+    expect(prompt).toContain(
+      `minimum supported v${MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION};\n  latest v${LATEST_WORKFLOW_COMPATIBILITY_VERSION}`,
+    );
     expect(prompt).toContain('`--import-map=.hatch/import-map.json`');
     expect(prompt).toContain('source-owned `hatch/workflow.ts` is unsupported');
     expect(prompt).toContain('@WORKFLOW{name="..." id="..."}');

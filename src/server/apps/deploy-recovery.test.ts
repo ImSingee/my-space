@@ -5,6 +5,7 @@ import {
   LATEST_APP_COMPATIBILITY_VERSION,
   MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
 } from '~/app-compatibility';
+import { LATEST_WORKFLOW_COMPATIBILITY_VERSION } from '~/workflow-compatibility';
 
 type Row = Record<string, unknown>;
 type Predicate =
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   appStack: [] as string[],
   updates: [] as Array<{ values: Row; predicate: Predicate }>,
   buildApp: vi.fn<(id: string, options: unknown) => Promise<unknown>>(),
+  getWorkflowCallability: vi.fn<(id: string) => Promise<unknown>>(),
   liveBuildMatchesDeployment:
     vi.fn<(id: string, deploymentId: string) => Promise<boolean>>(),
   buildMatchesDeployment:
@@ -289,6 +291,9 @@ vi.mock('~/db', () => {
 });
 
 vi.mock('./build', () => ({ buildApp: mocks.buildApp }));
+vi.mock('../workflows/external', () => ({
+  getWorkflowCallability: mocks.getWorkflowCallability,
+}));
 vi.mock('./build-identity', () => ({
   buildMatchesDeployment: mocks.buildMatchesDeployment,
   liveBuildMatchesDeployment: mocks.liveBuildMatchesDeployment,
@@ -450,6 +455,30 @@ function stageFrontendBuildAt(
   };
 }
 
+async function stageWorkflowCallingBuild(
+  id: string,
+  options: unknown,
+): Promise<unknown> {
+  const build = (await stageFrontendBuild(id, options)) as {
+    source: Row;
+    normalized: Row;
+  };
+  build.source.capabilities = {
+    database: false,
+    frontend: false,
+    widgets: false,
+    backend: true,
+    cron: false,
+    webhook: false,
+    kv: false,
+    dataTable: false,
+  };
+  build.source.backend = { entry: 'backend/main.ts', network: [] };
+  build.source.workflows = [{ alias: 'daily', workflow: 'daily-workflow' }];
+  build.normalized.workflows = [{ alias: 'daily', workflow: 'daily-workflow' }];
+  return build;
+}
+
 async function arrangeSupersededPendingArtifact(id: string): Promise<{
   app: Row;
   pendingArtifact: string;
@@ -500,6 +529,7 @@ describe('App deployment activation recovery', () => {
     mocks.liveBuildMatchesDeployment.mockResolvedValue(true);
     mocks.buildMatchesDeployment.mockResolvedValue(true);
     mocks.recoverCurrentDataSchema.mockResolvedValue(null);
+    mocks.getWorkflowCallability.mockResolvedValue({ state: 'unavailable' });
     mocks.ensureAppRunning.mockResolvedValue(1234);
     mocks.reloadScheduler.mockResolvedValue();
     mocks.assertDeployableWorktree.mockResolvedValue();
@@ -614,6 +644,41 @@ describe('App deployment activation recovery', () => {
       expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
     },
   );
+
+  it('preserves the platform-upgrade reason for an unsupported Workflow call', async () => {
+    const id = 'unsupported-workflow-call';
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageWorkflowCallingBuild);
+    mocks.getWorkflowCallability.mockResolvedValueOnce({
+      state: 'unsupported',
+      compatibility: {
+        version: LATEST_WORKFLOW_COMPATIBILITY_VERSION + 1,
+        latestVersion: LATEST_WORKFLOW_COMPATIBILITY_VERSION,
+        minimumSupportedVersion: 1,
+        isSupported: false,
+        isLatest: false,
+      },
+    });
+
+    await expect(
+      deployApp(id, {
+        message: 'Reference a newer Workflow',
+        sourceDir: '/source',
+      }),
+    ).rejects.toThrow(/Workflow cannot run.*newer.*Update the platform/);
+
+    expect(app.status).toBe('draft');
+    expect(mocks.deployments.size).toBe(0);
+    expect(mocks.publishDeploymentSource).not.toHaveBeenCalled();
+    expect(mocks.publishPlatformEvent).not.toHaveBeenCalled();
+  });
 
   it('does not publish an activation event when a normal build fails', async () => {
     const id = 'normal-build-failure';

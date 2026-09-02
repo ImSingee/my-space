@@ -97,6 +97,7 @@ export const sourceWorkflowManifestSchema = z.object({
   description: z.string().default(''),
   /** Removed; retained only so legacy manifests remain parseable. */
   version: z.unknown().optional(),
+  compatibilityVersion: z.number().int().min(1),
   /** Entry module exporting `defineWorkflow(...)` as default. */
   entry: sourceRelativePath.default('workflow.ts'),
   /** Missing only for legacy deployments, which retain unrestricted access. */

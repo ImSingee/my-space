@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { LATEST_WORKFLOW_COMPATIBILITY_VERSION } from '~/workflow-compatibility';
 import { parseSourceWorkflowManifest } from './manifest';
 
 describe('default workflow template', () => {
@@ -18,6 +19,12 @@ describe('default workflow template', () => {
     const source = JSON.parse(rendered) as Record<string, unknown>;
 
     expect(source).not.toHaveProperty('version');
-    expect(parseSourceWorkflowManifest(source).network).toEqual([]);
+    expect(source.compatibilityVersion).toBe(
+      LATEST_WORKFLOW_COMPATIBILITY_VERSION,
+    );
+    expect(parseSourceWorkflowManifest(source)).toMatchObject({
+      compatibilityVersion: LATEST_WORKFLOW_COMPATIBILITY_VERSION,
+      network: [],
+    });
   });
 });

@@ -8,10 +8,15 @@ import {
   LATEST_APP_COMPATIBILITY_VERSION,
   MIN_SUPPORTED_APP_COMPATIBILITY_VERSION,
 } from '~/app-compatibility';
+import {
+  LATEST_WORKFLOW_COMPATIBILITY_VERSION,
+  MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION,
+} from '~/workflow-compatibility';
 
 const WORKFLOW_SKILL_NAMES = new Set([
   'building-workflows',
   'importing-workflows',
+  'workflow-compatibility',
 ]);
 
 export function buildSystemPrompt(
@@ -54,6 +59,10 @@ export function buildSystemPrompt(
 - Load the complete \`building-workflows\` Skill before creating or changing a
   workflow. Workflows use \`workflow.ts\`, \`manifest.json\`, \`package.json\`,
   \`deno.json\`, and committed \`deno.lock\`.
+- Current Workflow compatibility: minimum supported v${MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION};
+  latest v${LATEST_WORKFLOW_COMPATIBILITY_VERSION}.
+- Every Workflow manifest must explicitly declare \`compatibilityVersion\`.
+  There is no default.
 - \`create_workflow\` and \`checkout_workflow\` generate the platform-owned
   \`.hatch/\` SDK and import map before returning. Treat \`.hatch\` as reserved
   case-insensitively; never edit, replace, copy, depend on, or commit it, and

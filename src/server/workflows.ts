@@ -4,6 +4,10 @@ import { db } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
 import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
+import {
+  type WorkflowCompatibility,
+  workflowCompatibility,
+} from '~/workflow-compatibility';
 import { authMiddleware } from './auth';
 import { idAndDeploymentSchema, idSchema } from './validation';
 import {
@@ -65,6 +69,7 @@ export type WorkflowDetail = {
   pinned: boolean;
   currentDeploymentId: string | null;
   currentSourceCommit: string | null;
+  compatibility: WorkflowCompatibility | null;
   inputSchema: JsonObject | null;
   createdAt: string;
   updatedAt: string;
@@ -93,8 +98,17 @@ export const getWorkflowBySlug = createServerFn({ method: 'GET' })
       },
     });
     if (!row) return null;
+    const deployment = row.currentDeploymentId
+      ? await db.query.workflowDeployments.findFirst({
+          where: { id: row.currentDeploymentId },
+          columns: { compatibilityVersion: true },
+        })
+      : null;
     return {
       ...row,
+      compatibility: deployment
+        ? workflowCompatibility(deployment.compatibilityVersion)
+        : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

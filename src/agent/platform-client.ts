@@ -9,6 +9,7 @@
  */
 import type { NormalizedManifest } from '~server/apps/manifest';
 import type { AppCompatibility } from '~/app-compatibility';
+import type { WorkflowCompatibility } from '~/workflow-compatibility';
 import type { AppDetail, AppSummary } from '~server/apps/inspect';
 import type { NormalizedWorkflowManifest } from '~server/workflows/manifest';
 import type {
@@ -50,6 +51,7 @@ export type AppDeployResponse = {
 export type WorkflowDeployResponse = {
   deploymentId: string;
   version: number;
+  compatibilityVersion: number;
   normalized: NormalizedWorkflowManifest;
 };
 
@@ -145,5 +147,5 @@ export type PlatformClient = {
   rollbackWorkflow(
     workflowId: string,
     version: number,
-  ): Promise<{ version: number }>;
+  ): Promise<{ version: number; compatibility: WorkflowCompatibility }>;
 };

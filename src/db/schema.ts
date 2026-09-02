@@ -371,6 +371,8 @@ export const workflowDeployments = snakeCase.table(
       .notNull()
       .references(() => workflows.id, { onDelete: 'cascade' }),
     version: integer().notNull().default(1),
+    /** Compatibility contract explicitly selected by the source manifest. */
+    compatibilityVersion: integer().notNull(),
     status: text()
       .$type<WorkflowDeploymentStatus>()
       .notNull()

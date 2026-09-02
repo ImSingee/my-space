@@ -5,6 +5,10 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (options?: unknown) => Promise<Record<string, unknown> | undefined>
     >(),
+  findDeployment:
+    vi.fn<
+      (options?: unknown) => Promise<Record<string, unknown> | undefined>
+    >(),
 }));
 
 vi.mock('@tanstack/react-start', () => ({
@@ -29,6 +33,7 @@ vi.mock('~/db', () => ({
   db: {
     query: {
       workflows: { findFirst: mocks.findWorkflow },
+      workflowDeployments: { findFirst: mocks.findDeployment },
     },
   },
 }));
@@ -59,6 +64,7 @@ describe('Workflow human route lookup', () => {
         ?.where;
       return where?.slug === row.slug ? row : undefined;
     });
+    mocks.findDeployment.mockResolvedValue({ compatibilityVersion: 1 });
   });
 
   it('loads detail strictly by the mutable slug', async () => {
@@ -66,6 +72,13 @@ describe('Workflow human route lookup', () => {
       getWorkflowBySlug({ data: 'human-readable-slug' }),
     ).resolves.toEqual({
       ...row,
+      compatibility: {
+        version: 1,
+        latestVersion: 1,
+        minimumSupportedVersion: 1,
+        isSupported: true,
+        isLatest: true,
+      },
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T01:00:00.000Z',
     });
