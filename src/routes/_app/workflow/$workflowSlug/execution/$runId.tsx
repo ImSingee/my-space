@@ -183,6 +183,20 @@ function WorkflowExecutionPage() {
       }
     >
       <Stack gap="xl">
+        {run.output != null ? (
+          <>
+            <Section title="Output">
+              <Code block>{pretty(run.output)}</Code>
+            </Section>
+            <Divider />
+          </>
+        ) : null}
+
+        <Section title="Input">
+          <Code block>{pretty(run.input ?? {})}</Code>
+        </Section>
+
+        <Divider />
         <Section title="Steps">
           {run.steps.length === 0 ? (
             <Text size="sm" c="dimmed">
@@ -214,20 +228,6 @@ function WorkflowExecutionPage() {
               <Code block style={{ color: 'var(--mantine-color-red-7)' }}>
                 {run.error}
               </Code>
-            </Section>
-          </>
-        ) : null}
-
-        <Divider />
-        <Section title="Input">
-          <Code block>{pretty(run.input ?? {})}</Code>
-        </Section>
-
-        {run.output != null ? (
-          <>
-            <Divider />
-            <Section title="Output">
-              <Code block>{pretty(run.output)}</Code>
             </Section>
           </>
         ) : null}
