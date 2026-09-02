@@ -74,6 +74,10 @@ beforeEach(() => {
 
 test('groups chats by their existing updated-at order', async () => {
   const now = dayjs();
+  const earlier = now.subtract(8, 'day');
+  const earlierLabel = earlier.format(
+    earlier.year() === now.year() ? 'MMMM D' : 'MMMM D, YYYY',
+  );
   fixtures.sessions = [
     session(
       'today-new',
@@ -90,7 +94,7 @@ test('groups chats by their existing updated-at order', async () => {
       'Yesterday chat',
       now.subtract(1, 'day').toISOString(),
     ),
-    session('week', 'Earlier this month', now.subtract(8, 'day').toISOString()),
+    session('week', 'Earlier this month', earlier.toISOString()),
   ];
 
   const { screen, onSelect } = await renderPanel('today-new');
@@ -104,7 +108,7 @@ test('groups chats by their existing updated-at order', async () => {
   await expect
     .element(
       screen.getByRole('heading', {
-        name: 'Previous 30 Days',
+        name: earlierLabel,
         level: 2,
       }),
     )
@@ -116,7 +120,7 @@ test('groups chats by their existing updated-at order', async () => {
   expect(sections).toEqual([
     'TodayLatest chatMorning chat',
     'YesterdayYesterday chat',
-    'Previous 30 DaysEarlier this month',
+    `${earlierLabel}Earlier this month`,
   ]);
 
   await screen.getByRole('button', { name: 'Morning chat' }).click();
