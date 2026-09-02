@@ -18,14 +18,16 @@ function session(id: string, daysAgo: number, hour = 10) {
 }
 
 describe('groupSessionsByDate', () => {
-  it('uses the agreed relative ranges without reordering the server result', () => {
+  it('groups each local date without reordering the server result', () => {
     const groups = groupSessionsByDate(
       [
         session('today-late', 0, 11),
         session('today-early', 0, 8),
         session('yesterday', 1),
+        session('two-days', 2),
         session('six-days', 6),
-        session('seven-days', 7),
+        session('seven-days-late', 7, 11),
+        session('seven-days-early', 7, 8),
         session('twenty-nine-days', 29),
         session('thirty-days', 30),
       ],
@@ -40,16 +42,15 @@ describe('groupSessionsByDate', () => {
     ).toEqual([
       { label: 'Today', ids: ['today-late', 'today-early'] },
       { label: 'Yesterday', ids: ['yesterday'] },
-      { label: 'Previous 7 Days', ids: ['six-days'] },
-      {
-        label: 'Previous 30 Days',
-        ids: ['seven-days', 'twenty-nine-days'],
-      },
-      { label: 'July 2026', ids: ['thirty-days'] },
+      { label: 'Saturday', ids: ['two-days'] },
+      { label: 'Tuesday', ids: ['six-days'] },
+      { label: 'August 10', ids: ['seven-days-late', 'seven-days-early'] },
+      { label: 'July 19', ids: ['twenty-nine-days'] },
+      { label: 'July 18', ids: ['thirty-days'] },
     ]);
   });
 
-  it('keeps older month groups distinct across years', () => {
+  it('includes the year only for dates outside the current local year', () => {
     const groups = groupSessionsByDate(
       [
         {
@@ -58,15 +59,15 @@ describe('groupSessionsByDate', () => {
         },
         {
           id: 'last-year',
-          updatedAt: new Date(2025, 11, 15, 10).toISOString(),
+          updatedAt: new Date(2025, 11, 31, 10).toISOString(),
         },
       ],
       NOW,
     );
 
     expect(groups.map(({ label }) => label)).toEqual([
-      'January 2026',
-      'December 2025',
+      'January 15',
+      'December 31, 2025',
     ]);
   });
 });
