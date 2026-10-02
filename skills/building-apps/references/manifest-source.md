@@ -1,8 +1,16 @@
 # Source manifests
 
-App and Workflow templates use `manifest.ts`. Existing `manifest.json` packages
-remain supported without migration. The source root must contain exactly one;
-two files are an error, and a broken TS manifest never falls back to JSON.
+App and Workflow source may currently use either `manifest.ts` or
+`manifest.json`. The source root must contain exactly one; two files are an
+error, and a broken TS manifest never falls back to JSON. New templates use TS
+so Agents can validate configuration with the TypeScript toolchain.
+
+Preserve the authored format during ordinary edits, imports, and redeployments.
+Do not migrate JSON to TS unless the user explicitly requests the conversion,
+or as part of a user-requested upgrade to a released compatibility v3 or later
+that requires TS. No v3+ contract exists yet: the current latest versions are
+App v2 and Workflow v1. The TS-only requirement is recorded under
+`Next (proposal)` in the respective compatibility Skills and is not active.
 
 ## Authoring
 
@@ -43,12 +51,19 @@ or commit them. Restore a missing SDK through checkout/preparation.
 
 ## Checking and evaluation
 
-After preparing locked dependencies, check the TS manifest independently:
+For `manifest.ts`, after create/checkout has materialized `.hatch/` and prepared
+locked dependencies, run this from the App or Workflow source root before
+codegen or entry checks:
 
 ```sh
 deno check --config=deno.json --no-remote --node-modules-dir=manual \
   --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./manifest.ts
 ```
+
+Fix any errors before continuing. This explicitly checks the manifest and its
+imports even when no execution entry imports them. For `manifest.json`, skip
+this TS-only command without converting the file; the platform still parses
+and validates JSON against its manifest schema.
 
 Then follow the resource's building Skill for codegen and entry checks. A
 manifest is needed before RPC generation: share constants through pure source
@@ -74,10 +89,13 @@ parsed source JSON and normalized deployment JSON; deployed runtimes and
 artifact rollback do not execute the TS manifest again. Do not maintain a
 generated root `manifest.json` alongside TS.
 
-To adopt TS, wrap the existing JSON object with the appropriate helper, preserve
-the immutable id and compatibility version, remove the JSON file in the same
-commit, and verify equivalent parsed configuration before deploying. Existing
-deployments and application data require no migration.
+Only when conversion is authorized as described above, wrap the existing JSON
+object with the appropriate helper, preserve the immutable id, and preserve
+the compatibility version unless applying the requested version upgrade.
+Remove the JSON file in the same commit, run the manifest check above, and
+verify equivalent parsed configuration apart from any required version-upgrade
+changes before deploying. Existing deployments and application data require
+no migration for a source-format conversion.
 
 An older platform may understand the deployment compatibility version but lack
 the TS loader. Upgrade it before importing/rebuilding TS source. If JSON source

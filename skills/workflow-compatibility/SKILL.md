@@ -17,9 +17,15 @@ description: Explain Hatch Workflow deployment compatibility versions and guide 
 
 ## Source format compatibility
 
-New templates use `manifest.ts`; existing `manifest.json` source packages remain
-supported. Keep exactly one file. TypeScript authoring does not introduce a new
-deployment compatibility version: the platform still stores parsed source JSON
+Current source may use either `manifest.ts` or `manifest.json`; keep exactly one
+file. New templates use TS for TypeScript toolchain validation. Preserve the
+authored format during ordinary edits, imports, and redeployments. Do not
+migrate JSON to TS unless the user explicitly requests the conversion, or as
+part of a user-requested upgrade to a released compatibility v3 or later that
+requires TS. The latest Workflow contract is v1; v3+ is not available yet.
+
+TypeScript authoring does not introduce a new deployment compatibility version:
+the platform still stores parsed source JSON
 and normalized deployment JSON, and rollback uses stored deployment artifacts.
 
 A platform build predating TypeScript manifest support cannot necessarily rebuild
@@ -44,7 +50,14 @@ These proposals are not active platform policy and do not change the latest or
 minimum supported version until they are promoted into the version history
 above.
 
-No future Workflow compatibility changes are currently proposed.
+- Compatibility v3 and later will require `manifest.ts`; `manifest.json` will
+  no longer be accepted as source for those contracts. When that contract is
+  released and the user requests an upgrade, convert the JSON object using
+  `defineWorkflowManifest`, remove `manifest.json` in the same change, and run
+  the independent manifest check in `building-workflows` before entry checks.
+  Until then, preserve JSON unless the user explicitly requests conversion.
+  This proposal concerns authored source, not stored deployment JSON, and does
+  not introduce or skip any currently unavailable compatibility version.
 
 ## Handling compatibility versions
 

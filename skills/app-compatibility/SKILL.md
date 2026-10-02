@@ -17,9 +17,15 @@ description: Explain Hatch App deployment compatibility versions and guide handl
 
 ## Source format compatibility
 
-New templates use `manifest.ts`; existing `manifest.json` source packages remain
-supported. Keep exactly one file. TypeScript authoring does not introduce a new
-deployment compatibility version: the platform still stores parsed source JSON
+Current source may use either `manifest.ts` or `manifest.json`; keep exactly one
+file. New templates use TS for TypeScript toolchain validation. Preserve the
+authored format during ordinary edits, imports, and redeployments. Do not
+migrate JSON to TS unless the user explicitly requests the conversion, or as
+part of a user-requested upgrade to a released compatibility v3 or later that
+requires TS. The latest App contract is v2; v3+ is not available yet.
+
+TypeScript authoring does not introduce a new deployment compatibility version:
+the platform still stores parsed source JSON
 and normalized deployment JSON, and rollback uses stored deployment artifacts.
 
 A platform build predating TypeScript manifest support cannot necessarily rebuild
@@ -50,21 +56,24 @@ These proposals are not active platform policy and do not change the latest or
 minimum supported version until they are promoted into the version history
 above.
 
+- Compatibility v3 and later will require `manifest.ts`; `manifest.json` will
+  no longer be accepted as source for those contracts. When that contract is
+  released and the user requests an upgrade, convert the JSON object using
+  `defineAppManifest`, remove `manifest.json` in the same change, and run the
+  independent manifest check in `building-apps` before codegen and entry checks.
+  Until then, preserve JSON unless the user explicitly requests conversion.
+  This proposal concerns authored source, not stored deployment JSON.
+
 - Omitting `compatibilityVersion` from the source manifest (`manifest.ts` or `manifest.json`) keeps the App on
   compatibility v2. To use any newer compatibility version, declare the target
   as a positive integer at the top level. For example, once compatibility v3 is
-  available and its guidance has been applied:
-
-  ```json
-  {
-    "compatibilityVersion": 3
-  }
-  ```
+  available and its guidance has been applied, set `compatibilityVersion: 3`
+  in the `manifest.ts` object passed to `defineAppManifest`.
 
   Preserve an existing declaration during ordinary edits and choose a newer
   value only after applying that version's guidance.
 
-- Historical fields in the source manifest (`manifest.ts` or `manifest.json`) will no longer be accepted. Remove the
+- Historical fields in the source manifest will no longer be accepted. Remove the
   top-level `version` and `userscripts` fields, and remove
   `capabilities.userscripts`, before targeting a newer compatibility version.
 
