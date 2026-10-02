@@ -102,11 +102,13 @@ export default defineWorkflow({
 - Treat `.hatch` as reserved case-insensitively. Do **not** edit, replace,
   depend on, copy, or commit `.hatch/`; do not create variants such as
   `.HATCH`. Create/checkout refresh it, and deploy generates a fresh trusted
-  copy instead of accepting SDK bytes from workflow source.
+  copy instead of accepting SDK bytes from workflow source. Legacy source-owned
+  `hatch/workflow.ts` is unsupported.
 - Extra npm deps go in `package.json` `dependencies`, then use a bare import such
   as `import dayjs from 'dayjs'`. Never add `@hatch/*` to `package.json`,
-  `deno.json`, or `deno.lock`. Local Deno tooling resolves `@hatch/workflow`
-  through the generated `.hatch/import-map.json`.
+  `deno.json`, or `deno.lock`, or map them in source-owned import maps. Local
+  Deno tooling resolves `@hatch/workflow` through the generated
+  `.hatch/import-map.json`.
 
 ### Dependencies and lifecycle scripts
 
@@ -268,10 +270,13 @@ replace platform validation of paths, cross-field requirements, or serializabili
 
 ## Git workflow
 
-1. For a new workflow, confirm the name + slug with the user via `ask`. Both are
-   editable later. The slug is the human-facing `/workflow/<slug>` segment;
+1. For a new workflow, confirm the name and slug in two separate `ask` calls,
+   name first. Offer style-matched name choices and derive slug suggestions
+   from the chosen name. Explain that both are editable later. The slug is the
+   human-facing `/workflow/<slug>` segment;
    Hatch generates a separate id for the manifest, Git repository, runs,
-   webhook, and all technical APIs. Only then call `create_workflow`.
+   webhook, and all technical APIs. Always pass that id to existing-Workflow
+   tools, never the slug. Only then call `create_workflow`.
    Pass `pin: true` (default) to pin it to the sidebar.
 2. For an existing workflow with no checkout in this conversation, inspect it
    with `list_workflows` / `get_workflow`, then call `checkout_workflow` with

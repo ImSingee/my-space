@@ -33,15 +33,19 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toContain('not deployed');
   });
 
-  it('keeps existing checkout synchronization non-destructive', () => {
-    const prompt = buildSystemPrompt(appUrl, workflowDisabled);
+  it.each([workflowDisabled, workflowEnabled])(
+    'requires building Skills before platform tools or source edits (%j)',
+    (options) => {
+      const prompt = buildSystemPrompt(appUrl, options);
 
-    expect(prompt).toMatch(/checkout, call it with `clone: false`/);
-    expect(prompt).toContain('update mode never creates or replaces a path');
-    expect(prompt).toMatch(
-      /Use\s+`force: true` only with `clone: true` when permanently discarding/,
-    );
-  });
+      expect(prompt).toMatch(/read the full.*`read_file` before calling/i);
+      expect(prompt).toMatch(/platform tools or editing/i);
+      expect(prompt).toContain('`building-apps`');
+      expect(prompt.includes('`building-workflows`')).toBe(
+        options.workflowBetaEnabled,
+      );
+    },
+  );
 
   it('identifies the current APP_URL', () => {
     const prompt = buildSystemPrompt(appUrl, workflowDisabled);
@@ -86,14 +90,9 @@ describe('Agent system prompt skills', () => {
 
     expect(prompt).toContain('Hatch has two kinds of buildable things');
     expect(prompt).toContain('building-workflows');
-    expect(prompt).toContain('# Workflow contract');
-    expect(prompt).toContain('must explicitly declare `compatibilityVersion`');
-    expect(prompt).toContain('There is no default');
     expect(prompt).toContain(
       `minimum supported v${MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION};\n  latest v${LATEST_WORKFLOW_COMPATIBILITY_VERSION}`,
     );
-    expect(prompt).toContain('`--import-map=.hatch/import-map.json`');
-    expect(prompt).toContain('source-owned `hatch/workflow.ts` is unsupported');
     expect(prompt).toContain('@WORKFLOW{name="..." id="..."}');
     expect(prompt).toContain('Use its stable id with Workflow tools');
     expect(prompt).toMatch(
@@ -163,6 +162,13 @@ describe('Agent system prompt skills', () => {
     expect(prompt).toMatch(/before downloading or extracting the attachment/i);
     expect(prompt).not.toContain('building-workflows');
     expect(prompt).not.toContain('importing-workflows');
+  });
+
+  it('requires Workflow import and build Skills before opening source archives', () => {
+    const prompt = buildSystemPrompt(appUrl, workflowEnabled);
+
+    expect(prompt).toMatch(/importing-workflows.*building-workflows/s);
+    expect(prompt).toMatch(/before downloading or extracting the attachment/i);
   });
 
   it('hides skills disabled for model invocation', () => {
