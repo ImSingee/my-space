@@ -1,3 +1,5 @@
+import { evaluateTemplateManifest } from '../../test-manifest-fixture';
+import { defaultWorkflowManifest } from './default-manifest';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { LATEST_WORKFLOW_COMPATIBILITY_VERSION } from '~/workflow-compatibility';
@@ -7,16 +9,18 @@ describe('default workflow template', () => {
   it('blocks network access until destinations are declared', async () => {
     const raw = await readFile(
       new URL(
-        '../../../templates/default-workflow/manifest.json',
+        '../../../templates/default-workflow/manifest.ts',
         import.meta.url,
       ),
       'utf8',
     );
-    const rendered = raw
-      .replaceAll('__WORKFLOW_ID__', 'demo')
-      .replaceAll('__WORKFLOW_NAME__', 'Demo')
-      .replaceAll('__WORKFLOW_DESCRIPTION__', 'Demo workflow');
-    const source = JSON.parse(rendered) as Record<string, unknown>;
+    const expected = defaultWorkflowManifest('demo', 'Demo', 'Demo workflow');
+    const rendered = raw.replace(
+      '__WORKFLOW_MANIFEST__',
+      JSON.stringify(expected),
+    );
+    const source = await evaluateTemplateManifest(rendered, 'workflow');
+    expect(source).toEqual(expected);
 
     expect(source).not.toHaveProperty('version');
     expect(source.compatibilityVersion).toBe(

@@ -30,10 +30,10 @@ deployment. Do not rely on conventions found in the imported source.
    configuration. Use `find` without following symlinks, and delete matching
    files, directories, or links recursively.
 4. Confirm that none remain, then locate exactly one source root containing
-   `manifest.json`. An exported archive commonly wraps that root in an App id
+   a single `manifest.ts` or `manifest.json`. An exported archive commonly wraps that root in an App id
    directory. Stop if the source root is missing or ambiguous; copy the root's
    contents later, not its wrapper.
-5. Read that `manifest.json` statically. Compare any declared top-level
+5. Read the selected manifest and its transitive imports statically. Compare any declared top-level
    `compatibilityVersion` with the current App latest version in the system
    prompt. If it is higher, stop before creating or changing an App. Tell the
    user that this source cannot be deployed on the current platform and that the
@@ -42,6 +42,14 @@ deployment. Do not rely on conventions found in the imported source.
 Never use an imported Git repository, config, history, submodule, or hook.
 Treat hook-like directories left in the source as ordinary untrusted files and
 never enable them.
+
+For a TS manifest, never execute it to discover configuration before the static
+review passes. If its compatibility version cannot be established statically,
+finish reviewing all referenced source first, then use the restricted manifest
+loader with a freshly materialized platform SDK to establish the version before
+creating the destination resource. Reject ambiguous roots or two manifest files.
+After copying reviewed source, remove the destination template's other manifest
+format, update the immutable id in the selected manifest, and check the result.
 
 ## Complete the security review
 

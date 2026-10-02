@@ -6,7 +6,7 @@ Read this reference when an App has a frontend or dashboard widget.
 
 The platform serves `app/index.html`, which loads the bundled `./app.js`.
 Use TanStack Router with hash history because the App is served inside a static
-iframe. Keep every user-navigable route represented in `manifest.json` under
+iframe. Keep every user-navigable route represented in the source manifest (`manifest.ts` or `manifest.json`) under
 `app.routes`; this metadata powers entry-point discovery but does not register
 routes at runtime.
 

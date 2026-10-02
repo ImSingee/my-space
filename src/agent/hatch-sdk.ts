@@ -28,6 +28,7 @@ import {
 import { resolveAgentOwnershipSession, sandboxSpawn } from './shell-sandbox';
 
 const HATCH_DATA_SOURCE_DIR = path.join(REPO_ROOT, 'packages', 'hatch-data');
+const HATCH_APP_SOURCE_DIR = path.join(REPO_ROOT, 'packages', 'hatch-app');
 const HATCH_WORKFLOW_SOURCE_DIR = path.join(
   REPO_ROOT,
   'packages',
@@ -38,12 +39,14 @@ export const HATCH_SDK_IMPORT_MAP = '.hatch/import-map.json';
 export const HATCH_BUF_GEN_CONFIG = '.hatch/buf.gen.yaml';
 
 export const APP_HATCH_SDK_IMPORTS = {
+  '@hatch/app': './sdk/@hatch/app/dist/app.js',
   '@hatch/data': './sdk/@hatch/data/dist/data.js',
   '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
 } as const;
 
 export const WORKFLOW_HATCH_SDK_IMPORTS = {
   '@hatch/workflow': './sdk/@hatch/workflow/dist/workflow.js',
+  '@hatch/workflow/manifest': './sdk/@hatch/workflow/dist/manifest/workflow.js',
 } as const;
 
 export function appHatchDataPackageDir(root: string): string {
@@ -86,6 +89,11 @@ const APP_HATCH_SDK_GENERATION: HatchSdkGeneration = {
   imports: APP_HATCH_SDK_IMPORTS,
   packages: [
     {
+      sourceDir: HATCH_APP_SOURCE_DIR,
+      targetName: 'app',
+      buildFiles: ['dist/app.js', 'dist/app.d.ts', 'dist/app-schema.d.ts'],
+    },
+    {
       sourceDir: HATCH_DATA_SOURCE_DIR,
       targetName: 'data',
       buildFiles: [
@@ -107,7 +115,12 @@ const WORKFLOW_HATCH_SDK_GENERATION: HatchSdkGeneration = {
     {
       sourceDir: HATCH_WORKFLOW_SOURCE_DIR,
       targetName: 'workflow',
-      buildFiles: ['dist/workflow.js', 'dist/workflow.d.ts'],
+      buildFiles: [
+        'dist/workflow.js',
+        'dist/workflow.d.ts',
+        'dist/manifest/workflow.js',
+        'dist/manifest/workflow.d.ts',
+      ],
     },
   ],
 };

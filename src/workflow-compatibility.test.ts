@@ -17,13 +17,13 @@ describe('Workflow compatibility', () => {
 
   it('rejects source compatibility below the platform minimum', () => {
     expect(() => resolveWorkflowDeployCompatibilityVersion(0)).toThrow(
-      /manifest\.json compatibilityVersion.*below.*minimum/,
+      /Source manifest compatibilityVersion.*below.*minimum/,
     );
   });
 
   it('rejects source compatibility newer than the platform', () => {
     expect(() => resolveWorkflowDeployCompatibilityVersion(2)).toThrow(
-      /manifest\.json compatibilityVersion.*newer.*latest supported/,
+      /Source manifest compatibilityVersion.*newer.*latest supported/,
     );
   });
 

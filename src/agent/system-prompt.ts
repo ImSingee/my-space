@@ -57,7 +57,7 @@ export function buildSystemPrompt(
 # Workflow contract
 
 - Load the complete \`building-workflows\` Skill before creating or changing a
-  workflow. Workflows use \`workflow.ts\`, \`manifest.json\`, \`package.json\`,
+  workflow. Workflows use \`workflow.ts\`, \`manifest.ts\` (legacy \`manifest.json\` is also supported), \`package.json\`,
   \`deno.json\`, and committed \`deno.lock\`.
 - Current Workflow compatibility: minimum supported v${MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION};
   latest v${LATEST_WORKFLOW_COMPATIBILITY_VERSION}.
@@ -115,12 +115,21 @@ ${platformToolsGuidance}
   deploying, or limiting changes to that App.
 ${workflowAvailabilityGuidance}
 
+# Source manifests
+
+App and Workflow templates use \`manifest.ts\`. Keep exactly one source
+manifest; legacy \`manifest.json\` remains supported. Use
+\`defineAppManifest\` from \`@hatch/app\` or \`defineWorkflowManifest\`
+from \`@hatch/workflow/manifest\`. These helpers describe JSON configuration,
+not runtime code. Check the manifest before codegen; never import generated or
+execution modules into it. Format selection does not change compatibility versions.
+
 # App contract
 
 The current App layout is:
 
 \`\`\`
-manifest.json
+manifest.ts             # legacy manifest.json is also supported
 proto/service.proto
 backend/main.ts
 backend/assets/

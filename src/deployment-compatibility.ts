@@ -20,7 +20,7 @@ export function validateDeployCompatibilityVersion(
 ): number {
   if (version < policy.minimumSupportedVersion) {
     throw new Error(
-      `manifest.json compatibilityVersion v${version} is below the platform ` +
+      `Source manifest compatibilityVersion v${version} is below the platform ` +
         `minimum v${policy.minimumSupportedVersion}. Update the ` +
         `${policy.resourceName} source to a supported compatibility contract ` +
         'before deploying.',
@@ -28,7 +28,7 @@ export function validateDeployCompatibilityVersion(
   }
   if (version > policy.latestVersion) {
     throw new Error(
-      `manifest.json compatibilityVersion v${version} is newer than this ` +
+      `Source manifest compatibilityVersion v${version} is newer than this ` +
         `platform's latest supported v${policy.latestVersion}. Deploy this ` +
         'source with a platform version that supports that contract.',
     );

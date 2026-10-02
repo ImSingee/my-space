@@ -75,6 +75,8 @@ COPY package.json ./
 COPY migrations ./migrations
 COPY templates ./templates
 COPY skills ./skills
+COPY --from=build /app/packages/hatch-app/package.json ./packages/hatch-app/package.json
+COPY --from=build /app/packages/hatch-app/dist ./packages/hatch-app/dist
 COPY --from=build /app/packages/hatch-data/package.json ./packages/hatch-data/package.json
 COPY --from=build /app/packages/hatch-data/dist ./packages/hatch-data/dist
 COPY --from=build /app/packages/hatch-workflow/package.json ./packages/hatch-workflow/package.json

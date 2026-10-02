@@ -73,6 +73,32 @@ afterEach(async () => {
 });
 
 describe('buildWorkflow dependencies', () => {
+  it('builds a typed manifest and preserves a previous artifact on validation failure', async () => {
+    const { sourceDir, outputDir } = await makeWorkflowSource({ network: [] });
+    const json = await fs.readFile(
+      path.join(sourceDir, 'manifest.json'),
+      'utf8',
+    );
+    await fs.rm(path.join(sourceDir, 'manifest.json'));
+    const typed = `import { defineWorkflowManifest } from '@hatch/workflow/manifest';\nexport default defineWorkflowManifest(${json});`;
+    await fs.writeFile(path.join(sourceDir, 'manifest.ts'), typed);
+    const built = await buildWorkflow('demo', { sourceDir, outputDir });
+    const before = await fs.readFile(built.bundlePath, 'utf8');
+    expect(built.source.compatibilityVersion).toBe(1);
+    expect(built.inputSchema).toMatchObject({ type: 'object' });
+    await fs.writeFile(
+      path.join(sourceDir, 'manifest.ts'),
+      typed.replace(
+        '"compatibilityVersion":1',
+        '"compatibilityVersion":"invalid"',
+      ),
+    );
+    await expect(
+      buildWorkflow('demo', { sourceDir, outputDir }),
+    ).rejects.toThrow(/not assignable/);
+    expect(await fs.readFile(built.bundlePath, 'utf8')).toBe(before);
+  });
+
   it('installs a frozen package.json graph and injects the SDK import map', async () => {
     const { sourceDir, outputDir } = await makeWorkflowSource();
 

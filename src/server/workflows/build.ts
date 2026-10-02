@@ -1,4 +1,8 @@
 /** Server-only: compile a workflow source tree into a single-file program. */
+import {
+  detectSourceManifest,
+  loadSourceManifest,
+} from '../../source-manifest';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -44,19 +48,6 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-async function readManifest(src: string): Promise<SourceWorkflowManifest> {
-  const raw = await fs.readFile(path.join(src, 'manifest.json'), 'utf8');
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(
-      `manifest.json is not valid JSON: ${e instanceof Error ? e.message : e}`,
-    );
-  }
-  return parseSourceWorkflowManifest(json);
-}
-
 /** Find the JSON object carried on the first `[[hatch]]` event line of a kind. */
 function parseSentinel(stdout: string, kind: string): unknown {
   for (const line of stdout.split('\n')) {
@@ -87,6 +78,7 @@ export async function buildWorkflow(
   }
 
   const tempSrc = path.join(WORKFLOW_BUILD_WORK_DIR, id, randomUUID());
+  const stagedOutput = `${tempSrc}-output`;
   await fs.rm(tempSrc, { recursive: true, force: true });
   await fs.mkdir(path.dirname(tempSrc), { recursive: true });
   await fs.cp(originalSrc, tempSrc, {
@@ -104,7 +96,14 @@ export async function buildWorkflow(
   });
 
   try {
-    const manifest = await readManifest(tempSrc);
+    const file = await detectSourceManifest(tempSrc);
+    const legacy =
+      file === 'manifest.json'
+        ? await loadSourceManifest(tempSrc, {
+            kind: 'workflow',
+            parse: parseSourceWorkflowManifest,
+          })
+        : undefined;
 
     await validateDenoDependencySource(tempSrc, 'workflow');
 
@@ -115,31 +114,7 @@ export async function buildWorkflow(
       );
     }
 
-    const entry = path.join(tempSrc, manifest.entry);
-    if (!(await pathExists(entry))) {
-      throw new Error(`workflow entry not found: ${manifest.entry}`);
-    }
-
-    await fs.rm(out, { recursive: true, force: true });
-    await fs.mkdir(out, { recursive: true });
-
-    // Materialize the authoritative SDK and generate only the per-build runner
-    // wrapper. User source keeps the stable @hatch/workflow import without
-    // owning the SDK implementation or its import map.
     await materializeWorkflowHatchSdk(tempSrc);
-    const entryImport = `./${manifest.entry.replace(/\\/g, '/')}`;
-    const wrapper = path.join(tempSrc, '__hatch_main.ts');
-    await fs.writeFile(
-      wrapper,
-      // JSON.stringify the specifier so an entry path with quotes/backslashes
-      // can't break out of the import string (entry is already constrained to a
-      // safe relative path by the manifest schema; this is defense in depth).
-      `import workflow from ${JSON.stringify(entryImport)};\n` +
-        `import { runCli } from '@hatch/workflow';\n` +
-        'await runCli(workflow);\n',
-      'utf8',
-    );
-
     // 1) Reproduce the source-controlled dependency graph. Deno reads reviewed
     // allowScripts entries from deno.json; --frozen rejects uncommitted changes.
     const installArgs = [
@@ -168,8 +143,38 @@ export async function buildWorkflow(
       );
     }
 
+    const { manifest } =
+      legacy ??
+      (await loadSourceManifest(tempSrc, {
+        kind: 'workflow',
+        parse: parseSourceWorkflowManifest,
+        logs,
+      }));
+    const entry = path.join(tempSrc, manifest.entry);
+    if (!(await pathExists(entry))) {
+      throw new Error(`workflow entry not found: ${manifest.entry}`);
+    }
+
+    await fs.mkdir(stagedOutput);
+
+    // Materialize the authoritative SDK and generate only the per-build runner
+    // wrapper. User source keeps the stable @hatch/workflow import without
+    // owning the SDK implementation or its import map.
+    const entryImport = `./${manifest.entry.replace(/\\/g, '/')}`;
+    const wrapper = path.join(tempSrc, '__hatch_main.ts');
+    await fs.writeFile(
+      wrapper,
+      // JSON.stringify the specifier so an entry path with quotes/backslashes
+      // can't break out of the import string (entry is already constrained to a
+      // safe relative path by the manifest schema; this is defense in depth).
+      `import workflow from ${JSON.stringify(entryImport)};\n` +
+        `import { runCli } from '@hatch/workflow';\n` +
+        'await runCli(workflow);\n',
+      'utf8',
+    );
+
     // 2) Bundle the workflow + its npm deps into one Deno-runnable file.
-    const bundlePath = path.join(out, 'workflow.js');
+    const bundlePath = path.join(stagedOutput, 'workflow.js');
     const bundleArgs = [
       'bundle',
       '--node-modules-dir=auto',
@@ -203,7 +208,7 @@ export async function buildWorkflow(
       // real run, so it must use the identical network permission contract.
       buildWorkflowDenoArgs({
         bundlePath,
-        artifactDir: out,
+        artifactDir: stagedOutput,
         network: manifest.network,
       }),
       { cwd: tempSrc, env: workflowSandboxEnv({ HATCH_MODE: 'describe' }) },
@@ -229,24 +234,28 @@ export async function buildWorkflow(
 
     const normalized = normalizeWorkflowManifest(manifest);
     await fs.writeFile(
-      path.join(out, 'manifest.normalized.json'),
+      path.join(stagedOutput, 'manifest.normalized.json'),
       JSON.stringify(normalized, null, 2),
       'utf8',
     );
     await fs.writeFile(
-      path.join(out, 'input.schema.json'),
+      path.join(stagedOutput, 'input.schema.json'),
       JSON.stringify(inputSchema, null, 2),
       'utf8',
     );
+
+    await fs.rm(out, { recursive: true, force: true });
+    await fs.cp(stagedOutput, out, { recursive: true });
 
     return {
       source: manifest,
       normalized,
       inputSchema,
-      bundlePath,
+      bundlePath: path.join(out, 'workflow.js'),
       log: logs.join('\n'),
     };
   } finally {
     await fs.rm(tempSrc, { recursive: true, force: true });
+    await fs.rm(stagedOutput, { recursive: true, force: true });
   }
 }

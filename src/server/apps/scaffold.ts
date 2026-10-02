@@ -16,32 +16,22 @@ import { appSlugExists } from './access';
 import { ensureAppRepo } from './git';
 import { isValidAppSlug } from './manifest';
 
-/**
- * Escape a value for insertion *inside* an existing pair of JSON quotes (the
- * template already supplies the surrounding `"`). Without this, a name or
- * description containing `"`/newline/etc. produces invalid manifest.json.
- */
-function jsonStringInner(value: string): string {
-  return JSON.stringify(value).slice(1, -1);
-}
-
+/** Substitute original tokens once; never reinterpret user-provided text. */
 function applyReplacements(
   text: string,
   replacements: Record<string, string>,
 ): string {
-  let out = text;
-  for (const [token, value] of Object.entries(replacements)) {
-    out = out.split(token).join(value);
-  }
-  return out;
+  const tokens = Object.keys(replacements).map((token) =>
+    token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  );
+  if (!tokens.length) return text;
+  return text.replace(
+    new RegExp(tokens.join('|'), 'g'),
+    (token) => replacements[token],
+  );
 }
 
-/**
- * Read a template directory into an in-memory file map, applying token
- * substitutions to the given (text) files. The map is returned to the Agent
- * Runner, which writes it into its own worktree — the platform no longer
- * writes agent worktrees itself.
- */
+/** Render authored files without executing any template source. */
 export async function renderTemplate(
   templateDir: string,
   substitutions: Record<string, Record<string, string>>,
@@ -161,10 +151,10 @@ export async function createApp(
   const files = await renderTemplate(
     path.join(TEMPLATES_DIR, 'default-app'),
     {
-      'manifest.json': {
-        __APP_ID__: jsonStringInner(id),
-        __APP_NAME__: jsonStringInner(name),
-        __APP_DESCRIPTION__: jsonStringInner(description),
+      'manifest.ts': {
+        __APP_ID__: JSON.stringify(id),
+        __APP_NAME__: JSON.stringify(name),
+        __APP_DESCRIPTION__: JSON.stringify(description),
       },
       // package.json `name` is never published; the kebab-case slug is a
       // valid, readable npm name, so a plain substitution is safe.

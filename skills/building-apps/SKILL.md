@@ -8,6 +8,14 @@ description: Design, build, validate, and deploy Hatch Apps with React frontends
 Load this Skill before calling App platform tools or editing an App. Follow the
 workflow in order and load only the capability references needed for the task.
 
+## Manifest authoring
+
+New templates use `manifest.ts`; existing `manifest.json` sources remain supported.
+Keep exactly one of these files. Read [Source manifests](references/manifest-source.md)
+for SDK helpers, type checking, execution boundaries, and format conversion.
+Type-check `manifest.ts` independently before codegen or checking execution entries.
+Do not import generated files or execution modules from the manifest.
+
 ## Core workflow
 
 1. For a new App, call `list_apps` and use existing `slug · name` pairs to match
@@ -26,7 +34,7 @@ workflow in order and load only the capability references needed for the task.
    its exact `source_path`. Update mode never creates a missing path. Use
    `force: true` only with `clone: true` when intentionally discarding the
    current contents of that exact target.
-3. Read the actual source tree before editing. Keep `manifest.json`, proto,
+3. Read the actual source tree before editing. Keep the source manifest (`manifest.ts` or `manifest.json`), proto,
    backend, frontend, widgets, and capabilities synchronized.
 4. If dependencies changed, update the lockfile with the Deno command below.
    Generate RPC code, run the source check, and run relevant tests.
@@ -46,7 +54,7 @@ retry. Checkout never authorizes silently replacing local work.
 `create_app` produces a prepared, runnable Counter App:
 
 ```text
-manifest.json          App entries, capabilities, routes, widgets, integrations
+manifest.ts            App entries, capabilities, routes, widgets, integrations
 proto/service.proto    Connect RPC service; proto files stay under proto/
 backend/main.ts        bundled Deno backend
 backend/assets/        optional read-only runtime assets
@@ -236,7 +244,7 @@ it from the App root with Hatch's platform-owned template. Do not run bare
 buf generate --template .hatch/buf.gen.yaml
 ```
 
-Then type-check every enabled entry from `manifest.json`, plus `data/schema.ts`
+Then type-check every enabled entry from the source manifest (`manifest.ts` or `manifest.json`), plus `data/schema.ts`
 when Data Tables are enabled:
 
 ```bash

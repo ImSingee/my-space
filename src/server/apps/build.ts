@@ -1,4 +1,8 @@
 /** Server-only: compile an app source tree into deployable artifacts. */
+import {
+  detectSourceManifest,
+  loadSourceManifest,
+} from '../../source-manifest';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -268,19 +272,6 @@ async function assertSourceHasNoSymlinks(root: string): Promise<void> {
   await walk(root);
 }
 
-async function readManifest(src: string): Promise<SourceManifest> {
-  const raw = await fs.readFile(path.join(src, 'manifest.json'), 'utf8');
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(
-      `manifest.json is not valid JSON: ${e instanceof Error ? e.message : e}`,
-    );
-  }
-  return parseSourceManifest(json);
-}
-
 type SourceCheckEntry = {
   path: string;
   missingMessage: string;
@@ -347,8 +338,7 @@ async function checkAppSource(
     `--import-map=${hatchImportMapPath(src)}`,
     '--lock=deno.lock',
     '--frozen',
-    '--',
-    ...entries.map((entry) => entry.path),
+    ...entries.map((entry) => `./${entry.path}`),
   ];
   const checked = await run('deno', checkArgs, {
     cwd: src,
@@ -767,17 +757,14 @@ export async function buildApp(
     });
     await assertSourceHasNoSymlinks(tempSrc);
 
-    const manifest = await readManifest(src);
-
-    // The manifest id drives every generated URL (app/widget/RPC), but
-    // artifacts and the DB row are keyed by the `id` argument. If they diverge,
-    // the deploy "succeeds" with URLs pointing at a different slug. Reject early.
-    if (manifest.id !== id) {
-      throw new Error(
-        `manifest.id "${manifest.id}" does not match the app id "${id}". ` +
-          'Fix manifest.json so its id matches the app.',
-      );
-    }
+    const manifestFile = await detectSourceManifest(src);
+    const legacy =
+      manifestFile === 'manifest.json'
+        ? await loadSourceManifest(src, {
+            kind: 'app',
+            parse: parseSourceManifest,
+          })
+        : undefined;
 
     await validateDenoDependencySource(src, 'app');
 
@@ -785,56 +772,6 @@ export async function buildApp(
     // After validating authored dependency metadata, materialize the trusted
     // SDK and fixed platform import map inside this disposable checkout.
     await materializeAppHatchSdk(src);
-
-    // 1) Connect codegen from proto (if the app has a backend RPC service). We
-    // also compile the proto to a descriptor set so the platform records the
-    // app's declared API (services + methods) and uploads the raw proto.
-    const protoPath = manifest.rpc ? path.join(src, manifest.rpc.proto) : null;
-    let api: AppApi | undefined;
-    if (manifest.rpc && protoPath) {
-      const rpc = manifest.rpc;
-      const protoEntry = await fs.lstat(protoPath).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-        throw error;
-      });
-      if (!protoEntry) {
-        throw new Error(
-          `RPC proto declared by manifest.json was not found: ${rpc.proto}`,
-        );
-      }
-      if (!protoEntry.isFile()) {
-        throw new Error(
-          `RPC proto declared by manifest.json must be a regular file: ${rpc.proto}`,
-        );
-      }
-      // `buf generate` executes the plugins listed in buf.gen.yaml, and `local:`
-      // plugins are arbitrary commands. The file ships with the app source, so
-      // an app could point it at `sh` and run code at build time. Overwrite it
-      // (we build from a temp copy) with the platform's fixed codegen config so
-      // only the sanctioned plugin ever runs, and withhold platform secrets
-      // from the plugin's environment like every other build subprocess.
-      await fs.writeFile(
-        path.join(src, 'buf.gen.yaml'),
-        PLATFORM_APP_BUF_GEN_YAML,
-      );
-      const gen = await run('buf', ['generate'], {
-        cwd: src,
-        env: subprocessSandboxEnv(),
-      });
-      logs.push(`$ buf generate\n${gen.output.trim()}`);
-      if (gen.code !== 0) {
-        throw new Error(`Connect codegen failed:\n${gen.output}`);
-      }
-      api = await extractAppApi(src);
-      if (!api.services.some((service) => service.name === rpc.service)) {
-        throw new Error(
-          `RPC service declared by manifest.json was not found in the compiled proto: ${rpc.service}`,
-        );
-      }
-      logs.push(
-        `captured app API: ${api.services.length} service(s), ${api.protoFiles.length} proto file(s)`,
-      );
-    }
 
     // 2) Reproduce the Agent-reviewed dependency install from the committed
     // package.json + deno.lock. `--no-config` prevents Deno from implicitly
@@ -858,6 +795,74 @@ export async function buildApp(
         'Dependency install failed with the committed deno.lock. Load the ' +
           '"building-apps" Skill, run deno install locally, commit the updated ' +
           `dependency files, and deploy again:\n${install.output}`,
+      );
+    }
+
+    const { manifest } =
+      legacy ??
+      (await loadSourceManifest(src, {
+        kind: 'app',
+        parse: parseSourceManifest,
+        logs,
+      }));
+
+    // The manifest id drives every generated URL (app/widget/RPC), but
+    // artifacts and the DB row are keyed by the `id` argument. If they diverge,
+    // the deploy "succeeds" with URLs pointing at a different slug. Reject early.
+    if (manifest.id !== id) {
+      throw new Error(
+        `manifest.id "${manifest.id}" does not match the app id "${id}". ` +
+          `Fix ${manifestFile} so its id matches the app.`,
+      );
+    }
+
+    // 1) Connect codegen from proto (if the app has a backend RPC service). We
+    // also compile the proto to a descriptor set so the platform records the
+    // app's declared API (services + methods) and uploads the raw proto.
+    const protoPath = manifest.rpc ? path.join(src, manifest.rpc.proto) : null;
+    let api: AppApi | undefined;
+    if (manifest.rpc && protoPath) {
+      const rpc = manifest.rpc;
+      const protoEntry = await fs.lstat(protoPath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      });
+      if (!protoEntry) {
+        throw new Error(
+          `RPC proto declared by ${manifestFile} was not found: ${rpc.proto}`,
+        );
+      }
+      if (!protoEntry.isFile()) {
+        throw new Error(
+          `RPC proto declared by ${manifestFile} must be a regular file: ${rpc.proto}`,
+        );
+      }
+      // `buf generate` executes the plugins listed in buf.gen.yaml, and `local:`
+      // plugins are arbitrary commands. The file ships with the app source, so
+      // an app could point it at `sh` and run code at build time. Overwrite it
+      // (we build from a temp copy) with the platform's fixed codegen config so
+      // only the sanctioned plugin ever runs, and withhold platform secrets
+      // from the plugin's environment like every other build subprocess.
+      await fs.writeFile(
+        path.join(src, 'buf.gen.yaml'),
+        PLATFORM_APP_BUF_GEN_YAML,
+      );
+      const gen = await run('buf', ['generate'], {
+        cwd: src,
+        env: subprocessSandboxEnv(),
+      });
+      logs.push(`$ buf generate\n${gen.output.trim()}`);
+      if (gen.code !== 0) {
+        throw new Error(`Connect codegen failed:\n${gen.output}`);
+      }
+      api = await extractAppApi(src);
+      if (!api.services.some((service) => service.name === rpc.service)) {
+        throw new Error(
+          `RPC service declared by ${manifestFile} was not found in the compiled proto: ${rpc.service}`,
+        );
+      }
+      logs.push(
+        `captured app API: ${api.services.length} service(s), ${api.protoFiles.length} proto file(s)`,
       );
     }
 

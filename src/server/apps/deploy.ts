@@ -888,8 +888,9 @@ async function deployAppInner(
 
         // Live swap is the last statement so an insert/update failure leaves
         // the previous build untouched. Data access stays fenced until COMMIT.
-        liveTouched = true;
         const live = appBuildDir(id);
+        await fs.mkdir(path.dirname(live), { recursive: true });
+        liveTouched = true;
         await fs.rm(liveBackup, { recursive: true, force: true });
         if (await pathExists(live)) {
           await fs.rename(live, liveBackup);

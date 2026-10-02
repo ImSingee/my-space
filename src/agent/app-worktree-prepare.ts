@@ -1,4 +1,8 @@
 /** Prepare generated/dependency files in an Agent App worktree. */
+import { loadSourceManifest, detectSourceManifest } from '../source-manifest';
+import { parseSourceManifest } from '../server/apps/manifest';
+import { subprocessSandboxEnv } from '../server/sandbox-env';
+import type { RunResult } from '../server/subprocess';
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import { access, lstat, readFile, readdir, realpath } from 'node:fs/promises';
@@ -37,6 +41,7 @@ export type AppPreparationOptions = {
 export type AppPreparationStage =
   | 'source preflight'
   | 'dependency install'
+  | 'manifest validation'
   | 'Connect codegen';
 
 export class AppPreparationError extends Error {
@@ -64,7 +69,8 @@ async function runPreparationCommand(
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<void> {
+  input?: string,
+): Promise<RunResult> {
   if (signal?.aborted) {
     throw new AppPreparationError(stage, 'operation was aborted.');
   }
@@ -96,7 +102,7 @@ async function runPreparationCommand(
     }
   };
 
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<RunResult>((resolve, reject) => {
     const child = spawn(wrapped.command, wrapped.args, {
       cwd: root,
       detached: process.platform !== 'win32',
@@ -104,9 +110,11 @@ async function runPreparationCommand(
         ...env,
         NO_COLOR: '1',
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     let output = '';
+    let stdout = '';
+    let stderr = '';
     let settled = false;
     const finish = (error?: Error) => {
       if (settled) return;
@@ -114,7 +122,7 @@ async function runPreparationCommand(
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
-      else resolve();
+      else resolve({ code: 0, output, stdout, stderr });
     };
     const fail = (reason: string) =>
       finish(new AppPreparationError(stage, reason));
@@ -130,11 +138,17 @@ async function runPreparationCommand(
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
     child.stdout.on('data', (chunk: Buffer) => {
+      stdout = appendCapped(stdout, chunk.toString());
       output = appendCapped(output, chunk.toString());
     });
     child.stderr.on('data', (chunk: Buffer) => {
+      stderr = appendCapped(stderr, chunk.toString());
       output = appendCapped(output, chunk.toString());
     });
+    child.stdin.on('error', () => {
+      /* The exit handler reports early termination. */
+    });
+    child.stdin.end(input);
     child.on('exit', () => {
       if (process.platform === 'win32' || !child.pid) return;
       // A surviving descendant keeps the original process group id. Targeting
@@ -423,44 +437,13 @@ async function readPreparationFile(
       throw error;
     }
   }
-  const result = await readAgentAuthoredFile(root, [file]);
+  const result = await readAgentAuthoredFile(root, file.split('/'));
   if ('content' in result) return result.content;
   if (result.error === 'missing') return null;
   if (result.error === 'symlink') {
     throw new Error(`${file} must not be a symbolic link.`);
   }
   throw new Error(`${file} must be a regular file.`);
-}
-
-async function appUsesRpc(root: string): Promise<boolean> {
-  let parsed: unknown;
-  try {
-    const source = await readPreparationFile(root, 'manifest.json');
-    if (source === null) throw new Error('manifest.json does not exist.');
-    parsed = JSON.parse(source);
-  } catch (error) {
-    throw new AppPreparationError(
-      'source preflight',
-      `cannot read manifest.json: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new AppPreparationError(
-      'source preflight',
-      'manifest.json must contain a JSON object.',
-    );
-  }
-  const rpc = (parsed as Record<string, unknown>).rpc;
-  if (rpc === undefined || rpc === null) return false;
-  if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
-    throw new AppPreparationError(
-      'source preflight',
-      'manifest.json rpc must contain an object.',
-    );
-  }
-  return true;
 }
 
 async function resetGeneratedDirectory(
@@ -535,7 +518,17 @@ export async function prepareAppWorktree(
       error instanceof Error ? error.message : String(error),
     );
   }
-  const usesRpc = await appUsesRpc(root);
+  const manifestFile = await detectSourceManifest(root, (file) =>
+    readPreparationFile(root, file),
+  );
+  const legacy =
+    manifestFile === 'manifest.json'
+      ? await loadSourceManifest(root, {
+          kind: 'app',
+          parse: parseSourceManifest,
+          read: (file) => readPreparationFile(root, file),
+        })
+      : undefined;
   const env = await trustedPreparationEnv(root);
   const timeoutMs = options.timeoutMs ?? PREPARE_TIMEOUT_MS;
   const deno = await resolveTrustedExecutable(
@@ -560,7 +553,24 @@ export async function prepareAppWorktree(
     timeoutMs,
     signal,
   );
-  if (!usesRpc) {
+  const { manifest } =
+    legacy ??
+    (await loadSourceManifest(root, {
+      kind: 'app',
+      parse: parseSourceManifest,
+      read: (file) => readPreparationFile(root, file),
+      run: (args, extra) =>
+        runPreparationCommand(
+          root,
+          'manifest validation',
+          [deno, ...args],
+          subprocessSandboxEnv({ PATH: env.PATH ?? '' }),
+          Math.min(extra.timeoutMs ?? timeoutMs, timeoutMs),
+          signal,
+          extra.input,
+        ),
+    }));
+  if (!manifest.rpc) {
     // The preflight proved this entry is absent or a real directory. Keep the
     // ignored generated state aligned with a deploy's clean temporary copy
     // when an App removes its RPC declaration.

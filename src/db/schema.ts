@@ -340,7 +340,7 @@ export const workflows = snakeCase.table(
     name: text().notNull(),
     description: text(),
     status: text().$type<WorkflowStatus>().notNull().default('draft'),
-    /** Latest source manifest.json (as authored by the Agent). */
+    /** Latest parsed source manifest (JSON from authored TS or JSON). */
     manifest: jsonb().$type<JsonObject>(),
     /**
      * JSON Schema (draft 2020-12) of the workflow input, derived from the
