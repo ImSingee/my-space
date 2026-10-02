@@ -57,7 +57,7 @@
   max-width: 100%;
 }
 
-.appActions {
+.deploymentActions {
   width: min(100%, 480px);
   margin-top: 4px;
   overflow: hidden;
@@ -67,7 +67,7 @@
   box-shadow: none;
 }
 
-.appActionsTitle {
+.deploymentActionsTitle {
   padding: 7px 10px;
   font-size: var(--mantine-font-size-xs);
   font-weight: 600;
@@ -75,30 +75,30 @@
   background: var(--surface-panel);
 }
 
-.appActionRows {
+.deploymentActionRows {
   display: flex;
   flex-direction: column;
 }
 
-.appActionRow {
+.deploymentActionRow {
   min-width: 0;
   padding: 8px 10px;
 }
 
-.appActionRow + .appActionRow {
+.deploymentActionRow + .deploymentActionRow {
   border-top: 1px solid var(--mantine-color-default-border);
 }
 
-.appActionIdentity {
+.deploymentActionIdentity {
   flex: 1;
   min-width: 0;
 }
 
-.appActionCtas {
+.deploymentActionCtas {
   flex-shrink: 0;
 }
 
-.unavailableApp {
+.unavailableResource {
   flex-shrink: 0;
 }
 
