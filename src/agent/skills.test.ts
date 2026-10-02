@@ -69,34 +69,33 @@ describe('Agent skills', () => {
     );
   });
 
-  it('advertises shipped skills that the registered read tool can load', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-work-'));
-    tempRoots.push(root);
-    const env = new NodeExecutionEnv({ cwd: root });
-    const skills = await loadAgentSkills(env, {
-      workflowBetaEnabled: false,
-      skillsDir: SKILLS_DIR,
-    });
-    const prompt = buildSystemPrompt(
-      appUrl,
-      { workflowBetaEnabled: false },
-      skills,
-    );
-    const readFileTool = createTools(env, {
-      workflowBetaEnabled: false,
-      platform: stubPlatform,
-      readOnlyRoots: [SKILLS_DIR],
-    }).find((tool) => tool.name === 'read_file');
-    if (!readFileTool) throw new Error('Missing read_file tool');
-
-    for (const skill of skills) {
-      expect(prompt).toContain(skill.filePath);
-      const result = await readFileTool.execute('read', {
-        path: skill.filePath,
+  it.each([false, true])(
+    'advertises readable shipped skills (workflow beta: %s)',
+    async (workflowBetaEnabled) => {
+      const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-work-'));
+      tempRoots.push(root);
+      const env = new NodeExecutionEnv({ cwd: root });
+      const skills = await loadAgentSkills(env, {
+        workflowBetaEnabled,
+        skillsDir: SKILLS_DIR,
       });
-      expect(textOf(result)).toContain(skill.content);
-    }
-  });
+      const prompt = buildSystemPrompt(appUrl, { workflowBetaEnabled }, skills);
+      const readFileTool = createTools(env, {
+        workflowBetaEnabled,
+        platform: stubPlatform,
+        readOnlyRoots: [SKILLS_DIR],
+      }).find((tool) => tool.name === 'read_file');
+      if (!readFileTool) throw new Error('Missing read_file tool');
+
+      for (const skill of skills) {
+        expect(prompt).toContain(skill.filePath);
+        const result = await readFileTool.execute('read', {
+          path: skill.filePath,
+        });
+        expect(textOf(result)).toContain(skill.content);
+      }
+    },
+  );
 
   it('rejects an incomplete skill directory', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'hatch-agent-skills-'));
