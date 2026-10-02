@@ -277,13 +277,18 @@
 /* ActionIcon */
 .mantine-ActionIcon-root {
   &:where(:disabled:not([data-loading]), [data-disabled]:not([data-loading])) {
-    border: var(--ai-bd);
-    opacity: 0.5;
-    background-color: transparent;
+    /* Mantine's default disabled fill reads as a gray chip; keep only the
+       muted icon, no background block (Backends row actions, KV delete, etc.). */
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--mantine-color-disabled-color);
+    opacity: 0.55;
+    cursor: not-allowed;
 
     &:hover,
     &:active {
-      background-color: transparent;
+      background: transparent;
+      color: var(--mantine-color-disabled-color);
     }
 
     &:active {
