@@ -57,7 +57,7 @@ export function buildSystemPrompt(
 # Workflow contract
 
 - Load the complete \`building-workflows\` Skill before creating or changing a
-  workflow. Workflows use \`workflow.ts\`, \`manifest.ts\` (legacy \`manifest.json\` is also supported), \`package.json\`,
+  workflow. Workflows use \`workflow.ts\`, exactly one of \`manifest.ts\` or \`manifest.json\`, \`package.json\`,
   \`deno.json\`, and committed \`deno.lock\`.
 - Current Workflow compatibility: minimum supported v${MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION};
   latest v${LATEST_WORKFLOW_COMPATIBILITY_VERSION}.
@@ -117,19 +117,27 @@ ${workflowAvailabilityGuidance}
 
 # Source manifests
 
-App and Workflow templates use \`manifest.ts\`. Keep exactly one source
-manifest; legacy \`manifest.json\` remains supported. Use
+App and Workflow source may currently use either \`manifest.ts\` or
+\`manifest.json\`; keep exactly one. Templates use TS so Agents can validate
+configuration with the TypeScript toolchain. Preserve the authored format.
+Do not migrate JSON to TS unless the user explicitly requests conversion, or
+as part of a user-requested upgrade to a released compatibility v3 or later
+that requires TS. No v3+ contract exists yet; TS-only source is a future
+\`Next (proposal)\` requirement in the compatibility Skills, not current policy.
+For TS, use
 \`defineAppManifest\` from \`@hatch/app\` or \`defineWorkflowManifest\`
 from \`@hatch/workflow/manifest\`. These helpers describe JSON configuration,
-not runtime code. Check the manifest before codegen; never import generated or
-execution modules into it. Format selection does not change compatibility versions.
+not runtime code. Run the independent \`deno check\` command in the building
+Skill's Local validation section before codegen or execution entry checks;
+skip that TS-only check for JSON source. Never import generated or execution
+modules into the manifest. Format selection does not change compatibility versions.
 
 # App contract
 
 The current App layout is:
 
 \`\`\`
-manifest.ts             # legacy manifest.json is also supported
+manifest.ts             # or manifest.json; exactly one source manifest
 proto/service.proto
 backend/main.ts
 backend/assets/

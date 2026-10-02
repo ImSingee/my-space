@@ -18,10 +18,17 @@ serving the webhook.
 
 ## Manifest authoring
 
-New templates use `manifest.ts`; existing `manifest.json` sources remain supported.
-Keep exactly one of these files. Read [Source manifests](../building-apps/references/manifest-source.md)
-for SDK helpers, type checking, execution boundaries, and format conversion.
-Type-check `manifest.ts` independently before codegen or checking execution entries.
+Current source may use either `manifest.ts` or `manifest.json`; keep exactly one.
+New templates use TS to let Agents validate configuration with the TypeScript
+toolchain. Preserve the selected format during ordinary edits and imports.
+Do not migrate JSON to TS unless the user explicitly requests that conversion,
+or as part of a user-requested upgrade to a released compatibility v3 or later
+that requires TS. No such version exists yet; TS-only source is recorded under
+`Next (proposal)` in `workflow-compatibility`, not current policy.
+
+Read [Source manifests](../building-apps/references/manifest-source.md) for SDK
+helpers, execution boundaries, and authorized format conversion. Follow Local
+validation below to check TS manifests independently before execution entries.
 Do not import generated files or execution modules from the manifest.
 
 ## Source layout
@@ -154,7 +161,8 @@ it reports a skipped lifecycle script, do not enable it blindly:
 
 The source manifest (`manifest.ts` or `manifest.json`) declares the id/name, network policy, and triggers. The input
 schema is NOT in the manifest — it is derived from your zod schema at deploy
-time.
+time. The JSON example below can be used in `manifest.json`, or as the object
+passed to `defineWorkflowManifest` in `manifest.ts`.
 
 ```json
 {
@@ -221,6 +229,32 @@ lockfile, npm, and remote module resolution disabled.
   input) or GET with query params. The secret may also be sent as the
   `x-hatch-secret` header.
 
+## Local validation
+
+After create/checkout has prepared `.hatch/` and locked dependencies (and after
+installing any dependency changes), run from the Workflow root. If the selected
+source is `manifest.ts`, check it independently before the execution entry:
+
+```bash
+deno check --config=deno.json --no-remote --node-modules-dir=manual \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./manifest.ts
+```
+
+This checks the manifest's own import graph, which checking `workflow.ts` may
+never reach. Fix failures before continuing. For `manifest.json`, skip only
+this TS check and retain JSON source; platform manifest validation still
+applies. Then check the manifest's declared entry (replace `workflow.ts` below
+if different) and run relevant tests with the generated import map:
+
+```bash
+deno check --import-map=.hatch/import-map.json workflow.ts
+deno test --import-map=.hatch/import-map.json <test paths...>
+```
+
+`deploy_workflow` repeats TS manifest checking and validates the evaluated
+configuration before bundling. A successful TypeScript check does not replace
+platform validation of paths, cross-field requirements, or serializability.
+
 ## Git workflow
 
 1. For a new workflow, confirm the name + slug with the user via `ask`. Both are
@@ -234,7 +268,7 @@ lockfile, npm, and remote module resolution disabled.
    `clone: false` and the exact returned `source_path`; update mode never creates
    or replaces a path. Use a separate `clone: true` call with the same
    `source_path` and `force: true` only to permanently discard and replace it.
-3. Edit files under the exact returned source path.
+3. Edit files under the exact returned source path and complete Local validation.
 4. `git status`, `git add ...`, `git commit -m "message"` there.
 5. Call `deploy_workflow` with that `source_path` and a required `message`.
    Deploy bundles the program, captures the input JSON Schema, publishes the
@@ -266,7 +300,7 @@ origin master`, rebase, resolve, and deploy again.
    `checkout_workflow` and retain its returned source path.
 2. Read the files, edit `workflow.ts` (input + steps) and the source manifest (`manifest.ts` or `manifest.json`)
    (network policy + triggers), keeping the zod schema authoritative.
-3. Commit with git.
+3. Complete Local validation, then commit with git.
 4. `deploy_workflow` with that `source_path` and a `message`. On failure, read
    the build/describe output, fix the source, commit, and deploy again.
 5. Tell the user what it does, how it's triggered, and where to watch runs.

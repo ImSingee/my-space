@@ -10,10 +10,17 @@ workflow in order and load only the capability references needed for the task.
 
 ## Manifest authoring
 
-New templates use `manifest.ts`; existing `manifest.json` sources remain supported.
-Keep exactly one of these files. Read [Source manifests](references/manifest-source.md)
-for SDK helpers, type checking, execution boundaries, and format conversion.
-Type-check `manifest.ts` independently before codegen or checking execution entries.
+Current source may use either `manifest.ts` or `manifest.json`; keep exactly one.
+New templates use TS to let Agents validate configuration with the TypeScript
+toolchain. Preserve the selected format during ordinary edits and imports.
+Do not migrate JSON to TS unless the user explicitly requests that conversion,
+or as part of a user-requested upgrade to a released compatibility v3 or later
+that requires TS. No such version exists yet; TS-only source is recorded under
+`Next (proposal)` in `app-compatibility`, not current policy.
+
+Read [Source manifests](references/manifest-source.md) for SDK helpers,
+execution boundaries, and authorized format conversion. Follow Local validation
+below to check TS manifests independently before codegen or execution entries.
 Do not import generated files or execution modules from the manifest.
 
 ## Core workflow
@@ -37,7 +44,8 @@ Do not import generated files or execution modules from the manifest.
 3. Read the actual source tree before editing. Keep the source manifest (`manifest.ts` or `manifest.json`), proto,
    backend, frontend, widgets, and capabilities synchronized.
 4. If dependencies changed, update the lockfile with the Deno command below.
-   Generate RPC code, run the source check, and run relevant tests.
+   Follow Local validation: check `manifest.ts` when selected, generate RPC
+   code, check enabled source entries, and run relevant tests.
 5. In the returned worktree, inspect `git status`, stage only intended authored
    files, and commit. Do not push branches or create/push tags.
 6. Call `deploy_app` with the same `source_path` and a concise release `message`.
@@ -121,8 +129,9 @@ the same contents. Deleting the App permanently deletes the directory.
 
 ## Manifest
 
-Keep every declaration consistent with its source file. A representative
-manifest is:
+Keep every declaration consistent with its source file. The JSON example below
+can be used in `manifest.json`, or as the object passed to `defineAppManifest`
+in `manifest.ts`:
 
 ```json
 {
@@ -236,6 +245,20 @@ those mechanisms.
 
 ## Local validation
 
+After create/checkout has prepared `.hatch/` and locked dependencies (and after
+installing any dependency changes), run from the App root. If the selected
+source is `manifest.ts`, type-check it separately before RPC codegen and entry
+checks:
+
+```bash
+deno check --config=deno.json --no-remote --node-modules-dir=manual \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./manifest.ts
+```
+
+This checks the manifest's own import graph, which entry checks may never
+reach. Fix failures before continuing. For `manifest.json`, skip only this TS
+check and retain JSON source; platform manifest validation still applies.
+
 Create and checkout already generate RPC code. After changing a proto, regenerate
 it from the App root with Hatch's platform-owned template. Do not run bare
 `buf generate`: that reads the App-authored `buf.gen.yaml` instead.
@@ -258,8 +281,10 @@ Adjust the final entry list to the manifest and omit disabled or absent entries.
 Run relevant tests after the check. Do not use a different import map for local
 checks.
 
-Every other Deno command that resolves App TypeScript must use the same SDK,
-node-modules, and frozen-lock contract. For example:
+Other Deno commands that resolve App execution entries must use the same SDK,
+automatic node-modules, and frozen-lock contract as the entry check. The
+manifest check above uses manual node-modules to match the restricted loader.
+For example:
 
 ```bash
 deno test --config=deno.json --no-remote --node-modules-dir=auto \
