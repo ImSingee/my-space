@@ -68,6 +68,10 @@ export function buildSystemPrompt(
   case-insensitively; never edit, replace, copy, depend on, or commit it, and
   never declare or map \`@hatch/*\` in source-owned dependency files. Pass
   \`--import-map=.hatch/import-map.json\` to local Deno check/test/run commands.
+- Before committing, type-check the manifest-selected Workflow entry with
+  \`deno check --config=deno.json --node-modules-dir=auto --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./workflow.ts\`
+  (adjust the entry path to the manifest). Deploy repeats this source check
+  before bundling or executing describe mode and rejects type errors.
 - Settle name and slug with the same two-question flow, then create/checkout,
   edit, install dependencies with Deno, validate, commit, and call
   \`deploy_workflow\` with the exact returned source path and release message.
