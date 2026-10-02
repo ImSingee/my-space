@@ -1,5 +1,4 @@
 import { evaluateTemplateManifest } from '../../test-manifest-fixture';
-import { defaultWorkflowManifest } from './default-manifest';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { LATEST_WORKFLOW_COMPATIBILITY_VERSION } from '~/workflow-compatibility';
@@ -14,13 +13,11 @@ describe('default workflow template', () => {
       ),
       'utf8',
     );
-    const expected = defaultWorkflowManifest('demo', 'Demo', 'Demo workflow');
-    const rendered = raw.replace(
-      '__WORKFLOW_MANIFEST__',
-      JSON.stringify(expected),
-    );
+    const rendered = raw
+      .replace('__WORKFLOW_ID__', JSON.stringify('demo'))
+      .replace('__WORKFLOW_NAME__', JSON.stringify('Demo'))
+      .replace('__WORKFLOW_DESCRIPTION__', JSON.stringify('Demo workflow'));
     const source = await evaluateTemplateManifest(rendered, 'workflow');
-    expect(source).toEqual(expected);
 
     expect(source).not.toHaveProperty('version');
     expect(source.compatibilityVersion).toBe(

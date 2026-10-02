@@ -38,12 +38,13 @@ describe('createWorkflow', () => {
   it('generates an immutable id and uses the slug only for human-facing state', async () => {
     const created = await createWorkflow({
       slug: 'daily-digest',
-      name: 'Daily digest',
+      name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
+      description: 'First line\nSecond line \\ __WORKFLOW_ID__',
     });
 
     expect(created).toMatchObject({
       slug: 'daily-digest',
-      name: 'Daily digest',
+      name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
     });
     expect(created.id).toMatch(/^[0-9a-z]{26}$/);
     expect(created.id).not.toBe(created.slug);
@@ -52,7 +53,11 @@ describe('createWorkflow', () => {
         renderedFile(created.files, 'manifest.ts'),
         'workflow',
       ),
-    ).toMatchObject({ id: created.id, name: 'Daily digest' });
+    ).toMatchObject({
+      id: created.id,
+      name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
+      description: 'First line\nSecond line \\ __WORKFLOW_ID__',
+    });
     expect(
       JSON.parse(renderedFile(created.files, 'package.json')),
     ).toMatchObject({ name: 'daily-digest' });
@@ -60,9 +65,13 @@ describe('createWorkflow', () => {
     await expect(db.query.workflows.findFirst()).resolves.toMatchObject({
       id: created.id,
       slug: 'daily-digest',
-      name: 'Daily digest',
+      name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
+      description: 'First line\nSecond line \\ __WORKFLOW_ID__',
       repoPath: `/test/workflow-repos/${created.id}.git`,
-      manifest: { id: created.id },
+      status: 'draft',
+      manifest: null,
+      inputSchema: null,
+      currentDeploymentId: null,
     });
   });
 

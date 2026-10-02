@@ -4,13 +4,11 @@ import { ulid } from 'ulid';
 import { TEMPLATES_DIR } from '~agent/paths';
 import type { ScaffoldFile } from '~agent/protocol';
 import { db, schema } from '~/db';
-import type { JsonObject } from '~/db/schema';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import { renderTemplate } from '../apps/scaffold';
 import { workflowSlugExists } from './access';
 import { ensureWorkflowRepo } from './git';
 import { isValidWorkflowSlug } from './manifest';
-import { defaultWorkflowManifest } from './default-manifest';
 
 export type CreateWorkflowInput = {
   /** Mutable human-facing URL slug; the immutable id is generated here. */
@@ -61,17 +59,19 @@ export async function createWorkflow(
   const name = input.name.trim() || slug;
   const description = (input.description ?? '').trim();
 
-  const manifest = defaultWorkflowManifest(id, name, description);
   const files = await renderTemplate(
     path.join(TEMPLATES_DIR, 'default-workflow'),
     {
       'manifest.ts': {
-        __WORKFLOW_MANIFEST__: JSON.stringify(manifest, null, 2),
+        __WORKFLOW_ID__: JSON.stringify(id),
+        __WORKFLOW_NAME__: JSON.stringify(name),
+        __WORKFLOW_DESCRIPTION__: JSON.stringify(description),
       },
       'package.json': { __WORKFLOW_ID__: slug },
     },
   );
 
+  // Like App drafts, the source manifest is recorded after deployment.
   const [created] = await db
     .insert(schema.workflows)
     .values({
@@ -80,7 +80,6 @@ export async function createWorkflow(
       name,
       description: description || null,
       status: 'draft',
-      manifest: manifest as unknown as JsonObject,
       repoPath,
       pinned: input.pin ?? true,
     })
