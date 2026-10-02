@@ -155,6 +155,29 @@ export async function buildWorkflow(
       throw new Error(`workflow entry not found: ${manifest.entry}`);
     }
 
+    // Check the authored entry and its transitive imports before bundling or
+    // evaluating author code. Bundling erases TypeScript types without checking
+    // them; describe mode only validates the emitted runtime program.
+    const checkArgs = [
+      'check',
+      '--config=deno.json',
+      '--node-modules-dir=auto',
+      `--import-map=${hatchImportMapPath(tempSrc)}`,
+      '--lock=deno.lock',
+      '--frozen',
+      `./${manifest.entry}`,
+    ];
+    const checked = await run('deno', checkArgs, {
+      cwd: tempSrc,
+      env: workflowSandboxEnv(),
+    });
+    logs.push(`$ deno ${checkArgs.join(' ')}\n${checked.output.trim()}`);
+    if (checked.code !== 0) {
+      throw new Error(
+        `Workflow source validation failed during deno check:\n${checked.output}`,
+      );
+    }
+
     await fs.mkdir(stagedOutput);
 
     // Materialize the authoritative SDK and generate only the per-build runner

@@ -104,6 +104,40 @@ afterEach(async () => {
 });
 
 describe('Workflow final deployment compatibility recording', () => {
+  it('keeps the live release when source type checking fails', async () => {
+    const previous = await deployWorkflow(WORKFLOW_ID, {
+      sourceDir: '/source',
+      message: 'Initial deployment',
+    });
+    mocks.publishDeploymentSource.mockClear();
+    mocks.reloadWorkflowScheduler.mockClear();
+    mocks.buildWorkflow.mockRejectedValueOnce(
+      new Error('Workflow source validation failed during deno check: TS2322'),
+    );
+
+    await expect(
+      deployWorkflow(WORKFLOW_ID, {
+        sourceDir: '/source',
+        message: 'Invalid source',
+      }),
+    ).rejects.toThrow(/source validation failed during deno check/);
+
+    await expect(
+      db.query.workflows.findFirst({
+        where: { id: WORKFLOW_ID },
+        columns: { status: true, currentDeploymentId: true },
+      }),
+    ).resolves.toEqual({
+      status: 'deployed',
+      currentDeploymentId: previous.deploymentId,
+    });
+    await expect(
+      db.query.workflowDeployments.findMany({ columns: { id: true } }),
+    ).resolves.toEqual([{ id: previous.deploymentId }]);
+    expect(mocks.publishDeploymentSource).not.toHaveBeenCalled();
+    expect(mocks.reloadWorkflowScheduler).not.toHaveBeenCalled();
+  });
+
   it('records and returns the manifest-selected compatibility version', async () => {
     const result = await deployWorkflow(WORKFLOW_ID, {
       sourceDir: '/source',

@@ -128,10 +128,19 @@ For local Deno commands that load workflow source, always select the generated
 import map explicitly:
 
 ```bash
-deno check --import-map=.hatch/import-map.json workflow.ts
+deno check --config=deno.json --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./workflow.ts
 deno test --import-map=.hatch/import-map.json
 deno run --import-map=.hatch/import-map.json <local-harness.ts>
 ```
+
+Run the source check before committing, replacing `./workflow.ts` with the
+manifest's entry path when different. It checks that entry and its transitive
+imports. `deploy_workflow` repeats this check with the committed dependencies
+and a fresh platform SDK before bundling, describe-mode execution, or artifact
+publication. Type errors fail deploy and must be fixed in authored source and
+committed before retrying; bundling and input-schema extraction do not replace
+type checking.
 
 If `.hatch/` is missing or stale, run `create_workflow` or `checkout_workflow`
 again for the same source path. Do not recreate the SDK or import map yourself.
@@ -247,13 +256,15 @@ applies. Then check the manifest's declared entry (replace `workflow.ts` below
 if different) and run relevant tests with the generated import map:
 
 ```bash
-deno check --import-map=.hatch/import-map.json workflow.ts
+deno check --config=deno.json --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./workflow.ts
 deno test --import-map=.hatch/import-map.json <test paths...>
 ```
 
-`deploy_workflow` repeats TS manifest checking and validates the evaluated
-configuration before bundling. A successful TypeScript check does not replace
-platform validation of paths, cross-field requirements, or serializability.
+`deploy_workflow` repeats TS manifest checking, validates the evaluated
+configuration, and checks the execution entry and its transitive imports before
+bundling or describe-mode execution. A successful TypeScript check does not
+replace platform validation of paths, cross-field requirements, or serializability.
 
 ## Git workflow
 
@@ -271,9 +282,9 @@ platform validation of paths, cross-field requirements, or serializability.
 3. Edit files under the exact returned source path and complete Local validation.
 4. `git status`, `git add ...`, `git commit -m "message"` there.
 5. Call `deploy_workflow` with that `source_path` and a required `message`.
-   Deploy bundles the program, captures the input JSON Schema, publishes the
-   clean commit, tags `deploy/v<version>`, records the artifact, and reloads the
-   cron schedule.
+   Deploy type-checks and bundles the program, captures the input JSON Schema,
+   publishes the clean commit, tags `deploy/v<version>`, records the artifact,
+   and reloads the cron schedule.
 
 Do not push branches or tags — the platform Git server rejects Agent pushes. If
 deploy says `master` advanced, call `checkout_workflow` with the same
@@ -300,7 +311,7 @@ origin master`, rebase, resolve, and deploy again.
    `checkout_workflow` and retain its returned source path.
 2. Read the files, edit `workflow.ts` (input + steps) and the source manifest (`manifest.ts` or `manifest.json`)
    (network policy + triggers), keeping the zod schema authoritative.
-3. Complete Local validation, then commit with git.
+3. Complete Local validation (manifest and entry checks), then commit with git.
 4. `deploy_workflow` with that `source_path` and a `message`. On failure, read
    the build/describe output, fix the source, commit, and deploy again.
 5. Tell the user what it does, how it's triggered, and where to watch runs.
