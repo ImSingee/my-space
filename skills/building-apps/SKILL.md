@@ -96,8 +96,15 @@ to `"react"`. Do not add `imports`, `scopes`, `importMap`, or `workspace` to
 
 The public SDK mappings are generated in `.hatch/import-map.json`. Do not add
 `@hatch/*` packages to `package.json` or `deno.lock`; Hatch owns their version
-and materialization. The authoritative declaration entry for `@hatch/data` is
-the `exports` map in `.hatch/sdk/@hatch/data/package.json`.
+and materialization. The authoritative declaration entry for `@hatch/app/data` is
+the `exports` map in `.hatch/sdk/@hatch/app/package.json`.
+
+Use `@hatch/app` for `defineAppManifest`, `@hatch/app/data` for Data Tables,
+and `@hatch/app/data/react` for the React adapter. Existing `@hatch/data`
+imports remain supported by platform-generated re-export stubs for current
+compatibility versions. Do not author those stubs or rewrite historical source
+unless migrating it; the next-version removal is documented in
+`app-compatibility`.
 
 Buf generates `gen/service_pb.ts` from `proto/service.proto`. Never author
 generated RPC code. Every relative TypeScript import must state its `.ts` or
@@ -311,7 +318,7 @@ joins, or aggregates. It works without a backend and provides automatic
 forward migrations plus realtime queries.
 
 ```ts
-import { defineSchema, defineTable, t } from '@hatch/data';
+import { defineSchema, defineTable, t } from '@hatch/app/data';
 
 export default defineSchema({
   todos: defineTable({
@@ -324,7 +331,7 @@ export default defineSchema({
 
 ```ts
 import schema from '../data/schema.ts';
-import { createDataClient, type JsonValue } from '@hatch/data';
+import { createDataClient, type JsonValue } from '@hatch/app/data';
 
 declare const __DATA_BASE_URL__: string;
 export const data = createDataClient<typeof schema>({
@@ -338,13 +345,13 @@ await data.insert('todos', { title: 'Ship it', metadata });
 Preserve the SDK's schema inference and public types. Do not delete the schema
 generic, copy SDK declarations into App source, replace types with `any`, or add
 casts to conceal an SDK-resolution or type error. Resolve API declarations
-through `.hatch/sdk/@hatch/data/package.json` exports.
+through `.hatch/sdk/@hatch/app/package.json` exports.
 
 Tables include `id`, `createdAt`, and `updatedAt`. Use `renamedFrom(...)` for
 renames, add indexes for frequent filters/orderings, use `unset` to clear an
 optional field to SQL `NULL`, and use `increment` for atomic arithmetic on
 required numeric fields. Use `data.watch` or `useDataQuery` from
-`@hatch/data/react` for realtime results. Backends use `HATCH_DATA_URL` and
+`@hatch/app/data/react` for realtime results. Backends use `HATCH_DATA_URL` and
 `HATCH_SIGNING_SECRET` with the same typed client.
 
 Dropping tables/fields or narrowing types returns a destructive migration

@@ -1,6 +1,6 @@
-// @ts-self-types="./workflow.d.ts"
+// @ts-self-types="./manifest.d.ts"
 import type { z } from 'zod';
-import type { sourceWorkflowManifestSchema } from './workflow-schema.js';
+import type { sourceWorkflowManifestSchema } from '../../../packages/hatch-manifest/src/workflow-schema.js';
 
 export type WorkflowManifestInput = z.input<
   typeof sourceWorkflowManifestSchema

@@ -8,8 +8,8 @@
       "default": "./dist/workflow.js"
     },
     "./manifest": {
-      "types": "./dist/manifest/workflow.d.ts",
-      "default": "./dist/manifest/workflow.js"
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
     }
   },
   "sideEffects": false,

@@ -19,7 +19,7 @@
 import http from 'node:http';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import type { ConnectRouter } from '@connectrpc/connect';
-import { createDataClient, DataRequestError } from '@hatch/data';
+import { createDataClient, DataRequestError } from '@hatch/app/data';
 import schema from '../data/schema.ts';
 import { CounterService } from '../gen/service_pb.ts';
 import { incrementCounter, readCounter, type CounterStore } from './counter.ts';

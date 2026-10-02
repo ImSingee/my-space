@@ -1,6 +1,6 @@
 // @ts-self-types="./app.d.ts"
 import type { z } from 'zod';
-import type { sourceManifestSchema } from './app-schema.js';
+import type { sourceManifestSchema } from '../../../packages/hatch-manifest/src/app-schema.js';
 
 export type AppManifestInput = z.input<typeof sourceManifestSchema>;
 

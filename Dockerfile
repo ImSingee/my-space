@@ -75,12 +75,12 @@ COPY package.json ./
 COPY migrations ./migrations
 COPY templates ./templates
 COPY skills ./skills
-COPY --from=build /app/packages/hatch-app/package.json ./packages/hatch-app/package.json
-COPY --from=build /app/packages/hatch-app/dist ./packages/hatch-app/dist
-COPY --from=build /app/packages/hatch-data/package.json ./packages/hatch-data/package.json
-COPY --from=build /app/packages/hatch-data/dist ./packages/hatch-data/dist
-COPY --from=build /app/packages/hatch-workflow/package.json ./packages/hatch-workflow/package.json
-COPY --from=build /app/packages/hatch-workflow/dist ./packages/hatch-workflow/dist
+COPY --from=build /app/sdk-internal/app/package.json ./sdk-internal/app/package.json
+COPY --from=build /app/sdk-internal/app/dist ./sdk-internal/app/dist
+COPY --from=build /app/sdk-internal/data/package.json ./sdk-internal/data/package.json
+COPY --from=build /app/sdk-internal/data/dist ./sdk-internal/data/dist
+COPY --from=build /app/sdk-internal/workflow/package.json ./sdk-internal/workflow/package.json
+COPY --from=build /app/sdk-internal/workflow/dist ./sdk-internal/workflow/dist
 
 # Runtime data lives in /app/workspace; dependency/tool caches live in /cache.
 RUN mkdir -p /app/workspace /cache/deno
