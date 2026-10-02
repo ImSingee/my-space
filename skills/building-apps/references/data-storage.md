@@ -48,7 +48,7 @@ and mutation behavior:
 - `data.increment(...)` atomically updates a required integer/number field and
   returns `null` if the row no longer exists. Its raw mutation can participate
   in `data.transaction`.
-- `data.watch(query, callback)` and `useDataQuery` from `@hatch/data/react`
+- `data.watch(query, callback)` and `useDataQuery` from `@hatch/app/data/react`
   subscribe to realtime results.
 - A backend creates the same typed client with `HATCH_DATA_URL` and
   `HATCH_SIGNING_SECRET`.

@@ -49,6 +49,7 @@ const {
 } = await import('./shell-sandbox');
 const { createAppTools } = await import('./tools/apps');
 const { createWorkflowTools } = await import('./tools/workflows');
+const { appHatchSdkMaterializer } = await import('./hatch-sdk');
 
 async function exists(target: string): Promise<boolean> {
   try {
@@ -610,6 +611,98 @@ describe('runner source paths', () => {
       }),
     ).rejects.toThrow(/already exists/);
   });
+
+  it.each(['dirty', 'ahead', 'diverged'] as const)(
+    'refreshes SDKs without discarding a %s checkout',
+    async (state) => {
+      const sourceSession = `sdk-refresh-source-${state}`;
+      const targetSession = `sdk-refresh-target-${state}`;
+      const original = await initNewWorktree(
+        sourceSession,
+        'app',
+        'refresh-app',
+        async () => {},
+      );
+      let masterCommit = await commitFile(original.absolutePath);
+      let bundle = await bundleWorktreeForDeploy(
+        sourceSession,
+        'app',
+        'refresh-app',
+        original.absolutePath,
+      );
+      const checkout = await checkoutFromBundle(
+        targetSession,
+        'app',
+        {
+          id: 'refresh-app',
+          masterCommit,
+          bundleBase64: bundle.bundleBase64,
+        },
+        { materializer: appHatchSdkMaterializer },
+      );
+      if (state === 'dirty') {
+        await writeFile(
+          path.join(checkout.absolutePath, 'local.txt'),
+          'uncommitted',
+        );
+      } else {
+        await commitFile(checkout.absolutePath, 'local.txt', 'local commit');
+      }
+      if (state === 'diverged') {
+        masterCommit = await commitFile(
+          original.absolutePath,
+          'remote.txt',
+          'remote commit',
+        );
+        bundle = await bundleWorktreeForDeploy(
+          sourceSession,
+          'app',
+          'refresh-app',
+          original.absolutePath,
+        );
+      }
+      const importMap = appSdkImportMap(checkout.absolutePath);
+      await chmod(importMap, 0o644);
+      await writeFile(importMap, 'stale SDK');
+      const before = {
+        head: await git(checkout.absolutePath, 'rev-parse', 'HEAD'),
+        status: await git(checkout.absolutePath, 'status', '--porcelain'),
+        authored: await readFile(
+          path.join(checkout.absolutePath, 'local.txt'),
+          'utf8',
+        ),
+      };
+      await expect(
+        checkoutFromBundle(
+          targetSession,
+          'app',
+          {
+            id: 'refresh-app',
+            masterCommit,
+            bundleBase64: bundle.bundleBase64,
+          },
+          {
+            mode: 'update',
+            targetPath: checkout.absolutePath,
+            materializer: appHatchSdkMaterializer,
+          },
+        ),
+      ).rejects.toThrow(/not overwritten|ahead of or diverged/);
+      expect(await git(checkout.absolutePath, 'rev-parse', 'HEAD')).toBe(
+        before.head,
+      );
+      expect(await git(checkout.absolutePath, 'status', '--porcelain')).toBe(
+        before.status,
+      );
+      expect(
+        await readFile(path.join(checkout.absolutePath, 'local.txt'), 'utf8'),
+      ).toBe(before.authored);
+      expect(
+        JSON.parse(await readFile(importMap, 'utf8')).imports,
+      ).toHaveProperty('@hatch/app/data');
+    },
+    15_000,
+  );
 
   it('reports synchronized existing app and workflow checkouts', async () => {
     const sourceSessionId = 'checkout-tools-sync-source';

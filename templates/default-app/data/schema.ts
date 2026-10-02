@@ -1,4 +1,4 @@
-import { defineSchema, defineTable, t } from '@hatch/data';
+import { defineSchema, defineTable, t } from '@hatch/app/data';
 
 export default defineSchema({
   counters: defineTable({

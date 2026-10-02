@@ -3,7 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 import {
   subscribeDataQueryCache,
   useDataQuery,
-} from '../../../../packages/hatch-data/src/data-react';
+} from '../../../../sdk-internal/app/src/data-react';
 import {
   createDataClient,
   DataRequestError,
@@ -12,7 +12,7 @@ import {
   t,
   type DataClient,
   type DataSchema,
-} from '../../../../packages/hatch-data/src/data';
+} from '../../../../sdk-internal/app/src/data';
 
 const mocks = vi.hoisted(() => ({
   fetchQuery: vi.fn<(options: unknown) => Promise<unknown>>(),

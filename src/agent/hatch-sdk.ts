@@ -26,28 +26,19 @@ import {
   WORKSPACE_ROOT,
 } from './paths';
 import { resolveAgentOwnershipSession, sandboxSpawn } from './shell-sandbox';
-
-const HATCH_DATA_SOURCE_DIR = path.join(REPO_ROOT, 'packages', 'hatch-data');
-const HATCH_APP_SOURCE_DIR = path.join(REPO_ROOT, 'packages', 'hatch-app');
-const HATCH_WORKFLOW_SOURCE_DIR = path.join(
-  REPO_ROOT,
-  'packages',
-  'hatch-workflow',
-);
+import {
+  APP_SDK,
+  LEGACY_DATA_SDK,
+  WORKFLOW_SDK,
+  sdkImports,
+  type SdkDefinition,
+} from '../../sdk-internal/definitions';
 
 export const HATCH_SDK_IMPORT_MAP = '.hatch/import-map.json';
 export const HATCH_BUF_GEN_CONFIG = '.hatch/buf.gen.yaml';
 
-export const APP_HATCH_SDK_IMPORTS = {
-  '@hatch/app': './sdk/@hatch/app/dist/app.js',
-  '@hatch/data': './sdk/@hatch/data/dist/data.js',
-  '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
-} as const;
-
-export const WORKFLOW_HATCH_SDK_IMPORTS = {
-  '@hatch/workflow': './sdk/@hatch/workflow/dist/workflow.js',
-  '@hatch/workflow/manifest': './sdk/@hatch/workflow/dist/manifest/workflow.js',
-} as const;
+export const APP_HATCH_SDK_IMPORTS = sdkImports([APP_SDK, LEGACY_DATA_SDK]);
+export const WORKFLOW_HATCH_SDK_IMPORTS = sdkImports([WORKFLOW_SDK]);
 
 export function appHatchDataPackageDir(root: string): string {
   return path.join(root, '.hatch', 'sdk', '@hatch', 'data');
@@ -83,27 +74,22 @@ type HatchSdkGeneration = {
   extraFiles?: Readonly<Record<string, string>>;
 };
 
+function sdkPackage(definition: SdkDefinition): HatchSdkPackage {
+  return {
+    sourceDir: path.join(REPO_ROOT, 'sdk-internal', definition.directory),
+    targetName: definition.directory,
+    buildFiles: Object.values(definition.manifest.exports).flatMap((entry) => [
+      entry.default,
+      entry.types,
+    ]),
+  };
+}
+
 const APP_HATCH_SDK_GENERATION: HatchSdkGeneration = {
-  label: '@hatch/data',
+  label: '@hatch/app',
   sourceRootLabel: 'App source root',
   imports: APP_HATCH_SDK_IMPORTS,
-  packages: [
-    {
-      sourceDir: HATCH_APP_SOURCE_DIR,
-      targetName: 'app',
-      buildFiles: ['dist/app.js', 'dist/app.d.ts', 'dist/app-schema.d.ts'],
-    },
-    {
-      sourceDir: HATCH_DATA_SOURCE_DIR,
-      targetName: 'data',
-      buildFiles: [
-        'dist/data.js',
-        'dist/data.d.ts',
-        'dist/data-react.js',
-        'dist/data-react.d.ts',
-      ],
-    },
-  ],
+  packages: [sdkPackage(APP_SDK), sdkPackage(LEGACY_DATA_SDK)],
   extraFiles: { 'buf.gen.yaml': PLATFORM_APP_BUF_GEN_YAML },
 };
 
@@ -111,18 +97,7 @@ const WORKFLOW_HATCH_SDK_GENERATION: HatchSdkGeneration = {
   label: '@hatch/workflow',
   sourceRootLabel: 'Workflow source root',
   imports: WORKFLOW_HATCH_SDK_IMPORTS,
-  packages: [
-    {
-      sourceDir: HATCH_WORKFLOW_SOURCE_DIR,
-      targetName: 'workflow',
-      buildFiles: [
-        'dist/workflow.js',
-        'dist/workflow.d.ts',
-        'dist/manifest/workflow.js',
-        'dist/manifest/workflow.d.ts',
-      ],
-    },
-  ],
+  packages: [sdkPackage(WORKFLOW_SDK)],
 };
 
 async function assertReplaceableManagedDirectory(

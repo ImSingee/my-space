@@ -15,7 +15,7 @@ import {
   appSrcDir,
 } from '~agent/paths';
 import {
-  appHatchDataPackageDir,
+  APP_HATCH_SDK_IMPORTS,
   hatchImportMapPath,
   materializeAppHatchSdk,
 } from '~agent/hatch-sdk';
@@ -473,11 +473,12 @@ function browserDefine(
 
 /** Resolve only the public, platform-owned Hatch SDK browser entrypoints. */
 function hatchSdkPlugin(src: string): esbuild.Plugin {
-  const sdk = appHatchDataPackageDir(src);
-  const entries = new Map([
-    ['@hatch/data', path.join(sdk, 'dist', 'data.js')],
-    ['@hatch/data/react', path.join(sdk, 'dist', 'data-react.js')],
-  ]);
+  const entries = new Map(
+    Object.entries(APP_HATCH_SDK_IMPORTS).map(([specifier, target]) => [
+      specifier,
+      path.resolve(src, '.hatch', target),
+    ]),
+  );
   return {
     name: 'hatch-sdk',
     setup(build) {
@@ -489,7 +490,7 @@ function hatchSdkPlugin(src: string): esbuild.Plugin {
             {
               text:
                 `Unknown Hatch SDK import "${args.path}". ` +
-                'Use @hatch/data or @hatch/data/react.',
+                'Use @hatch/app, @hatch/app/data or @hatch/app/data/react.',
             },
           ],
         };

@@ -109,6 +109,10 @@ export default defineWorkflow({
   `deno.json`, or `deno.lock`, or map them in source-owned import maps. Local
   Deno tooling resolves `@hatch/workflow` through the generated
   `.hatch/import-map.json`.
+- Use `@hatch/workflow/manifest` for `defineWorkflowManifest` and its input
+  type. Both public entrypoints use the declaration exports in
+  `.hatch/sdk/@hatch/workflow/package.json`; do not import private generated
+  files or repository implementation paths.
 
 ### Dependencies and lifecycle scripts
 

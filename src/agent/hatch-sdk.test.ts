@@ -77,6 +77,82 @@ afterAll(async () => {
 });
 
 describe('App Hatch SDK materialization', () => {
+  it('keeps new and legacy Data imports identical with standalone Deno types', async () => {
+    const root = await tempRoot();
+    const denoDir = await tempRoot();
+    await materializeAppHatchSdk(root);
+    await writeFile(path.join(root, 'deno.json'), '{}');
+    await writeFile(
+      path.join(root, 'check.ts'),
+      `
+      import * as modern from '@hatch/app/data';
+      import * as legacy from '@hatch/data';
+      import type { JsonValue } from '@hatch/app/data';
+      if (modern.createDataClient !== legacy.createDataClient ||
+          modern.DataRequestError !== legacy.DataRequestError ||
+          modern.defineSchema !== legacy.defineSchema) throw new Error('Duplicated SDK');
+      const schema = modern.defineSchema({
+        todos: legacy.defineTable({ title: modern.t.string() }),
+      });
+      const client = legacy.createDataClient<typeof schema>({ baseUrl: 'http://unused' });
+      const row: Parameters<typeof client.insert<'todos'>>[1] = { title: 'typed' };
+      // @ts-expect-error Both entrypoints must retain the inferred field type.
+      const invalid: Parameters<typeof client.insert<'todos'>>[1] = { title: 42 };
+      const json: JsonValue = row;
+      console.log(JSON.stringify(json), Boolean(invalid));
+    `,
+    );
+    const flags = [
+      '--no-remote',
+      '--no-npm',
+      `--import-map=${HATCH_SDK_IMPORT_MAP}`,
+    ];
+    const options = { cwd: root, env: { ...process.env, DENO_DIR: denoDir } };
+    await exec('deno', ['check', ...flags, 'check.ts'], options);
+    const executed = await exec('deno', ['run', ...flags, 'check.ts'], options);
+    expect(executed.stdout).toContain('{"title":"typed"}');
+
+    const legacyDist = path.join(appHatchDataPackageDir(root), 'dist');
+    expect((await readdir(legacyDist)).sort()).toEqual([
+      'data-react.d.ts',
+      'data-react.js',
+      'data.d.ts',
+      'data.js',
+    ]);
+    for (const file of ['data', 'data-react']) {
+      const wrapper = await readFile(
+        path.join(legacyDist, `${file}.js`),
+        'utf8',
+      );
+      expect(wrapper).toContain(`export * from "../../app/dist/${file}.js"`);
+    }
+  });
+
+  it('ships only the runtime and declaration closure belonging to each SDK', async () => {
+    for (const [name, materialize, unrelated] of [
+      ['app', materializeAppHatchSdk, 'workflow'],
+      ['workflow', materializeWorkflowHatchSdk, 'app'],
+    ] as const) {
+      const root = await tempRoot();
+      await materialize(root);
+      const files = await readdir(
+        path.join(root, '.hatch', 'sdk', '@hatch', name, 'dist'),
+        { recursive: true },
+      );
+      expect(files.some((file) => file.endsWith(`${name}-schema.d.ts`))).toBe(
+        true,
+      );
+      expect(
+        files.some(
+          (file) =>
+            file.includes(`${unrelated}-schema`) ||
+            file.includes(`sdk-internal/${unrelated}/`),
+        ),
+      ).toBe(false);
+      expect(files.some((file) => file.endsWith('-schema.js'))).toBe(false);
+    }
+  });
+
   it('stages outside the App root and installs a read-only generation', async () => {
     const root = await tempRoot();
 
@@ -152,6 +228,8 @@ describe('App Hatch SDK materialization', () => {
     expect(importMap).toEqual({ imports: APP_HATCH_SDK_IMPORTS });
     expect(APP_HATCH_SDK_IMPORTS).toEqual({
       '@hatch/app': './sdk/@hatch/app/dist/app.js',
+      '@hatch/app/data': './sdk/@hatch/app/dist/data.js',
+      '@hatch/app/data/react': './sdk/@hatch/app/dist/data-react.js',
       '@hatch/data': './sdk/@hatch/data/dist/data.js',
       '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
     });
@@ -347,15 +425,11 @@ describe('Workflow Hatch SDK materialization', () => {
       readFile(path.join(packageDir, 'dist', 'workflow.js'), 'utf8'),
     ).resolves.toContain('function defineWorkflow');
     await expect(
-      readFile(path.join(packageDir, 'dist', 'workflow.d.ts'), 'utf8'),
-    ).resolves.toContain('export declare function defineWorkflow');
-    await expect(
       readFile(hatchImportMapPath(root), 'utf8').then(JSON.parse),
     ).resolves.toEqual({ imports: WORKFLOW_HATCH_SDK_IMPORTS });
     expect(WORKFLOW_HATCH_SDK_IMPORTS).toEqual({
       '@hatch/workflow': './sdk/@hatch/workflow/dist/workflow.js',
-      '@hatch/workflow/manifest':
-        './sdk/@hatch/workflow/dist/manifest/workflow.js',
+      '@hatch/workflow/manifest': './sdk/@hatch/workflow/dist/manifest.js',
     });
     await expect(
       readFile(path.join(root, HATCH_BUF_GEN_CONFIG), 'utf8'),
