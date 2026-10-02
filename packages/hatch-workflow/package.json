@@ -6,6 +6,10 @@
     ".": {
       "types": "./dist/workflow.d.ts",
       "default": "./dist/workflow.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest/workflow.d.ts",
+      "default": "./dist/manifest/workflow.js"
     }
   },
   "sideEffects": false,

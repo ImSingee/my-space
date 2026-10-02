@@ -10,10 +10,24 @@ description: Explain Hatch App deployment compatibility versions and guide handl
 - Deployment version and manifest `compatibilityVersion` are independent values:
   the former is the deployed App version, which automatically increments with
   each deployment; the latter is the compatibility version set manually in
-  `manifest.json`.
-- Read the source compatibility version from `manifest.json`, defaulting to `2`
+  the source manifest (`manifest.ts` or `manifest.json`).
+- Read the source compatibility version from the source manifest (`manifest.ts` or `manifest.json`), defaulting to `2`
   when it is omitted; use `get_app` as the source of truth for the live
   deployment's compatibility version.
+
+## Source format compatibility
+
+New templates use `manifest.ts`; existing `manifest.json` source packages remain
+supported. Keep exactly one file. TypeScript authoring does not introduce a new
+deployment compatibility version: the platform still stores parsed source JSON
+and normalized deployment JSON, and rollback uses stored deployment artifacts.
+
+A platform build predating TypeScript manifest support cannot necessarily rebuild
+TS source with the same `compatibilityVersion`. Upgrade that platform, or use the
+new platform's restricted manifest evaluation to materialize equivalent source
+JSON, replace the TS file in one commit, and verify the parsed configuration is
+unchanged. Do not lower the compatibility declaration to bypass a build failure.
+Existing source, deployments, and application data need no automatic migration.
 
 ## Version history
 
@@ -36,7 +50,7 @@ These proposals are not active platform policy and do not change the latest or
 minimum supported version until they are promoted into the version history
 above.
 
-- Omitting `compatibilityVersion` from `manifest.json` keeps the App on
+- Omitting `compatibilityVersion` from the source manifest (`manifest.ts` or `manifest.json`) keeps the App on
   compatibility v2. To use any newer compatibility version, declare the target
   as a positive integer at the top level. For example, once compatibility v3 is
   available and its guidance has been applied:
@@ -50,7 +64,7 @@ above.
   Preserve an existing declaration during ordinary edits and choose a newer
   value only after applying that version's guidance.
 
-- Historical fields in `manifest.json` will no longer be accepted. Remove the
+- Historical fields in the source manifest (`manifest.ts` or `manifest.json`) will no longer be accepted. Remove the
   top-level `version` and `userscripts` fields, and remove
   `capabilities.userscripts`, before targeting a newer compatibility version.
 

@@ -151,6 +151,7 @@ describe('App Hatch SDK materialization', () => {
     expect(HATCH_BUF_GEN_CONFIG).toBe('.hatch/buf.gen.yaml');
     expect(importMap).toEqual({ imports: APP_HATCH_SDK_IMPORTS });
     expect(APP_HATCH_SDK_IMPORTS).toEqual({
+      '@hatch/app': './sdk/@hatch/app/dist/app.js',
       '@hatch/data': './sdk/@hatch/data/dist/data.js',
       '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
     });
@@ -353,6 +354,8 @@ describe('Workflow Hatch SDK materialization', () => {
     ).resolves.toEqual({ imports: WORKFLOW_HATCH_SDK_IMPORTS });
     expect(WORKFLOW_HATCH_SDK_IMPORTS).toEqual({
       '@hatch/workflow': './sdk/@hatch/workflow/dist/workflow.js',
+      '@hatch/workflow/manifest':
+        './sdk/@hatch/workflow/dist/manifest/workflow.js',
     });
     await expect(
       readFile(path.join(root, HATCH_BUF_GEN_CONFIG), 'utf8'),

@@ -1,0 +1,5 @@
+{
+  "name": "@hatch/manifest-contracts",
+  "private": true,
+  "type": "module"
+}

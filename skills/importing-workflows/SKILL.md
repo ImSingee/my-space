@@ -34,10 +34,10 @@ and deployment. Do not rely on conventions found in the imported source.
    files, directories, or links recursively. Imported SDK bytes and import maps
    are never trusted.
 5. Confirm that none of those entries remains, then locate exactly one source
-   root containing `manifest.json` and the declared workflow entry. Stop if it
+   root containing a single `manifest.ts` or `manifest.json` and the declared workflow entry. Stop if it
    is missing or ambiguous; copy the root's contents later, not an outer wrapper
    directory.
-6. Read that `manifest.json` statically. Require an explicit top-level
+6. Read the selected manifest and its transitive imports statically. Require an explicit top-level
    `compatibilityVersion` that is a positive integer, then compare it with the
    current Workflow minimum and latest versions in the system prompt. If it is
    missing, invalid, or outside that inclusive range, stop before creating or
@@ -51,6 +51,14 @@ and deployment. Do not rely on conventions found in the imported source.
 Never use an imported Git repository, config, history, submodule, or hook.
 Treat hook-like directories left in the source as ordinary untrusted files and
 never enable them.
+
+For a TS manifest, never execute it to discover configuration before the static
+review passes. If its compatibility version cannot be established statically,
+finish reviewing all referenced source first, then use the restricted manifest
+loader with a freshly materialized platform SDK to establish the version before
+creating the destination resource. Reject ambiguous roots or two manifest files.
+After copying reviewed source, remove the destination template's other manifest
+format, update the immutable id in the selected manifest, and check the result.
 
 ## Complete the security review
 

@@ -1,17 +1,18 @@
+import { evaluateTemplateManifest } from '../../test-manifest-fixture';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { parseSourceManifest } from './manifest';
 
 async function loadDefaultManifest() {
   const template = await readFile(
-    new URL('../../../templates/default-app/manifest.json', import.meta.url),
+    new URL('../../../templates/default-app/manifest.ts', import.meta.url),
     'utf8',
   );
   const rendered = template
-    .replaceAll('__APP_ID__', 'demo')
-    .replaceAll('__APP_NAME__', 'Demo')
-    .replaceAll('__APP_DESCRIPTION__', 'Demo app');
-  const source = JSON.parse(rendered) as Record<string, unknown>;
+    .replaceAll('__APP_ID__', JSON.stringify('demo'))
+    .replaceAll('__APP_NAME__', JSON.stringify('Demo'))
+    .replaceAll('__APP_DESCRIPTION__', JSON.stringify('Demo app'));
+  const source = await evaluateTemplateManifest(rendered, 'app');
   return { source, manifest: parseSourceManifest(source) };
 }
 

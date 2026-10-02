@@ -1,3 +1,4 @@
+import { evaluateTemplateManifest } from '../../test-manifest-fixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 
@@ -47,7 +48,10 @@ describe('createWorkflow', () => {
     expect(created.id).toMatch(/^[0-9a-z]{26}$/);
     expect(created.id).not.toBe(created.slug);
     expect(
-      JSON.parse(renderedFile(created.files, 'manifest.json')),
+      await evaluateTemplateManifest(
+        renderedFile(created.files, 'manifest.ts'),
+        'workflow',
+      ),
     ).toMatchObject({ id: created.id, name: 'Daily digest' });
     expect(
       JSON.parse(renderedFile(created.files, 'package.json')),

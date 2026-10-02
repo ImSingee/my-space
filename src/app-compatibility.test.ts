@@ -82,7 +82,7 @@ describe('App compatibility', () => {
       resolveAppDeployCompatibilityVersion(
         MIN_SUPPORTED_APP_COMPATIBILITY_VERSION - 1,
       ),
-    ).toThrow(/manifest\.json compatibilityVersion.*below.*minimum/);
+    ).toThrow(/Source manifest compatibilityVersion.*below.*minimum/);
   });
 
   it('rejects source compatibility newer than the platform', () => {
@@ -90,6 +90,6 @@ describe('App compatibility', () => {
       resolveAppDeployCompatibilityVersion(
         LATEST_APP_COMPATIBILITY_VERSION + 1,
       ),
-    ).toThrow(/manifest\.json compatibilityVersion.*newer.*latest supported/);
+    ).toThrow(/Source manifest compatibilityVersion.*newer.*latest supported/);
   });
 });

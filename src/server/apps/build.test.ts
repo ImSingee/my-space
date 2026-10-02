@@ -89,6 +89,45 @@ afterEach(async () => {
 });
 
 describe('buildApp backend', () => {
+  it('builds a TS manifest with the same deployed contract as legacy JSON', async () => {
+    const manifest = {
+      id: 'demo',
+      name: 'Demo',
+      capabilities: { backend: true },
+      backend: { entry: 'backend/main.ts', network: [] },
+    };
+    const { sourceDir, outputDir } = await makeAppSource(manifest, {
+      'backend/main.ts': 'export const value = 1;',
+    });
+    await useDefaultDependencyFiles(sourceDir);
+    const legacy = await buildApp('demo', { sourceDir, outputDir });
+    await fs.rm(path.join(sourceDir, 'manifest.json'));
+    await fs.writeFile(
+      path.join(sourceDir, 'manifest.ts'),
+      `import { defineAppManifest } from '@hatch/app';\nexport default defineAppManifest(${JSON.stringify(manifest)});`,
+    );
+    const typed = await buildApp('demo', { sourceDir, outputDir });
+    expect(typed.source).toEqual(legacy.source);
+    expect(typed.normalized).toEqual(legacy.normalized);
+    const before = await fs.readFile(
+      path.join(outputDir, 'manifest.normalized.json'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(sourceDir, 'manifest.ts'),
+      'export default new Date();',
+    );
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /plain JSON object/,
+    );
+    expect(
+      await fs.readFile(
+        path.join(outputDir, 'manifest.normalized.json'),
+        'utf8',
+      ),
+    ).toBe(before);
+  }, 30_000);
+
   it('emits a self-contained bundle with only fixed runtime assets', async () => {
     const { sourceDir, outputDir } = await makeAppSource(
       {

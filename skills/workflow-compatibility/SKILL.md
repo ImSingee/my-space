@@ -9,18 +9,32 @@ description: Explain Hatch Workflow deployment compatibility versions and guide 
 
 - Deployment version and manifest `compatibilityVersion` are independent values:
   the former automatically increments with each deployment; the latter selects
-  the Workflow compatibility contract and is set manually in `manifest.json`.
+  the Workflow compatibility contract and is set manually in the source manifest (`manifest.ts` or `manifest.json`).
 - Every Workflow manifest must explicitly declare `compatibilityVersion` as a
   positive integer. There is no omitted-field default and no legacy fallback.
 - Use `get_workflow` as the source of truth for the live deployment's recorded
   compatibility version.
+
+## Source format compatibility
+
+New templates use `manifest.ts`; existing `manifest.json` source packages remain
+supported. Keep exactly one file. TypeScript authoring does not introduce a new
+deployment compatibility version: the platform still stores parsed source JSON
+and normalized deployment JSON, and rollback uses stored deployment artifacts.
+
+A platform build predating TypeScript manifest support cannot necessarily rebuild
+TS source with the same `compatibilityVersion`. Upgrade that platform, or use the
+new platform's restricted manifest evaluation to materialize equivalent source
+JSON, replace the TS file in one commit, and verify the parsed configuration is
+unchanged. Do not lower the compatibility declaration to bypass a build failure.
+Existing source, deployments, and application data need no automatic migration.
 
 ## Version history
 
 ### Compatibility v1
 
 Compatibility v1 is the initial Workflow contract. Source must declare
-`"compatibilityVersion": 1` at the top level of `manifest.json` before it can
+`"compatibilityVersion": 1` at the top level of the source manifest (`manifest.ts` or `manifest.json`) before it can
 be deployed.
 
 ## Next (proposal)

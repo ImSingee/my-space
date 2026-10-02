@@ -16,11 +16,19 @@ defaults to `workflows/<slug>/`, but the returned absolute path is authoritative
 The platform handles bundling, versioning (git + artifact), scheduling, and
 serving the webhook.
 
+## Manifest authoring
+
+New templates use `manifest.ts`; existing `manifest.json` sources remain supported.
+Keep exactly one of these files. Read [Source manifests](../building-apps/references/manifest-source.md)
+for SDK helpers, type checking, execution boundaries, and format conversion.
+Type-check `manifest.ts` independently before codegen or checking execution entries.
+Do not import generated files or execution modules from the manifest.
+
 ## Source layout
 
 ```
 workflows/<slug>/
-  manifest.json        declares id, name, compatibilityVersion, entry, network, triggers
+  manifest.ts          declares id, name, compatibilityVersion, entry, network, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
   package.json         npm dependencies (installed only with Deno)
   deno.json            reviewed npm lifecycle-script allowlist
@@ -144,7 +152,7 @@ it reports a skipped lifecycle script, do not enable it blindly:
 
 ## Manifest & triggers
 
-`manifest.json` declares the id/name, network policy, and triggers. The input
+The source manifest (`manifest.ts` or `manifest.json`) declares the id/name, network policy, and triggers. The input
 schema is NOT in the manifest — it is derived from your zod schema at deploy
 time.
 
@@ -256,7 +264,7 @@ origin master`, rebase, resolve, and deploy again.
 
 1. New workflow → confirm name/slug → `create_workflow`. Existing →
    `checkout_workflow` and retain its returned source path.
-2. Read the files, edit `workflow.ts` (input + steps) and `manifest.json`
+2. Read the files, edit `workflow.ts` (input + steps) and the source manifest (`manifest.ts` or `manifest.json`)
    (network policy + triggers), keeping the zod schema authoritative.
 3. Commit with git.
 4. `deploy_workflow` with that `source_path` and a `message`. On failure, read

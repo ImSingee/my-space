@@ -341,7 +341,7 @@ export function createWorkflowTools(options: {
             `Created workflow "${res.name}" (id: ${res.id}, slug: ` +
               `${res.slug}). Source is at ${checkout.absolutePath}.\n` +
               'Read the scaffolded files, edit workflow.ts (input schema + steps) ' +
-              'and manifest.json (compatibility version + network policy + triggers), ' +
+              'and the source manifest (manifest.ts or manifest.json: compatibility version + network policy + triggers), ' +
               'commit with git, then call ' +
               `deploy_workflow with id "${res.id}" and source_path ` +
               `"${checkout.absolutePath}". The generated .hatch/ directory is platform-owned; ` +
@@ -368,7 +368,7 @@ export function createWorkflowTools(options: {
       'Bundle the workflow into a single Deno program, capture its input JSON ' +
       'Schema, and deploy it so it can be triggered. Requires package.json, ' +
       'deno.json, and a committed deno.lock; load the building-workflows Skill ' +
-      'to repair dependency configuration errors. manifest.json must explicitly ' +
+      'to repair dependency configuration errors. The source manifest must explicitly ' +
       'declare a supported compatibilityVersion. Reports the deployment and ' +
       'compatibility versions plus the webhook URL (if enabled).',
     executionMode: 'sequential',

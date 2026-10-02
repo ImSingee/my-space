@@ -1,3 +1,4 @@
+import { evaluateTemplateManifest } from '../../test-manifest-fixture';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -134,7 +135,10 @@ describe('createApp', () => {
       description: 'First line\nSecond line',
     });
 
-    const manifest = JSON.parse(renderedFile(result.files, 'manifest.json'));
+    const manifest = await evaluateTemplateManifest(
+      renderedFile(result.files, 'manifest.ts'),
+      'app',
+    );
     expect(manifest).toMatchObject({
       id: result.id,
       name: 'Hello "World"',
