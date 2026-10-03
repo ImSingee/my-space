@@ -13,6 +13,7 @@ import { ensureScheduler } from '~server/apps/scheduler';
 import { ensureRetentionSweep } from '~server/retention';
 import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
+import { getTailscaleManager } from '~server/tailscale-manager';
 
 // Validate synchronously while Nitro loads its plugins. Throwing from the async
 // plugin callback is reported as an unhandled rejection after the HTTP server
@@ -26,6 +27,13 @@ export default definePlugin(async () => {
   if (isSpaShellPrerendering()) return;
 
   await runMigrations();
+  await getTailscaleManager()
+    .initialize()
+    .catch(() => {
+      console.error(
+        '[tailscale] Could not restore the connection. Retry from Settings.',
+      );
+    });
   // Lock down PUBLIC connect on the platform DB so per-app roles (same server)
   // can't open a connection to it. Independent of the rest of boot.
   await hardenPlatformDatabase();

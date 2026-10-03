@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   ),
   schema: {},
   tanstackStartCookies: vi.fn<() => string>(() => 'tanstack-start-cookies'),
+  trustedOrigin: vi.fn<() => string | null>(() => null),
 }));
 
 vi.mock('better-auth/minimal', () => ({
@@ -29,6 +30,9 @@ vi.mock('../db', () => ({
 
 vi.mock('./signup-gate', () => ({
   assertSignupAllowed: vi.fn<() => Promise<void>>(() => Promise.resolve()),
+}));
+vi.mock('../server/tailscale-manager', () => ({
+  getTailscaleManager: () => ({ trustedOrigin: mocks.trustedOrigin }),
 }));
 
 describe('Better Auth configuration', () => {
@@ -58,5 +62,18 @@ describe('Better Auth configuration', () => {
       provider: 'pg',
       schema: mocks.schema,
     });
+  });
+
+  it('trusts only the active node origin and revokes it immediately after disconnect', async () => {
+    await import('./server');
+    const options = mocks.betterAuth.mock.calls[0]![0] as {
+      trustedOrigins: () => Promise<string[]>;
+    };
+    mocks.trustedOrigin.mockReturnValue('https://hatch.example.ts.net');
+    await expect(options.trustedOrigins()).resolves.toEqual([
+      'https://hatch.example.ts.net',
+    ]);
+    mocks.trustedOrigin.mockReturnValue(null);
+    await expect(options.trustedOrigins()).resolves.toEqual([]);
   });
 });
