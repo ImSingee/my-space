@@ -88,6 +88,11 @@ scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
 is behind a domain or reverse proxy, set `APP_URL` to that external origin
 (for example, `https://hatch.example.com`).
 
+For a private HTTPS address on your Tailscale network, open **Settings →
+Tailscale**, connect, and sign in. The Docker image includes the connection
+helper and remembers its identity across restarts. See [Tailscale access](docs/tailscale.md)
+for prerequisites and source installations.
+
 `HATCH_RUNNER_ID` is required and must remain paired one-to-one with the Agent
 Runner's persistent workspace volume. The default Compose deployment
 permanently pairs `runner-1` with the `agent_workspace` volume. Other

@@ -44,3 +44,23 @@ Use a dedicated database and workspace because deploy provisions resource data
 and writes Git history. SDK output must exist before materialization. App manifests
 are evaluated before RPC codegen. Workflow compatibilityVersion is mandatory.
 A successful build alone does not prove deployment or runtime execution.
+
+## 7. Tailscale settings verification
+
+Build the Go helper under `packages/tailscale` with `pnpm tailscale:build`
+using the Go version declared in its module. The Agent Runner is not required
+for settings verification. Use the isolated Platform, database, and free ports
+described above, recording runtime paths and ports in the ignored acceptance
+round. Keep test browser storage state private and never publish live Tailscale
+authentication URLs.
+
+Drive `/settings/tailscale` with Playwright after authentication. Observe
+server-function responses, the `network.tailscale` row in `platform_config`,
+and Platform child processes to verify configuration and helper lifecycle.
+The helper reports JSON snapshots through its private stdout pipe.
+
+Real tailnet HTTPS verification requires an enrolled test node, HTTPS
+certificates, MagicDNS, and a second authorized client. Synthetic connected
+snapshots prove only consuming UI and local boundary behavior, never tailnet
+connectivity. Missing external enrollment must remain blocked. Keep enrolled
+identities and state out of published artifacts.

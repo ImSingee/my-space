@@ -57,6 +57,9 @@ vi.mock('~server/apps/scheduler', () => ({
 vi.mock('~server/retention', () => ({
   ensureRetentionSweep: mocks.ensureRetentionSweep,
 }));
+vi.mock('~server/tailscale-manager', () => ({
+  getTailscaleManager: () => ({ initialize: async () => {} }),
+}));
 vi.mock('~server/workflows/execute', () => ({
   interruptStaleWorkflowRuns: mocks.interruptStaleWorkflowRuns,
 }));

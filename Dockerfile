@@ -3,6 +3,14 @@
 # --- Deno binary (used to run each app's backend) -------------------------
 FROM denoland/deno:bin-2.9.6 AS deno
 
+# Private in-panel Tailscale node (userspace, no TUN or privileged container).
+FROM golang:1.26.6 AS tailscale
+WORKDIR /build
+COPY packages/tailscale/go.mod packages/tailscale/go.sum ./
+RUN go mod download
+COPY packages/tailscale/*.go ./
+RUN CGO_ENABLED=0 go build -trimpath -o /hatch-tailscale .
+
 # --- Base image with pnpm ----------------------------------------------------
 FROM node:26-slim AS base
 WORKDIR /app
@@ -63,6 +71,7 @@ RUN useradd --system --user-group --no-create-home hatch-sandbox
 
 # Deno runs the app backends the platform spawns.
 COPY --from=deno /deno /usr/local/bin/deno
+COPY --from=tailscale /hatch-tailscale /app/bin/hatch-tailscale
 
 # Runtime needs: the built server, the full dependency tree (esbuild bundling +
 # buf/protoc-gen-es codegen happen on every deploy), the scaffold template, the

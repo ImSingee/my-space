@@ -1,15 +1,16 @@
 import path from 'node:path';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { devtools } from '@tanstack/devtools-vite';
+import { resolvePlatformPort } from './src/platform-port.ts';
 
 // Mirror src/agent/paths.ts: runtime data lives under HATCH_DATA_DIR (default
 // `workspace`). Keep it out of the dev watcher so agent writes don't reload.
 const dataDir = path.resolve(process.env.HATCH_DATA_DIR ?? 'workspace');
 
-const config = defineConfig({
+const config = defineConfig(({ mode, isPreview }) => ({
   resolve: {
     alias: {
       tslib: 'tslib/tslib.es6.mjs',
@@ -17,6 +18,12 @@ const config = defineConfig({
     tsconfigPaths: true,
   },
   server: {
+    host: '127.0.0.1',
+    port: resolvePlatformPort(
+      { ...loadEnv(mode, process.cwd(), ''), ...process.env },
+      3700,
+    ),
+    strictPort: true,
     watch: {
       // The Agent constantly writes app source, build output, Git repos, and
       // artifacts under workspace/ while scaffolding and deploying apps. Vite
@@ -35,6 +42,22 @@ const config = defineConfig({
     host: '127.0.0.1',
   },
   plugins: [
+    {
+      name: 'hatch-platform-port',
+      apply: 'serve',
+      enforce: 'pre',
+      config(config) {
+        if (isPreview) return;
+        // Vite has merged CLI overrides here. Normalize before Nitro snapshots
+        // its environment; its dev plugin also reads PORT for the listener.
+        const port = resolvePlatformPort({
+          PORT: String(config.server?.port ?? 3700),
+        });
+        process.env.NITRO_PORT = String(port);
+        process.env.PORT = String(port);
+        return { server: { port, strictPort: true } };
+      },
+    },
     devtools(),
     tanstackStart({
       spa: {
@@ -55,8 +78,8 @@ const config = defineConfig({
     output: {
       dir: 'dist/platform',
     },
-    plugins: ['src/nitro/plugins/migrate.ts'],
+    plugins: ['src/nitro/plugins/migrate.ts', 'src/nitro/plugins/tailscale.ts'],
   },
-});
+}));
 
 export default config;

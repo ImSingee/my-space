@@ -5,6 +5,7 @@ import {
   IconServer2,
   IconServerBolt,
   IconUsers,
+  IconNetwork,
 } from '@tabler/icons-react';
 import { Fragment } from 'react';
 import { Page } from '~components/app-shell/page';
@@ -20,6 +21,7 @@ const GROUPS = [
     items: [
       { to: '/settings/providers', label: 'AI Providers', icon: IconServer2 },
       { to: '/settings/users', label: 'Users', icon: IconUsers },
+      { to: '/settings/tailscale', label: 'Tailscale', icon: IconNetwork },
     ],
   },
   {
@@ -35,7 +37,7 @@ function SettingsLayout() {
   return (
     <Page
       title="Settings"
-      description="Manage providers, users, backends, and the Agent Runner."
+      description="Manage providers, users, private access, and runtime status."
       size={1040}
     >
       <Box className={classes.layout}>
