@@ -1,0 +1,60 @@
+.list {
+  border-top: 1px solid var(--mantine-color-default-border);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+  min-height: 66px;
+  padding: var(--mantine-spacing-sm) 0;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.nameInput {
+  width: min(100%, 320px);
+}
+
+.actions {
+  flex-shrink: 0;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mantine-spacing-sm);
+  min-height: 180px;
+  padding: var(--mantine-spacing-xl);
+  border-block: 1px solid var(--mantine-color-default-border);
+}
+
+@media (max-width: 36em) {
+  .header {
+    flex-direction: column;
+  }
+
+  .addButton {
+    width: 100%;
+  }
+
+  .row {
+    align-items: flex-start;
+  }
+
+  .nameInput {
+    width: 100%;
+  }
+}

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   drizzleAdapter: vi.fn<(database: unknown, options: unknown) => string>(
     () => 'database-adapter',
   ),
+  passkey: vi.fn<(options: unknown) => string>(() => 'passkey'),
   schema: {},
   tanstackStartCookies: vi.fn<() => string>(() => 'tanstack-start-cookies'),
 }));
@@ -20,6 +21,10 @@ vi.mock('@better-auth/drizzle-adapter/relations-v2', () => ({
 
 vi.mock('better-auth/tanstack-start', () => ({
   tanstackStartCookies: mocks.tanstackStartCookies,
+}));
+
+vi.mock('@better-auth/passkey', () => ({
+  passkey: mocks.passkey,
 }));
 
 vi.mock('../db', () => ({
@@ -58,5 +63,24 @@ describe('Better Auth configuration', () => {
       provider: 'pg',
       schema: mocks.schema,
     });
+    expect(mocks.passkey).toHaveBeenCalledWith({
+      rpID: 'app.example.test',
+      rpName: 'Hatch',
+      origin: 'https://app.example.test:8443',
+      registration: { requireSession: true },
+      authenticatorSelection: {
+        residentKey: 'required',
+        requireResidentKey: true,
+      },
+    });
+    expect(mocks.betterAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plugins: [
+          expect.objectContaining({ id: 'verification-retention' }),
+          'passkey',
+          'tanstack-start-cookies',
+        ],
+      }),
+    );
   });
 });

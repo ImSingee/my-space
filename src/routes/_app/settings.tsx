@@ -4,6 +4,7 @@ import {
   IconRobot,
   IconServer2,
   IconServerBolt,
+  IconShieldLock,
   IconUsers,
 } from '@tabler/icons-react';
 import { Fragment } from 'react';
@@ -18,6 +19,7 @@ const GROUPS = [
   {
     label: null,
     items: [
+      { to: '/settings/security', label: 'Security', icon: IconShieldLock },
       { to: '/settings/providers', label: 'AI Providers', icon: IconServer2 },
       { to: '/settings/users', label: 'Users', icon: IconUsers },
     ],
@@ -35,7 +37,7 @@ function SettingsLayout() {
   return (
     <Page
       title="Settings"
-      description="Manage providers, users, backends, and the Agent Runner."
+      description="Manage security, providers, users, and platform services."
       size={1040}
     >
       <Box className={classes.layout}>

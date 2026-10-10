@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   boolean,
+  integer,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -84,11 +85,37 @@ export const verification = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index('verification_identifier_idx').on(table.identifier)],
+  (table) => [
+    index('verification_expiresAt_idx').on(table.expiresAt),
+    index('verification_identifier_idx').on(table.identifier),
+  ],
+);
+
+export const passkey = pgTable(
+  'passkey',
+  {
+    id: text('id').primaryKey(),
+    name: text('name'),
+    publicKey: text('public_key').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    credentialID: text('credential_id').notNull(),
+    counter: integer('counter').notNull(),
+    deviceType: text('device_type').notNull(),
+    backedUp: boolean('backed_up').notNull(),
+    transports: text('transports'),
+    createdAt: timestamp('created_at'),
+    aaguid: text('aaguid'),
+  },
+  (table) => [
+    index('passkey_userId_idx').on(table.userId),
+    index('passkey_credentialID_idx').on(table.credentialID),
+  ],
 );
 
 export const authRelations = defineRelationsPart(
-  { user, session, account, verification },
+  { user, session, account, verification, passkey },
   (r) => ({
     user: {
       sessions: r.many.session({
@@ -98,6 +125,10 @@ export const authRelations = defineRelationsPart(
       accounts: r.many.account({
         from: r.user.id,
         to: r.account.userId,
+      }),
+      passkeys: r.many.passkey({
+        from: r.user.id,
+        to: r.passkey.userId,
       }),
     },
     session: {
@@ -109,6 +140,12 @@ export const authRelations = defineRelationsPart(
     account: {
       user: r.one.user({
         from: r.account.userId,
+        to: r.user.id,
+      }),
+    },
+    passkey: {
+      user: r.one.user({
+        from: r.passkey.userId,
         to: r.user.id,
       }),
     },

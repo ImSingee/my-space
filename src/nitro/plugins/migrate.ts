@@ -1,4 +1,5 @@
 import { definePlugin } from 'nitro';
+import { ensureVerificationCleanup } from '~auth/verification-cleanup';
 import { runMigrations } from '~db/migrate.ts';
 import { getPlatformEnv, isSpaShellPrerendering } from '~env';
 import {
@@ -19,13 +20,14 @@ import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
 // starts listening, which would leave a misconfigured process alive.
 if (!isSpaShellPrerendering()) getPlatformEnv();
 
-export default definePlugin(async () => {
+export default definePlugin(async (nitroApp) => {
   // TanStack Start launches the built Nitro server during `vite build` solely
   // to render the public SPA shell. Never migrate, start listeners/timers, or
   // touch runtime data from that build-time process.
   if (isSpaShellPrerendering()) return;
 
   await runMigrations();
+  nitroApp.hooks.hook('close', ensureVerificationCleanup());
   // Lock down PUBLIC connect on the platform DB so per-app roles (same server)
   // can't open a connection to it. Independent of the rest of boot.
   await hardenPlatformDatabase();

@@ -10,12 +10,15 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
+import { browserSupportsPasskeys } from '~auth/passkey-browser';
 import { Brand } from '~components/app-shell/brand';
+import { PasskeySignIn } from '~components/auth/passkey-sign-in';
 import { hasActiveSession } from '~server/auth';
 import { getSignupConfig } from '~server/users';
+import { passkeyOriginQueryOptions } from '~queries/passkeys';
 import classes from './login.module.css';
 
 /**
@@ -40,7 +43,13 @@ export const Route = createFileRoute('/login')({
   },
   // Whether to offer "Create account" is a runtime platform setting — the
   // server enforces it either way; this only keeps the UI honest.
-  loader: () => getSignupConfig(),
+  loader: async ({ context: { queryClient } }) => {
+    const [signup, appOrigin] = await Promise.all([
+      getSignupConfig(),
+      queryClient.ensureQueryData(passkeyOriginQueryOptions),
+    ]);
+    return { ...signup, appOrigin };
+  },
   component: LoginPage,
 });
 
@@ -49,12 +58,16 @@ type Mode = 'signin' | 'signup';
 function LoginPage() {
   const router = useRouter();
   const { redirect: redirectTo } = Route.useSearch();
-  const { allowSignup } = Route.useLoaderData();
+  const { allowSignup, appOrigin } = Route.useLoaderData();
   const [rawMode, setRawMode] = useState<Mode>('signin');
   // When sign-up is closed there is nothing to switch to — pin sign-in even if
   // a signup mode was selected before the config loaded.
   const mode: Mode = allowSignup ? rawMode : 'signin';
-  const [loading, setLoading] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  const navigateAfterAuthentication = useCallback(async () => {
+    await router.navigate({ href: safeRedirect(redirectTo) });
+  }, [redirectTo, router]);
 
   const form = useForm({
     initialValues: { name: '', email: '', password: '' },
@@ -68,7 +81,7 @@ function LoginPage() {
   });
 
   const submit = form.onSubmit(async (values) => {
-    setLoading(true);
+    setPasswordLoading(true);
     try {
       const result =
         mode === 'signin'
@@ -87,11 +100,11 @@ function LoginPage() {
         return;
       }
       toast.success(mode === 'signin' ? 'Welcome back' : 'Account created');
-      await router.navigate({ href: safeRedirect(redirectTo) });
+      await navigateAfterAuthentication();
     } catch {
       toast.error('Something went wrong. Please try again.');
     } finally {
-      setLoading(false);
+      setPasswordLoading(false);
     }
   });
 
@@ -124,19 +137,42 @@ function LoginPage() {
                   ]}
                 />
               )}
+              {mode === 'signin' ? (
+                <PasskeySignIn
+                  appOrigin={appOrigin}
+                  onSuccess={navigateAfterAuthentication}
+                />
+              ) : null}
               <form onSubmit={submit}>
                 <Stack gap="md">
                   {mode === 'signup' ? (
-                    <TextInput label="Name" {...form.getInputProps('name')} />
+                    <TextInput
+                      label="Name"
+                      autoComplete="name"
+                      {...form.getInputProps('name')}
+                    />
                   ) : null}
-                  <TextInput label="Email" {...form.getInputProps('email')} />
+                  <TextInput
+                    label="Email"
+                    autoComplete={
+                      mode === 'signin'
+                        ? browserSupportsPasskeys(appOrigin)
+                          ? 'username webauthn'
+                          : 'username'
+                        : 'email'
+                    }
+                    {...form.getInputProps('email')}
+                  />
                   <PasswordInput
                     label="Password"
+                    autoComplete={
+                      mode === 'signin' ? 'current-password' : 'new-password'
+                    }
                     {...form.getInputProps('password')}
                   />
                   <Button
                     type="submit"
-                    loading={loading}
+                    loading={passwordLoading}
                     mt="xs"
                     fullWidth
                     size="md"

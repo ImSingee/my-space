@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => {
     });
   return {
     events,
+    stopVerificationCleanup: vi.fn<() => Promise<void>>(async () => {}),
+    ensureVerificationCleanup: vi.fn<() => void>(),
+    onClose: vi.fn<(event: string, callback: () => Promise<void>) => void>(),
     isSpaShellPrerendering: vi.fn<() => boolean>(() => false),
     runMigrations: asyncStep('migrations'),
     hardenPlatformDatabase: asyncStep('harden'),
@@ -35,6 +38,13 @@ vi.mock('~env', () => ({
   isSpaShellPrerendering: mocks.isSpaShellPrerendering,
 }));
 vi.mock('~db/migrate.ts', () => ({ runMigrations: mocks.runMigrations }));
+vi.mock('~auth/verification-cleanup', () => ({
+  ensureVerificationCleanup: () => {
+    mocks.events.push('verification-cleanup');
+    mocks.ensureVerificationCleanup();
+    return mocks.stopVerificationCleanup;
+  },
+}));
 vi.mock('~server/agent-runs', () => ({
   ensureAgentRunSweeper: mocks.ensureAgentRunSweeper,
   sweepExpiredAgentRuns: mocks.sweepExpiredAgentRuns,
@@ -74,10 +84,11 @@ describe('platform startup migrations', () => {
   });
 
   it('recovers pending activations before starting backends', async () => {
-    await migratePlugin({} as never);
+    await migratePlugin({ hooks: { hook: mocks.onClose } } as never);
 
     expect(mocks.events).toEqual([
       'migrations',
+      'verification-cleanup',
       'harden',
       'activations',
       'agent-server',
@@ -89,6 +100,10 @@ describe('platform startup migrations', () => {
       'backend-warmup',
       'retention',
     ]);
+    expect(mocks.onClose).toHaveBeenCalledWith(
+      'close',
+      mocks.stopVerificationCleanup,
+    );
   });
 
   it('skips every runtime side effect while prerendering the SPA shell', async () => {
