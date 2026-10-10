@@ -14,9 +14,8 @@ Current source may use either `manifest.ts` or `manifest.json`; keep exactly one
 New templates use TS to let Agents validate configuration with the TypeScript
 toolchain. Preserve the selected format during ordinary edits and imports.
 Do not migrate JSON to TS unless the user explicitly requests that conversion,
-or as part of a user-requested upgrade to a released compatibility v3 or later
-that requires TS. No such version exists yet; TS-only source is recorded under
-`Next (proposal)` in `app-compatibility`, not current policy.
+or as part of a user-requested upgrade to a released contract that requires TS.
+TS-only source remains under `Next (proposal)` in `app-compatibility`.
 
 Read [Source manifests](references/manifest-source.md) for SDK helpers,
 execution boundaries, and authorized format conversion. Follow Local validation
@@ -64,7 +63,7 @@ retry. Checkout never authorizes silently replacing local work.
 ```text
 manifest.ts            App entries, capabilities, routes, widgets, integrations
 proto/service.proto    Connect RPC service; proto files stay under proto/
-backend/main.ts        bundled Deno backend
+backend/main.ts        bundled Deno Fetch backend
 backend/assets/        optional read-only runtime assets
 app/index.html         SPA host
 app/main.tsx           React SPA entry
@@ -94,6 +93,11 @@ to `"react"`. Do not add `imports`, `scopes`, `importMap`, or `workspace` to
 `deno.json`. Use explicit relative imports and registry dependencies from
 `package.json` instead.
 
+Never exclude `.hatch/` or any of its files in the top-level `deno.json`
+`exclude` array, including via glob patterns. Such exclusions can skip the
+platform-generated Fetch backend contract check even when its file is explicitly
+passed to `deno check`.
+
 The public SDK mappings are generated in `.hatch/import-map.json`. Do not add
 `@hatch/*` packages to `package.json` or `deno.lock`; Hatch owns their version
 and materialization. The authoritative declaration entry for `@hatch/app/data` is
@@ -121,6 +125,17 @@ Deploy bundles each enabled entry and its static imports. Source files,
 dependency metadata, installed modules, `.hatch/`, and `gen/` do not become
 runtime files. Only `backend/assets/` is copied beside the backend bundle; read
 it through `HATCH_ASSETS_DIR`. Put mutable files in Storage instead.
+
+Preserve the manifest's compatibility version during ordinary edits and runtime
+changes. Source that omits it uses v2. Choose backend startup separately through
+`backend.runtime`: `"deno-run"` or `"deno-serve"`. An omitted runtime means
+`"deno-run"`; Hatch injects `PORT` and source binds its own loopback listener.
+With `"deno-serve"`, the backend entry must default-export
+`{ fetch: handleRequest }` satisfying `Deno.ServeDefaultExport`. Do not name the
+module binding `fetch`, because that shadows Deno's outbound Fetch API. Hatch
+owns the listener, so source must not call `listen()` or read `PORT`. The field
+does not change `backendMode`, which controls lazy versus long-running lifecycle.
+Runtime selection is preserved in each deployment artifact and on rollback.
 
 ## Persistent Storage
 
@@ -164,6 +179,7 @@ in `manifest.ts`:
   },
   "backend": {
     "entry": "backend/main.ts",
+    "runtime": "deno-serve",
     "network": []
   },
   "app": {
@@ -218,11 +234,12 @@ permissions. Set `"network": "unrestricted"` only when the App genuinely needs
 arbitrary networking. Omitting `network` is reserved for compatibility with
 older deployments and also runs unrestricted; never omit it from new source.
 
-The platform automatically adds only the backend's exact
-`127.0.0.1:${PORT}` listener plus enabled Database, Data Tables, KV, and
-Workflow endpoints. These platform channels do not need to appear in the
-manifest. Bind the HTTP backend to `127.0.0.1`, not `0.0.0.0`, `::`, or an
-unspecified host. Every other destination must be declared.
+The platform automatically adds only the backend's exact loopback listener
+plus enabled Database, Data Tables, KV, and Workflow endpoints. These platform
+channels do not need to appear in the manifest. In `"deno-run"` mode, bind to
+`127.0.0.1:${PORT}`, not `0.0.0.0`, `::`, or an unspecified host. In
+`"deno-serve"` mode, Hatch supplies the loopback host and port. Every other
+destination must be declared.
 
 ## Dependencies
 

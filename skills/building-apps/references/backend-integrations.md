@@ -3,15 +3,18 @@
 Read this reference for backend RPC, cron, webhook, long-running processes, or
 calling top-level Workflows.
 
-## Deno Connect backend
+## Deno Fetch/Connect backend
 
-The platform injects `PORT`. It injects `DATABASE_URL` only with the database
-capability. Import generated code with an explicit `.ts` extension.
+For a manifest declaring `backend.runtime: "deno-serve"`, the platform starts the
+bundled backend with `deno serve` and owns its loopback listener. Default-export
+a Fetch handler; do not call `listen()` or read `PORT`. The platform injects
+`DATABASE_URL` only with the database capability. Import generated code with an
+explicit `.ts` extension.
 
 ```ts
-import http from 'node:http';
-import { connectNodeAdapter } from '@connectrpc/connect-node';
-import type { ConnectRouter } from '@connectrpc/connect';
+import { createConnectRouter, type ConnectRouter } from '@connectrpc/connect';
+import { compressionBrotli, compressionGzip } from '@connectrpc/connect-node';
+import { createFetchHandler } from '@connectrpc/connect/protocol';
 import { TodoService } from '../gen/service_pb.ts';
 
 function routes(router: ConnectRouter) {
@@ -22,9 +25,55 @@ function routes(router: ConnectRouter) {
   });
 }
 
-const port = Number(Deno.env.get('PORT') ?? '8080');
-http.createServer(connectNodeAdapter({ routes })).listen(port);
+function createConnectFetchHandler(
+  registerRoutes: (router: ConnectRouter) => void,
+) {
+  const router = createConnectRouter({
+    acceptCompression: [compressionGzip, compressionBrotli],
+  });
+  registerRoutes(router);
+  const handlers = new Map(
+    router.handlers.map((handler) => [
+      handler.requestPath,
+      createFetchHandler(handler, { httpVersion: '1.1' }),
+    ]),
+  );
+  return async (request: Request): Promise<Response> => {
+    const handler = handlers.get(new URL(request.url).pathname);
+    return handler?.(request) ?? new Response('Not found', { status: 404 });
+  };
+}
+
+const handleRequest = createConnectFetchHandler(routes);
+export default {
+  fetch: handleRequest,
+} satisfies Deno.ServeDefaultExport;
 ```
+
+This Fetch bridge supports Hatch's Connect and gRPC-Web traffic, including
+streaming responses. Native gRPC is not part of the App backend contract because
+the Fetch `Response` API cannot represent HTTP trailers.
+
+### Self-listening backend
+
+For `backend.runtime: "deno-run"` or an omitted runtime, Hatch starts the backend
+with `deno run` and injects `PORT`:
+
+```ts
+import http from 'node:http';
+import { connectNodeAdapter } from '@connectrpc/connect-node';
+
+const port = Number(Deno.env.get('PORT') ?? '8080');
+http.createServer(connectNodeAdapter({ routes })).listen(port, '127.0.0.1');
+```
+
+To switch to Fetch, replace the self-listening adapter with the default export
+above and select `backend.runtime: "deno-serve"` in the same source change.
+Preserve `compatibilityVersion`. Register `compressionGzip` and
+`compressionBrotli` as shown to retain compressed Connect and gRPC-Web traffic,
+refresh `deno.lock` when dependencies change, validate, and redeploy. Upgrade
+all serving platform processes before deploying Apps using the new mode;
+older platform releases always invoke `deno run`.
 
 Keep backend imports statically bundleable. Computed dynamic imports, separate
 worker entries, native addons, FFI, runtime sidecars, and packages that expect
@@ -84,22 +133,22 @@ Select the platform auth mode in the top-level manifest block:
 Preserve exact raw bytes when verifying signatures; decoding and re-encoding a
 binary or non-canonical body changes the HMAC input.
 
-Wrap the Connect handler when serving the webhook path:
+In a `"deno-serve"` backend, route the webhook before the Connect handler:
 
 ```ts
-const connect = connectNodeAdapter({ routes });
+const connect = createConnectFetchHandler(routes);
 
-http
-  .createServer(async (request, response) => {
-    if ((request.url ?? '/').startsWith('/__webhook')) {
-      // Authenticate according to the selected mode, then handle the request.
-      response.writeHead(200);
-      response.end('ok');
-      return;
-    }
-    connect(request, response);
-  })
-  .listen(port);
+async function handleRequest(request: Request): Promise<Response> {
+  if (new URL(request.url).pathname.startsWith('/__webhook')) {
+    // Authenticate according to the selected mode, then handle the request.
+    return new Response('ok');
+  }
+  return connect(request);
+}
+
+export default {
+  fetch: handleRequest,
+} satisfies Deno.ServeDefaultExport;
 ```
 
 ## Long-running mode

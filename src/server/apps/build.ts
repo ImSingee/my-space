@@ -6,7 +6,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as esbuild from 'esbuild';
 import {
   BUILD_WORK_DIR,
@@ -330,6 +330,30 @@ async function checkAppSource(
     }
   }
 
+  const checkPaths = entries.map((entry) => entry.path);
+  const backend = manifest.backend;
+  const validatesFetchBackend =
+    backend?.runtime === 'deno-serve' &&
+    manifest.capabilities.backend &&
+    backend !== undefined;
+  const contractEntry = validatesFetchBackend
+    ? '.hatch/backend-fetch-contract.ts'
+    : null;
+  if (contractEntry && backend) {
+    const backendUrl = pathToFileURL(
+      await fs.realpath(path.resolve(src, backend.entry)),
+    ).href;
+    await fs.writeFile(
+      path.join(src, contractEntry),
+      '/// <reference lib="deno.ns" />\n' +
+        `import backend from ${JSON.stringify(backendUrl)};\n\n` +
+        'const fetchHandler: Deno.ServeDefaultExport = backend;\n' +
+        'void fetchHandler;\n',
+      'utf8',
+    );
+    checkPaths.push(contractEntry);
+  }
+
   const checkArgs = [
     'check',
     '--config=deno.json',
@@ -338,7 +362,7 @@ async function checkAppSource(
     `--import-map=${hatchImportMapPath(src)}`,
     '--lock=deno.lock',
     '--frozen',
-    ...entries.map((entry) => `./${entry.path}`),
+    ...checkPaths.map((entry) => `./${entry}`),
   ];
   const checked = await run('deno', checkArgs, {
     cwd: src,
@@ -346,8 +370,14 @@ async function checkAppSource(
   });
   logs.push(`$ deno ${checkArgs.join(' ')}\n${checked.output.trim()}`);
   if (checked.code !== 0) {
+    const contractMessage =
+      contractEntry && checked.output.includes(contractEntry)
+        ? ' deno-serve backends must default-export ' +
+          'a Deno.ServeDefaultExport.'
+        : '';
     throw new Error(
-      `Source validation failed during deno check:\n${checked.output}`,
+      `Source validation failed during deno check.${contractMessage}\n` +
+        checked.output,
     );
   }
 }

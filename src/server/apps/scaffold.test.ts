@@ -144,6 +144,7 @@ describe('createApp', () => {
       name: 'Hello "World"',
       description: 'First line\nSecond line',
       compatibilityVersion: 2,
+      backend: { runtime: 'deno-serve' },
       backendMode: 'serverless',
       capabilities: {
         frontend: true,

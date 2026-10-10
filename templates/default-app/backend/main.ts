@@ -1,12 +1,11 @@
 /**
  * Deno Connect backend for the app.
  *
- * The platform bundles this entry into a single JavaScript file, runs that
- * bundle with Deno, and injects:
+ * The platform bundles this entry into a single JavaScript file, serves its
+ * default Fetch handler with Deno, and injects:
  *   - HATCH_DATA_URL: managed Data Table API endpoint
  *   - HATCH_SIGNING_SECRET: backend authentication for that endpoint
  *   - HATCH_DEPLOYMENT_ID: active deployment identity for Data Table requests
- *   - PORT: the port to listen on
  *   - HATCH_ASSETS_DIR: absolute path to the read-only backend/assets directory
  *   - STORAGE_DIR: private persistent directory when storage is enabled
  *
@@ -16,9 +15,9 @@
  * metadata, and lockfiles are not staged in the deployed artifact. Enable the
  * storage capability and use STORAGE_DIR when the backend needs mutable files.
  */
-import http from 'node:http';
-import { connectNodeAdapter } from '@connectrpc/connect-node';
-import type { ConnectRouter } from '@connectrpc/connect';
+import { createConnectRouter, type ConnectRouter } from '@connectrpc/connect';
+import { compressionBrotli, compressionGzip } from '@connectrpc/connect-node';
+import { createFetchHandler } from '@connectrpc/connect/protocol';
 import { createDataClient, DataRequestError } from '@hatch/app/data';
 import schema from '../data/schema.ts';
 import { CounterService } from '../gen/service_pb.ts';
@@ -64,10 +63,22 @@ function routes(router: ConnectRouter) {
   });
 }
 
-const port = Number(Deno.env.get('PORT') ?? '8080');
+const router = createConnectRouter({
+  acceptCompression: [compressionGzip, compressionBrotli],
+});
+routes(router);
+const handlers = new Map(
+  router.handlers.map((handler) => [
+    handler.requestPath,
+    createFetchHandler(handler, { httpVersion: '1.1' }),
+  ]),
+);
 
-http
-  .createServer(connectNodeAdapter({ routes }))
-  .listen(port, '127.0.0.1', () => {
-    console.log(`app backend listening on 127.0.0.1:${port}`);
-  });
+async function handleRequest(request: Request): Promise<Response> {
+  const handler = handlers.get(new URL(request.url).pathname);
+  return handler?.(request) ?? new Response('Not found', { status: 404 });
+}
+
+export default {
+  fetch: handleRequest,
+} satisfies Deno.ServeDefaultExport;

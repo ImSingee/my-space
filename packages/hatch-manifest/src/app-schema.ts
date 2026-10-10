@@ -296,6 +296,10 @@ export function isValidAppSlug(slug: string): boolean {
   return slug.length <= APP_SLUG_MAX_LENGTH && APP_SLUG_RE.test(slug);
 }
 
+/** Backend listener ownership; an omitted value retains self-listening Deno. */
+export const backendRuntimeSchema = z.enum(['deno-run', 'deno-serve']);
+export type BackendRuntime = z.infer<typeof backendRuntimeSchema>;
+
 export const sourceManifestSchema = z
   .object({
     id: z
@@ -323,6 +327,7 @@ export const sourceManifestSchema = z
     backend: z
       .object({
         entry: backendEntryPath,
+        runtime: backendRuntimeSchema.optional(),
         /** Unified Deno network permission for the deployed backend. */
         network: networkPolicySchema.optional(),
       })

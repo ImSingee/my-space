@@ -23,6 +23,7 @@ export default defineAppManifest({
   },
   backend: {
     entry: 'backend/main.ts',
+    runtime: 'deno-serve',
     network: [],
   },
   app: {

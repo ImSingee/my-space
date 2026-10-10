@@ -7,6 +7,7 @@ import {
   type AppRoute,
   type CronJob,
   type WebhookAuth,
+  type BackendRuntime,
 } from '../../../packages/hatch-manifest/src/app-schema.js';
 export * from '../../../packages/hatch-manifest/src/app-schema.js';
 
@@ -109,6 +110,8 @@ export type NormalizedManifest = {
   /** Backend artifact entry the platform runs, when a backend is present. */
   backend?: {
     entry: string;
+    /** Absent on historical deployments, which use deno run. */
+    runtime?: BackendRuntime;
     /** Absent on legacy source artifacts; set by the bundle build path. */
     format?: 'bundle-v1';
     /** Absent on legacy deployments, which retain unrestricted access. */
@@ -286,6 +289,9 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   if (src.capabilities.backend && src.backend) {
     out.backend = {
       entry: src.backend.entry,
+      ...(src.backend.runtime === undefined
+        ? {}
+        : { runtime: src.backend.runtime }),
       ...(src.backend.network === undefined
         ? {}
         : { network: src.backend.network }),
