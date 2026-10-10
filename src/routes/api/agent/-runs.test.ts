@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn<(input: { headers: Headers }) => Promise<unknown>>(),
-  startAgentRun: vi.fn<(input: unknown) => Promise<{ runId: string }>>(),
+  startAgentRun:
+    vi.fn<
+      (
+        input: unknown,
+        issuer?: { userId: string },
+      ) => Promise<{ runId: string }>
+    >(),
 }));
 
 vi.mock('~auth/server', () => ({
@@ -80,10 +86,13 @@ describe('POST /api/agent/runs', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mocks.startAgentRun).toHaveBeenCalledWith({
-      ...baseBody,
-      content: [{ type: 'text', text: 'Legacy instructions' }],
-    });
+    expect(mocks.startAgentRun).toHaveBeenCalledWith(
+      {
+        ...baseBody,
+        content: [{ type: 'text', text: 'Legacy instructions' }],
+      },
+      { userId: 'user-1' },
+    );
   });
 
   it('accepts ordered Workflow references in a modern request', async () => {
@@ -101,10 +110,13 @@ describe('POST /api/agent/runs', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mocks.startAgentRun).toHaveBeenCalledWith({
-      ...baseBody,
-      content,
-    });
+    expect(mocks.startAgentRun).toHaveBeenCalledWith(
+      {
+        ...baseBody,
+        content,
+      },
+      { userId: 'user-1' },
+    );
   });
 
   it('rejects requests that mix userText with content', async () => {

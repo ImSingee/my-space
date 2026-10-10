@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { routeTree } from './routeTree.gen';
 import { AppLoading } from '~components/system/app-loading.tsx';
 import { NotFoundElement } from '~components/system/not-found.tsx';
+import { parseSearch, stringifySearch } from './search-params';
 
 // Create a new router instance
 export const getRouter = () => {
@@ -19,14 +20,21 @@ export const getRouter = () => {
     // individual useMutation calls don't need (and shouldn't add) their own
     // onError toast — a local onError would run in addition and double-toast.
     // Mutations only run in the browser, so the toast call is client-only.
+    // Flows that render every failure inline opt out with
+    // `meta: { errorToast: false }`.
     mutationCache: new MutationCache({
-      onError: (error) => toast.error(error.message),
+      onError: (error, _variables, _result, mutation) => {
+        if (mutation.meta?.errorToast === false) return;
+        toast.error(error.message);
+      },
     }),
   });
 
   const router = createRouter({
     routeTree,
     context: { queryClient },
+    parseSearch,
+    stringifySearch,
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
     defaultPreload: 'intent',
@@ -53,5 +61,11 @@ export const getRouter = () => {
 declare module '@tanstack/react-router' {
   interface Register {
     router: ReturnType<typeof getRouter>;
+  }
+}
+
+declare module '@tanstack/react-query' {
+  interface Register {
+    mutationMeta: { errorToast?: boolean };
   }
 }

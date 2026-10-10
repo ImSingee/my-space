@@ -1,3 +1,4 @@
+import { assertCliWrite } from '~server/cli-auth/operation';
 /** Server-only: build + record a workflow deployment and flip it live. */
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -108,6 +109,7 @@ async function deployWorkflowInner(
 
   try {
     const markedBuilding = await db.transaction(async (tx) => {
+      await assertCliWrite(tx);
       const [currentWorkflow] = await tx
         .select({ createdAt: schema.workflows.createdAt })
         .from(schema.workflows)
@@ -192,6 +194,7 @@ async function deployWorkflowInner(
     let version = 0;
     await db.transaction(async (tx) => {
       await workflowDeployLock.acquire(tx, id);
+      await assertCliWrite(tx);
       const [currentWorkflow] = await tx
         .select({ createdAt: schema.workflows.createdAt })
         .from(schema.workflows)

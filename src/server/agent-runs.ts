@@ -389,7 +389,10 @@ async function resolveRunModelConfig(
 
 /** ================== start / dispatch ================== */
 
-export async function startAgentRun(input: AgentRunInput): Promise<{
+export async function startAgentRun(
+  input: AgentRunInput,
+  issuer?: { userId: string },
+): Promise<{
   runId: string;
 }> {
   const sessionRow = await db.query.agentSessions.findFirst({
@@ -566,6 +569,16 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
           },
         })
         .returning();
+
+      if (issuer) {
+        const { recordRunAuthorization } = await import('./cli-auth/runs');
+        await recordRunAuthorization(
+          tx,
+          inserted.id,
+          input.sessionId,
+          issuer.userId,
+        );
+      }
 
       // Keep run creation and transcript replacement in one commit. In
       // particular, a retry must never delete the failed turn unless the new

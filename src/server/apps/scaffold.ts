@@ -1,3 +1,4 @@
+import { assertCliWrite } from '~server/cli-auth/operation';
 /** Server-only: scaffold a new app source tree from the template. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -144,6 +145,7 @@ export async function createApp(
 
   // The id is an immutable internal key, independent of the mutable slug.
   const id = ulid().toLowerCase();
+  await assertCliWrite();
   const repoPath = await ensureAppRepo(id);
 
   const description = (input.description ?? '').trim();
@@ -167,6 +169,7 @@ export async function createApp(
   );
 
   await db.transaction(async (tx) => {
+    await assertCliWrite(tx);
     const [created] = await tx
       .insert(schema.apps)
       .values({

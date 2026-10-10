@@ -2,7 +2,14 @@ import { betterAuth } from 'better-auth/minimal';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter/relations-v2';
 import { passkey } from '@better-auth/passkey';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
+import { apiKey } from '@better-auth/api-key';
+import {
+  deviceAuthorization,
+  type DeviceAuthorizationGrant,
+  type DeviceAuthorizationRequest,
+} from 'better-auth/plugins/device-authorization';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { z } from 'zod';
 
 // FIXME: We have to use ../db (rather than ~db) here to make @better-auth/cli happy
 // See https://github.com/better-auth/better-auth/issues/6373
@@ -10,6 +17,7 @@ import { db, schema } from '../db';
 import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 import { getPasskeyOriginError, getPasskeyRpId } from './passkey-origin';
+import { issuanceEnabled } from './cli-policy';
 
 const { appUrl, betterAuthSecret } = getPlatformEnv();
 const relyingPartyId = getPasskeyRpId(appUrl);
@@ -19,6 +27,41 @@ const passkeyCeremonyPaths = new Set([
   '/passkey/verify-registration',
   '/passkey/verify-authentication',
 ]);
+
+const deviceFields = {
+  hatchResources: z.string(),
+  hatchExpiresIn: z.number(),
+  hatchInstanceId: z.string(),
+  hatchInstanceEpoch: z.number(),
+};
+const hatchDeviceGrant = {
+  requestSchemaFields: deviceFields,
+  deviceCodeSchemaFields: {
+    hatchResources: { type: 'string', required: true },
+    hatchExpiresIn: { type: 'number', required: true },
+    hatchInstanceId: { type: 'string', required: true },
+    hatchInstanceEpoch: { type: 'number', required: true },
+    hatchSessionId: { type: 'string', required: false },
+    hatchUserEpoch: { type: 'number', required: false },
+  },
+  authorizeRequest: ({ request }: { request: DeviceAuthorizationRequest }) => {
+    if (!issuanceEnabled() || request.user_id) throw new APIError('FORBIDDEN');
+    const fields = z.object(deviceFields).parse(request);
+    return {
+      clientId: 'hatch-cli',
+      deviceCodeFields: {
+        hatchResources: fields.hatchResources,
+        hatchExpiresIn: fields.hatchExpiresIn,
+        hatchInstanceId: fields.hatchInstanceId,
+        hatchInstanceEpoch: fields.hatchInstanceEpoch,
+      },
+    };
+  },
+  assertSessionRedemption: () => {
+    throw new APIError('FORBIDDEN');
+  },
+  getVerificationContext: () => undefined,
+} satisfies DeviceAuthorizationGrant<typeof deviceFields>;
 
 // Single-tenant platform: self-service sign-up is a runtime platform setting
 // (`auth.allowSignup` in platform_config), toggled from Settings → Users, not
@@ -51,6 +94,10 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      // Hatch's reviewed routes issue keys; the plugins' own HTTP routes stay sealed.
+      if (ctx.request && /^\/(?:api-key|device)(?:\/|$)/.test(ctx.path)) {
+        throw new APIError('NOT_FOUND');
+      }
       if (!passkeyCeremonyPaths.has(ctx.path)) return;
 
       // Check the public origin, not an internal reverse-proxy transport URL.
@@ -100,6 +147,30 @@ export const auth = betterAuth({
         // New accounts continue to use the email/password sign-up flow.
         requireSession: true,
       },
+    }),
+    apiKey({
+      configId: 'hatch',
+      requireName: true,
+      maximumNameLength: 64,
+      enableSessionForAPIKeys: false,
+      disableKeyHashing: false,
+      storage: 'database',
+      deferUpdates: false,
+      defaultPrefix: 'hatch_',
+      enableMetadata: true,
+      permissions: { defaultPermissions: {} },
+      keyExpiration: {
+        minExpiresIn: 300 / 86400,
+        maxExpiresIn: 90,
+        defaultExpiresIn: 7 * 86400,
+      },
+    }),
+    deviceAuthorization<typeof hatchDeviceGrant>({
+      expiresIn: '10m',
+      interval: '5s',
+      verificationUri: `${appUrl}/cli/authorize`,
+      validateClient: (clientId) => clientId === 'hatch-cli',
+      grant: hatchDeviceGrant,
     }),
     tanstackStartCookies(), // This should be the last plugin
   ],

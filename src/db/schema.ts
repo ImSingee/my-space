@@ -15,6 +15,7 @@ import {
 import { ulid as genUlid0 } from 'ulid';
 
 export * from './auth-schema';
+export * from './cli-auth-schema';
 
 /** ================== utils ================== */
 function timestamp(name?: string) {

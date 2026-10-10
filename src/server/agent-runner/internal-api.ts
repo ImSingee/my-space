@@ -165,6 +165,37 @@ export async function handleInternalApiRequest(
     const [, , resource, ...rest] = segments;
     const method = req.method ?? 'GET';
 
+    if (
+      resource === 'cli' &&
+      rest.length >= 3 &&
+      rest[0] === 'runs' &&
+      rest[2] === 'credential' &&
+      method === 'POST' &&
+      (rest.length === 3 || (rest.length === 4 && rest[3] === 'renew'))
+    ) {
+      const { z } = await import('zod');
+      const body = z
+        .object({
+          runnerId: z.string().min(1).max(191),
+          credentialId: z.string().min(1).optional(),
+        })
+        .strict()
+        .parse(await readJsonBody(req));
+      if (rest[3] === 'renew' && !body.credentialId)
+        throw new AppError('credentialId required.', 400);
+      const { mintRunCredential } = await import('~server/cli-auth/runs');
+      res.setHeader('cache-control', 'no-store');
+      json(
+        res,
+        200,
+        await mintRunCredential(
+          decodeURIComponent(rest[1]),
+          body.runnerId,
+          body.credentialId,
+        ),
+      );
+      return;
+    }
     if (resource === 'apps') {
       await handleApps(req, res, method, rest);
       return;

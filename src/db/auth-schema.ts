@@ -6,6 +6,7 @@ import {
   boolean,
   integer,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('user', {
@@ -103,8 +104,67 @@ export const passkey = pgTable(
   ],
 );
 
+export const apikey = pgTable(
+  'apikey',
+  {
+    id: text('id').primaryKey(),
+    configId: text('config_id').default('default').notNull(),
+    name: text('name'),
+    start: text('start'),
+    referenceId: text('reference_id').notNull(),
+    prefix: text('prefix'),
+    key: text('key').notNull(),
+    refillInterval: integer('refill_interval'),
+    refillAmount: integer('refill_amount'),
+    lastRefillAt: timestamp('last_refill_at'),
+    enabled: boolean('enabled').default(true),
+    rateLimitEnabled: boolean('rate_limit_enabled').default(true),
+    rateLimitTimeWindow: integer('rate_limit_time_window').default(86400000),
+    rateLimitMax: integer('rate_limit_max').default(10),
+    requestCount: integer('request_count').default(0),
+    remaining: integer('remaining'),
+    lastRequest: timestamp('last_request'),
+    expiresAt: timestamp('expires_at'),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
+    permissions: text('permissions'),
+    metadata: text('metadata'),
+  },
+  (table) => [
+    index('apikey_configId_idx').on(table.configId),
+    index('apikey_referenceId_idx').on(table.referenceId),
+    index('apikey_key_idx').on(table.key),
+  ],
+);
+
+export const deviceCode = pgTable(
+  'device_code',
+  {
+    id: text('id').primaryKey(),
+    deviceCode: text('device_code').notNull(),
+    userCode: text('user_code').notNull(),
+    userId: text('user_id'),
+    expiresAt: timestamp('expires_at').notNull(),
+    status: text('status').notNull(),
+    lastPolledAt: timestamp('last_polled_at'),
+    pollingInterval: integer('polling_interval'),
+    clientId: text('client_id'),
+    scope: text('scope'),
+    hatchResources: text('hatch_resources').notNull(),
+    hatchExpiresIn: integer('hatch_expires_in').notNull(),
+    hatchInstanceId: text('hatch_instance_id').notNull(),
+    hatchInstanceEpoch: integer('hatch_instance_epoch').notNull(),
+    hatchSessionId: text('hatch_session_id'),
+    hatchUserEpoch: integer('hatch_user_epoch'),
+  },
+  (table) => [
+    uniqueIndex('deviceCode_deviceCode_uidx').on(table.deviceCode),
+    uniqueIndex('deviceCode_userCode_uidx').on(table.userCode),
+  ],
+);
+
 export const authRelations = defineRelationsPart(
-  { user, session, account, verification, passkey },
+  { user, session, account, verification, passkey, apikey, deviceCode },
   (r) => ({
     user: {
       sessions: r.many.session({

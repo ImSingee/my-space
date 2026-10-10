@@ -18,6 +18,7 @@ import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as ApiEventsRouteImport } from './routes/api/events'
+import { Route as CliAuthorizeRouteImport } from './routes/cli/authorize'
 import { Route as AppAgentIndexRouteImport } from './routes/_app/agent/index'
 import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threadId'
 import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
@@ -39,6 +40,7 @@ import { Route as AppWorkflowWorkflowSlugIndexRouteImport } from './routes/_app/
 import { Route as AppWorkflowWorkflowSlugManageRouteImport } from './routes/_app/workflow/$workflowSlug/manage'
 import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
 import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
+import { Route as ApiCliV1SplatRouteImport } from './routes/api/cli/v1/$'
 import { Route as ApiWorkflowWorkflowIdDownloadRouteImport } from './routes/api/workflow/$workflowId/download'
 import { Route as ApiWorkflowWorkflowIdRunRouteImport } from './routes/api/workflow/$workflowId/run'
 import { Route as AppAppSlugEmbedSplatRouteImport } from './routes/app/$appSlug/embed/$'
@@ -98,6 +100,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
 const ApiEventsRoute = ApiEventsRouteImport.update({
   id: '/api/events',
   path: '/api/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CliAuthorizeRoute = CliAuthorizeRouteImport.update({
+  id: '/cli/authorize',
+  path: '/cli/authorize',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAgentIndexRoute = AppAgentIndexRouteImport.update({
@@ -208,6 +215,11 @@ const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
   path: '/api/app/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCliV1SplatRoute = ApiCliV1SplatRouteImport.update({
+  id: '/api/cli/v1/$',
+  path: '/api/cli/v1/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWorkflowWorkflowIdDownloadRoute =
   ApiWorkflowWorkflowIdDownloadRouteImport.update({
     id: '/api/workflow/$workflowId/download',
@@ -304,6 +316,7 @@ export interface FileRoutesByFullPath {
   '/executions': typeof AppExecutionsRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/api/events': typeof ApiEventsRoute
+  '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
@@ -323,6 +336,7 @@ export interface FileRoutesByFullPath {
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/cli/v1/$': typeof ApiCliV1SplatRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -349,6 +363,7 @@ export interface FileRoutesByTo {
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/api/events': typeof ApiEventsRoute
+  '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
@@ -368,6 +383,7 @@ export interface FileRoutesByTo {
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/cli/v1/$': typeof ApiCliV1SplatRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -398,6 +414,7 @@ export interface FileRoutesById {
   '/_app/executions': typeof AppExecutionsRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/api/events': typeof ApiEventsRoute
+  '/cli/authorize': typeof CliAuthorizeRoute
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
   '/_app/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
@@ -417,6 +434,7 @@ export interface FileRoutesById {
   '/_app/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/cli/v1/$': typeof ApiCliV1SplatRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -447,6 +465,7 @@ export interface FileRouteTypes {
     | '/executions'
     | '/settings'
     | '/api/events'
+    | '/cli/authorize'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/settings/agent-runner'
@@ -466,6 +485,7 @@ export interface FileRouteTypes {
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/cli/v1/$'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -492,6 +512,7 @@ export interface FileRouteTypes {
     | '/dashboards'
     | '/executions'
     | '/api/events'
+    | '/cli/authorize'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
     | '/settings/agent-runner'
@@ -511,6 +532,7 @@ export interface FileRouteTypes {
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/cli/v1/$'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -540,6 +562,7 @@ export interface FileRouteTypes {
     | '/_app/executions'
     | '/_app/settings'
     | '/api/events'
+    | '/cli/authorize'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
     | '/_app/settings/agent-runner'
@@ -559,6 +582,7 @@ export interface FileRouteTypes {
     | '/_app/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/cli/v1/$'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -585,10 +609,12 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiEventsRoute: typeof ApiEventsRoute
+  CliAuthorizeRoute: typeof CliAuthorizeRoute
   ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
+  ApiCliV1SplatRoute: typeof ApiCliV1SplatRoute
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
   ApiWorkflowWorkflowIdRunRoute: typeof ApiWorkflowWorkflowIdRunRoute
   AppAppSlugEmbedSplatRoute: typeof AppAppSlugEmbedSplatRoute
@@ -664,6 +690,13 @@ declare module '@tanstack/react-router' {
       path: '/api/events'
       fullPath: '/api/events'
       preLoaderRoute: typeof ApiEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cli/authorize': {
+      id: '/cli/authorize'
+      path: '/cli/authorize'
+      fullPath: '/cli/authorize'
+      preLoaderRoute: typeof CliAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/agent/': {
@@ -811,6 +844,13 @@ declare module '@tanstack/react-router' {
       path: '/api/app/$appId/download'
       fullPath: '/api/app/$appId/download'
       preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cli/v1/$': {
+      id: '/api/cli/v1/$'
+      path: '/api/cli/v1/$'
+      fullPath: '/api/cli/v1/$'
+      preLoaderRoute: typeof ApiCliV1SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/workflow/$workflowId/download': {
@@ -1028,10 +1068,12 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiEventsRoute: ApiEventsRoute,
+  CliAuthorizeRoute: CliAuthorizeRoute,
   ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
+  ApiCliV1SplatRoute: ApiCliV1SplatRoute,
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,
   ApiWorkflowWorkflowIdRunRoute: ApiWorkflowWorkflowIdRunRoute,
   AppAppSlugEmbedSplatRoute: AppAppSlugEmbedSplatRoute,
