@@ -32,6 +32,11 @@ const passkeyCeremonyPaths = new Set([
 export const auth = betterAuth({
   baseURL: appUrl,
   secret: betterAuthSecret,
+  trustedOrigins: async () => {
+    const { getTailscaleManager } = await import('../server/tailscale-manager');
+    const origin = getTailscaleManager().trustedOrigin();
+    return origin ? [origin] : [];
+  },
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema,

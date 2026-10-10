@@ -388,6 +388,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             }
             toolResults={toolResults}
             apps={appsQuery.data}
+            workflows={workflowsQuery.data}
             onRetry={showRetry ? retry : undefined}
             retrying={showRetry && retrying}
             retryDisabled={showRetry && !effectiveModelParts}
@@ -397,6 +398,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     [
       canOfferRetry,
       appsQuery.data,
+      workflowsQuery.data,
       effectiveModelParts,
       retry,
       retryableTurnKey,

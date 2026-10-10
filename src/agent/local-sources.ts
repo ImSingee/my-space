@@ -52,7 +52,6 @@ import {
 } from './workspace-paths';
 import {
   materializeWorktree,
-  prepareWorktreeMaterialization,
   type WorktreeMaterializer,
 } from './worktree-materializer';
 
@@ -695,10 +694,10 @@ async function synchronizeExistingCheckout(
   resolved: AgentWorkspacePath,
   materializer?: WorktreeMaterializer,
 ): Promise<LocalCheckout | null> {
-  if (!source.bundleBase64 || !source.masterCommit) return null;
-
   const worktree = resolved.absolutePath;
-  await prepareWorktreeMaterialization(worktree, materializer);
+  // Generated SDK bytes must be current even when Git cannot synchronize authored work.
+  await materializeWorktree(worktree, materializer);
+  if (!source.bundleBase64 || !source.masterCommit) return null;
   const [branchBeforeFetch, statusBeforeFetch] = await Promise.all([
     worktreeBranch(sessionId, worktree),
     worktreeStatus(sessionId, worktree),
@@ -770,7 +769,6 @@ async function synchronizeExistingCheckout(
     );
   }
 
-  await materializeWorktree(worktree, materializer);
   setAgentOwned([worktree], sessionId);
   const [branchAfterMaterialize, checkout] = await Promise.all([
     worktreeBranch(sessionId, worktree),

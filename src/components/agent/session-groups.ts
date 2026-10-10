@@ -16,18 +16,22 @@ function groupIdentity(
 ): Pick<SessionDateGroup<UpdatedSession>, 'key' | 'label'> {
   if (!value.isValid()) return { key: 'unknown', label: 'Unknown date' };
 
-  const daysAgo = today.diff(value.startOf('day'), 'day');
-  if (daysAgo <= 0) return { key: 'today', label: 'Today' };
-  if (daysAgo === 1) return { key: 'yesterday', label: 'Yesterday' };
-  if (daysAgo < 7) {
-    return { key: 'previous-7-days', label: 'Previous 7 Days' };
+  const date = value.startOf('day');
+  const daysAgo = today.diff(date, 'day');
+  if (daysAgo <= 0) {
+    return { key: today.format('YYYY-MM-DD'), label: 'Today' };
   }
-  if (daysAgo < 30) {
-    return { key: 'previous-30-days', label: 'Previous 30 Days' };
+
+  const key = date.format('YYYY-MM-DD');
+  if (daysAgo === 1) return { key, label: 'Yesterday' };
+  if (daysAgo < 7) {
+    return { key, label: date.format('dddd') };
   }
   return {
-    key: value.format('YYYY-MM'),
-    label: value.format('MMMM YYYY'),
+    key,
+    label: date.format(
+      date.year() === today.year() ? 'MMMM D' : 'MMMM D, YYYY',
+    ),
   };
 }
 

@@ -8,6 +8,20 @@ description: Design, build, validate, and deploy Hatch Apps with React frontends
 Load this Skill before calling App platform tools or editing an App. Follow the
 workflow in order and load only the capability references needed for the task.
 
+## Manifest authoring
+
+Current source may use either `manifest.ts` or `manifest.json`; keep exactly one.
+New templates use TS to let Agents validate configuration with the TypeScript
+toolchain. Preserve the selected format during ordinary edits and imports.
+Do not migrate JSON to TS unless the user explicitly requests that conversion,
+or as part of a user-requested upgrade to a released contract that requires TS.
+TS-only source remains under `Next (proposal)` in `app-compatibility`.
+
+Read [Source manifests](references/manifest-source.md) for SDK helpers,
+execution boundaries, and authorized format conversion. Follow Local validation
+below to check TS manifests independently before codegen or execution entries.
+Do not import generated files or execution modules from the manifest.
+
 ## Core workflow
 
 1. For a new App, call `list_apps` and use existing `slug · name` pairs to match
@@ -26,10 +40,11 @@ workflow in order and load only the capability references needed for the task.
    its exact `source_path`. Update mode never creates a missing path. Use
    `force: true` only with `clone: true` when intentionally discarding the
    current contents of that exact target.
-3. Read the actual source tree before editing. Keep `manifest.json`, proto,
+3. Read the actual source tree before editing. Keep the source manifest (`manifest.ts` or `manifest.json`), proto,
    backend, frontend, widgets, and capabilities synchronized.
 4. If dependencies changed, update the lockfile with the Deno command below.
-   Generate RPC code, run the source check, and run relevant tests.
+   Follow Local validation: check `manifest.ts` when selected, generate RPC
+   code, check enabled source entries, and run relevant tests.
 5. In the returned worktree, inspect `git status`, stage only intended authored
    files, and commit. Do not push branches or create/push tags.
 6. Call `deploy_app` with the same `source_path` and a concise release `message`.
@@ -46,9 +61,9 @@ retry. Checkout never authorizes silently replacing local work.
 `create_app` produces a prepared, runnable Counter App:
 
 ```text
-manifest.json          App entries, capabilities, routes, widgets, integrations
+manifest.ts            App entries, capabilities, routes, widgets, integrations
 proto/service.proto    Connect RPC service; proto files stay under proto/
-backend/main.ts        bundled Deno backend
+backend/main.ts        bundled Deno Fetch backend
 backend/assets/        optional read-only runtime assets
 app/index.html         SPA host
 app/main.tsx           React SPA entry
@@ -78,10 +93,22 @@ to `"react"`. Do not add `imports`, `scopes`, `importMap`, or `workspace` to
 `deno.json`. Use explicit relative imports and registry dependencies from
 `package.json` instead.
 
+Never exclude `.hatch/` or any of its files in the top-level `deno.json`
+`exclude` array, including via glob patterns. Such exclusions can skip the
+platform-generated Fetch backend contract check even when its file is explicitly
+passed to `deno check`.
+
 The public SDK mappings are generated in `.hatch/import-map.json`. Do not add
 `@hatch/*` packages to `package.json` or `deno.lock`; Hatch owns their version
-and materialization. The authoritative declaration entry for `@hatch/data` is
-the `exports` map in `.hatch/sdk/@hatch/data/package.json`.
+and materialization. The authoritative declaration entry for `@hatch/app/data` is
+the `exports` map in `.hatch/sdk/@hatch/app/package.json`.
+
+Use `@hatch/app` for `defineAppManifest`, `@hatch/app/data` for Data Tables,
+and `@hatch/app/data/react` for the React adapter. Existing `@hatch/data`
+imports remain supported by platform-generated re-export stubs for current
+compatibility versions. Do not author those stubs or rewrite historical source
+unless migrating it; the next-version removal is documented in
+`app-compatibility`.
 
 Buf generates `gen/service_pb.ts` from `proto/service.proto`. Never author
 generated RPC code. Every relative TypeScript import must state its `.ts` or
@@ -99,6 +126,17 @@ dependency metadata, installed modules, `.hatch/`, and `gen/` do not become
 runtime files. Only `backend/assets/` is copied beside the backend bundle; read
 it through `HATCH_ASSETS_DIR`. Put mutable files in Storage instead.
 
+Preserve the manifest's compatibility version during ordinary edits and runtime
+changes. Source that omits it uses v2. Choose backend startup separately through
+`backend.runtime`: `"deno-run"` or `"deno-serve"`. An omitted runtime means
+`"deno-run"`; Hatch injects `PORT` and source binds its own loopback listener.
+With `"deno-serve"`, the backend entry must default-export
+`{ fetch: handleRequest }` satisfying `Deno.ServeDefaultExport`. Do not name the
+module binding `fetch`, because that shadows Deno's outbound Fetch API. Hatch
+owns the listener, so source must not call `listen()` or read `PORT`. The field
+does not change `backendMode`, which controls lazy versus long-running lifecycle.
+Runtime selection is preserved in each deployment artifact and on rollback.
+
 ## Persistent Storage
 
 For mutable files, enable both `capabilities.backend` and
@@ -113,8 +151,9 @@ the same contents. Deleting the App permanently deletes the directory.
 
 ## Manifest
 
-Keep every declaration consistent with its source file. A representative
-manifest is:
+Keep every declaration consistent with its source file. The JSON example below
+can be used in `manifest.json`, or as the object passed to `defineAppManifest`
+in `manifest.ts`:
 
 ```json
 {
@@ -140,6 +179,7 @@ manifest is:
   },
   "backend": {
     "entry": "backend/main.ts",
+    "runtime": "deno-serve",
     "network": []
   },
   "app": {
@@ -194,11 +234,12 @@ permissions. Set `"network": "unrestricted"` only when the App genuinely needs
 arbitrary networking. Omitting `network` is reserved for compatibility with
 older deployments and also runs unrestricted; never omit it from new source.
 
-The platform automatically adds only the backend's exact
-`127.0.0.1:${PORT}` listener plus enabled Database, Data Tables, KV, and
-Workflow endpoints. These platform channels do not need to appear in the
-manifest. Bind the HTTP backend to `127.0.0.1`, not `0.0.0.0`, `::`, or an
-unspecified host. Every other destination must be declared.
+The platform automatically adds only the backend's exact loopback listener
+plus enabled Database, Data Tables, KV, and Workflow endpoints. These platform
+channels do not need to appear in the manifest. In `"deno-run"` mode, bind to
+`127.0.0.1:${PORT}`, not `0.0.0.0`, `::`, or an unspecified host. In
+`"deno-serve"` mode, Hatch supplies the loopback host and port. Every other
+destination must be declared.
 
 ## Dependencies
 
@@ -228,6 +269,20 @@ those mechanisms.
 
 ## Local validation
 
+After create/checkout has prepared `.hatch/` and locked dependencies (and after
+installing any dependency changes), run from the App root. If the selected
+source is `manifest.ts`, type-check it separately before RPC codegen and entry
+checks:
+
+```bash
+deno check --config=deno.json --no-remote --node-modules-dir=manual \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./manifest.ts
+```
+
+This checks the manifest's own import graph, which entry checks may never
+reach. Fix failures before continuing. For `manifest.json`, skip only this TS
+check and retain JSON source; platform manifest validation still applies.
+
 Create and checkout already generate RPC code. After changing a proto, regenerate
 it from the App root with Hatch's platform-owned template. Do not run bare
 `buf generate`: that reads the App-authored `buf.gen.yaml` instead.
@@ -236,7 +291,7 @@ it from the App root with Hatch's platform-owned template. Do not run bare
 buf generate --template .hatch/buf.gen.yaml
 ```
 
-Then type-check every enabled entry from `manifest.json`, plus `data/schema.ts`
+Then type-check every enabled entry from the source manifest (`manifest.ts` or `manifest.json`), plus `data/schema.ts`
 when Data Tables are enabled:
 
 ```bash
@@ -250,8 +305,10 @@ Adjust the final entry list to the manifest and omit disabled or absent entries.
 Run relevant tests after the check. Do not use a different import map for local
 checks.
 
-Every other Deno command that resolves App TypeScript must use the same SDK,
-node-modules, and frozen-lock contract. For example:
+Other Deno commands that resolve App execution entries must use the same SDK,
+automatic node-modules, and frozen-lock contract as the entry check. The
+manifest check above uses manual node-modules to match the restricted loader.
+For example:
 
 ```bash
 deno test --config=deno.json --no-remote --node-modules-dir=auto \
@@ -278,7 +335,7 @@ joins, or aggregates. It works without a backend and provides automatic
 forward migrations plus realtime queries.
 
 ```ts
-import { defineSchema, defineTable, t } from '@hatch/data';
+import { defineSchema, defineTable, t } from '@hatch/app/data';
 
 export default defineSchema({
   todos: defineTable({
@@ -291,7 +348,7 @@ export default defineSchema({
 
 ```ts
 import schema from '../data/schema.ts';
-import { createDataClient, type JsonValue } from '@hatch/data';
+import { createDataClient, type JsonValue } from '@hatch/app/data';
 
 declare const __DATA_BASE_URL__: string;
 export const data = createDataClient<typeof schema>({
@@ -305,13 +362,13 @@ await data.insert('todos', { title: 'Ship it', metadata });
 Preserve the SDK's schema inference and public types. Do not delete the schema
 generic, copy SDK declarations into App source, replace types with `any`, or add
 casts to conceal an SDK-resolution or type error. Resolve API declarations
-through `.hatch/sdk/@hatch/data/package.json` exports.
+through `.hatch/sdk/@hatch/app/package.json` exports.
 
 Tables include `id`, `createdAt`, and `updatedAt`. Use `renamedFrom(...)` for
 renames, add indexes for frequent filters/orderings, use `unset` to clear an
 optional field to SQL `NULL`, and use `increment` for atomic arithmetic on
 required numeric fields. Use `data.watch` or `useDataQuery` from
-`@hatch/data/react` for realtime results. Backends use `HATCH_DATA_URL` and
+`@hatch/app/data/react` for realtime results. Backends use `HATCH_DATA_URL` and
 `HATCH_SIGNING_SECRET` with the same typed client.
 
 Dropping tables/fields or narrowing types returns a destructive migration

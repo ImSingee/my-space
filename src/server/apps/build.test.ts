@@ -13,6 +13,13 @@ const execFileAsync = promisify(execFile);
 async function makeAppSource(
   manifest: Record<string, unknown>,
   files: Record<string, string>,
+  libs: readonly string[] = [
+    'deno.ns',
+    'dom',
+    'dom.iterable',
+    'dom.asynciterable',
+    'esnext',
+  ],
 ): Promise<{ sourceDir: string; outputDir: string }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hatch-build-test-'));
   tempDirs.push(root);
@@ -37,7 +44,7 @@ async function makeAppSource(
         strict: true,
         jsx: 'react-jsx',
         jsxImportSource: 'react',
-        lib: ['deno.ns', 'dom', 'dom.iterable', 'dom.asynciterable', 'esnext'],
+        lib: libs,
       },
       allowScripts: [],
     }),
@@ -89,6 +96,288 @@ afterEach(async () => {
 });
 
 describe('buildApp backend', () => {
+  it('builds a TS manifest with the same deployed contract as legacy JSON', async () => {
+    const manifest = {
+      id: 'demo',
+      name: 'Demo',
+      capabilities: { backend: true },
+      backend: { entry: 'backend/main.ts', network: [] },
+    };
+    const { sourceDir, outputDir } = await makeAppSource(manifest, {
+      'backend/main.ts': 'export const value = 1;',
+    });
+    await useDefaultDependencyFiles(sourceDir);
+    const legacy = await buildApp('demo', { sourceDir, outputDir });
+    await fs.rm(path.join(sourceDir, 'manifest.json'));
+    await fs.writeFile(
+      path.join(sourceDir, 'manifest.ts'),
+      `import { defineAppManifest } from '@hatch/app';\nexport default defineAppManifest(${JSON.stringify(manifest)});`,
+    );
+    const typed = await buildApp('demo', { sourceDir, outputDir });
+    expect(typed.source).toEqual(legacy.source);
+    expect(typed.normalized).toEqual(legacy.normalized);
+    const before = await fs.readFile(
+      path.join(outputDir, 'manifest.normalized.json'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(sourceDir, 'manifest.ts'),
+      'export default new Date();',
+    );
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /plain JSON object/,
+    );
+    expect(
+      await fs.readFile(
+        path.join(outputDir, 'manifest.normalized.json'),
+        'utf8',
+      ),
+    ).toBe(before);
+  }, 30_000);
+
+  it('accepts a deno-serve Fetch backend on compatibility v1', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        compatibilityVersion: 1,
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts', runtime: 'deno-serve' },
+      },
+      {
+        'backend/main.ts':
+          "import { createConnectRouter } from '@connectrpc/connect';\n" +
+          "import { createFetchHandler } from '@connectrpc/connect/protocol';\n" +
+          'const router = createConnectRouter({});\n' +
+          'const handlers = new Map(\n' +
+          '  router.handlers.map((handler) => [\n' +
+          '    handler.requestPath,\n' +
+          "    createFetchHandler(handler, { httpVersion: '1.1' }),\n" +
+          '  ]),\n' +
+          ');\n' +
+          'async function handleRequest(request: Request): Promise<Response> {\n' +
+          '  const handler = handlers.get(new URL(request.url).pathname);\n' +
+          "  return handler?.(request) ?? new Response('Not found', { status: 404 });\n" +
+          '}\n' +
+          'export default {\n' +
+          '  fetch: handleRequest,\n' +
+          '} satisfies Deno.ServeDefaultExport;\n',
+      },
+    );
+    await useDefaultDependencyFiles(sourceDir);
+
+    await expect(
+      buildApp('demo', { sourceDir, outputDir }),
+    ).resolves.toMatchObject({
+      source: { compatibilityVersion: 1 },
+      normalized: { backend: { runtime: 'deno-serve' } },
+    });
+  });
+
+  it('builds a Fetch backend with npm dependencies through a symlinked data root', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts', runtime: 'deno-serve' },
+      },
+      {
+        'backend/main.ts':
+          "import { createConnectRouter } from '@connectrpc/connect';\n" +
+          'const router = createConnectRouter({});\n' +
+          'export default { fetch: () => new Response(String(router.handlers.length)) };\n',
+      },
+    );
+    await useDefaultDependencyFiles(sourceDir);
+    const dataRoot = path.join(path.dirname(sourceDir), 'data');
+    const dataAlias = path.join(path.dirname(sourceDir), 'data-link');
+    await fs.mkdir(dataRoot);
+    await fs.mkdir(path.join(dataRoot, 'workspace'));
+    await fs.symlink(await fs.realpath(dataRoot), dataAlias, 'dir');
+
+    // Isolate module-load-time paths and exercise the real Deno workspace resolver.
+    await execFileAsync(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        '--input-type=module',
+        '--eval',
+        `const { buildApp } = await import(${JSON.stringify(new URL('./build.ts', import.meta.url).href)});\n` +
+          `await buildApp('demo', ${JSON.stringify({ sourceDir, outputDir })});`,
+      ],
+      {
+        env: {
+          ...process.env,
+          HATCH_DATA_DIR: path.join(dataAlias, 'workspace'),
+        },
+        timeout: 45_000,
+      },
+    );
+
+    const normalized = JSON.parse(
+      await fs.readFile(
+        path.join(outputDir, 'manifest.normalized.json'),
+        'utf8',
+      ),
+    );
+    expect(normalized.backend).toMatchObject({
+      runtime: 'deno-serve',
+      entry: 'backend/main.bundle.js',
+      format: 'bundle-v1',
+    });
+    await expect(
+      fs.access(path.join(outputDir, normalized.backend.entry)),
+    ).resolves.toBeUndefined();
+  }, 60_000);
+
+  it('accepts a Fetch backend without Deno namespace types in the authored config', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts', runtime: 'deno-serve' },
+      },
+      {
+        'backend/main.ts':
+          "export default { fetch: () => new Response('ok') };\n",
+      },
+      ['dom', 'esnext'],
+    );
+    const authoredConfig = await fs.readFile(
+      path.join(sourceDir, 'deno.json'),
+      'utf8',
+    );
+
+    await expect(
+      buildApp('demo', { sourceDir, outputDir }),
+    ).resolves.toMatchObject({
+      normalized: { backend: { runtime: 'deno-serve', format: 'bundle-v1' } },
+    });
+    expect(await fs.readFile(path.join(sourceDir, 'deno.json'), 'utf8')).toBe(
+      authoredConfig,
+    );
+  });
+
+  it.each([
+    ['a missing default export', 'export const value = 1;\n'],
+    ['an incompatible default export', 'export default { value: 1 };\n'],
+  ])('rejects deno-serve backends with %s', async (_label, backend) => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        compatibilityVersion: 2,
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts', runtime: 'deno-serve' },
+      },
+      { 'backend/main.ts': backend },
+      ['dom', 'esnext'],
+    );
+
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /deno-serve backends must default-export a Deno\.ServeDefaultExport/,
+    );
+  });
+
+  it.each([undefined, 'deno-run'])(
+    'keeps runtime %s on the self-listening contract regardless of compatibility',
+    async (runtime) => {
+      const { sourceDir, outputDir } = await makeAppSource(
+        {
+          id: 'demo',
+          name: 'Demo',
+          compatibilityVersion: 3,
+          capabilities: { backend: true },
+          backend: {
+            entry: 'backend/main.ts',
+            ...(runtime ? { runtime } : {}),
+          },
+        },
+        { 'backend/main.ts': 'console.log("legacy backend");\n' },
+      );
+
+      await expect(
+        buildApp('demo', { sourceDir, outputDir }),
+      ).resolves.toMatchObject({
+        source: { compatibilityVersion: 3 },
+      });
+    },
+  );
+
+  it('does not require a backend export for frontend-only apps', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        compatibilityVersion: 2,
+        capabilities: { frontend: true },
+        app: { entry: 'app/main.ts', html: 'app/index.html', routes: [] },
+      },
+      {
+        'app/main.ts': 'document.body.textContent = "ok";\n',
+        'app/index.html': '<html><body></body></html>',
+      },
+    );
+
+    await expect(
+      buildApp('demo', { sourceDir, outputDir }),
+    ).resolves.toMatchObject({
+      source: { compatibilityVersion: 2 },
+    });
+  });
+
+  it.each(['backend/main#api.ts', 'backend/main%20api.ts'])(
+    'checks and bundles the literal deno-serve entry %s',
+    async (entry) => {
+      const { sourceDir, outputDir } = await makeAppSource(
+        {
+          id: 'demo',
+          name: 'Demo',
+          capabilities: { backend: true },
+          backend: { entry, runtime: 'deno-serve' },
+        },
+        {
+          [entry]:
+            "export default { fetch: () => new Response('ok') } satisfies Deno.ServeDefaultExport;\n",
+        },
+      );
+      const result = await buildApp('demo', { sourceDir, outputDir });
+      expect(result.normalized.backend).toMatchObject({
+        entry: entry.replace(/\.ts$/, '.bundle.js'),
+        runtime: 'deno-serve',
+      });
+      await expect(
+        fs.access(path.join(outputDir, result.normalized.backend!.entry)),
+      ).resolves.toBeUndefined();
+      await expect(fs.access(path.join(outputDir, '.hatch'))).rejects.toThrow(
+        /ENOENT/,
+      );
+    },
+  );
+
+  it('checks an encoded-directory backend rather than a valid decoy module', async () => {
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { backend: true },
+        backend: { entry: 'backend/%2e%2e/main.ts', runtime: 'deno-serve' },
+      },
+      {
+        'backend/%2e%2e/main.ts': 'export const value = 1;\n',
+        'main.ts': 'export default { fetch: () => new Response("decoy") };\n',
+      },
+    );
+
+    await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+      /deno-serve backends must default-export a Deno\.ServeDefaultExport/,
+    );
+    await expect(fs.access(outputDir)).rejects.toThrow(/ENOENT/);
+  });
+
   it('emits a self-contained bundle with only fixed runtime assets', async () => {
     const { sourceDir, outputDir } = await makeAppSource(
       {
@@ -859,31 +1148,33 @@ describe('buildApp managed Data Tables', () => {
     );
   });
 
-  it('evaluates schemas and inlines the platform-provided Data SDK', async () => {
-    const { sourceDir, outputDir } = await makeAppSource(
-      {
-        id: 'demo',
-        name: 'Demo',
-        capabilities: { dataTable: true, frontend: true, backend: true },
-        backend: { entry: 'backend/main.ts' },
-        app: {
-          entry: 'app/main.ts',
-          html: 'app/index.html',
-          routes: [],
+  it.each(['@hatch/data', '@hatch/app/data'])(
+    'evaluates schemas and bundles the %s SDK',
+    async (dataImport) => {
+      const { sourceDir, outputDir } = await makeAppSource(
+        {
+          id: 'demo',
+          name: 'Demo',
+          capabilities: { dataTable: true, frontend: true, backend: true },
+          backend: { entry: 'backend/main.ts' },
+          app: {
+            entry: 'app/main.ts',
+            html: 'app/index.html',
+            routes: [],
+          },
         },
-      },
-      {
-        'app/main.ts': `
-          import { useDataQuery } from '@hatch/data/react';
+        {
+          'app/main.ts': `
+          import { useDataQuery } from '${dataImport}/react';
           declare const __DATA_DEPLOYMENT_ID__: string;
           document.body.dataset.deploymentId = __DATA_DEPLOYMENT_ID__;
           document.body.dataset.sdk = typeof useDataQuery;
         `,
-        'app/index.html': '<html><body></body></html>',
-        'backend/main.ts': `
+          'app/index.html': '<html><body></body></html>',
+          'backend/main.ts': `
           import schema from '../data/schema.ts';
           import { runtimeValue } from './runtime-value.ts';
-          import { createDataClient } from '@hatch/data';
+          import { createDataClient } from '${dataImport}';
           export const data = createDataClient<typeof schema>({
             baseUrl: Deno.env.get('HATCH_DATA_URL') ?? '',
           });
@@ -895,12 +1186,12 @@ describe('buildApp managed Data Tables', () => {
             sdk: typeof data.increment,
           }));
         `,
-        'backend/runtime-value.ts':
-          "export const runtimeValue = 'runtime-alias';\n",
-        'data/fields.ts': "export const titleFieldName = 'title' as const;\n",
-        'data/schema.ts': `
+          'backend/runtime-value.ts':
+            "export const runtimeValue = 'runtime-alias';\n",
+          'data/fields.ts': "export const titleFieldName = 'title' as const;\n",
+          'data/schema.ts': `
           import { titleFieldName } from './fields.ts';
-          import { defineSchema, defineTable, t } from '@hatch/data';
+          import { defineSchema, defineTable, t } from '${dataImport}';
           export default defineSchema({
             todos: defineTable({
               [titleFieldName]: t.string(),
@@ -909,88 +1200,92 @@ describe('buildApp managed Data Tables', () => {
             }).index('by_completed', ['completed']),
           });
         `,
-      },
-    );
-    await useDefaultDependencyFiles(sourceDir);
+        },
+      );
+      await useDefaultDependencyFiles(sourceDir);
 
-    const result = await buildApp('demo', {
-      sourceDir,
-      outputDir,
-      deploymentId: 'deployment-123',
-    });
+      const result = await buildApp('demo', {
+        sourceDir,
+        outputDir,
+        deploymentId: 'deployment-123',
+      });
 
-    expect(result.dataSchema?.tables.todos).toMatchObject({
-      fields: {
-        title: { kind: 'string', optional: false },
-        completed: { kind: 'boolean', optional: false, default: false },
-        attempts: { kind: 'integer', optional: false, default: 0 },
-      },
-      indexes: [{ name: 'by_completed', fields: ['completed'], unique: false }],
-    });
-    expect(result.normalized.dataTable).toEqual({
-      url: '/api/app/demo/data',
-    });
-    expect(result.log).toContain(
-      'deno run --no-prompt --config=deno.json --no-remote ' +
-        '--node-modules-dir=auto',
-    );
-    await expect(
-      fs.readFile(path.join(outputDir, 'app', 'index.html'), 'utf8'),
-    ).resolves.toContain('deployment-123');
-    await expect(
-      fs.readFile(path.join(outputDir, 'deployment.json'), 'utf8'),
-    ).resolves.toContain('deployment-123');
-    expect(result.normalized.backend).toEqual({
-      entry: 'backend/main.bundle.js',
-      format: 'bundle-v1',
-    });
-
-    const bundlePath = path.join(outputDir, 'backend', 'main.bundle.js');
-    await expect(fs.access(bundlePath)).resolves.toBeUndefined();
-    for (const buildOnlyPath of [
-      HATCH_SDK_IMPORT_MAP,
-      'node_modules/@hatch/data',
-      'node_modules/react',
-      'backend/main.ts',
-      'backend/runtime-value.ts',
-      'data/schema.ts',
-      'data/fields.ts',
-      'deno.json',
-      'deno.lock',
-    ]) {
+      expect(result.dataSchema?.tables.todos).toMatchObject({
+        fields: {
+          title: { kind: 'string', optional: false },
+          completed: { kind: 'boolean', optional: false, default: false },
+          attempts: { kind: 'integer', optional: false, default: 0 },
+        },
+        indexes: [
+          { name: 'by_completed', fields: ['completed'], unique: false },
+        ],
+      });
+      expect(result.normalized.dataTable).toEqual({
+        url: '/api/app/demo/data',
+      });
+      expect(result.log).toContain(
+        'deno run --no-prompt --config=deno.json --no-remote ' +
+          '--node-modules-dir=auto',
+      );
       await expect(
-        fs.access(path.join(outputDir, buildOnlyPath)),
-      ).rejects.toMatchObject({ code: 'ENOENT' });
-    }
+        fs.readFile(path.join(outputDir, 'app', 'index.html'), 'utf8'),
+      ).resolves.toContain('deployment-123');
+      await expect(
+        fs.readFile(path.join(outputDir, 'deployment.json'), 'utf8'),
+      ).resolves.toContain('deployment-123');
+      expect(result.normalized.backend).toEqual({
+        entry: 'backend/main.bundle.js',
+        format: 'bundle-v1',
+      });
 
-    // Relative App imports and the SDK must already be inside the bundle: the
-    // final artifact runs with an empty cache and external resolution disabled.
-    const recoveryCache = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'hatch-data-recovery-cache-'),
-    );
-    tempDirs.push(recoveryCache);
-    const executed = await execFileAsync(
-      'deno',
-      [
-        'run',
-        '--no-config',
-        '--no-lock',
-        '--no-npm',
-        '--no-remote',
-        '--cached-only',
-        '--allow-env=HATCH_DATA_URL,HATCH_DATA_DEPLOYMENT_ID',
-        bundlePath,
-      ],
-      {
-        cwd: outputDir,
-        env: { ...process.env, DENO_DIR: recoveryCache },
-      },
-    );
-    expect(JSON.parse(executed.stdout.trim())).toEqual({
-      runtime: 'runtime-alias',
-      sdk: 'function',
-    });
-  }, 15_000);
+      const bundlePath = path.join(outputDir, 'backend', 'main.bundle.js');
+      await expect(fs.access(bundlePath)).resolves.toBeUndefined();
+      for (const buildOnlyPath of [
+        HATCH_SDK_IMPORT_MAP,
+        'node_modules/@hatch/data',
+        'node_modules/react',
+        'backend/main.ts',
+        'backend/runtime-value.ts',
+        'data/schema.ts',
+        'data/fields.ts',
+        'deno.json',
+        'deno.lock',
+      ]) {
+        await expect(
+          fs.access(path.join(outputDir, buildOnlyPath)),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+
+      // Relative App imports and the SDK must already be inside the bundle: the
+      // final artifact runs with an empty cache and external resolution disabled.
+      const recoveryCache = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'hatch-data-recovery-cache-'),
+      );
+      tempDirs.push(recoveryCache);
+      const executed = await execFileAsync(
+        'deno',
+        [
+          'run',
+          '--no-config',
+          '--no-lock',
+          '--no-npm',
+          '--no-remote',
+          '--cached-only',
+          '--allow-env=HATCH_DATA_URL,HATCH_DATA_DEPLOYMENT_ID',
+          bundlePath,
+        ],
+        {
+          cwd: outputDir,
+          env: { ...process.env, DENO_DIR: recoveryCache },
+        },
+      );
+      expect(JSON.parse(executed.stdout.trim())).toEqual({
+        runtime: 'runtime-alias',
+        sdk: 'function',
+      });
+    },
+    15_000,
+  );
 
   it('rejects a local external import map', async () => {
     const externalMap = {

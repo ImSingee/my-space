@@ -25,6 +25,7 @@ export type RunOptions = {
   timeoutMs?: number;
   /** Cap on each captured stream. Defaults to 1MB. */
   maxOutput?: number;
+  signal?: AbortSignal;
 };
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -65,6 +66,15 @@ export function run(
   };
 
   return new Promise((resolve) => {
+    if (opts.signal?.aborted) {
+      resolve({
+        code: 1,
+        stdout: '',
+        stderr: 'Operation aborted',
+        output: 'Operation aborted',
+      });
+      return;
+    }
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
@@ -79,8 +89,15 @@ export function run(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', abort);
       killProcessTree(child.pid);
       resolve({ code, stdout, stderr, output });
+    };
+    const abort = () => {
+      output = appendCapped(output, '\nOperation aborted');
+      stderr = appendCapped(stderr, '\nOperation aborted');
+      killProcessTree(child.pid);
+      finish(1);
     };
     const timer = setTimeout(() => {
       const note = `\n${cmd} timed out after ${timeoutMs}ms`;
@@ -90,6 +107,8 @@ export function run(
       finish(1);
     }, timeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
+    opts.signal?.addEventListener('abort', abort, { once: true });
+    if (opts.signal?.aborted) abort();
     child.stdout.on('data', (d: Buffer) => {
       const text = d.toString();
       stdout = appendCapped(stdout, text);
@@ -108,6 +127,10 @@ export function run(
     });
     child.on('exit', () => killProcessTree(child.pid));
     child.on('close', (code) => finish(code ?? 0));
+    // Early process termination can close stdin before a bundle finishes writing.
+    child.stdin.on('error', () => {
+      /* The process result reports the failure. */
+    });
     if (opts.input !== undefined) {
       child.stdin.end(opts.input);
     } else {

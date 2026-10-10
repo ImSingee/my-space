@@ -548,7 +548,7 @@ describe('App deployment activation recovery', () => {
     await fs.rm(mocks.root, { recursive: true, force: true });
   });
 
-  it('publishes one activation event after a normal successful deployment', async () => {
+  it('publishes the first deployment into a fresh workspace and emits one activation event', async () => {
     const id = 'normal-deploy';
     const app = appState(id, {
       status: 'draft',
@@ -559,7 +559,7 @@ describe('App deployment activation recovery', () => {
     });
     mocks.apps.set(id, app);
     mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
-    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+    await expect(fs.access(`${mocks.root}/live`)).rejects.toThrow(/ENOENT/);
 
     const result = await deployApp(id, {
       message: 'First deployment',

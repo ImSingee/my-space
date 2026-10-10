@@ -145,8 +145,8 @@ async function deployWorkflowInner(
     // resolve. Reject the mismatch instead of shipping a broken trigger.
     if (build.source.id !== id) {
       throw new Error(
-        `manifest.json id "${build.source.id}" does not match the workflow ` +
-          `being deployed ("${id}"). Set "id": "${id}" in manifest.json.`,
+        `Source manifest id "${build.source.id}" does not match the workflow ` +
+          `being deployed ("${id}"). Set "id": "${id}" in the source manifest.`,
       );
     }
     const compatibilityVersion = resolveWorkflowDeployCompatibilityVersion(

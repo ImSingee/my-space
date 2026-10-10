@@ -28,15 +28,15 @@ async function defaultAppRoot(): Promise<string> {
   await fs.cp(new URL('../../templates/default-app/', import.meta.url), root, {
     recursive: true,
   });
-  const manifestPath = path.join(root, 'manifest.json');
+  const manifestPath = path.join(root, 'manifest.ts');
   const packagePath = path.join(root, 'package.json');
   await Promise.all([
     fs.writeFile(
       manifestPath,
       (await fs.readFile(manifestPath, 'utf8'))
-        .replaceAll('__APP_ID__', 'prepared-app')
-        .replaceAll('__APP_NAME__', 'Prepared App')
-        .replaceAll('__APP_DESCRIPTION__', 'Prepared by test'),
+        .replaceAll('__APP_ID__', JSON.stringify('prepared-app'))
+        .replaceAll('__APP_NAME__', JSON.stringify('Prepared App'))
+        .replaceAll('__APP_DESCRIPTION__', JSON.stringify('Prepared by test')),
     ),
     fs.writeFile(
       packagePath,
@@ -58,7 +58,11 @@ async function minimalAppRoot(): Promise<string> {
   await Promise.all([
     fs.writeFile(
       path.join(root, 'manifest.json'),
-      JSON.stringify({ id: 'prepared-app' }),
+      JSON.stringify({
+        id: 'prepared-app',
+        name: 'Prepared App',
+        capabilities: {},
+      }),
       'utf8',
     ),
     fs.writeFile(
@@ -100,7 +104,10 @@ async function minimalAgentAppRoot(): Promise<string> {
   );
   tempDirs.push(agentSessionDir(sessionId));
   await Promise.all([
-    fs.writeFile(path.join(root, 'manifest.json'), '{"id":"app"}\n'),
+    fs.writeFile(
+      path.join(root, 'manifest.json'),
+      '{"id":"app","name":"App","capabilities":{}}\n',
+    ),
     fs.writeFile(path.join(root, 'package.json'), '{"type":"module"}\n'),
     fs.writeFile(
       path.join(root, 'deno.json'),
@@ -233,7 +240,7 @@ describe('prepareAppWorktree', () => {
     });
 
     const authoredFiles = [
-      'manifest.json',
+      'manifest.ts',
       'package.json',
       'deno.json',
       'deno.lock',

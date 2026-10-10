@@ -1,5 +1,5 @@
 // @ts-self-types="./data.d.ts"
-/** @hatch/data — schema DSL and runtime client for managed Data Tables. */
+/** @hatch/app/data — schema DSL and runtime client for managed Data Tables. */
 
 declare const __DATA_DEPLOYMENT_ID__: string;
 

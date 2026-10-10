@@ -16,11 +16,26 @@ defaults to `workflows/<slug>/`, but the returned absolute path is authoritative
 The platform handles bundling, versioning (git + artifact), scheduling, and
 serving the webhook.
 
+## Manifest authoring
+
+Current source may use either `manifest.ts` or `manifest.json`; keep exactly one.
+New templates use TS to let Agents validate configuration with the TypeScript
+toolchain. Preserve the selected format during ordinary edits and imports.
+Do not migrate JSON to TS unless the user explicitly requests that conversion,
+or as part of a user-requested upgrade to a released compatibility v3 or later
+that requires TS. No such version exists yet; TS-only source is recorded under
+`Next (proposal)` in `workflow-compatibility`, not current policy.
+
+Read [Source manifests](../building-apps/references/manifest-source.md) for SDK
+helpers, execution boundaries, and authorized format conversion. Follow Local
+validation below to check TS manifests independently before execution entries.
+Do not import generated files or execution modules from the manifest.
+
 ## Source layout
 
 ```
 workflows/<slug>/
-  manifest.json        declares id, name, compatibilityVersion, entry, network, triggers
+  manifest.ts          declares id, name, compatibilityVersion, entry, network, triggers
   workflow.ts          your workflow: defineWorkflow({ input, run })
   package.json         npm dependencies (installed only with Deno)
   deno.json            reviewed npm lifecycle-script allowlist
@@ -87,11 +102,17 @@ export default defineWorkflow({
 - Treat `.hatch` as reserved case-insensitively. Do **not** edit, replace,
   depend on, copy, or commit `.hatch/`; do not create variants such as
   `.HATCH`. Create/checkout refresh it, and deploy generates a fresh trusted
-  copy instead of accepting SDK bytes from workflow source.
+  copy instead of accepting SDK bytes from workflow source. Legacy source-owned
+  `hatch/workflow.ts` is unsupported.
 - Extra npm deps go in `package.json` `dependencies`, then use a bare import such
   as `import dayjs from 'dayjs'`. Never add `@hatch/*` to `package.json`,
-  `deno.json`, or `deno.lock`. Local Deno tooling resolves `@hatch/workflow`
-  through the generated `.hatch/import-map.json`.
+  `deno.json`, or `deno.lock`, or map them in source-owned import maps. Local
+  Deno tooling resolves `@hatch/workflow` through the generated
+  `.hatch/import-map.json`.
+- Use `@hatch/workflow/manifest` for `defineWorkflowManifest` and its input
+  type. Both public entrypoints use the declaration exports in
+  `.hatch/sdk/@hatch/workflow/package.json`; do not import private generated
+  files or repository implementation paths.
 
 ### Dependencies and lifecycle scripts
 
@@ -113,10 +134,19 @@ For local Deno commands that load workflow source, always select the generated
 import map explicitly:
 
 ```bash
-deno check --import-map=.hatch/import-map.json workflow.ts
+deno check --config=deno.json --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./workflow.ts
 deno test --import-map=.hatch/import-map.json
 deno run --import-map=.hatch/import-map.json <local-harness.ts>
 ```
+
+Run the source check before committing, replacing `./workflow.ts` with the
+manifest's entry path when different. It checks that entry and its transitive
+imports. `deploy_workflow` repeats this check with the committed dependencies
+and a fresh platform SDK before bundling, describe-mode execution, or artifact
+publication. Type errors fail deploy and must be fixed in authored source and
+committed before retrying; bundling and input-schema extraction do not replace
+type checking.
 
 If `.hatch/` is missing or stale, run `create_workflow` or `checkout_workflow`
 again for the same source path. Do not recreate the SDK or import map yourself.
@@ -144,9 +174,10 @@ it reports a skipped lifecycle script, do not enable it blindly:
 
 ## Manifest & triggers
 
-`manifest.json` declares the id/name, network policy, and triggers. The input
+The source manifest (`manifest.ts` or `manifest.json`) declares the id/name, network policy, and triggers. The input
 schema is NOT in the manifest — it is derived from your zod schema at deploy
-time.
+time. The JSON example below can be used in `manifest.json`, or as the object
+passed to `defineWorkflowManifest` in `manifest.ts`.
 
 ```json
 {
@@ -213,12 +244,43 @@ lockfile, npm, and remote module resolution disabled.
   input) or GET with query params. The secret may also be sent as the
   `x-hatch-secret` header.
 
+## Local validation
+
+After create/checkout has prepared `.hatch/` and locked dependencies (and after
+installing any dependency changes), run from the Workflow root. If the selected
+source is `manifest.ts`, check it independently before the execution entry:
+
+```bash
+deno check --config=deno.json --no-remote --node-modules-dir=manual \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./manifest.ts
+```
+
+This checks the manifest's own import graph, which checking `workflow.ts` may
+never reach. Fix failures before continuing. For `manifest.json`, skip only
+this TS check and retain JSON source; platform manifest validation still
+applies. Then check the manifest's declared entry (replace `workflow.ts` below
+if different) and run relevant tests with the generated import map:
+
+```bash
+deno check --config=deno.json --node-modules-dir=auto \
+  --import-map=.hatch/import-map.json --lock=deno.lock --frozen ./workflow.ts
+deno test --import-map=.hatch/import-map.json <test paths...>
+```
+
+`deploy_workflow` repeats TS manifest checking, validates the evaluated
+configuration, and checks the execution entry and its transitive imports before
+bundling or describe-mode execution. A successful TypeScript check does not
+replace platform validation of paths, cross-field requirements, or serializability.
+
 ## Git workflow
 
-1. For a new workflow, confirm the name + slug with the user via `ask`. Both are
-   editable later. The slug is the human-facing `/workflow/<slug>` segment;
+1. For a new workflow, confirm the name and slug in two separate `ask` calls,
+   name first. Offer style-matched name choices and derive slug suggestions
+   from the chosen name. Explain that both are editable later. The slug is the
+   human-facing `/workflow/<slug>` segment;
    Hatch generates a separate id for the manifest, Git repository, runs,
-   webhook, and all technical APIs. Only then call `create_workflow`.
+   webhook, and all technical APIs. Always pass that id to existing-Workflow
+   tools, never the slug. Only then call `create_workflow`.
    Pass `pin: true` (default) to pin it to the sidebar.
 2. For an existing workflow with no checkout in this conversation, inspect it
    with `list_workflows` / `get_workflow`, then call `checkout_workflow` with
@@ -226,12 +288,12 @@ lockfile, npm, and remote module resolution disabled.
    `clone: false` and the exact returned `source_path`; update mode never creates
    or replaces a path. Use a separate `clone: true` call with the same
    `source_path` and `force: true` only to permanently discard and replace it.
-3. Edit files under the exact returned source path.
+3. Edit files under the exact returned source path and complete Local validation.
 4. `git status`, `git add ...`, `git commit -m "message"` there.
 5. Call `deploy_workflow` with that `source_path` and a required `message`.
-   Deploy bundles the program, captures the input JSON Schema, publishes the
-   clean commit, tags `deploy/v<version>`, records the artifact, and reloads the
-   cron schedule.
+   Deploy type-checks and bundles the program, captures the input JSON Schema,
+   publishes the clean commit, tags `deploy/v<version>`, records the artifact,
+   and reloads the cron schedule.
 
 Do not push branches or tags — the platform Git server rejects Agent pushes. If
 deploy says `master` advanced, call `checkout_workflow` with the same
@@ -256,9 +318,9 @@ origin master`, rebase, resolve, and deploy again.
 
 1. New workflow → confirm name/slug → `create_workflow`. Existing →
    `checkout_workflow` and retain its returned source path.
-2. Read the files, edit `workflow.ts` (input + steps) and `manifest.json`
+2. Read the files, edit `workflow.ts` (input + steps) and the source manifest (`manifest.ts` or `manifest.json`)
    (network policy + triggers), keeping the zod schema authoritative.
-3. Commit with git.
+3. Complete Local validation (manifest and entry checks), then commit with git.
 4. `deploy_workflow` with that `source_path` and a `message`. On failure, read
    the build/describe output, fix the source, commit, and deploy again.
 5. Tell the user what it does, how it's triggered, and where to watch runs.

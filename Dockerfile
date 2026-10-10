@@ -3,6 +3,14 @@
 # --- Deno binary (used to run each app's backend) -------------------------
 FROM denoland/deno:bin-2.9.6 AS deno
 
+# Private in-panel Tailscale node (userspace, no TUN or privileged container).
+FROM golang:1.26.6 AS tailscale
+WORKDIR /build
+COPY packages/tailscale/go.mod packages/tailscale/go.sum ./
+RUN go mod download
+COPY packages/tailscale/*.go ./
+RUN CGO_ENABLED=0 go build -trimpath -o /hatch-tailscale .
+
 # --- Base image with pnpm ----------------------------------------------------
 FROM node:26-slim AS base
 WORKDIR /app
@@ -48,6 +56,7 @@ RUN apt-get update \
     python-is-python3 \
     python3 \
     python3-pip \
+    ripgrep \
     rsync \
     unzip \
     util-linux \
@@ -63,6 +72,7 @@ RUN useradd --system --user-group --no-create-home hatch-sandbox
 
 # Deno runs the app backends the platform spawns.
 COPY --from=deno /deno /usr/local/bin/deno
+COPY --from=tailscale /hatch-tailscale /app/bin/hatch-tailscale
 
 # Runtime needs: the built server, the full dependency tree (esbuild bundling +
 # buf/protoc-gen-es codegen happen on every deploy), the scaffold template, the
@@ -75,10 +85,12 @@ COPY package.json ./
 COPY migrations ./migrations
 COPY templates ./templates
 COPY skills ./skills
-COPY --from=build /app/packages/hatch-data/package.json ./packages/hatch-data/package.json
-COPY --from=build /app/packages/hatch-data/dist ./packages/hatch-data/dist
-COPY --from=build /app/packages/hatch-workflow/package.json ./packages/hatch-workflow/package.json
-COPY --from=build /app/packages/hatch-workflow/dist ./packages/hatch-workflow/dist
+COPY --from=build /app/sdk-internal/app/package.json ./sdk-internal/app/package.json
+COPY --from=build /app/sdk-internal/app/dist ./sdk-internal/app/dist
+COPY --from=build /app/sdk-internal/data/package.json ./sdk-internal/data/package.json
+COPY --from=build /app/sdk-internal/data/dist ./sdk-internal/data/dist
+COPY --from=build /app/sdk-internal/workflow/package.json ./sdk-internal/workflow/package.json
+COPY --from=build /app/sdk-internal/workflow/dist ./sdk-internal/workflow/dist
 
 # Runtime data lives in /app/workspace; dependency/tool caches live in /cache.
 RUN mkdir -p /app/workspace /cache/deno

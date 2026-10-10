@@ -1,4 +1,5 @@
 node_modules
+/bin/
 .DS_Store
 dist
 dist-ssr
@@ -30,3 +31,6 @@ todos.json
 auth.json
 .pi
 .vitest-attachments
+
+# Temporary SDK build transactions.
+/sdk-internal/.build-*/

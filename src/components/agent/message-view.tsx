@@ -1,30 +1,16 @@
 /** Persisted chat messages: user bubbles, assistant blocks, tool timelines. */
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Group,
-  Image,
-  Menu,
-  Paper,
-  Stack,
-  Text,
-  Tooltip,
-} from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import {
-  IconDownload,
-  IconExternalLink,
-  IconFile,
-  IconDots,
-  IconSettings,
-} from '@tabler/icons-react';
+import { Box, Group, Image, Paper, Stack, Text } from '@mantine/core';
+import { IconDownload, IconFile } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import type { AgentComposerContentPart } from '~agent/composer-content';
-import { AppGlyph } from '~components/apps/app-glyph';
 import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
+import type { WorkflowListItem } from '~server/workflows';
 import { AgentErrorNotice } from './agent-error-notice';
+import {
+  AppDeploymentActions,
+  WorkflowDeploymentActions,
+} from './deployment-actions';
 import { Markdownish } from './markdownish';
 import { ThinkingStep, ToolStep } from './steps';
 import {
@@ -34,16 +20,12 @@ import {
   partsToImages,
   partsToText,
   successfullyDeployedAppIds,
+  successfullyDeployedWorkflowIds,
   toolDetail,
 } from './types';
 import classes from './chat.module.css';
 
 type ToolResultMap = Map<string, ToolResultMessage>;
-
-type DeployedApp = {
-  reference: string;
-  app?: AppListItem;
-};
 
 function UserComposerText({
   content,
@@ -61,144 +43,6 @@ function UserComposerText({
         @{part.name}
       </span>
     ),
-  );
-}
-
-/** Resolve id/slug handles and deduplicate aliases by the canonical app id. */
-export function resolveDeployedApps(
-  references: string[],
-  apps: AppListItem[],
-): DeployedApp[] {
-  const seen = new Set<string>();
-  const resolved: DeployedApp[] = [];
-  for (const reference of references) {
-    const app = apps.find(
-      (candidate) => candidate.id === reference || candidate.slug === reference,
-    );
-    const key = app?.id ?? `missing:${reference}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    resolved.push({ reference, ...(app ? { app } : {}) });
-  }
-  return resolved;
-}
-
-function AppActions({
-  ids,
-  apps,
-}: {
-  ids: string[];
-  apps: AppListItem[] | undefined;
-}) {
-  if (!apps) return null;
-  const deployedApps = resolveDeployedApps(ids, apps);
-  if (deployedApps.length === 0) return null;
-  const plural = deployedApps.length > 1;
-
-  return (
-    <Box
-      component="section"
-      className={classes.appActions}
-      aria-label={plural ? 'Deployed apps' : 'Deployed app'}
-    >
-      <Text className={classes.appActionsTitle}>
-        {plural ? `Deployed apps · ${deployedApps.length}` : 'Deployed app'}
-      </Text>
-      <Box className={classes.appActionRows}>
-        {deployedApps.map(({ reference, app }) => {
-          const name = app?.name ?? reference;
-          const canOpen =
-            app?.status === 'deployed' && Boolean(app.capabilities?.frontend);
-          return (
-            <Group
-              key={app?.id ?? reference}
-              className={classes.appActionRow}
-              wrap="nowrap"
-            >
-              <AppGlyph name={name} seed={app?.id ?? reference} size="sm" />
-              <Box className={classes.appActionIdentity}>
-                <Text size="sm" fw={600} truncate>
-                  {name}
-                </Text>
-                <Text size="xs" c="dimmed" truncate>
-                  {app ? app.slug : 'No longer available'}
-                </Text>
-              </Box>
-              {app ? (
-                <Group gap={4} wrap="nowrap" className={classes.appActionCtas}>
-                  {canOpen ? (
-                    <Button
-                      size="compact-sm"
-                      variant="light"
-                      color="ember"
-                      leftSection={<IconExternalLink size={14} stroke={1.8} />}
-                      renderRoot={(props) => (
-                        <Link
-                          to="/app/$appSlug"
-                          params={{ appSlug: app.slug }}
-                          {...props}
-                        />
-                      )}
-                    >
-                      Open
-                    </Button>
-                  ) : (
-                    <Button
-                      size="compact-sm"
-                      variant="default"
-                      leftSection={<IconSettings size={14} stroke={1.8} />}
-                      renderRoot={(props) => (
-                        <Link
-                          to="/app/$appSlug/manage"
-                          params={{ appSlug: app.slug }}
-                          {...props}
-                        />
-                      )}
-                    >
-                      Manage
-                    </Button>
-                  )}
-                  {canOpen ? (
-                    <Menu position="bottom-end" withinPortal>
-                      <Menu.Target>
-                        <Tooltip label={`Manage ${name}`} withArrow>
-                          <ActionIcon
-                            variant="subtle"
-                            color="gray"
-                            size="sm"
-                            aria-label={`More actions for ${name}`}
-                          >
-                            <IconDots size={16} stroke={1.8} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Menu.Target>
-                      <Menu.Dropdown>
-                        <Menu.Item
-                          leftSection={<IconSettings size={15} stroke={1.7} />}
-                          renderRoot={(props) => (
-                            <Link
-                              to="/app/$appSlug/manage"
-                              params={{ appSlug: app.slug }}
-                              {...props}
-                            />
-                          )}
-                        >
-                          Manage app
-                        </Menu.Item>
-                      </Menu.Dropdown>
-                    </Menu>
-                  ) : null}
-                </Group>
-              ) : (
-                <Text size="xs" c="dimmed" className={classes.unavailableApp}>
-                  Unavailable
-                </Text>
-              )}
-            </Group>
-          );
-        })}
-      </Box>
-    </Box>
   );
 }
 
@@ -266,6 +110,7 @@ export function MessageView({
   retrying = false,
   retryDisabled = false,
   apps,
+  workflows,
 }: {
   message: ChatMessage;
   toolResults?: ToolResultMap;
@@ -273,6 +118,7 @@ export function MessageView({
   retrying?: boolean;
   retryDisabled?: boolean;
   apps?: AppListItem[];
+  workflows?: WorkflowListItem[];
 }) {
   if (message.role === 'user') {
     const text = partsToText(
@@ -359,9 +205,13 @@ export function MessageView({
   return (
     <Box className={classes.assistantRow}>
       <AssistantBlocks blocks={message.content} toolResults={toolResults} />
-      <AppActions
+      <AppDeploymentActions
         ids={successfullyDeployedAppIds(message.content, toolResults)}
         apps={apps}
+      />
+      <WorkflowDeploymentActions
+        ids={successfullyDeployedWorkflowIds(message.content, toolResults)}
+        workflows={workflows}
       />
       {message.stopReason === 'error' ? (
         <AgentErrorNotice

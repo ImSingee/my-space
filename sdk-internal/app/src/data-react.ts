@@ -1,5 +1,5 @@
 // @ts-self-types="./data-react.d.ts"
-/** React Query adapter for @hatch/data. */
+/** React Query adapter for @hatch/app/data. */
 import { useEffect, useMemo } from 'react';
 import {
   useQuery,

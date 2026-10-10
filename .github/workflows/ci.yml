@@ -36,3 +36,18 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  tailscale:
+    name: Tailscale connection helper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: packages/tailscale/go.mod
+          cache-dependency-path: packages/tailscale/go.sum
+      - name: Check proxy boundaries and build helper
+        working-directory: packages/tailscale
+        run: |
+          go test ./...
+          CGO_ENABLED=0 go build -trimpath .

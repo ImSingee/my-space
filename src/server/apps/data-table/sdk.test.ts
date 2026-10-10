@@ -13,7 +13,7 @@ import {
   type DataPatchOptions,
   type DataQuery,
   type DataQueryFor,
-} from '../../../../packages/hatch-data/src/data';
+} from '../../../../sdk-internal/app/src/data';
 
 describe('managed Data Table schema SDK', () => {
   it('allows indexes on platform-managed system fields', () => {

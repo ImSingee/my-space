@@ -7,6 +7,10 @@ dist-ssr
 .output
 .nitro
 .vinxi
+sdk-internal/.build-*
+sdk-internal/*/dist
+packages/*/dist
+/bin
 
 # Platform runtime data (provided by a volume at runtime; never baked into the image)
 workspace
@@ -49,6 +53,7 @@ LICENSE.md
 
 # Test and coverage
 coverage
+.acceptances
 *.test.ts
 *.test.tsx
 *.spec.ts
