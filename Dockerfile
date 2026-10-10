@@ -48,6 +48,7 @@ RUN apt-get update \
     python-is-python3 \
     python3 \
     python3-pip \
+    ripgrep \
     rsync \
     unzip \
     util-linux \
