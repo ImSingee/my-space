@@ -13,12 +13,14 @@ func proxy(target *url.URL) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
-			r.Out.Host = r.In.Host
+			// The local listener (including Vite's Host guard) only receives its
+			// loopback authority. Keep the browser authority in forwarding metadata.
+			r.Out.Host = target.Host
 			r.SetXForwarded()
 			r.Out.Header.Set("X-Forwarded-Proto", "https")
 			// Identity headers are not an authentication mechanism for Hatch.
 			for name := range r.Out.Header {
-				if strings.HasPrefix(strings.ToLower(name), "tailscale-") {
+				if strings.HasPrefix(strings.ToLower(name), "tailscale-") || strings.HasPrefix(strings.ToLower(name), "x-hatch-ingress-") {
 					r.Out.Header.Del(name)
 				}
 			}

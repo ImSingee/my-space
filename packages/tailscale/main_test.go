@@ -6,13 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestProxyPreservesAuthenticationAndOriginWithoutTrustingIdentityHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != "hatch.example.ts.net" || r.URL.RequestURI() != "/api/auth/get-session?x=1" {
+		if !strings.HasPrefix(r.Host, "127.0.0.1:") || r.Header.Get("X-Forwarded-Host") != "hatch.example.ts.net" || r.URL.RequestURI() != "/api/auth/get-session?x=1" {
 			t.Errorf("incorrect request destination: %s %s", r.Host, r.URL)
 		}
 		if r.Header.Get("Cookie") != "session=test" || r.Header.Get("Origin") != "https://hatch.example.ts.net" {
@@ -134,5 +135,31 @@ func TestProxyDoesNotRewriteUntrustedOrigin(t *testing.T) {
 	proxy(target).ServeHTTP(w, r)
 	if w.Code != http.StatusForbidden {
 		t.Fatal("upstream authorization response lost")
+	}
+}
+
+func TestAppIngressBindsIdentityAndStripsCallerProof(t *testing.T) {
+	var got http.Header
+	var host string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		host = r.Host
+		w.WriteHeader(204)
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	ingress := httptest.NewServer(appProxy(target, "private-proof", "app-a", "https://notes.example.ts.net"))
+	defer ingress.Close()
+	req, _ := http.NewRequest("GET", ingress.URL+"/api/app/app-a/rpc/ping", nil)
+	req.Header.Set("X-Hatch-Ingress-App", "app-b")
+	req.Header.Set("X-Hatch-Ingress-Token", "attacker")
+	req.Header.Set("Tailscale-User-Login", "attacker@example.com")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if got.Get("X-Hatch-Ingress-App") != "app-a" || got.Get("X-Hatch-Ingress-Token") != "private-proof" || got.Get("X-Hatch-Ingress-Origin") != "https://notes.example.ts.net" || got.Get("Tailscale-User-Login") != "" || host != target.Host || got.Get("X-Forwarded-Host") != "notes.example.ts.net" {
+		t.Fatal("untrusted ingress identity reached upstream")
 	}
 }

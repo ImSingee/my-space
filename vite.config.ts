@@ -79,6 +79,13 @@ const config = defineConfig(({ mode, isPreview }) => ({
       dir: 'dist/platform',
     },
     plugins: ['src/nitro/plugins/migrate.ts', 'src/nitro/plugins/tailscale.ts'],
+    handlers: [
+      {
+        route: '/**',
+        middleware: true,
+        handler: 'src/nitro/middleware/app-ingress.ts',
+      },
+    ],
   },
 }));
 

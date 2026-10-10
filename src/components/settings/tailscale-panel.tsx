@@ -333,6 +333,29 @@ export function TailscalePanel({
           >
             {status.origin}
           </Anchor>
+          <Alert
+            title="App addresses"
+            color={status.tags?.length ? 'blue' : 'yellow'}
+          >
+            <Stack gap="xs">
+              <Text size="sm">
+                {status.tags?.length
+                  ? `This node can advertise App Services (${status.tags.join(', ')}). Enable an address from each App's management page.`
+                  : 'To advertise independent App addresses, assign a tag to this Hatch node in Tailscale. No additional sign-in is needed.'}
+              </Text>
+              <Anchor
+                href="https://console.tailscale.com/admin/machines"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Manage node tags in Tailscale
+              </Anchor>
+              <Text size="sm">
+                Service definitions, approval and access grants remain under
+                your control in Tailscale.
+              </Text>
+            </Stack>
+          </Alert>
           <Group>
             <Button
               type="button"

@@ -3,7 +3,7 @@ import {
   appCompatibilityRuntimeMessage,
   type AppCompatibility,
 } from '~/app-compatibility';
-import { auth } from '~auth/server';
+import { authorizeAppRuntimeRequest } from '../runtime-auth';
 import { db } from '~/db';
 import {
   DATA_REQUEST_MAX_BYTES,
@@ -76,7 +76,7 @@ async function authorize(
   id: string,
   rawBody: string,
 ): Promise<boolean> {
-  const session = await auth.api.getSession({ headers: request.headers });
+  const session = await authorizeAppRuntimeRequest(request, id);
   if (session) {
     const origin = request.headers.get('origin');
     if (request.method !== 'GET' && origin) {

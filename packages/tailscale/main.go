@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,10 +20,14 @@ import (
 )
 
 type snapshot struct {
-	State    string `json:"state"`
-	LoginURL string `json:"loginUrl"`
-	Origin   string `json:"origin"`
-	Message  string `json:"message"`
+	State    string            `json:"state"`
+	LoginURL string            `json:"loginUrl"`
+	Origin   string            `json:"origin"`
+	Message  string            `json:"message"`
+	Tags     []string          `json:"tags"`
+	NodeID   string            `json:"nodeId"`
+	Suffix   string            `json:"suffix"`
+	Services []serviceSnapshot `json:"services"`
 }
 
 func main() {
@@ -40,7 +44,11 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	// EOF also shuts down on abrupt parent death, including SIGKILL.
-	go func() { _, _ = io.Copy(io.Discard, os.Stdin); cancel() }()
+	controls := make(chan control, 1)
+	go readControl(ctx, os.Stdin, controls, cancel)
+	var desired control
+	services := &serviceManager{}
+	defer services.close()
 	s := &tsnet.Server{
 		Hostname: *hostname, Dir: *dir,
 		Logf: func(string, ...any) {}, UserLogf: func(string, ...any) {},
@@ -80,10 +88,11 @@ func main() {
 			case "NeedsMachineAuth":
 				v.State = "needs-approval"
 			case "Running":
-				if st.CurrentTailnet == nil || !st.CurrentTailnet.MagicDNSEnabled || len(st.CertDomains) == 0 {
+				if st.CurrentTailnet == nil || !st.CurrentTailnet.MagicDNSEnabled || len(st.CertDomains) == 0 || st.Self == nil || st.Self.DNSName == "" {
 					v = snapshot{State: "error", Message: "Enable MagicDNS and HTTPS certificates in your Tailscale DNS settings. This page will retry automatically."}
 				} else {
-					domain := st.CertDomains[0]
+					// Service certificate domains must never replace the node address.
+					domain := strings.TrimSuffix(st.Self.DNSName, ".")
 					if !listening {
 						_, _, err = lc.CertPair(pollCtx, domain)
 						if err == nil {
@@ -103,6 +112,16 @@ func main() {
 				}
 			}
 		}
+		if st != nil && st.Self != nil {
+			v.NodeID = string(st.Self.ID)
+			if st.Self.Tags != nil {
+				v.Tags = st.Self.Tags.AsSlice()
+			}
+			if st.CurrentTailnet != nil {
+				v.Suffix = st.CurrentTailnet.MagicDNSSuffix
+			}
+		}
+		v.Services = services.reconcile(ctx, s, lc, st, target, desired)
 		pollCancel()
 		emit(v)
 		select {
@@ -111,6 +130,7 @@ func main() {
 		case <-serveErrors:
 			emit(snapshot{State: "error", Message: "The Tailscale HTTPS listener stopped. Reconnect to try again."})
 			return
+		case desired = <-controls:
 		case <-ticker.C:
 		}
 	}

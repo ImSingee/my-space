@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TailscaleManager } from './tailscale-manager';
 import type { TailscaleConfig } from '../tailscale';
+import type { AppServiceAdvertisement } from '../app-tailscale';
 
 const managers: TailscaleManager[] = [];
 const directories: string[] = [];
@@ -18,7 +19,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(origin = 'https://hatch.example.ts.net') {
+async function fixture(
+  origin = 'https://hatch.example.ts.net',
+  loadServices?: () => Promise<AppServiceAdvertisement[]>,
+) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'hatch-tailscale-test-'));
   directories.push(dir);
   const binary = path.join(dir, 'helper');
@@ -30,6 +34,11 @@ require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)
 if (process.env.SECRET || process.env.TS_AUTHKEY || process.env.DATABASE_URL) process.exit(2);
 process.stdin.resume();
 process.stdin.on('end', () => process.exit());
+require('node:readline').createInterface({input: process.stdin}).on('line', line => {
+  const control = JSON.parse(line);
+  require('node:fs').writeFileSync(${JSON.stringify(pidFile + '.control')}, line, {mode: 0o600});
+  console.log(JSON.stringify({state: 'connected', origin: ${JSON.stringify(origin)}, loginUrl: '', message: '', suffix: 'example.ts.net', services: control.services.map(service => ({...service, state: 'ready', origin: 'https://' + service.serviceName + '.example.ts.net', message: ''}))}));
+});
 console.log(JSON.stringify({ state: 'connected', origin: ${JSON.stringify(origin)}, loginUrl: '', message: '' }));
 `,
     { mode: 0o700 },
@@ -40,6 +49,7 @@ console.log(JSON.stringify({ state: 'connected', origin: ${JSON.stringify(origin
       binary,
       stateDir: path.join(dir, 'state'),
       port: 3700,
+      loadServices,
       load: async () => ({ ...config }),
       save: async (value) => {
         config = { ...value };
@@ -125,4 +135,89 @@ it('does not persist enabling ingress when the helper is unavailable', async () 
   ).rejects.toThrow('not included');
   expect(getConfig().enabled).toBe(false);
   expect((await manager.getStatus()).available).toBe(false);
+});
+
+it('recovers persisted App advertisements with fresh private proof and withdraws removed or revised bindings', async () => {
+  let services: AppServiceAdvertisement[] = [
+    { appId: 'app-a', serviceName: 'notes', revision: 'one', enabled: true },
+  ];
+  const { create, pidFile } = await fixture(undefined, async () => services);
+  const first = create();
+  await first.configure({ enabled: true, hostname: 'hatch' });
+  await vi.waitFor(() =>
+    expect(first.serviceSnapshot('app-a')?.state).toBe('ready'),
+  );
+  const oldProof = (
+    JSON.parse(await readFile(pidFile + '.control', 'utf8')) as {
+      token: string;
+    }
+  ).token;
+  expect(first.verifyIngress(oldProof)).toBe(true);
+  expect(first.verifyIngress('ü'.repeat(43))).toBe(false);
+  await expect(
+    first.configure({ enabled: true, hostname: 'notes' }),
+  ).rejects.toThrow(/already used/);
+  services = [{ ...services[0]!, revision: 'two' }];
+  await first.refreshServices();
+  expect(first.serviceSnapshot('app-a')).toBeNull();
+  await vi.waitFor(() =>
+    expect(first.serviceSnapshot('app-a')?.revision).toBe('two'),
+  );
+  await first.shutdown();
+  expect(first.verifyIngress(oldProof)).toBe(false);
+  const second = create();
+  await second.initialize();
+  await vi.waitFor(() =>
+    expect(second.serviceSnapshot('app-a')?.revision).toBe('two'),
+  );
+  expect(second.verifyIngress(oldProof)).toBe(false);
+  services = [];
+  await second.refreshServices();
+  expect(second.serviceSnapshot('app-a')).toBeNull();
+  await vi.waitFor(async () =>
+    expect(
+      (
+        JSON.parse(await readFile(pidFile + '.control', 'utf8')) as {
+          services: unknown[];
+        }
+      ).services,
+    ).toEqual([]),
+  );
+});
+
+it('serializes node renames and App Service identity writes so they cannot claim the same hostname', async () => {
+  let services: AppServiceAdvertisement[] = [];
+  const { create } = await fixture(undefined, async () => services);
+  const manager = create();
+  const save = () =>
+    manager.mutateServices(async (hostname) => {
+      if (hostname === 'notes') throw new Error('Node name conflict');
+      services = [
+        {
+          appId: 'app-a',
+          serviceName: 'notes',
+          revision: 'one',
+          enabled: true,
+        },
+      ];
+    });
+  const first = await Promise.allSettled([
+    manager.configure({ enabled: true, hostname: 'notes' }),
+    save(),
+  ]);
+  expect(first.map((result) => result.status)).toEqual([
+    'fulfilled',
+    'rejected',
+  ]);
+  expect(services).toEqual([]);
+  await manager.configure({ enabled: true, hostname: 'hatch' });
+  const second = await Promise.allSettled([
+    save(),
+    manager.configure({ enabled: true, hostname: 'notes' }),
+  ]);
+  expect(second.map((result) => result.status)).toEqual([
+    'fulfilled',
+    'rejected',
+  ]);
+  expect(manager.snapshot().hostname).toBe('hatch');
 });
