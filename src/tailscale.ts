@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AppServiceSnapshot } from './app-tailscale';
 
 export const tailscaleConfigSchema = z.object({
   enabled: z.boolean(),
@@ -8,6 +9,10 @@ export const tailscaleConfigSchema = z.object({
 export type TailscaleConfig = z.infer<typeof tailscaleConfigSchema>;
 
 export type TailscaleStatus = TailscaleConfig & {
+  tags?: string[];
+  nodeId?: string;
+  suffix?: string;
+  services?: AppServiceSnapshot[];
   available: boolean;
   state:
     | 'disconnected'

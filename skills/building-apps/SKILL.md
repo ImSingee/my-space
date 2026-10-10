@@ -58,6 +58,13 @@ retry. Checkout never authorizes silently replacing local work.
 
 ## Source contract
 
+Apps may also be hosted at a private Tailscale Service origin with their frontend
+at `/`. Use same-origin SDK runtime URLs and relative asset/navigation URLs;
+never hard-code the platform origin or rely on its admin routes being available
+from an App origin. The existing `/api/app/<id>/...` routes remain supported for
+that App. Hatch handles the central sign-in handoff; no App source migration or
+additional authentication implementation is required.
+
 `create_app` produces a prepared, runnable Counter App:
 
 ```text

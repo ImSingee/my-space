@@ -27,6 +27,9 @@ function safeRedirect(target: string | undefined): string {
   if (target && /^\/(?![/\\])/.test(target)) return target;
   return '/dashboard';
 }
+function isAppAccessHandoff(target: string): boolean {
+  return target.split('?')[0] === '/__hatch/app-access';
+}
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search): { redirect?: string } => ({
@@ -35,7 +38,11 @@ export const Route = createFileRoute('/login')({
   beforeLoad: async ({ search }) => {
     const authenticated = await hasActiveSession();
     if (authenticated) {
-      throw redirect({ href: safeRedirect(search.redirect) });
+      const target = safeRedirect(search.redirect);
+      throw redirect({
+        href: target,
+        reloadDocument: isAppAccessHandoff(target),
+      });
     }
   },
   // Whether to offer "Create account" is a runtime platform setting — the
@@ -87,7 +94,9 @@ function LoginPage() {
         return;
       }
       toast.success(mode === 'signin' ? 'Welcome back' : 'Account created');
-      await router.navigate({ href: safeRedirect(redirectTo) });
+      const target = safeRedirect(redirectTo);
+      if (isAppAccessHandoff(target)) window.location.assign(target);
+      else await router.navigate({ href: target });
     } catch {
       toast.error('Something went wrong. Please try again.');
     } finally {

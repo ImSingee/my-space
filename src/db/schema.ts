@@ -13,6 +13,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { ulid as genUlid0 } from 'ulid';
+import { session } from './auth-schema';
 
 export * from './auth-schema';
 
@@ -193,6 +194,42 @@ export const apps = snakeCase.table(
 );
 
 /** ================== deployments ================== */
+
+export const appTailscaleServices = snakeCase.table(
+  'app_tailscale_services',
+  {
+    appId: text()
+      .primaryKey()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    serviceName: text().notNull(),
+    enabled: boolean().notNull().default(false),
+    revision: text().notNull(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    uniqueIndex('app_tailscale_services_name_idx').on(table.serviceName),
+  ],
+);
+
+export const appAccessCodes = snakeCase.table(
+  'app_access_codes',
+  {
+    digest: text().primaryKey(),
+    appId: text()
+      .notNull()
+      .references(() => apps.id, { onDelete: 'cascade' }),
+    sessionId: text()
+      .notNull()
+      .references(() => session.id, { onDelete: 'cascade' }),
+    revision: text().notNull(),
+    origin: text().notNull(),
+    challenge: text().notNull(),
+    returnPath: text().notNull(),
+    expiresAt: timestamp().notNull(),
+  },
+  (table) => [index('app_access_codes_expiry_idx').on(table.expiresAt)],
+);
 
 export const deployments = snakeCase.table(
   'deployments',

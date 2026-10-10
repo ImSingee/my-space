@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { appCompatibilityRuntimeMessage } from '~/app-compatibility';
 import { appBuildDir } from '~agent/paths';
-import { auth } from '~auth/server';
+import { authorizeAppRuntimeRequest } from '../runtime-auth';
 import { parseAppApiPath } from './path';
 
 export async function handleWidgetRequest({
@@ -9,12 +9,10 @@ export async function handleWidgetRequest({
 }: {
   request: Request;
 }): Promise<Response> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) {
-    return new Response('Unauthorized', { status: 401 });
-  }
   const url = new URL(request.url);
   const parsed = parseAppApiPath(url.pathname);
+  if (!(await authorizeAppRuntimeRequest(request, parsed?.id ?? '')))
+    return new Response('Unauthorized', { status: 401 });
   const match = parsed?.rest.match(/^\/widget\/([^/]+?)(?:\.js)?$/);
   if (!parsed || !match) {
     return new Response('Not found', { status: 404 });
