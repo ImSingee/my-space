@@ -61,7 +61,7 @@ describe('App compatibility manifest', () => {
     capabilities: {},
   });
 
-  it.each([1, 2])('preserves declared compatibility v%i', (version) => {
+  it.each([1, 2, 3])('preserves declared compatibility v%i', (version) => {
     expect(parseSourceManifest(manifest(version)).compatibilityVersion).toBe(
       version,
     );
@@ -104,6 +104,21 @@ describe('backend manifest', () => {
     name: 'Demo',
     capabilities: { backend: true },
     backend: { entry: 'backend/main.ts', ...backend },
+  });
+
+  it('preserves runtime selection while old manifests leave it absent', () => {
+    const legacy = parseSourceManifest(source({}));
+    expect(legacy.backend?.runtime).toBeUndefined();
+    expect(normalizeManifest(legacy).backend).not.toHaveProperty('runtime');
+
+    for (const runtime of ['deno-run', 'deno-serve']) {
+      const parsed = parseSourceManifest(source({ runtime }));
+      expect(parsed.backend?.runtime).toBe(runtime);
+      expect(normalizeManifest(parsed).backend?.runtime).toBe(runtime);
+    }
+    expect(() => parseSourceManifest(source({ runtime: 'node' }))).toThrow(
+      /runtime/,
+    );
   });
 
   it('rejects the removed backend assets field instead of stripping it', () => {

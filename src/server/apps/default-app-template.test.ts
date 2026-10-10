@@ -35,11 +35,23 @@ describe('default app template', () => {
       dataTable: true,
     });
     expect(manifest.compatibilityVersion).toBe(2);
+    expect(manifest.backend?.runtime).toBe('deno-serve');
     expect(manifest.backend?.network).toEqual([]);
     expect(backend).toContain('createDataClient<typeof schema>');
+    expect(backend).toContain('createFetchHandler');
+    expect(backend).toContain('compressionGzip');
+    expect(backend).toContain('compressionBrotli');
+    expect(backend).toContain(
+      'acceptCompression: [compressionGzip, compressionBrotli]',
+    );
+    expect(backend).toContain('satisfies Deno.ServeDefaultExport');
+    expect(backend).toContain('fetch: handleRequest');
+    expect(backend).not.toContain('function fetch(');
     expect(backend).toContain("Deno.env.get('HATCH_DATA_URL')");
+    expect(backend).not.toContain("Deno.env.get('PORT')");
+    expect(backend).not.toContain('connectNodeAdapter');
+    expect(backend).not.toContain('.listen(');
     expect(backend).not.toContain('DATABASE_URL');
-    expect(backend).toContain(".listen(port, '127.0.0.1'");
     expect(backend).toContain(
       "data.increment('counters', id, 'value', amount)",
     );

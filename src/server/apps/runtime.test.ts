@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import {
   mkdirSync,
   mkdtempSync,
@@ -7,6 +9,8 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
 
@@ -41,6 +45,7 @@ vi.mock('./provision', () => ({
 
 const {
   backendArtifactEnv,
+  backendPortEnv,
   backendStorageEnv,
   buildBackendDenoArgs,
   ensureAppRunning,
@@ -149,6 +154,105 @@ describe('long-running backend compatibility checks', () => {
 });
 
 describe('app backend runtime artifacts', () => {
+  it.each(['deno-run', 'deno-serve'] as const)(
+    'starts a real %s artifact with its listener and port contract',
+    async (runtime) => {
+      const dir = runtimeDir();
+      const entryPath = writeBackendEntry(dir, 'backend/main.bundle.js');
+      writeFileSync(
+        entryPath,
+        runtime === 'deno-serve'
+          ? 'export default { fetch: () => new Response(Deno.env.get("PORT") ?? "no-port") };'
+          : 'Deno.serve({ hostname: "127.0.0.1", port: Number(Deno.env.get("PORT")) }, () => new Response(Deno.env.get("PORT")));',
+      );
+      writeManifest(dir, {
+        backend: {
+          entry: 'backend/main.bundle.js',
+          format: 'bundle-v1',
+          runtime,
+          network: [],
+        },
+      });
+      const server = net.createServer();
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      const port = (server.address() as net.AddressInfo).port;
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+      const artifact = resolveBackendArtifact(dir);
+      const args = buildBackendDenoArgs({
+        artifact,
+        buildDir: dir,
+        port,
+        storageDir: null,
+        cacheDir: null,
+        certPaths: [],
+        automaticNetworkDestinations: [`127.0.0.1:${port}`],
+        hasLock: false,
+      });
+      const env = { ...process.env };
+      delete env.PORT;
+      Object.assign(env, backendPortEnv(artifact.runtime, port));
+      const proc = spawn('deno', args, { cwd: dir, env });
+      const closed = once(proc, 'close');
+      let output = '';
+      proc.stdout.on('data', (chunk) => (output += chunk.toString()));
+      proc.stderr.on('data', (chunk) => (output += chunk.toString()));
+      try {
+        let response: Response | undefined;
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline && proc.exitCode === null) {
+          try {
+            response = await fetch(`http://127.0.0.1:${port}/`, {
+              signal: AbortSignal.timeout(200),
+            });
+            break;
+          } catch {
+            await delay(20);
+          }
+        }
+        if (!response) throw new Error(`Backend did not start: ${output}`);
+        expect(await response.text()).toBe(
+          runtime === 'deno-serve' ? 'no-port' : String(port),
+        );
+      } finally {
+        proc.kill();
+        await closed;
+      }
+    },
+  );
+
+  it('uses the runtime recorded in each artifact when switching deployments', () => {
+    const dir = runtimeDir();
+    const entry = writeBackendEntry(dir, 'backend/main.bundle.js');
+    for (const runtime of ['deno-serve', 'deno-run'] as const) {
+      writeManifest(dir, {
+        backend: {
+          entry: 'backend/main.bundle.js',
+          format: 'bundle-v1',
+          runtime,
+        },
+      });
+      const artifact = resolveBackendArtifact(dir);
+      expect(artifact).toEqual({
+        entryPath: entry,
+        format: 'bundle-v1',
+        runtime,
+      });
+      const args = buildBackendDenoArgs({
+        artifact,
+        buildDir: dir,
+        port: 45678,
+        storageDir: null,
+        cacheDir: null,
+        certPaths: [],
+        hasLock: false,
+      });
+      expect(args[0]).toBe(runtime === 'deno-serve' ? 'serve' : 'run');
+    }
+  });
+
   it('reads bundle-v1 metadata and keeps legacy manifests source-based', () => {
     const bundleDir = runtimeDir();
     const legacyDir = runtimeDir();
@@ -242,6 +346,13 @@ describe('app backend runtime artifacts', () => {
       /unsupported backend format.*bundle-v2/,
     ],
     [
+      'unknown runtime',
+      JSON.stringify({
+        backend: { entry: 'backend/main.js', runtime: 'node' },
+      }),
+      /unsupported backend runtime.*node/,
+    ],
+    [
       'backend metadata without an entry',
       JSON.stringify({ backend: {} }),
       /backend\.entry must be a non-empty string/,
@@ -331,11 +442,12 @@ describe('app backend runtime artifacts', () => {
     );
   });
 
-  it('retains the legacy source invocation and cache access', () => {
+  it('runs source artifacts with the historical port contract', () => {
     expect(
       buildBackendDenoArgs({
         artifact: { entryPath: '/build/backend/main.ts' },
         buildDir: '/build',
+        port: 45678,
         storageDir: '/storage',
         cacheDir: '/deno-cache',
         certPaths: ['/tls/ca.pem'],
@@ -353,12 +465,36 @@ describe('app backend runtime artifacts', () => {
       '--frozen',
       '/build/backend/main.ts',
     ]);
+    expect(backendPortEnv(undefined, 45678)).toEqual({ PORT: '45678' });
+  });
+
+  it('runs bundles that explicitly select deno-run', () => {
+    const args = buildBackendDenoArgs({
+      artifact: {
+        entryPath: '/build/backend/main.bundle.js',
+        format: 'bundle-v1',
+        runtime: 'deno-run',
+      },
+      buildDir: '/build',
+      port: 45678,
+      storageDir: null,
+      cacheDir: '/deno-cache',
+      certPaths: [],
+      hasLock: true,
+    });
+
+    expect(args[0]).toBe('run');
+    expect(args).not.toContain('--host=127.0.0.1');
+    expect(args).not.toContain('--port=45678');
+    expect(args).toContain('--no-config');
+    expect(backendPortEnv('deno-run', 45678)).toEqual({ PORT: '45678' });
   });
 
   it('withholds storage environment and filesystem permissions when disabled', () => {
     const legacyArgs = buildBackendDenoArgs({
       artifact: { entryPath: '/build/backend/main.ts' },
       buildDir: '/build',
+      port: 45678,
       storageDir: null,
       cacheDir: '/deno-cache',
       certPaths: ['/tls/ca.pem'],
@@ -370,6 +506,7 @@ describe('app backend runtime artifacts', () => {
         format: 'bundle-v1',
       },
       buildDir: '/build',
+      port: 45678,
       storageDir: null,
       cacheDir: '/deno-cache',
       certPaths: ['/tls/ca.pem'],
@@ -406,13 +543,15 @@ describe('app backend runtime artifacts', () => {
     ).toEqual({});
   });
 
-  it('runs bundle-v1 without config, dependency resolution, or cache access', () => {
+  it('serves bundles that select deno-serve without PORT injection', () => {
     const args = buildBackendDenoArgs({
       artifact: {
         entryPath: '/build/backend/main.bundle.js',
         format: 'bundle-v1',
+        runtime: 'deno-serve',
       },
       buildDir: '/build',
+      port: 45678,
       storageDir: '/storage',
       cacheDir: '/deno-cache',
       certPaths: ['/tls/ca.pem'],
@@ -420,7 +559,9 @@ describe('app backend runtime artifacts', () => {
     });
 
     expect(args).toEqual([
-      'run',
+      'serve',
+      '--host=127.0.0.1',
+      '--port=45678',
       '--no-config',
       '--no-lock',
       '--no-npm',
@@ -437,6 +578,7 @@ describe('app backend runtime artifacts', () => {
     expect(args).not.toContain('--node-modules-dir=none');
     expect(args).not.toContain('--lock=deno.lock');
     expect(args).not.toContain('--frozen');
+    expect(backendPortEnv('deno-serve', 45678)).toEqual({});
   });
 
   it('scopes network access to automatic platform targets and declarations', () => {
@@ -447,6 +589,7 @@ describe('app backend runtime artifacts', () => {
         network: ['api.example.com:443'],
       },
       buildDir: '/build',
+      port: 45678,
       storageDir: null,
       cacheDir: '/deno-cache',
       certPaths: [],
@@ -472,6 +615,7 @@ describe('app backend runtime artifacts', () => {
         network: [],
       },
       buildDir: '/build',
+      port: 45678,
       storageDir: null,
       cacheDir: null,
       certPaths: [],
@@ -489,6 +633,7 @@ describe('app backend runtime artifacts', () => {
         network: 'unrestricted',
       },
       buildDir: '/build',
+      port: 45678,
       storageDir: null,
       cacheDir: null,
       certPaths: [],

@@ -34,7 +34,12 @@ import {
   assertSupportedDeployment,
 } from './compatibility';
 import { appDatabaseRuntimeEnv } from './runtime-database';
-import { dataTableUrl, kvUrl } from './manifest';
+import {
+  backendRuntimeSchema,
+  type BackendRuntime,
+  dataTableUrl,
+  kvUrl,
+} from './manifest';
 import {
   type BackendRuntimeSnapshot,
   getBackendSnapshot,
@@ -49,6 +54,8 @@ import {
 export type BackendArtifact = {
   /** Validated absolute path to the runtime entry inside artifact/backend/. */
   entryPath: string;
+  /** Absent on historical deployments, which use deno run. */
+  runtime?: BackendRuntime;
   format?: 'bundle-v1';
   /** Missing only for legacy deployments, which retain unrestricted access. */
   network?: NetworkPolicy;
@@ -145,6 +152,7 @@ function validateBackendEntryPath(buildDir: string, entry: string): string {
 
 function readBackendArtifactMetadata(buildDir: string): {
   entry: string;
+  runtime?: BackendRuntime;
   format?: 'bundle-v1';
   network?: NetworkPolicy;
 } {
@@ -199,6 +207,17 @@ function readBackendArtifactMetadata(buildDir: string): {
   }
   const entry = metadata.entry;
 
+  let runtime: BackendRuntime | undefined;
+  if (Object.hasOwn(metadata, 'runtime')) {
+    const parsedRuntime = backendRuntimeSchema.safeParse(metadata.runtime);
+    if (!parsedRuntime.success) {
+      throw invalidBackendArtifact(
+        `unsupported backend runtime: ${JSON.stringify(metadata.runtime)}`,
+      );
+    }
+    runtime = parsedRuntime.data;
+  }
+
   let network: NetworkPolicy | undefined;
   if (Object.hasOwn(metadata, 'network')) {
     const parsedNetwork = networkPolicySchema.safeParse(metadata.network);
@@ -211,6 +230,7 @@ function readBackendArtifactMetadata(buildDir: string): {
   }
   const base = {
     entry,
+    ...(runtime === undefined ? {} : { runtime }),
     ...(network === undefined ? {} : { network }),
   };
 
@@ -250,9 +270,11 @@ export function resolveBackendArtifact(buildDir: string): BackendArtifact {
   const entryPath = validateBackendEntryPath(buildDir, metadata.entry);
   const network =
     metadata.network === undefined ? {} : { network: metadata.network };
+  const runtime =
+    metadata.runtime === undefined ? {} : { runtime: metadata.runtime };
   return metadata.format === 'bundle-v1'
-    ? { entryPath, format: 'bundle-v1', ...network }
-    : { entryPath, ...network };
+    ? { entryPath, format: 'bundle-v1', ...network, ...runtime }
+    : { entryPath, ...network, ...runtime };
 }
 
 /** Outbound workflow calls the app declared, read from the staged manifest. */
@@ -350,6 +372,7 @@ function denoCacheDir(): string | null {
 type BackendDenoArgsOptions = {
   artifact: BackendArtifact;
   buildDir: string;
+  port: number;
   storageDir: string | null;
   cacheDir: string | null;
   certPaths: readonly string[];
@@ -362,6 +385,7 @@ type BackendDenoArgsOptions = {
 export function buildBackendDenoArgs({
   artifact,
   buildDir,
+  port,
   storageDir,
   cacheDir,
   certPaths,
@@ -377,7 +401,10 @@ export function buildBackendDenoArgs({
   if (!bundled && cacheDir) allowRead.push(cacheDir);
   allowRead.push(...certPaths);
 
-  const denoArgs = ['run'];
+  const denoArgs =
+    artifact.runtime === 'deno-serve'
+      ? ['serve', '--host=127.0.0.1', `--port=${port}`]
+      : ['run'];
   if (bundled) {
     denoArgs.push(
       '--no-config',
@@ -410,6 +437,14 @@ export function buildBackendDenoArgs({
   }
   denoArgs.push(artifact.entryPath);
   return denoArgs;
+}
+
+/** Inject PORT only for self-listening backends, including historical artifacts. */
+export function backendPortEnv(
+  runtime: BackendRuntime | undefined,
+  port: number,
+): Record<string, string> {
+  return runtime === 'deno-serve' ? {} : { PORT: String(port) };
 }
 
 type RunningBackend = {
@@ -837,6 +872,7 @@ async function startBackend(
   const denoArgs = buildBackendDenoArgs({
     artifact: backendArtifact,
     buildDir,
+    port,
     storageDir,
     cacheDir,
     certPaths,
@@ -853,7 +889,7 @@ async function startBackend(
     // provider keys); hand over only the sandbox allowlist plus the app's own
     // runtime variables.
     env: subprocessSandboxEnv({
-      PORT: String(port),
+      ...backendPortEnv(backendArtifact.runtime, port),
       ...databaseEnv,
       ...backendStorageEnv(storageDir),
       ...backendArtifactEnv(buildDir, backendArtifact),

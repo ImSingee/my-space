@@ -56,6 +56,13 @@ These proposals are not active platform policy and do not change the latest or
 minimum supported version until they are promoted into the version history
 above.
 
+- `deno serve` will be the only supported backend mode in a future compatibility
+  version. Backend-capable Apps will need `backend.runtime: "deno-serve"` and
+  a default Fetch export satisfying `Deno.ServeDefaultExport`. Currently,
+  `backend.runtime` is independent of `compatibilityVersion`; both modes remain
+  supported, and omitting runtime retains `deno-run`. Follow `building-apps`
+  for source migration.
+
 - Compatibility v3 and later will require `manifest.ts`; `manifest.json` will
   no longer be accepted as source for those contracts. When that contract is
   released and the user requests an upgrade, convert the JSON object using
