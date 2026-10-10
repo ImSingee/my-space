@@ -7,9 +7,11 @@
   },
   "packageManager": "pnpm@11.24.0",
   "scripts": {
+    "tailscale:build": "cd packages/tailscale && go build -trimpath -o ../../bin/hatch-tailscale .",
+    "tailscale:test": "cd packages/tailscale && go test ./...",
     "dev": "pnpm hatch-sdk:build && concurrently --kill-others --names platform,runner --prefix-colors blue,magenta \"pnpm dev:platform:watch\" \"pnpm dev:runner:watch\"",
     "dev:platform": "pnpm hatch-sdk:build && pnpm dev:platform:watch",
-    "dev:platform:watch": "HATCH_DATA_DIR=../my-space-data vite dev --port 3700",
+    "dev:platform:watch": "HATCH_DATA_DIR=../my-space-data vite dev",
     "dev:runner": "pnpm hatch-sdk:build && pnpm dev:runner:watch",
     "dev:runner:watch": "HATCH_DATA_DIR=../my-space-runner-data tsx watch src/runner/main.ts",
     "build": "pnpm hatch-sdk:build && pnpm build:platform && pnpm build:runner",

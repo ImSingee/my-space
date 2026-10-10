@@ -27,6 +27,7 @@ import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/ind
 import { Route as AppSettingsAgentRunnerRouteImport } from './routes/_app/settings/agent-runner'
 import { Route as AppSettingsBackendsRouteImport } from './routes/_app/settings/backends'
 import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings/providers'
+import { Route as AppSettingsTailscaleRouteImport } from './routes/_app/settings/tailscale'
 import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
 import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
 import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
@@ -141,6 +142,11 @@ const AppSettingsBackendsRoute = AppSettingsBackendsRouteImport.update({
 const AppSettingsProvidersRoute = AppSettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsTailscaleRoute = AppSettingsTailscaleRouteImport.update({
+  id: '/tailscale',
+  path: '/tailscale',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsUsersRoute = AppSettingsUsersRouteImport.update({
@@ -297,6 +303,7 @@ export interface FileRoutesByFullPath {
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
+  '/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -340,6 +347,7 @@ export interface FileRoutesByTo {
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
+  '/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -387,6 +395,7 @@ export interface FileRoutesById {
   '/_app/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/_app/settings/backends': typeof AppSettingsBackendsRoute
   '/_app/settings/providers': typeof AppSettingsProvidersRoute
+  '/_app/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/_app/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -434,6 +443,7 @@ export interface FileRouteTypes {
     | '/settings/agent-runner'
     | '/settings/backends'
     | '/settings/providers'
+    | '/settings/tailscale'
     | '/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
@@ -477,6 +487,7 @@ export interface FileRouteTypes {
     | '/settings/agent-runner'
     | '/settings/backends'
     | '/settings/providers'
+    | '/settings/tailscale'
     | '/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
@@ -523,6 +534,7 @@ export interface FileRouteTypes {
     | '/_app/settings/agent-runner'
     | '/_app/settings/backends'
     | '/_app/settings/providers'
+    | '/_app/settings/tailscale'
     | '/_app/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
@@ -703,6 +715,13 @@ declare module '@tanstack/react-router' {
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof AppSettingsProvidersRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/tailscale': {
+      id: '/_app/settings/tailscale'
+      path: '/tailscale'
+      fullPath: '/settings/tailscale'
+      preLoaderRoute: typeof AppSettingsTailscaleRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/users': {
@@ -908,6 +927,7 @@ interface AppSettingsRouteChildren {
   AppSettingsAgentRunnerRoute: typeof AppSettingsAgentRunnerRoute
   AppSettingsBackendsRoute: typeof AppSettingsBackendsRoute
   AppSettingsProvidersRoute: typeof AppSettingsProvidersRoute
+  AppSettingsTailscaleRoute: typeof AppSettingsTailscaleRoute
   AppSettingsUsersRoute: typeof AppSettingsUsersRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
@@ -916,6 +936,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsAgentRunnerRoute: AppSettingsAgentRunnerRoute,
   AppSettingsBackendsRoute: AppSettingsBackendsRoute,
   AppSettingsProvidersRoute: AppSettingsProvidersRoute,
+  AppSettingsTailscaleRoute: AppSettingsTailscaleRoute,
   AppSettingsUsersRoute: AppSettingsUsersRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }

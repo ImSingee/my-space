@@ -15,6 +15,7 @@
  * directly and cannot resolve the `~` path alias for.
  */
 import { z } from 'zod';
+import { tailscaleConfigSchema, type TailscaleConfig } from '../tailscale';
 import { db, schema } from '../db';
 import type { JsonValue } from '../db/schema';
 
@@ -36,6 +37,11 @@ type ConfigEntry<T> = {
  * and default) to introduce a setting — no schema migration required.
  */
 const REGISTRY = {
+  'network.tailscale': {
+    schema: tailscaleConfigSchema,
+    fallback: { enabled: false, hostname: 'hatch' },
+    invalidFallback: { enabled: false, hostname: 'hatch' },
+  } satisfies ConfigEntry<TailscaleConfig>,
   /**
    * Whether self-service sign-up is open. When false, only existing users can
    * sign in; the sign-up flow is rejected server-side (see the Better Auth
@@ -65,7 +71,7 @@ export type PlatformConfigValue<K extends PlatformConfigKey> = z.infer<
 export async function getPlatformConfig<K extends PlatformConfigKey>(
   key: K,
 ): Promise<PlatformConfigValue<K>> {
-  const entry = REGISTRY[key];
+  const entry: ConfigEntry<unknown> = REGISTRY[key];
   const row = await db.query.platformConfig.findFirst({
     where: { key },
   });
