@@ -3,14 +3,14 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { PasskeySignIn } from './passkey-sign-in';
 
-const fixtures = vi.hoisted(() => ({ supported: true }));
+const fixtures = vi.hoisted(() => ({ supported: true, autofill: false }));
 type SignInResult = {
   data: unknown;
   error: { code?: string; message?: string } | null;
 };
 const mocks = vi.hoisted(() => ({
   onSuccess: vi.fn<() => Promise<void>>(),
-  signIn: vi.fn<() => Promise<SignInResult>>(),
+  signIn: vi.fn<(options?: { autoFill: boolean }) => Promise<SignInResult>>(),
   toastError: vi.fn<(message: string) => void>(),
   toastSuccess: vi.fn<(message: string) => void>(),
 }));
@@ -27,7 +27,7 @@ async function renderPasskeySignIn(appOrigin = window.location.origin) {
   vi.stubGlobal(
     'PublicKeyCredential',
     fixtures.supported
-      ? { isConditionalMediationAvailable: async () => true }
+      ? { isConditionalMediationAvailable: async () => fixtures.autofill }
       : undefined,
   );
   return render(
@@ -40,13 +40,14 @@ async function renderPasskeySignIn(appOrigin = window.location.origin) {
 beforeEach(() => {
   vi.clearAllMocks();
   fixtures.supported = true;
+  fixtures.autofill = false;
   mocks.signIn.mockReset().mockResolvedValue({ data: {}, error: null });
   mocks.onSuccess.mockReset().mockResolvedValue();
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
-test('starts SDK authentication only after the user chooses passkey sign-in', async () => {
+test('keeps button sign-in available when conditional mediation is unsupported', async () => {
   const screen = await renderPasskeySignIn();
   window.dispatchEvent(new Event('focus'));
   window.dispatchEvent(new Event('online'));
@@ -59,27 +60,60 @@ test('starts SDK authentication only after the user chooses passkey sign-in', as
   expect(mocks.toastSuccess).toHaveBeenCalledWith('Welcome back');
 });
 
-test('retries navigation without repeating authentication and disables pending navigation', async () => {
-  let release: () => void = () => {};
-  const navigation = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  mocks.onSuccess.mockRejectedValueOnce(new Error('Route unavailable'));
-  mocks.onSuccess.mockImplementationOnce(() => navigation);
-  const screen = await renderPasskeySignIn();
-  await screen.getByRole('button', { name: 'Sign in with a passkey' }).click();
+test('completes conditional sign-in through the official SDK', async () => {
+  fixtures.autofill = true;
+  await renderPasskeySignIn();
 
-  const retry = screen.getByRole('button', { name: 'Continue', exact: true });
-  await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledOnce());
-  await expect.element(retry).toBeEnabled();
-  expect(mocks.toastSuccess).not.toHaveBeenCalled();
-  await retry.click();
-  await expect.element(retry).toBeDisabled();
-  expect(mocks.onSuccess).toHaveBeenCalledTimes(2);
-  expect(mocks.signIn).toHaveBeenCalledOnce();
-  release();
-  await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
+  expect(mocks.signIn).toHaveBeenCalledExactlyOnceWith({ autoFill: true });
+  expect(mocks.toastSuccess).toHaveBeenCalledOnce();
 });
+
+test('leaves explicit sign-in usable when optional autofill fails', async () => {
+  fixtures.autofill = true;
+  mocks.signIn.mockResolvedValueOnce({
+    data: null,
+    error: { code: 'SERVICE_UNAVAILABLE', message: 'Unavailable' },
+  });
+  const screen = await renderPasskeySignIn();
+  await vi.waitFor(() => expect(mocks.signIn).toHaveBeenCalledOnce());
+  expect(mocks.onSuccess).not.toHaveBeenCalled();
+  expect(mocks.toastError).not.toHaveBeenCalled();
+
+  await screen.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
+  expect(mocks.signIn).toHaveBeenLastCalledWith();
+});
+
+test.each([false, true])(
+  'retries navigation without repeating authentication and disables pending navigation (autofill: %s)',
+  async (autofill) => {
+    fixtures.autofill = autofill;
+    let release: () => void = () => {};
+    const navigation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.onSuccess.mockRejectedValueOnce(new Error('Route unavailable'));
+    mocks.onSuccess.mockImplementationOnce(() => navigation);
+    const screen = await renderPasskeySignIn();
+    if (!autofill) {
+      await screen
+        .getByRole('button', { name: 'Sign in with a passkey' })
+        .click();
+    }
+
+    const retry = screen.getByRole('button', { name: 'Continue', exact: true });
+    await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledOnce());
+    await expect.element(retry).toBeEnabled();
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    await retry.click();
+    await expect.element(retry).toBeDisabled();
+    expect(mocks.onSuccess).toHaveBeenCalledTimes(2);
+    expect(mocks.signIn).toHaveBeenCalledOnce();
+    release();
+    await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledOnce());
+  },
+);
 
 test('keeps SDK-reported cancellation silent and allows a successful retry', async () => {
   mocks.signIn.mockResolvedValueOnce({
@@ -145,7 +179,8 @@ test('disables pending authentication and ignores completion after leaving login
   expect(mocks.toastSuccess).not.toHaveBeenCalled();
 });
 
-test('does not offer passkey sign-in when WebAuthn is unavailable', async () => {
+test('does not offer passkey sign-in or start autofill when WebAuthn is unavailable', async () => {
+  fixtures.autofill = true;
   fixtures.supported = false;
   const screen = await renderPasskeySignIn();
 
@@ -156,8 +191,9 @@ test('does not offer passkey sign-in when WebAuthn is unavailable', async () => 
 });
 
 test.each(['http://127.0.0.1:3700', 'http://[::1]:3700'])(
-  'does not offer passkey sign-in for IP APP_URL %s',
+  'does not offer passkey sign-in or start autofill for IP APP_URL %s',
   async (appOrigin) => {
+    fixtures.autofill = true;
     const screen = await renderPasskeySignIn(appOrigin);
 
     await expect

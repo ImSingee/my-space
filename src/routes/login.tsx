@@ -13,6 +13,7 @@ import { createFileRoute, redirect, useRouter } from '@tanstack/react-router';
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { authClient } from '~auth/client';
+import { browserSupportsPasskeys } from '~auth/passkey-browser';
 import { Brand } from '~components/app-shell/brand';
 import { PasskeySignIn } from '~components/auth/passkey-sign-in';
 import { hasActiveSession } from '~server/auth';
@@ -149,7 +150,13 @@ function LoginPage() {
                   ) : null}
                   <TextInput
                     label="Email"
-                    autoComplete={mode === 'signin' ? 'username' : 'email'}
+                    autoComplete={
+                      mode === 'signin'
+                        ? browserSupportsPasskeys(appOrigin)
+                          ? 'username webauthn'
+                          : 'username'
+                        : 'email'
+                    }
                     {...form.getInputProps('email')}
                   />
                   <PasswordInput

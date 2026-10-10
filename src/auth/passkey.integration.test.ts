@@ -46,6 +46,7 @@ type ApiResult = { error: { code?: string; message: string } | null };
 // Serve the production component, SDK and auth handler together. Only the
 // authenticator and database are virtual; HTTP cookies and ceremonies are real.
 const html = `<!doctype html><html><body>
+  <input autocomplete="username webauthn" aria-label="Email" />
   <div id="root"></div><script type="module">
   import React from 'react';
   import { createRoot } from 'react-dom/client';
@@ -61,6 +62,8 @@ const html = `<!doctype html><html><body>
     return get(options);
   };
   window.client = authClient;
+  window.conditional = false;
+  PublicKeyCredential.isConditionalMediationAvailable = async () => window.conditional;
   window.navigationAttempts = 0;
   window.navigationFailures = 0;
   window.register = () => window.client.passkey.addPasskey({ name: 'Regression key' });
@@ -209,31 +212,43 @@ async function completeNativeAuthentication() {
   expect(session.data.user.email).toBe('passkey@example.test');
 }
 
-test('retries navigation after SDK authentication without another ceremony or session', async () => {
-  await enrollAndOpenLogin();
-  await page.evaluate('window.navigationFailures = 2; window.mount()');
-  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
-  await page.waitForFunction('window.navigationAttempts === 1');
-  await page.getByText(/Signed in, but the next page/).waitFor();
-  const initialSession = await page.evaluate<{
-    data: { session: { id: string } };
-  }>('window.client.getSession()');
-  expect(initialSession.data.session.id).toBeTruthy();
-  const retry = page.getByRole('button', { name: 'Continue', exact: true });
-  await retry.click();
-  await page.waitForFunction('window.navigationAttempts === 2');
-  await expect.poll(() => retry.isEnabled()).toBe(true);
-  await retry.click();
-  await completeNativeAuthentication();
-  expect(await page.evaluate('window.navigationAttempts')).toBe(3);
-  expect(await page.evaluate('window.ceremonies')).toEqual(['explicit']);
-  const session = await page.evaluate<{ data: { session: { id: string } } }>(
-    'window.client.getSession()',
-  );
-  expect(session.data.session.id).toBe(initialSession.data.session.id);
-}, 20_000);
+test.each(['explicit', 'conditional'])(
+  'retries navigation after SDK %s authentication without another ceremony or session',
+  async (mediation) => {
+    await enrollAndOpenLogin();
+    await page.evaluate((conditional) => {
+      PublicKeyCredential.isConditionalMediationAvailable = async () =>
+        conditional;
+    }, mediation === 'conditional');
+    await page.evaluate('window.navigationFailures = 2; window.mount()');
+    if (mediation === 'explicit') {
+      await page
+        .getByRole('button', { name: 'Sign in with a passkey' })
+        .click();
+    }
+    await page.waitForFunction('window.navigationAttempts === 1');
+    await page.getByText(/Signed in, but the next page/).waitFor();
+    const initialSession = await page.evaluate<{
+      data: { session: { id: string } };
+    }>('window.client.getSession()');
+    expect(initialSession.data.session.id).toBeTruthy();
+    const retry = page.getByRole('button', { name: 'Continue', exact: true });
+    await retry.click();
+    await page.waitForFunction('window.navigationAttempts === 2');
+    await expect.poll(() => retry.isEnabled()).toBe(true);
+    await retry.click();
+    await completeNativeAuthentication();
+    expect(await page.evaluate('window.navigationAttempts')).toBe(3);
+    expect(await page.evaluate('window.ceremonies')).toEqual([mediation]);
+    const session = await page.evaluate<{ data: { session: { id: string } } }>(
+      'window.client.getSession()',
+    );
+    expect(session.data.session.id).toBe(initialSession.data.session.id);
+  },
+  20_000,
+);
 
-test('does not request a challenge on mount, focus, or network restoration', async () => {
+test('does not request a background challenge when conditional mediation is unsupported', async () => {
   await enrollAndOpenLogin();
   let optionsRequests = 0;
   page.on('request', (request) => {
