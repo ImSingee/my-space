@@ -202,8 +202,6 @@ function Details({ request }: { request: DeviceRequest }) {
             <DataList.ItemLabel>Instance</DataList.ItemLabel>
             <DataList.ItemValue className={classes.mono}>
               {window.location.origin}
-              {'\n'}
-              {request.instanceId}
             </DataList.ItemValue>
           </DataList.Item>
         </DataList>

@@ -1,17 +1,14 @@
 import { z } from 'zod';
-import { keyRequestSchema, scopesFrom } from '~auth/cli-policy';
-import { db } from '~/db';
+import { keyRequestSchema } from '~auth/cli-policy';
 import { getPlatformEnv } from '~env';
 import {
   AuthError,
   cookieSession,
-  instance,
   issueCredential,
   listKeys,
   resolveCredential,
   revokeOwnedKey,
-  userEpoch,
-  audit,
+  rotateOwnedKey,
 } from './credentials';
 import { authRateLimit } from './rate-limit';
 import {
@@ -73,9 +70,7 @@ export async function handleCliAuthRequest(
     const path = url.pathname.slice('/api/cli/v1/'.length).split('/');
     const method = request.method;
     if (method === 'GET' && path.join('/') === 'instance') {
-      const inst = await instance();
       return safeJson({
-        instanceId: inst.instanceId,
         url: getPlatformEnv().appUrl,
         authentication: 'opaque_key',
       });
@@ -95,7 +90,7 @@ export async function handleCliAuthRequest(
       return safeJson({ revoked: true });
     }
     if (action === 'device' && method === 'POST') {
-      await authRateLimit('device-create');
+      authRateLimit('device-create');
       return safeJson(await createDevice(await readAuthBody(request)));
     }
     if (action === 'device/token' && method === 'POST') {
@@ -112,7 +107,7 @@ export async function handleCliAuthRequest(
       method === 'POST'
     ) {
       const session = await cookieSession(request);
-      await authRateLimit(action, session.user.id);
+      authRateLimit(action, session.user.id);
       const { user_code } = codeBody.parse(await readAuthBody(request));
       return safeJson(
         action === 'device/claim'
@@ -126,17 +121,13 @@ export async function handleCliAuthRequest(
     }
     if (action === 'keys' && method === 'POST') {
       const session = await cookieSession(request);
-      await authRateLimit(action, session.user.id);
+      authRateLimit(action, session.user.id);
       const input = keyRequestSchema.parse(await readAuthBody(request));
-      const inst = await instance();
       return safeJson(
         await issueCredential({
           ...input,
           userId: session.user.id,
           credentialType: 'user_api_key',
-          userEpoch: await userEpoch(db, session.user.id),
-          instanceId: inst.instanceId,
-          instanceEpoch: inst.epoch,
         }),
       );
     }
@@ -147,7 +138,7 @@ export async function handleCliAuthRequest(
       method === 'POST'
     ) {
       const session = await cookieSession(request);
-      await authRateLimit(action, session.user.id);
+      authRateLimit(action, session.user.id);
       const id = decodeURIComponent(path[2]);
       if (path[3] === 'revoke') {
         await revokeOwnedKey(session.user.id, id);
@@ -163,64 +154,10 @@ export async function handleCliAuthRequest(
         })
         .strict()
         .parse(await readAuthBody(request));
-      const old = await db.query.cliCredentialBindings.findFirst({
-        where: { keyId: id, userId: session.user.id },
-      });
-      const key = await db.query.apikey.findFirst({ where: { id } });
-      if (!old || !key) throw new AuthError('key_not_found', 404);
-      if (old.credentialType === 'run_key')
-        throw new AuthError('host_managed_credential', 403);
-      if (
-        old.revokedAt ||
-        !key.enabled ||
-        !key.expiresAt ||
-        key.expiresAt <= new Date() ||
-        (await userEpoch(db, session.user.id)) !== old.userEpoch
-      )
-        throw new AuthError('rotation_conflict', 409);
-      if (old.credentialType === 'interactive_key' && expiresIn > 30 * 86400)
-        throw new AuthError('invalid_expiration', 400);
-      const inst = await instance();
-      if (
-        old.instanceId !== inst.instanceId ||
-        old.instanceEpoch !== inst.epoch
-      )
-        throw new AuthError('rotation_conflict', 409);
-      const scopes = scopesFrom(JSON.parse(key.permissions ?? '{}'));
-      if (!scopes.length) throw new AuthError('invalid_credential', 401);
-      return safeJson(
-        await issueCredential({
-          userId: session.user.id,
-          credentialType: old.credentialType,
-          name: old.displayName,
-          expiresIn,
-          scopes,
-          resources: old.resources,
-          userEpoch: old.userEpoch,
-          instanceId: old.instanceId,
-          instanceEpoch: old.instanceEpoch,
-          rotateKeyId: id,
-        }),
-      );
+      return safeJson(await rotateOwnedKey(session.user.id, id, expiresIn));
     }
     throw new AuthError('not_found', 404);
   } catch (error) {
-    if (error instanceof AuthError && error.credentialId && error.userId) {
-      try {
-        await db.transaction((tx) =>
-          audit(
-            tx,
-            'permission.deny',
-            error.userId!,
-            error.credentialId!,
-            null,
-            { reason: error.code },
-          ),
-        );
-      } catch {
-        return safeJson({ error: 'internal_error' }, 500);
-      }
-    }
     return authErrorResponse(error);
   }
 }

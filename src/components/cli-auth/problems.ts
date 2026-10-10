@@ -10,7 +10,6 @@ export type Problem =
   | 'elsewhere'
   | 'signed-out'
   | 'session-ended'
-  | 'invalidated'
   | 'disabled'
   | 'origin'
   | 'unapprovable'
@@ -74,8 +73,6 @@ export function classifyDecisionError(
     case 'cookie_required':
     case 'invalid_credential':
       return 'session-ended';
-    case 'grant_invalidated':
-      return 'invalidated';
     case 'invalid_grant':
       return 'closed';
     case 'resource_not_found':

@@ -7,12 +7,9 @@ import {
 } from '~auth/cli-policy';
 import { db, schema, type TX } from '~/db';
 import {
-  audit,
   AuthError,
-  instance,
   issueCredential,
   requireIssuance,
-  userEpoch,
   validateResources,
 } from './credentials';
 
@@ -24,18 +21,14 @@ export async function createDevice(raw: unknown) {
   requireIssuance();
   const input = deviceRequestSchema.parse(raw);
   await validateResources(input.resources);
-  const inst = await instance();
-  const result = await auth.api.deviceCode({
+  return auth.api.deviceCode({
     body: {
       client_id: input.client_id,
       scope: input.scopes.join(' '),
       hatchResources: JSON.stringify(input.resources),
       hatchExpiresIn: input.expiresIn,
-      hatchInstanceId: inst.instanceId,
-      hatchInstanceEpoch: inst.epoch,
     },
   });
-  return { ...result, instanceId: inst.instanceId };
 }
 
 async function lockedCode(
@@ -69,48 +62,33 @@ function checkOwner(row: Device, session: Session) {
   )
     throw new AuthError('grant_claimed_by_another_session', 403);
 }
-function safeContext(row: Device, session: Session) {
+function grantOf(row: Device) {
   return {
-    userCode: row.userCode,
-    account: session.user.email,
-    instanceId: row.hatchInstanceId,
     scopes: scopesSchema.parse((row.scope ?? '').split(' ')),
     resources: resourceRangeSchema.parse(JSON.parse(row.hatchResources)),
-    credentialType: 'interactive_key' as const,
-    expiresIn: row.hatchExpiresIn,
-    grantExpiresAt: row.expiresAt,
   };
 }
 
+/** Bind a pending grant to this exact user and Cookie session, then describe it. */
 export async function claimDevice(userCode: string, session: Session) {
   requireIssuance();
   return db.transaction(async (tx) => {
     const row = await lockedCode(tx, 'userCode', userCode);
     checkPending(row);
-    const inst = await instance(tx);
-    if (
-      row.hatchInstanceId !== inst.instanceId ||
-      row.hatchInstanceEpoch !== inst.epoch
-    )
-      throw new AuthError('invalid_grant', 400);
     if (row.userId || row.hatchSessionId) checkOwner(row, session);
-    else {
-      row.userId = session.user.id;
-      row.hatchSessionId = session.session.id;
-      row.hatchUserEpoch = await userEpoch(tx, session.user.id);
+    else
       await tx
         .update(schema.deviceCode)
-        .set({
-          userId: row.userId,
-          hatchSessionId: row.hatchSessionId,
-          hatchUserEpoch: row.hatchUserEpoch,
-        })
+        .set({ userId: session.user.id, hatchSessionId: session.session.id })
         .where(eq(schema.deviceCode.id, row.id));
-      await audit(tx, 'device.claim', session.user.id, null, null, {
-        grantId: row.id,
-      });
-    }
-    return safeContext(row, session);
+    return {
+      userCode: row.userCode,
+      account: session.user.email,
+      ...grantOf(row),
+      credentialType: 'interactive_key' as const,
+      expiresIn: row.hatchExpiresIn,
+      grantExpiresAt: row.expiresAt,
+    };
   });
 }
 
@@ -124,25 +102,11 @@ export async function decideDevice(
     const row = await lockedCode(tx, 'userCode', userCode);
     checkPending(row);
     checkOwner(row, session);
-    if (row.hatchUserEpoch !== (await userEpoch(tx, session.user.id)))
-      throw new AuthError('grant_invalidated', 401);
-    if (approve)
-      await validateResources(
-        resourceRangeSchema.parse(JSON.parse(row.hatchResources)),
-        tx,
-      );
+    if (approve) await validateResources(grantOf(row).resources, tx);
     await tx
       .update(schema.deviceCode)
       .set({ status: approve ? 'approved' : 'denied' })
       .where(eq(schema.deviceCode.id, row.id));
-    await audit(
-      tx,
-      approve ? 'device.approve' : 'device.deny',
-      session.user.id,
-      null,
-      null,
-      { grantId: row.id },
-    );
   });
   return { status: approve ? 'approved' : 'denied' };
 }
@@ -157,9 +121,6 @@ export async function cancelDevice(deviceCode: string) {
       .update(schema.deviceCode)
       .set({ status: 'cancelled' })
       .where(eq(schema.deviceCode.id, row.id));
-    await audit(tx, 'device.cancel', row.userId, null, null, {
-      grantId: row.id,
-    });
   });
   return { status: 'cancelled' };
 }
@@ -200,6 +161,8 @@ export async function redeemDevice(deviceCode: string) {
       return { error: 'authorization_pending', interval } as const;
     if (row.status !== 'approved' || !row.userId || !row.hatchSessionId)
       return { error: 'invalid_grant', interval: 0 } as const;
+    // The approving Cookie session must still exist: signing out, or a
+    // password change that revokes sessions, withdraws an unredeemed approval.
     const approvingSession = await tx.query.session.findFirst({
       where: {
         id: row.hatchSessionId,
@@ -207,35 +170,21 @@ export async function redeemDevice(deviceCode: string) {
         expiresAt: { gt: new Date() },
       },
     });
-    const inst = await instance(tx);
-    if (
-      !approvingSession ||
-      (await userEpoch(tx, row.userId)) !== row.hatchUserEpoch ||
-      inst.instanceId !== row.hatchInstanceId ||
-      inst.epoch !== row.hatchInstanceEpoch
-    )
+    if (!approvingSession)
       return { error: 'invalid_grant', interval: 0 } as const;
     // Tombstone prevents repeated and concurrent exchanges, including failed issuance.
     await tx
       .update(schema.deviceCode)
       .set({ status: 'consumed' })
       .where(eq(schema.deviceCode.id, row.id));
-    await audit(tx, 'device.consume', row.userId, null, null, {
-      grantId: row.id,
-    });
     return { row } as const;
   });
   if ('error' in result) return result;
-  const row = result.row;
   return issueCredential({
-    userId: row.userId!,
+    userId: result.row.userId!,
     credentialType: 'interactive_key',
     name: 'Browser-approved login',
-    expiresIn: row.hatchExpiresIn,
-    scopes: scopesSchema.parse((row.scope ?? '').split(' ')),
-    resources: resourceRangeSchema.parse(JSON.parse(row.hatchResources)),
-    userEpoch: row.hatchUserEpoch!,
-    instanceId: row.hatchInstanceId,
-    instanceEpoch: row.hatchInstanceEpoch,
+    expiresIn: result.row.hatchExpiresIn,
+    ...grantOf(result.row),
   });
 }

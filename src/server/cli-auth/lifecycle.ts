@@ -88,16 +88,13 @@ export async function handleLifecycleRequest(request: Request, path: string[]) {
     createdAt: true,
     updatedAt: true,
   } as const;
-  const row =
+  // An exact immutable ID always wins. Legacy kebab-case IDs share the slug
+  // alphabet, so another object's slug may equal this ID.
+  const find = (where: { id: string } | { slug: string }) =>
     kind === 'app'
-      ? await db.query.apps.findFirst({
-          where: { OR: [{ id }, { slug: id }] },
-          columns,
-        })
-      : await db.query.workflows.findFirst({
-          where: { OR: [{ id }, { slug: id }] },
-          columns,
-        });
+      ? db.query.apps.findFirst({ where, columns })
+      : db.query.workflows.findFirst({ where, columns });
+  const row = (await find({ id })) ?? (await find({ slug: id }));
   if (!row) throw new AuthError('resource_not_found', 404);
   requirePermission(principal, scope, row.id);
   if (request.method === 'POST') {

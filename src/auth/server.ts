@@ -31,18 +31,14 @@ const passkeyCeremonyPaths = new Set([
 const deviceFields = {
   hatchResources: z.string(),
   hatchExpiresIn: z.number(),
-  hatchInstanceId: z.string(),
-  hatchInstanceEpoch: z.number(),
 };
 const hatchDeviceGrant = {
   requestSchemaFields: deviceFields,
   deviceCodeSchemaFields: {
     hatchResources: { type: 'string', required: true },
     hatchExpiresIn: { type: 'number', required: true },
-    hatchInstanceId: { type: 'string', required: true },
-    hatchInstanceEpoch: { type: 'number', required: true },
+    // The Cookie session that claimed the grant; it must survive until redemption.
     hatchSessionId: { type: 'string', required: false },
-    hatchUserEpoch: { type: 'number', required: false },
   },
   authorizeRequest: ({ request }: { request: DeviceAuthorizationRequest }) => {
     if (!issuanceEnabled() || request.user_id) throw new APIError('FORBIDDEN');
@@ -52,8 +48,6 @@ const hatchDeviceGrant = {
       deviceCodeFields: {
         hatchResources: fields.hatchResources,
         hatchExpiresIn: fields.hatchExpiresIn,
-        hatchInstanceId: fields.hatchInstanceId,
-        hatchInstanceEpoch: fields.hatchInstanceEpoch,
       },
     };
   },

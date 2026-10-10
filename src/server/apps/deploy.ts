@@ -645,16 +645,21 @@ async function deployAppInner(
     // so an archive/state change committed while the build was running is never
     // overwritten using the stale status read above.
     if (statusBeforeBuild !== 'archived') {
-      const marked = await db
-        .update(schema.apps)
-        .set({ status: 'building' })
-        .where(
-          and(
-            eq(schema.apps.id, id),
-            eq(schema.apps.status, statusBeforeBuild),
-          ),
-        )
-        .returning({ id: schema.apps.id });
+      // A long build can outlive the caller's authority: recheck it in the
+      // transaction that writes the marker, so a lapsed principal leaves no state.
+      const marked = await db.transaction(async (tx) => {
+        await assertCliWrite(tx);
+        return tx
+          .update(schema.apps)
+          .set({ status: 'building' })
+          .where(
+            and(
+              eq(schema.apps.id, id),
+              eq(schema.apps.status, statusBeforeBuild),
+            ),
+          )
+          .returning({ id: schema.apps.id });
+      });
       if (marked.length === 0) {
         throw new Error(
           `App "${id}" changed state while its deployment was building. ` +

@@ -30,7 +30,6 @@ export function formatUserCode(code: string): string {
 const claimSchema = z.object({
   userCode: z.string().min(1),
   account: z.string().min(1),
-  instanceId: z.string().min(1),
   // Unknown scopes fail closed: the page must be able to explain everything
   // it asks the person to approve.
   scopes: z.array(z.enum(CLI_SCOPES)).min(1),

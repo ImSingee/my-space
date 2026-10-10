@@ -10,7 +10,6 @@ import {
   IconHourglassHigh,
   IconLogin2,
   IconPlugConnectedX,
-  IconShieldX,
   IconWorldX,
   type Icon,
 } from '@tabler/icons-react';
@@ -65,13 +64,6 @@ const PROBLEMS: Record<Problem, StatusCopy> = {
     title: 'Your session ended',
     body: 'Nothing was approved. Sign in again, then start a new sign-in on your device.',
     actions: ['sign-in'],
-  },
-  invalidated: {
-    icon: IconShieldX,
-    color: 'red',
-    title: 'Your sign-in details changed',
-    body: 'Nothing was approved. Start a new sign-in on your device.',
-    actions: ['new-code'],
   },
   disabled: {
     icon: IconPlugConnectedX,

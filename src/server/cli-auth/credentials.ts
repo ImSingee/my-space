@@ -1,10 +1,15 @@
-/** Server-only opaque credentials. Plugin verification never grants a Cookie session. */
-import { randomUUID } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+/**
+ * Server-only opaque credentials, stored entirely in Better Auth's `apikey`
+ * table. `permissions` holds the scopes; `metadata` holds the credential type,
+ * resource range and Run context. Both are written only by this server: the
+ * plugin's HTTP routes are sealed (see `isSealedAuthPath`).
+ */
+import { and, eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { auth } from '~auth/server';
 import {
-  issuanceEnabled,
   grantSchema,
+  issuanceEnabled,
   permissionsFor,
   resourceRangeSchema,
   scopesFrom,
@@ -17,8 +22,6 @@ import { getPlatformEnv } from '~env';
 import { AppError } from '~server/errors';
 
 export class AuthError extends AppError {
-  userId?: string;
-  credentialId?: string;
   constructor(
     public code: string,
     status: number,
@@ -29,47 +32,60 @@ export class AuthError extends AppError {
 export function requireIssuance(): void {
   if (!issuanceEnabled()) throw new AuthError('issuance_disabled', 503);
 }
-export async function audit(
-  tx: TX,
-  action: string,
-  userId: string | null,
-  credentialId: string | null = null,
-  runId: string | null = null,
-  details: typeof schema.cliAuthAudit.$inferInsert.details = {},
-) {
-  await tx
-    .insert(schema.cliAuthAudit)
-    .values({ id: randomUUID(), action, userId, credentialId, runId, details });
+
+const CONFIG_ID = 'hatch';
+const LIVE_RUN_STATUSES = ['running', 'blocked'];
+
+const runContextSchema = z
+  .object({
+    runId: z.string().min(1),
+    sessionId: z.string().min(1),
+    runnerId: z.string().min(1),
+  })
+  .strict();
+const metadataSchema = z
+  .object({
+    credentialType: z.enum(['interactive_key', 'user_api_key', 'run_key']),
+    resources: resourceRangeSchema,
+    run: runContextSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (value) => (value.credentialType === 'run_key') === Boolean(value.run),
+    'Only Run keys carry a Run context',
+  );
+type KeyMetadata = z.infer<typeof metadataSchema>;
+type Connection = TX | typeof db;
+type KeyRow = typeof schema.apikey.$inferSelect;
+
+/** A key without valid Hatch metadata has no authority, whatever the plugin says. */
+export function readMetadata(raw: string | null): KeyMetadata | null {
+  try {
+    let value: unknown = JSON.parse(raw ?? 'null');
+    // Older plugin versions stored metadata JSON-encoded twice.
+    if (typeof value === 'string') value = JSON.parse(value);
+    const parsed = metadataSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+function readScopes(raw: string | null): CliScope[] {
+  try {
+    return scopesFrom(JSON.parse(raw ?? '{}'));
+  } catch {
+    return [];
+  }
 }
 
-export async function instance(tx: TX | typeof db = db) {
-  await tx
-    .insert(schema.cliAuthInstance)
-    .values({ id: 'platform', instanceId: randomUUID() })
-    .onConflictDoNothing();
-  const [row] = await tx
-    .select()
-    .from(schema.cliAuthInstance)
-    .where(eq(schema.cliAuthInstance.id, 'platform'));
-  return row;
-}
-export async function userEpoch(tx: TX | typeof db, userId: string) {
-  // No guessed issuer and no cached authorization. A deleted user is never valid.
-  const [user] = await tx
-    .select({ id: schema.user.id })
-    .from(schema.user)
-    .where(eq(schema.user.id, userId));
-  if (!user) throw new AuthError('invalid_credential', 401);
-  await tx
-    .insert(schema.cliUserSecurity)
-    .values({ userId })
-    .onConflictDoNothing();
-  const [state] = await tx
-    .select()
-    .from(schema.cliUserSecurity)
-    .where(eq(schema.cliUserSecurity.userId, userId));
-  return state.epoch;
-}
+export type CliPrincipal = {
+  userId: string;
+  credentialId: string;
+  credentialType: CredentialType;
+  scopes: CliScope[];
+  resources: ResourceRange;
+  context: z.infer<typeof runContextSchema> | null;
+};
 
 /** Cookie only, with no API-key/Bearer input forwarded to Better Auth. */
 export async function cookieSession(request: Request, mutation = true) {
@@ -95,7 +111,7 @@ export async function cookieSession(request: Request, mutation = true) {
 
 export async function validateResources(
   resources: ResourceRange,
-  tx: TX | typeof db = db,
+  tx: Connection = db,
 ) {
   if (resources.mode === 'all') return;
   if (
@@ -122,97 +138,94 @@ export async function validateResources(
     throw new AuthError('resource_not_found', 404);
 }
 
-type Binding = typeof schema.cliCredentialBindings.$inferSelect;
-export type CliPrincipal = {
-  userId: string;
-  credentialId: string;
-  credentialType: CredentialType;
-  scopes: CliScope[];
-  resources: ResourceRange;
-  instanceId: string;
-  context: { sessionId: string; runId: string; runnerId: string } | null;
-};
+/**
+ * A password change ends every credential issued before it. Better Auth bumps
+ * the credential account's `updatedAt` on every password write (change, reset
+ * or set), so comparing against it covers all of them without hooks.
+ */
+async function passwordChangedAt(conn: Connection, userId: string) {
+  const [account] = await conn
+    .select({ updatedAt: schema.account.updatedAt })
+    .from(schema.account)
+    .where(
+      and(
+        eq(schema.account.userId, userId),
+        eq(schema.account.providerId, 'credential'),
+      ),
+    );
+  return account?.updatedAt ?? null;
+}
 
-/** Re-check a saved binding at the write boundary, taking locks in the caller's transaction. */
-async function checkBinding(
-  binding: Binding,
-  tx: TX | typeof db,
-  lock = false,
-) {
-  const query = tx
-    .select()
-    .from(schema.cliCredentialBindings)
-    .where(eq(schema.cliCredentialBindings.keyId, binding.keyId));
-  const [current] = await (lock ? query.for('share') : query);
-  const keyQuery = tx
-    .select()
-    .from(schema.apikey)
-    .where(eq(schema.apikey.id, binding.keyId));
-  const [key] = await (lock ? keyQuery.for('share') : keyQuery);
+/** Why a stored key no longer grants anything, or null while it is usable. */
+async function keyProblem(
+  key: KeyRow | undefined,
+  metadata: KeyMetadata | null,
+  conn: Connection,
+  lock: boolean,
+): Promise<AuthError | null> {
+  const invalid = new AuthError('invalid_credential', 401);
   if (
-    !current ||
-    current.revokedAt ||
-    !key?.enabled ||
+    !key ||
+    key.configId !== CONFIG_ID ||
+    !key.enabled ||
     !key.expiresAt ||
     key.expiresAt <= new Date() ||
-    key.referenceId !== current.userId ||
-    key.configId !== 'hatch'
+    !metadata ||
+    !readScopes(key.permissions).length
   )
-    throw new AuthError('invalid_credential', 401);
-  const instanceQuery = tx
-    .select()
-    .from(schema.cliAuthInstance)
-    .where(eq(schema.cliAuthInstance.id, 'platform'));
-  const [inst] = await (lock ? instanceQuery.for('share') : instanceQuery);
-  const userQuery = tx
+    return invalid;
+  const userQuery = conn
     .select({ id: schema.user.id })
     .from(schema.user)
-    .where(eq(schema.user.id, current.userId));
+    .where(eq(schema.user.id, key.referenceId));
   const [user] = await (lock ? userQuery.for('share') : userQuery);
-  const epochQuery = tx
-    .select()
-    .from(schema.cliUserSecurity)
-    .where(eq(schema.cliUserSecurity.userId, current.userId));
-  const [security] = await (lock ? epochQuery.for('share') : epochQuery);
-  if (
-    !user ||
-    !security ||
-    security.epoch !== current.userEpoch ||
-    !inst ||
-    inst.instanceId !== current.instanceId ||
-    inst.epoch !== current.instanceEpoch
-  )
-    throw new AuthError('invalid_credential', 401);
-  if (current.credentialType === 'run_key') {
-    const runQuery = tx
+  if (!user) return invalid;
+  const changed = await passwordChangedAt(conn, key.referenceId);
+  if (changed && changed > key.createdAt) return invalid;
+  if (metadata.run) {
+    const runQuery = conn
       .select()
       .from(schema.agentRuns)
-      .where(eq(schema.agentRuns.id, current.runId!));
+      .where(eq(schema.agentRuns.id, metadata.run.runId));
     const [run] = await (lock ? runQuery.for('share') : runQuery);
-    const grantQuery = tx
-      .select()
-      .from(schema.cliRunAuthorizations)
-      .where(eq(schema.cliRunAuthorizations.runId, current.runId!));
-    const [grant] = await (lock ? grantQuery.for('share') : grantQuery);
     if (
       !run ||
-      !grant ||
-      grant.revokedAt ||
-      grant.epoch !== current.runEpoch ||
-      grant.userId !== current.userId ||
-      grant.sessionId !== current.sessionId ||
-      run.sessionId !== current.sessionId ||
-      run.runnerId !== current.runnerId ||
-      !['running', 'blocked'].includes(run.status) ||
+      run.startedByUserId !== key.referenceId ||
+      run.sessionId !== metadata.run.sessionId ||
+      run.runnerId !== metadata.run.runnerId ||
+      !LIVE_RUN_STATUSES.includes(run.status) ||
       !run.leaseExpiresAt ||
       run.leaseExpiresAt <= new Date()
     )
-      throw new AuthError('run_authorization_ended', 401);
+      return new AuthError('run_authorization_ended', 401);
   }
+  return null;
+}
+
+/**
+ * Load a key's current authority. With `lock`, the key, owner and Run rows are
+ * share-locked so a concurrent revocation serializes with the caller's commit.
+ */
+async function loadPrincipal(
+  keyId: string,
+  conn: Connection,
+  lock = false,
+): Promise<CliPrincipal> {
+  const query = conn
+    .select()
+    .from(schema.apikey)
+    .where(eq(schema.apikey.id, keyId));
+  const [key] = await (lock ? query.for('share') : query);
+  const metadata = readMetadata(key?.metadata ?? null);
+  const problem = await keyProblem(key, metadata, conn, lock);
+  if (problem) throw problem;
   return {
-    binding: current,
-    key,
-    scopes: scopesFrom(JSON.parse(key.permissions ?? '{}')),
+    userId: key!.referenceId,
+    credentialId: key!.id,
+    credentialType: metadata!.credentialType,
+    scopes: readScopes(key!.permissions),
+    resources: metadata!.resources,
+    context: metadata!.run ?? null,
   };
 }
 
@@ -225,34 +238,15 @@ export async function resolveCredential(
   const match = /^Bearer ([^\s,]+)$/.exec(authorization);
   if (!match || match[1].length > 512)
     throw new AuthError('invalid_credential', 401);
+  // The plugin checks the hash, `enabled`, expiry and the per-key rate limit.
   const verified = await auth.api.verifyApiKey({
-    body: { key: match[1], configId: 'hatch' },
+    body: { key: match[1], configId: CONFIG_ID },
   });
   if (verified.error?.code === 'RATE_LIMITED')
     throw new AuthError('rate_limited', 429);
   if (!verified.valid || !verified.key)
     throw new AuthError('invalid_credential', 401);
-  const binding = await db.query.cliCredentialBindings.findFirst({
-    where: { keyId: verified.key.id },
-  });
-  if (!binding) throw new AuthError('invalid_credential', 401);
-  const checked = await checkBinding(binding, db);
-  return {
-    userId: binding.userId,
-    credentialId: binding.keyId,
-    credentialType: binding.credentialType,
-    scopes: checked.scopes,
-    resources: resourceRangeSchema.parse(binding.resources),
-    instanceId: binding.instanceId,
-    context:
-      binding.credentialType === 'run_key'
-        ? {
-            sessionId: binding.sessionId!,
-            runId: binding.runId!,
-            runnerId: binding.runnerId!,
-          }
-        : null,
-  };
+  return loadPrincipal(verified.key.id, db);
 }
 
 export function requirePermission(
@@ -260,37 +254,26 @@ export function requirePermission(
   scope: CliScope,
   resourceId?: string,
 ) {
-  const denied = (code: string) =>
-    Object.assign(new AuthError(code, 403), {
-      userId: principal.userId,
-      credentialId: principal.credentialId,
-    });
-  if (!principal.scopes.includes(scope)) throw denied('insufficient_scope');
+  if (!principal.scopes.includes(scope))
+    throw new AuthError('insufficient_scope', 403);
   const kind = scope.startsWith('app.') ? 'apps' : 'workflows';
   if (
     principal.resources.mode === 'ids' &&
     (scope.endsWith('.create') ||
       (resourceId != null && !principal.resources[kind].includes(resourceId)))
   )
-    throw denied('resource_forbidden');
+    throw new AuthError('resource_forbidden', 403);
 }
+
+/** Recheck a captured principal inside the transaction that commits a write. */
 export async function authorizeCommit(
   principal: CliPrincipal,
   scope: CliScope,
   resourceId: string | undefined,
   tx: TX,
 ) {
-  const binding = await tx.query.cliCredentialBindings.findFirst({
-    where: { keyId: principal.credentialId },
-  });
-  if (!binding) throw new AuthError('invalid_credential', 401);
-  const checked = await checkBinding(binding, tx, true);
   requirePermission(
-    {
-      ...principal,
-      scopes: checked.scopes,
-      resources: checked.binding.resources,
-    },
+    await loadPrincipal(principal.credentialId, tx, true),
     scope,
     resourceId,
   );
@@ -303,18 +286,10 @@ export type IssueInput = {
   expiresIn: number;
   scopes: CliScope[];
   resources: ResourceRange;
-  userEpoch: number;
-  instanceId: string;
-  instanceEpoch: number;
-  run?: { runId: string; sessionId: string; runnerId: string; epoch: number };
-  rotateKeyId?: string;
+  run?: z.infer<typeof runContextSchema>;
 };
 
-/**
- * Better Auth's API uses its own connection. Create an unbound key, then activate
- * context + audit atomically. Without the binding, even a valid plugin key has no
- * Hatch access. Never pretend these two connections form one transaction.
- */
+/** One plugin call: the key is complete, and authoritative, once it exists. */
 export async function issueCredential(input: IssueInput) {
   requireIssuance();
   grantSchema.parse({ scopes: input.scopes, resources: input.resources });
@@ -328,244 +303,114 @@ export async function issueCredential(input: IssueInput) {
       (!input.run || input.expiresIn !== 300))
   )
     throw new AuthError('invalid_expiration', 400);
+  await validateResources(input.resources);
+  const metadata: KeyMetadata = {
+    credentialType: input.credentialType,
+    resources: input.resources,
+    ...(input.run ? { run: input.run } : {}),
+  };
   const key = await auth.api.createApiKey({
     body: {
-      configId: 'hatch',
+      configId: CONFIG_ID,
       userId: input.userId,
       name: input.name,
       expiresIn: input.expiresIn,
       permissions: permissionsFor(input.scopes),
+      metadata,
       rateLimitEnabled: true,
       rateLimitMax: 120,
       rateLimitTimeWindow: 60000,
     },
   });
-  try {
-    await db.transaction(async (tx) => {
-      const inst = await instance(tx);
-      await tx
-        .select()
-        .from(schema.cliAuthInstance)
-        .where(eq(schema.cliAuthInstance.id, 'platform'))
-        .for('share');
-      const [lockedUser] = await tx
-        .select({ id: schema.user.id })
-        .from(schema.user)
-        .where(eq(schema.user.id, input.userId))
-        .for('share');
-      if (!lockedUser) throw new AuthError('grant_invalidated', 401);
-      if (
-        inst.instanceId !== input.instanceId ||
-        inst.epoch !== input.instanceEpoch ||
-        (await userEpoch(tx, input.userId)) !== input.userEpoch
-      )
-        throw new AuthError('grant_invalidated', 401);
-      // Lock epochs so password changes/deletion and rotation serialize with activation.
-      await tx
-        .select()
-        .from(schema.cliUserSecurity)
-        .where(eq(schema.cliUserSecurity.userId, input.userId))
-        .for('share');
-      if ((await userEpoch(tx, input.userId)) !== input.userEpoch)
-        throw new AuthError('grant_invalidated', 401);
-      await validateResources(input.resources, tx);
-      if (input.run) {
-        const { validateRunGrant } = await import('./runs');
-        await validateRunGrant(
-          tx,
-          input.run.runId,
-          input.run.runnerId,
-          input.userId,
-          input.run.epoch,
-        );
-      }
-      if (input.rotateKeyId) {
-        const [old] = await tx
-          .select()
-          .from(schema.cliCredentialBindings)
-          .where(
-            and(
-              eq(schema.cliCredentialBindings.keyId, input.rotateKeyId),
-              eq(schema.cliCredentialBindings.userId, input.userId),
-            ),
-          )
-          .for('update');
-        if (!old || old.revokedAt || old.credentialType === 'run_key')
-          throw new AuthError('rotation_conflict', 409);
-        const [oldKey] = await tx
-          .select()
-          .from(schema.apikey)
-          .where(eq(schema.apikey.id, old.keyId))
-          .for('update');
-        if (
-          !oldKey?.enabled ||
-          !oldKey.expiresAt ||
-          oldKey.expiresAt <= new Date() ||
-          old.userEpoch !== input.userEpoch ||
-          old.instanceEpoch !== input.instanceEpoch ||
-          old.instanceId !== input.instanceId ||
-          old.credentialType !== input.credentialType ||
-          JSON.stringify(old.resources) !== JSON.stringify(input.resources) ||
-          JSON.stringify(scopesFrom(JSON.parse(oldKey.permissions ?? '{}'))) !==
-            JSON.stringify(input.scopes)
-        )
-          throw new AuthError('rotation_conflict', 409);
-        await revoke(tx, old, 'rotated');
-      }
-      await tx.insert(schema.cliCredentialBindings).values({
-        keyId: key.id,
-        credentialType: input.credentialType,
-        userId: input.userId,
-        userEpoch: input.userEpoch,
-        instanceId: input.instanceId,
-        instanceEpoch: input.instanceEpoch,
-        resources: input.resources,
-        displayName: input.name,
-        issuedExpiresAt: key.expiresAt!,
-        runId: input.run?.runId,
-        sessionId: input.run?.sessionId,
-        runnerId: input.run?.runnerId,
-        runEpoch: input.run?.epoch,
-      });
-      await audit(
-        tx,
-        input.rotateKeyId ? 'key.rotate' : 'key.issue',
-        input.userId,
-        key.id,
-        input.run?.runId,
-        {
-          credentialType: input.credentialType,
-          scopes: input.scopes,
-          expiresIn: input.expiresIn,
-          resourcesMode: input.resources.mode,
-          apps: input.resources.mode === 'ids' ? input.resources.apps : [],
-          workflows:
-            input.resources.mode === 'ids' ? input.resources.workflows : [],
-        },
-      );
-    });
-  } catch (error) {
-    // Best-effort cleanup is not the authorization boundary: the missing binding is.
-    await db
-      .update(schema.apikey)
-      .set({ enabled: false })
-      .where(eq(schema.apikey.id, key.id))
-      .catch(() => {});
-    throw error;
-  }
   return {
     id: key.id,
     token: key.key,
     credentialType: input.credentialType,
-    instanceId: input.instanceId,
     scopes: input.scopes,
     resources: input.resources,
     expiresAt: key.expiresAt,
   };
 }
 
-export async function revoke(tx: TX, binding: Binding, reason: string) {
-  await tx
-    .update(schema.cliCredentialBindings)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(schema.cliCredentialBindings.keyId, binding.keyId),
-        isNull(schema.cliCredentialBindings.revokedAt),
-      ),
-    );
-  await tx
-    .update(schema.apikey)
-    .set({ enabled: false })
-    .where(eq(schema.apikey.id, binding.keyId));
-  await audit(tx, 'key.revoke', binding.userId, binding.keyId, binding.runId, {
-    reason,
+async function ownedKey(userId: string, keyId: string) {
+  const key = await db.query.apikey.findFirst({
+    where: { id: keyId, referenceId: userId, configId: CONFIG_ID },
   });
+  const metadata = readMetadata(key?.metadata ?? null);
+  if (!key || !metadata) throw new AuthError('key_not_found', 404);
+  if (metadata.credentialType === 'run_key')
+    throw new AuthError('host_managed_credential', 403);
+  return { key, metadata };
 }
 
+/** Idempotent. Run keys belong to their Host and are never revoked here. */
 export async function revokeOwnedKey(userId: string, keyId: string) {
-  await db.transaction(async (tx) => {
-    const [binding] = await tx
-      .select()
-      .from(schema.cliCredentialBindings)
-      .where(
-        and(
-          eq(schema.cliCredentialBindings.keyId, keyId),
-          eq(schema.cliCredentialBindings.userId, userId),
-        ),
-      )
-      .for('update');
-    if (!binding) throw new AuthError('key_not_found', 404);
-    if (binding.credentialType === 'run_key')
-      throw new AuthError('host_managed_credential', 403);
-    if (!binding.revokedAt) await revoke(tx, binding, 'explicit');
+  await ownedKey(userId, keyId);
+  await db
+    .update(schema.apikey)
+    .set({ enabled: false })
+    .where(eq(schema.apikey.id, keyId));
+}
+
+/**
+ * Same scopes and resources with a new secret and expiration. Of concurrent
+ * rotations, only the one that disables the old key keeps its new key.
+ */
+export async function rotateOwnedKey(
+  userId: string,
+  keyId: string,
+  expiresIn: number,
+) {
+  const { key, metadata } = await ownedKey(userId, keyId);
+  if (await keyProblem(key, metadata, db, false))
+    throw new AuthError('rotation_conflict', 409);
+  const next = await issueCredential({
+    userId,
+    credentialType: metadata.credentialType,
+    name: key.name ?? 'Hatch key',
+    expiresIn,
+    scopes: readScopes(key.permissions),
+    resources: metadata.resources,
   });
+  const disabled = await db
+    .update(schema.apikey)
+    .set({ enabled: false })
+    .where(and(eq(schema.apikey.id, keyId), eq(schema.apikey.enabled, true)))
+    .returning({ id: schema.apikey.id });
+  if (!disabled.length) {
+    await db
+      .update(schema.apikey)
+      .set({ enabled: false })
+      .where(eq(schema.apikey.id, next.id));
+    throw new AuthError('rotation_conflict', 409);
+  }
+  return next;
 }
 
 export async function listKeys(userId: string) {
-  const rows = await db
-    .select({
-      binding: schema.cliCredentialBindings,
-      enabled: schema.apikey.enabled,
-      expiresAt: schema.apikey.expiresAt,
-      permissions: schema.apikey.permissions,
-    })
-    .from(schema.cliCredentialBindings)
-    .leftJoin(
-      schema.apikey,
-      eq(schema.apikey.id, schema.cliCredentialBindings.keyId),
-    )
-    .where(eq(schema.cliCredentialBindings.userId, userId));
-  const epoch = await userEpoch(db, userId);
-  const inst = await instance();
-  const runIds = rows
-    .map((row) => row.binding.runId)
-    .filter((id): id is string => id != null);
-  const [runRows, grants] = runIds.length
-    ? await Promise.all([
-        db.query.agentRuns.findMany({ where: { id: { in: runIds } } }),
-        db.query.cliRunAuthorizations.findMany({
-          where: { runId: { in: runIds } },
-        }),
-      ])
-    : [[], []];
-  const liveRuns = new Map(runRows.map((run) => [run.id, run]));
-  const liveGrants = new Map(grants.map((grant) => [grant.runId, grant]));
-  const runEnded = (b: Binding) => {
-    if (b.credentialType !== 'run_key') return false;
-    const run = liveRuns.get(b.runId!);
-    const grant = liveGrants.get(b.runId!);
-    return (
-      !run ||
-      !grant ||
-      grant.revokedAt ||
-      grant.epoch !== b.runEpoch ||
-      run.runnerId !== b.runnerId ||
-      run.sessionId !== b.sessionId ||
-      !['running', 'blocked'].includes(run.status) ||
-      !run.leaseExpiresAt ||
-      run.leaseExpiresAt <= new Date()
-    );
-  };
-  return rows.map(({ binding: b, enabled, expiresAt, permissions }) => ({
-    id: b.keyId,
-    name: b.displayName,
-    credentialType: b.credentialType,
-    resources: b.resources,
-    scopes: scopesFrom(JSON.parse(permissions ?? '{}')),
-    expiresAt: expiresAt ?? b.issuedExpiresAt,
-    createdAt: b.createdAt,
-    status:
-      b.revokedAt ||
-      b.userEpoch !== epoch ||
-      b.instanceEpoch !== inst.epoch ||
-      b.instanceId !== inst.instanceId ||
-      runEnded(b)
-        ? 'revoked'
-        : b.issuedExpiresAt <= new Date() || expiresAt == null
-          ? 'expired'
-          : !enabled
-            ? 'revoked'
-            : 'active',
-  }));
+  const keys = await db.query.apikey.findMany({
+    where: { referenceId: userId, configId: CONFIG_ID },
+    orderBy: { createdAt: 'desc' },
+  });
+  const rows = await Promise.all(
+    keys.map(async (key) => {
+      const metadata = readMetadata(key.metadata);
+      if (!metadata) return null;
+      const expired = !key.expiresAt || key.expiresAt <= new Date();
+      const problem = expired
+        ? null
+        : await keyProblem(key, metadata, db, false);
+      return {
+        id: key.id,
+        name: key.name,
+        credentialType: metadata.credentialType,
+        scopes: readScopes(key.permissions),
+        resources: metadata.resources,
+        expiresAt: key.expiresAt,
+        createdAt: key.createdAt,
+        status: expired ? 'expired' : problem ? 'revoked' : 'active',
+      };
+    }),
+  );
+  return rows.filter((row) => row !== null);
 }

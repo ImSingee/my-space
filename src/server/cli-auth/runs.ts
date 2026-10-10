@@ -1,77 +1,16 @@
-import { eq } from 'drizzle-orm';
-import { CLI_SCOPES, issuanceEnabled } from '~auth/cli-policy';
-import { db, schema, type TX } from '~/db';
-import {
-  audit,
-  AuthError,
-  instance,
-  issueCredential,
-  userEpoch,
-} from './credentials';
+import { CLI_SCOPES } from '~auth/cli-policy';
+import { db } from '~/db';
+import { AuthError, issueCredential, readMetadata } from './credentials';
 
-/** Called inside real Cookie-initiated run creation, never from Agent input. */
-export async function recordRunAuthorization(
-  tx: TX,
-  runId: string,
-  sessionId: string,
-  userId: string,
-) {
-  if (!issuanceEnabled()) return;
-  const inst = await instance(tx);
-  const epoch = await userEpoch(tx, userId);
-  // Current platform users are single-tenant administrators. This grant narrows
-  // that authority to lifecycle operations; mentions do not create new authority.
-  await tx.insert(schema.cliRunAuthorizations).values({
-    runId,
-    sessionId,
-    userId,
-    userEpoch: epoch,
-    instanceId: inst.instanceId,
-    instanceEpoch: inst.epoch,
-    scopes: [...CLI_SCOPES],
-    resources: { mode: 'all' },
-  });
-  await audit(tx, 'run.authorize', userId, null, runId, { sessionId });
-}
-
-export async function validateRunGrant(
-  tx: TX,
-  runId: string,
-  runnerId: string,
-  userId?: string,
-  epoch?: number,
-) {
-  const [run] = await tx
-    .select()
-    .from(schema.agentRuns)
-    .where(eq(schema.agentRuns.id, runId))
-    .for('share');
-  const [grant] = await tx
-    .select()
-    .from(schema.cliRunAuthorizations)
-    .where(eq(schema.cliRunAuthorizations.runId, runId))
-    .for('share');
-  const inst = await instance(tx);
-  if (
-    !run ||
-    !grant ||
-    grant.revokedAt ||
-    (userId && grant.userId !== userId) ||
-    (epoch && grant.epoch !== epoch) ||
-    run.runnerId !== runnerId ||
-    run.sessionId !== grant.sessionId ||
-    !['running', 'blocked'].includes(run.status) ||
-    !run.leaseExpiresAt ||
-    run.leaseExpiresAt <= new Date() ||
-    grant.instanceId !== inst.instanceId ||
-    grant.instanceEpoch !== inst.epoch ||
-    (await userEpoch(tx, grant.userId)) !== grant.userEpoch
-  )
-    throw new AuthError('run_authorization_ended', 401);
-  return grant;
-}
-
-/** The shared internal token proves membership in the trusted fleet, not a distinct Runner identity. */
+/**
+ * Mint (or renew) a five-minute key for a live Run started by a real Cookie
+ * user. Current users are single-tenant administrators, so the key carries
+ * every lifecycle scope over all resources and nothing else. Each use rechecks
+ * the Run's status, lease, Runner and session, so ending the Run ends the key.
+ *
+ * The shared internal token proves membership in the trusted fleet, not a
+ * distinct Runner identity.
+ */
 export async function mintRunCredential(
   runId: string,
   runnerId: string,
@@ -80,29 +19,38 @@ export async function mintRunCredential(
   const { listConnectedRunners } = await import('~server/agent-runner/hub');
   if (!listConnectedRunners().some((runner) => runner.runnerId === runnerId))
     throw new AuthError('runner_not_connected', 403);
-  const grant = await db.transaction((tx) =>
-    validateRunGrant(tx, runId, runnerId),
-  );
+  const run = await db.query.agentRuns.findFirst({ where: { id: runId } });
+  if (
+    !run?.startedByUserId ||
+    run.runnerId !== runnerId ||
+    !['running', 'blocked'].includes(run.status) ||
+    !run.leaseExpiresAt ||
+    run.leaseExpiresAt <= new Date()
+  )
+    throw new AuthError('run_authorization_ended', 401);
   if (renewKeyId) {
-    const old = await db.query.cliCredentialBindings.findFirst({
-      where: { keyId: renewKeyId, runId, runnerId, credentialType: 'run_key' },
+    // An expired previous key may still identify the Run it was minted for.
+    const previous = await db.query.apikey.findFirst({
+      where: { id: renewKeyId, referenceId: run.startedByUserId },
     });
-    if (!old || old.revokedAt || old.runEpoch !== grant.epoch)
+    const previousRun = readMetadata(previous?.metadata ?? null)?.run;
+    if (
+      !previous?.enabled ||
+      previousRun?.runId !== runId ||
+      previousRun.sessionId !== run.sessionId ||
+      previousRun.runnerId !== runnerId
+    )
       throw new AuthError('renewal_conflict', 409);
   }
   const key = await issueCredential({
-    userId: grant.userId,
-    userEpoch: grant.userEpoch,
-    instanceId: grant.instanceId,
-    instanceEpoch: grant.instanceEpoch,
+    userId: run.startedByUserId,
     credentialType: 'run_key',
     name: `Run ${runId}`,
     expiresIn: 300,
-    scopes: grant.scopes,
-    resources: grant.resources,
-    run: { runId, sessionId: grant.sessionId, runnerId, epoch: grant.epoch },
+    scopes: [...CLI_SCOPES],
+    resources: { mode: 'all' },
+    run: { runId, sessionId: run.sessionId, runnerId },
   });
-  // Renewal overlaps only until the previous five-minute TTL. Host replaces its
-  // delivered token. Expired keys may renew only while the original run grant is live.
-  return { ...key, context: { runId, sessionId: grant.sessionId, runnerId } };
+  // Renewal overlaps only until the previous key's own five-minute expiry.
+  return { ...key, context: { runId, sessionId: run.sessionId, runnerId } };
 }

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { CliScope, ResourceRange } from '~auth/cli-policy';
 
@@ -14,7 +14,6 @@ let database: typeof import('~/db');
 let auth: typeof import('~auth/server').auth;
 let api: typeof import('./http').handleCliAuthRequest;
 let credentials: typeof import('./credentials');
-let runs: typeof import('./runs');
 let server: http.Server;
 let websocketServer: WebSocketServer;
 let socket: WebSocket;
@@ -138,9 +137,9 @@ async function assignedRun(owner = userId) {
       modelId: 'test',
       input: { text: 'Test run' },
       runnerId,
+      startedByUserId: owner,
       leaseExpiresAt: new Date(Date.now() + 90000),
     });
-    await runs.recordRunAuthorization(tx, runId, sessionId, owner);
   });
   return { runId, sessionId };
 }
@@ -184,7 +183,6 @@ describe.runIf(Boolean(databaseUrl))(
       auth = (await import('~auth/server')).auth;
       api = (await import('./http')).handleCliAuthRequest;
       credentials = await import('./credentials');
-      runs = await import('./runs');
       const owner = await signup();
       cookie = owner.cookie;
       userId = owner.userId;
@@ -630,7 +628,7 @@ describe.runIf(Boolean(databaseUrl))(
       expect((await poll(cancelled)).response.status).toBe(400);
     });
 
-    it('invalidates keys on real password change and deletion while retaining audit', async () => {
+    it('invalidates keys on real password change and user deletion', async () => {
       const owner = await signup();
       const key = await newKey(['app.read'], { mode: 'all' }, owner.cookie);
       const changed = await auth.handler(
@@ -651,6 +649,23 @@ describe.runIf(Boolean(databaseUrl))(
       expect(
         (await call('auth/status', undefined, bearer(key))).response.status,
       ).toBe(401);
+      const listed = await call<{ id: string; status: string }[]>(
+        'auth/keys',
+        undefined,
+        { cookie: owner.cookie },
+      );
+      expect(listed.data.find((item) => item.id === key.id)?.status).toBe(
+        'revoked',
+      );
+      const afterChange = await newKey(
+        ['app.read'],
+        { mode: 'all' },
+        owner.cookie,
+      );
+      expect(
+        (await call('auth/status', undefined, bearer(afterChange))).response
+          .status,
+      ).toBe(200);
       const deleted = await signup();
       const deletedKey = await newKey(
         ['app.read'],
@@ -664,18 +679,6 @@ describe.runIf(Boolean(databaseUrl))(
         (await call('auth/status', undefined, bearer(deletedKey))).response
           .status,
       ).toBe(401);
-      const events = await database.db.query.cliAuthAudit.findMany({
-        where: { userId: deleted.userId },
-      });
-      expect(
-        events.some((event) => event.action === 'user.delete.invalidate'),
-      ).toBe(true);
-      expect(JSON.stringify(events).includes(deletedKey.token)).toBe(false);
-      await expect(
-        database.db
-          .delete(database.schema.cliAuthAudit)
-          .where(eq(database.schema.cliAuthAudit.userId, deleted.userId)),
-      ).rejects.toThrow(/Failed query/);
     });
 
     it('mints and renews through a real protocol-18 Runner connection and internal HTTP auth', async () => {
@@ -744,9 +747,10 @@ describe.runIf(Boolean(databaseUrl))(
       },
     );
 
-    it('never revives run credentials when a late heartbeat extends an expired lease', async () => {
+    it('rejects a Run key as soon as its lease lapses', async () => {
       const run = await assignedRun();
       const key = await internal(run.runId, { runnerId });
+      expect(key.response.status).toBe(200);
       await database.db
         .update(database.schema.agentRuns)
         .set({ leaseExpiresAt: new Date(Date.now() - 1000) })
@@ -755,12 +759,17 @@ describe.runIf(Boolean(databaseUrl))(
         (await call('auth/status', undefined, bearer(key.data))).response
           .status,
       ).toBe(401);
-      const { renewRunnerLeases } = await import('~server/agent-runs');
-      await renewRunnerLeases(runnerId);
-      expect(
-        (await call('auth/status', undefined, bearer(key.data))).response
-          .status,
-      ).toBe(401);
+      expect((await internal(run.runId, { runnerId })).response.status).toBe(
+        401,
+      );
+    });
+
+    it('never mints Run keys for runs without a Cookie issuer', async () => {
+      const run = await assignedRun();
+      await database.db
+        .update(database.schema.agentRuns)
+        .set({ startedByUserId: null })
+        .where(eq(database.schema.agentRuns.id, run.runId));
       expect((await internal(run.runId, { runnerId })).response.status).toBe(
         401,
       );
@@ -791,37 +800,40 @@ describe.runIf(Boolean(databaseUrl))(
       ).rejects.toThrow('invalid_credential');
     });
 
-    it('fails closed on activation error, issuance rollback and installation epoch change', async () => {
-      const inst = await credentials.instance();
-      const epoch = await credentials.userEpoch(database.db, userId);
-      await expect(
-        credentials.issueCredential({
-          userId,
-          userEpoch: epoch + 1,
-          instanceId: inst.instanceId,
-          instanceEpoch: inst.epoch,
-          credentialType: 'user_api_key',
-          name: 'Unbound failure',
-          expiresIn: 300,
-          scopes: ['app.read'],
-          resources: { mode: 'all' },
-        }),
-      ).rejects.toThrow('grant_invalidated');
-      const orphan = await database.db.query.apikey.findFirst({
-        where: { name: 'Unbound failure' },
+    it('resolves an exact immutable ID before a colliding slug', async () => {
+      const legacyId = `legacy-${randomUUID()}`;
+      const other = randomUUID();
+      // A legacy kebab-case ID that another object later took as its slug.
+      // The slug holder is stored first, where an unordered match finds it.
+      await database.db.insert(database.schema.apps).values([
+        { id: other, slug: legacyId, name: 'Slug holder' },
+        { id: legacyId, slug: `renamed-${randomUUID()}`, name: 'Legacy' },
+      ]);
+      const all = await newKey(['app.read']);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const found = await call<{ id: string }>(
+          `apps/${legacyId}`,
+          undefined,
+          bearer(all),
+        );
+        expect(found.data.id).toBe(legacyId);
+      }
+      const finite = await newKey(['app.read'], {
+        mode: 'ids',
+        apps: [legacyId],
+        workflows: [],
       });
-      expect(orphan?.enabled).toBe(false);
       expect(
-        Boolean(
-          await database.db.query.cliCredentialBindings.findFirst({
-            where: { keyId: orphan!.id },
-          }),
-        ),
-      ).toBe(false);
+        (await call(`apps/${legacyId}`, undefined, bearer(finite))).response
+          .status,
+      ).toBe(200);
+    });
+
+    it('grants nothing to plugin keys without Hatch metadata, and keeps verification while issuance is off', async () => {
       const pluginOnly = await auth.api.createApiKey({
         body: {
           configId: 'hatch',
-          name: 'No binding',
+          name: 'No metadata',
           expiresIn: 300,
           userId,
           permissions: { hatch: ['app.read'] },
@@ -859,6 +871,9 @@ describe.runIf(Boolean(databaseUrl))(
             .status,
         ).toBe(200);
         expect(
+          (await call('auth/status', undefined, bearer(key))).response.status,
+        ).toBe(401);
+        expect(
           Boolean(
             await auth.api.getSession({ headers: new Headers({ cookie }) }),
           ),
@@ -866,14 +881,6 @@ describe.runIf(Boolean(databaseUrl))(
       } finally {
         process.env.HATCH_CLI_AUTH_ENABLED = 'true';
       }
-      const invalidated = await newKey();
-      await database.db
-        .update(database.schema.cliAuthInstance)
-        .set({ epoch: sql`${database.schema.cliAuthInstance.epoch} + 1` });
-      expect(
-        (await call('auth/status', undefined, bearer(invalidated))).response
-          .status,
-      ).toBe(401);
     });
   },
 );

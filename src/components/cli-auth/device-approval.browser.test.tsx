@@ -19,7 +19,6 @@ const CODE = 'WDJB4K7M';
 const review = {
   userCode: CODE,
   account: 'owner@example.com',
-  instanceId: 'instance-1',
   scopes: ['app.read', 'app.deploy'],
   resources: { mode: 'all' },
   credentialType: 'interactive_key',

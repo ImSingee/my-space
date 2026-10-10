@@ -52,7 +52,7 @@ must be English; user-facing review explanations may be Chinese.
 All three calls are JSON POSTs with `{ "user_code": "..." }`, same-origin
 real Cookie credentials, and `Content-Type: application/json`:
 
-- `/api/cli/v1/auth/device/claim`: returns `userCode`, `account`, `instanceId`,
+- `/api/cli/v1/auth/device/claim`: returns `userCode`, `account`,
   `scopes`, `resources`, `credentialType`, `expiresIn` (key lifetime in seconds),
   and `grantExpiresAt`. This is a mutation, not a fetch to run automatically.
 - `/api/cli/v1/auth/device/approve`: returns `{ "status": "approved" }`.

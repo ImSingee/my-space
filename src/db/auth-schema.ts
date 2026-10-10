@@ -152,10 +152,7 @@ export const deviceCode = pgTable(
     scope: text('scope'),
     hatchResources: text('hatch_resources').notNull(),
     hatchExpiresIn: integer('hatch_expires_in').notNull(),
-    hatchInstanceId: text('hatch_instance_id').notNull(),
-    hatchInstanceEpoch: integer('hatch_instance_epoch').notNull(),
     hatchSessionId: text('hatch_session_id'),
-    hatchUserEpoch: integer('hatch_user_epoch'),
   },
   (table) => [
     uniqueIndex('deviceCode_deviceCode_uidx').on(table.deviceCode),

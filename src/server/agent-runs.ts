@@ -556,6 +556,7 @@ export async function startAgentRun(
           providerId: model.providerId,
           modelId: model.model.id,
           status: 'running',
+          startedByUserId: issuer?.userId ?? null,
           // Covers the dispatch window; the accepting runner renews from here.
           leaseExpiresAt: leaseDeadline(),
           // Diagnostics only (no reader reconstructs the run from this). Store
@@ -569,16 +570,6 @@ export async function startAgentRun(
           },
         })
         .returning();
-
-      if (issuer) {
-        const { recordRunAuthorization } = await import('./cli-auth/runs');
-        await recordRunAuthorization(
-          tx,
-          inserted.id,
-          input.sessionId,
-          issuer.userId,
-        );
-      }
 
       // Keep run creation and transcript replacement in one commit. In
       // particular, a retry must never delete the failed turn unless the new
