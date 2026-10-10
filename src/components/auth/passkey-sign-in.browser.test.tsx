@@ -60,6 +60,7 @@ beforeEach(() => {
   fixtures.autofill = false;
   fixtures.supported = true;
   mocks.signIn.mockResolvedValue({ data: {}, error: null });
+  mocks.onSuccess.mockReset().mockResolvedValue();
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -85,6 +86,30 @@ test('completes conditional UI sign-in without touching the password form', asyn
     expect(mocks.signIn).toHaveBeenCalledWith({ autoFill: true });
     expect(mocks.onSuccess).toHaveBeenCalledOnce();
   });
+});
+
+test('retries navigation independently and disables the action while navigation is pending', async () => {
+  fixtures.autofill = true;
+  let release: () => void = () => {};
+  mocks.onSuccess.mockRejectedValueOnce(new Error('Route unavailable'));
+  mocks.onSuccess.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const screen = await renderPasskeySignIn();
+  const retry = screen.getByRole('button', { name: 'Continue', exact: true });
+  await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledOnce());
+  await expect.element(retry).toBeEnabled();
+  expect(mocks.toastSuccess).not.toHaveBeenCalled();
+  await retry.click();
+  await expect.element(retry).toBeDisabled();
+  expect(mocks.onSuccess).toHaveBeenCalledTimes(2);
+  expect(mocks.signIn).toHaveBeenCalledOnce();
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  release();
+  await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledOnce());
 });
 
 test('keeps a dismissed native prompt silent and the explicit action usable', async () => {

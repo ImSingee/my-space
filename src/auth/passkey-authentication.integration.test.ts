@@ -63,6 +63,8 @@ const html = `<!doctype html><html><body>
     return get(options);
   };
   window.client = authClient;
+  window.navigationAttempts = 0;
+  window.navigationFailures = 0;
   window.register = async () => {
     const options = await authClient.$fetch('/passkey/generate-register-options');
     options.data.timeout = 1000;
@@ -76,7 +78,11 @@ const html = `<!doctype html><html><body>
   window.mount = () => root.render(React.createElement(MantineProvider, {},
     React.createElement(React.Fragment, {}, React.createElement(Toaster),
     React.createElement(PasskeySignIn, { appOrigin: location.origin,
-      onSuccess: async () => { window.signedIn = true; }
+      onSuccess: async () => {
+        window.navigationAttempts++;
+        if (window.navigationFailures-- > 0) throw new Error('Route unavailable');
+        window.signedIn = true;
+      }
     }))));
   window.unmount = () => root.unmount();
   window.ready = true;
@@ -219,6 +225,42 @@ async function completeNativeAuthentication() {
   );
   expect(session.data.user.email).toBe('passkey@example.test');
 }
+
+test.each(['explicit', 'conditional'])(
+  'retries navigation after %s authentication without another ceremony or session',
+  async (mediation) => {
+    await enrollAndOpenLogin();
+    await page.evaluate((conditional) => {
+      PublicKeyCredential.isConditionalMediationAvailable = async () =>
+        conditional;
+    }, mediation === 'conditional');
+    await page.evaluate('window.navigationFailures = 2; window.mount()');
+    if (mediation === 'explicit') {
+      await page
+        .getByRole('button', { name: 'Sign in with a passkey' })
+        .click();
+    }
+    await page.waitForFunction('window.navigationAttempts === 1');
+    await page.getByText(/Signed in, but the next page/).waitFor();
+    const initialSession = await page.evaluate<{
+      data: { session: { id: string } };
+    }>('window.client.getSession()');
+    expect(initialSession.data.session.id).toBeTruthy();
+    const retry = page.getByRole('button', { name: 'Continue', exact: true });
+    await retry.click({ timeout: 3_000 });
+    await page.waitForFunction('window.navigationAttempts === 2');
+    await expect.poll(() => retry.isEnabled()).toBe(true);
+    await retry.click();
+    await completeNativeAuthentication();
+    expect(await page.evaluate('window.navigationAttempts')).toBe(3);
+    expect(await page.evaluate('window.ceremonies')).toEqual([mediation]);
+    const session = await page.evaluate<{ data: { session: { id: string } } }>(
+      'window.client.getSession()',
+    );
+    expect(session.data.session.id).toBe(initialSession.data.session.id);
+  },
+  20_000,
+);
 
 test.each(['generate-authenticate-options', 'verify-authentication'])(
   'reports explicit HTTP timeout at %s and allows a successful retry',
