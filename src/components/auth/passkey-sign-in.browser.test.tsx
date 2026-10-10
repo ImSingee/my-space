@@ -3,38 +3,20 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { PasskeySignIn } from './passkey-sign-in';
 
-const fixtures = vi.hoisted(() => ({
-  autofill: false,
-  supported: true,
-}));
-
+const fixtures = vi.hoisted(() => ({ supported: true }));
+type SignInResult = {
+  data: unknown;
+  error: { code?: string; message?: string } | null;
+};
 const mocks = vi.hoisted(() => ({
-  onSuccess: vi.fn<() => Promise<void>>(async () => {}),
-  signIn: vi.fn<
-    (options: { autoFill: boolean }) => Promise<{
-      data: unknown;
-      error: { code?: string; message?: string } | null;
-    }>
-  >(async () => ({ data: {}, error: null })),
+  onSuccess: vi.fn<() => Promise<void>>(),
+  signIn: vi.fn<() => Promise<SignInResult>>(),
   toastError: vi.fn<(message: string) => void>(),
   toastSuccess: vi.fn<(message: string) => void>(),
-  fetch: vi.fn<() => Promise<{ data: object; error: null }>>(async () => ({
-    data: {},
-    error: null,
-  })),
-  notify: vi.fn<() => void>(),
 }));
 
 vi.mock('~auth/client', () => ({
-  authClient: { $fetch: mocks.fetch, $store: { notify: mocks.notify } },
-}));
-
-vi.mock('~auth/passkey-credential', () => ({
-  authenticatePasskey: async (_options: unknown, conditional: boolean) => {
-    const result = await mocks.signIn({ autoFill: conditional });
-    if (result.error) throw result.error;
-    return { clientExtensionResults: {} };
-  },
+  authClient: { signIn: { passkey: mocks.signIn } },
 }));
 
 vi.mock('sonner', () => ({
@@ -45,7 +27,7 @@ async function renderPasskeySignIn(appOrigin = window.location.origin) {
   vi.stubGlobal(
     'PublicKeyCredential',
     fixtures.supported
-      ? { isConditionalMediationAvailable: async () => fixtures.autofill }
+      ? { isConditionalMediationAvailable: async () => true }
       : undefined,
   );
   return render(
@@ -57,48 +39,36 @@ async function renderPasskeySignIn(appOrigin = window.location.origin) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  fixtures.autofill = false;
   fixtures.supported = true;
-  mocks.signIn.mockResolvedValue({ data: {}, error: null });
+  mocks.signIn.mockReset().mockResolvedValue({ data: {}, error: null });
   mocks.onSuccess.mockReset().mockResolvedValue();
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
-test('signs in from the explicit passkey action', async () => {
+test('starts SDK authentication only after the user chooses passkey sign-in', async () => {
   const screen = await renderPasskeySignIn();
+  window.dispatchEvent(new Event('focus'));
+  window.dispatchEvent(new Event('online'));
+  expect(mocks.signIn).not.toHaveBeenCalled();
 
   await screen.getByRole('button', { name: 'Sign in with a passkey' }).click();
 
-  await vi.waitFor(() => {
-    expect(mocks.signIn).toHaveBeenCalledWith({ autoFill: false });
-    expect(mocks.onSuccess).toHaveBeenCalledOnce();
-  });
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
+  expect(mocks.signIn).toHaveBeenCalledWith();
   expect(mocks.toastSuccess).toHaveBeenCalledWith('Welcome back');
 });
 
-test('completes conditional UI sign-in without touching the password form', async () => {
-  fixtures.autofill = true;
-
-  await renderPasskeySignIn();
-
-  await vi.waitFor(() => {
-    expect(mocks.signIn).toHaveBeenCalledWith({ autoFill: true });
-    expect(mocks.onSuccess).toHaveBeenCalledOnce();
-  });
-});
-
-test('retries navigation independently and disables the action while navigation is pending', async () => {
-  fixtures.autofill = true;
+test('retries navigation without repeating authentication and disables pending navigation', async () => {
   let release: () => void = () => {};
+  const navigation = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   mocks.onSuccess.mockRejectedValueOnce(new Error('Route unavailable'));
-  mocks.onSuccess.mockImplementationOnce(
-    () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-  );
+  mocks.onSuccess.mockImplementationOnce(() => navigation);
   const screen = await renderPasskeySignIn();
+  await screen.getByRole('button', { name: 'Sign in with a passkey' }).click();
+
   const retry = screen.getByRole('button', { name: 'Continue', exact: true });
   await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledOnce());
   await expect.element(retry).toBeEnabled();
@@ -107,48 +77,73 @@ test('retries navigation independently and disables the action while navigation 
   await expect.element(retry).toBeDisabled();
   expect(mocks.onSuccess).toHaveBeenCalledTimes(2);
   expect(mocks.signIn).toHaveBeenCalledOnce();
-  expect(mocks.fetch).toHaveBeenCalledTimes(2);
   release();
   await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledOnce());
 });
 
-test('keeps a dismissed native prompt silent and the explicit action usable', async () => {
-  mocks.signIn.mockResolvedValue({
+test('keeps SDK-reported cancellation silent and allows a successful retry', async () => {
+  mocks.signIn.mockResolvedValueOnce({
     data: null,
-    error: {
-      code: 'ERROR_CEREMONY_ABORTED',
-      message: 'Passkey registration was cancelled',
-    },
+    error: { code: 'AUTH_CANCELLED', message: 'Authentication was cancelled' },
   });
   const screen = await renderPasskeySignIn();
-  const button = screen.getByRole('button', {
-    name: 'Sign in with a passkey',
-  });
-
+  const button = screen.getByRole('button', { name: 'Sign in with a passkey' });
   await button.click();
 
-  await vi.waitFor(() => expect(mocks.signIn).toHaveBeenCalledOnce());
-  expect(mocks.toastError).not.toHaveBeenCalled();
   await expect.element(button).toBeEnabled();
+  expect(mocks.toastError).not.toHaveBeenCalled();
+  expect(mocks.onSuccess).not.toHaveBeenCalled();
+  await button.click();
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
 });
 
-test.each(['AbortError', 'NotAllowedError'])(
-  'keeps native %s silent and allows another explicit sign-in',
-  async (name) => {
-    mocks.signIn.mockRejectedValueOnce(new DOMException('Cancelled', name));
-    const screen = await renderPasskeySignIn();
-    const button = screen.getByRole('button', {
-      name: 'Sign in with a passkey',
-    });
-    await button.click();
-    await vi.waitFor(() => expect(mocks.signIn).toHaveBeenCalledOnce());
-    await expect.element(button).toBeEnabled();
-    expect(mocks.toastError).not.toHaveBeenCalled();
-    expect(mocks.onSuccess).not.toHaveBeenCalled();
-    await button.click();
-    await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
-  },
-);
+test('reports a rejected authentication and allows a successful retry', async () => {
+  mocks.signIn.mockResolvedValueOnce({
+    data: null,
+    error: { code: 'AUTHENTICATION_FAILED', message: 'Authentication failed' },
+  });
+  const screen = await renderPasskeySignIn();
+  const button = screen.getByRole('button', { name: 'Sign in with a passkey' });
+  await button.click();
+
+  await vi.waitFor(() =>
+    expect(mocks.toastError).toHaveBeenCalledWith('Authentication failed'),
+  );
+  expect(mocks.onSuccess).not.toHaveBeenCalled();
+  await button.click();
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
+});
+
+test('reports a thrown SDK request failure and allows a successful retry', async () => {
+  mocks.signIn.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  const screen = await renderPasskeySignIn();
+  const button = screen.getByRole('button', { name: 'Sign in with a passkey' });
+  await button.click();
+
+  await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledOnce());
+  expect(mocks.onSuccess).not.toHaveBeenCalled();
+  await button.click();
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
+});
+
+test('disables pending authentication and ignores completion after leaving login', async () => {
+  let release: (result: SignInResult) => void = () => {};
+  const authentication = new Promise<SignInResult>((resolve) => {
+    release = resolve;
+  });
+  mocks.signIn.mockImplementationOnce(() => authentication);
+  const screen = await renderPasskeySignIn();
+  const button = screen.getByRole('button', { name: 'Sign in with a passkey' });
+  await button.click();
+
+  await expect.element(button).toBeDisabled();
+  expect(mocks.signIn).toHaveBeenCalledOnce();
+  await screen.unmount();
+  release({ data: {}, error: null });
+  await authentication;
+  expect(mocks.onSuccess).not.toHaveBeenCalled();
+  expect(mocks.toastSuccess).not.toHaveBeenCalled();
+});
 
 test('does not offer passkey sign-in when WebAuthn is unavailable', async () => {
   fixtures.supported = false;
@@ -161,9 +156,8 @@ test('does not offer passkey sign-in when WebAuthn is unavailable', async () => 
 });
 
 test.each(['http://127.0.0.1:3700', 'http://[::1]:3700'])(
-  'hides both explicit and conditional sign-in for IP APP_URL %s',
+  'does not offer passkey sign-in for IP APP_URL %s',
   async (appOrigin) => {
-    fixtures.autofill = true;
     const screen = await renderPasskeySignIn(appOrigin);
 
     await expect

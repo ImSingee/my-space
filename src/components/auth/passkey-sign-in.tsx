@@ -1,11 +1,11 @@
 import { Button, Divider, Stack } from '@mantine/core';
 import { IconKey } from '@tabler/icons-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PasskeyAuthentication } from '~auth/passkey-authentication';
+import { authClient } from '~auth/client';
 import {
-  browserSupportsPasskeyAutofill,
   browserSupportsPasskeys,
+  isPasskeyCancellation,
   passkeyErrorMessage,
 } from '~auth/passkey-browser';
 
@@ -18,73 +18,56 @@ export function PasskeySignIn({
 }) {
   const [loading, setLoading] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
-  const completing = useRef(false);
-  const authentication = useRef<PasskeyAuthentication | null>(null);
+  const pending = useRef(false);
+  const mounted = useRef(true);
   const supported = browserSupportsPasskeys(appOrigin);
 
-  const completeSignIn = useCallback(async () => {
-    if (completing.current) return;
-    completing.current = true;
-    // Authentication already established a session. A failed navigation must
-    // retry only the destination, not start another WebAuthn ceremony.
-    setAuthenticated(true);
-    setLoading(true);
-
-    try {
-      await onSuccess();
-      toast.success('Welcome back');
-    } catch {
-      toast.error(
-        'Signed in, but the next page could not be opened. Click Continue to try again.',
-      );
-    } finally {
-      completing.current = false;
-      setLoading(false);
-    }
-  }, [onSuccess]);
-
   useEffect(() => {
-    if (!supported) return;
-
-    let active = true;
-    const flow = new PasskeyAuthentication(completeSignIn, (error) => {
-      toast.error(passkeyErrorMessage(error, 'Passkey sign-in failed.'));
-    });
-    authentication.current = flow;
-    void (async () => {
-      if (!(await browserSupportsPasskeyAutofill(appOrigin)) || !active) return;
-      flow.enableAutofill();
-    })();
-
-    const refresh = () => {
-      if (document.visibilityState === 'visible') flow.refreshAutofill();
-    };
-    window.addEventListener('focus', refresh);
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', refresh);
-
+    mounted.current = true;
     return () => {
-      active = false;
-      flow.dispose();
-      if (authentication.current === flow) authentication.current = null;
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', refresh);
+      mounted.current = false;
     };
-  }, [appOrigin, completeSignIn, supported]);
+  }, []);
 
   if (!supported) return null;
 
   const signIn = async () => {
-    if (completing.current) return;
+    if (pending.current) return;
+    pending.current = true;
     setLoading(true);
     try {
-      if (authenticated) await completeSignIn();
-      else await authentication.current?.signIn();
+      if (!authenticated) {
+        const result = await authClient.signIn.passkey();
+        if (!mounted.current) return;
+        if (result.error) {
+          if (!isPasskeyCancellation(result.error)) {
+            toast.error(
+              passkeyErrorMessage(result.error, 'Passkey sign-in failed.'),
+            );
+          }
+          return;
+        }
+        setAuthenticated(true);
+      }
+
+      // Retry only navigation if the SDK already established the session.
+      try {
+        await onSuccess();
+        toast.success('Welcome back');
+      } catch {
+        if (mounted.current) {
+          toast.error(
+            'Signed in, but the next page could not be opened. Click Continue to try again.',
+          );
+        }
+      }
     } catch {
-      toast.error('Passkey sign-in failed. Please try again.');
+      if (mounted.current) {
+        toast.error('Passkey sign-in failed. Please try again.');
+      }
     } finally {
-      setLoading(false);
+      pending.current = false;
+      if (mounted.current) setLoading(false);
     }
   };
 

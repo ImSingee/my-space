@@ -23,21 +23,6 @@ export function browserSupportsPasskeys(appOrigin: string): boolean {
   );
 }
 
-export async function browserSupportsPasskeyAutofill(
-  appOrigin: string,
-): Promise<boolean> {
-  if (!browserSupportsPasskeys(appOrigin)) return false;
-
-  const check = window.PublicKeyCredential.isConditionalMediationAvailable;
-  if (typeof check !== 'function') return false;
-
-  try {
-    return await check.call(window.PublicKeyCredential);
-  } catch {
-    return false;
-  }
-}
-
 export function isPasskeyCancellation(
   error: PasskeyClientError | null | undefined,
 ): boolean {
