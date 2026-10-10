@@ -146,11 +146,7 @@ function LoginPage() {
               <form onSubmit={submit}>
                 <Stack gap="md">
                   {mode === 'signup' ? (
-                    <TextInput
-                      label="Name"
-                      autoComplete="name"
-                      {...form.getInputProps('name')}
-                    />
+                    <TextInput label="Name" {...form.getInputProps('name')} />
                   ) : null}
                   <TextInput
                     label="Email"
@@ -165,9 +161,6 @@ function LoginPage() {
                   />
                   <PasswordInput
                     label="Password"
-                    autoComplete={
-                      mode === 'signin' ? 'current-password' : 'new-password'
-                    }
                     {...form.getInputProps('password')}
                   />
                   <Button

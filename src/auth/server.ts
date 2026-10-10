@@ -85,17 +85,6 @@ export const auth = betterAuth({
     // },
   },
   plugins: [
-    {
-      id: 'verification-retention',
-      // Keep the expiry index in the generated auth schema. The platform's
-      // background sweep removes abandoned challenges without a verify request.
-      schema: {
-        verification: {
-          fields: {},
-          indexes: [{ fields: ['expiresAt'] }],
-        },
-      },
-    },
     // Keep management endpoints and schema available even when ceremonies
     // are disabled. The hook above rejects them before any challenge is stored.
     passkey({

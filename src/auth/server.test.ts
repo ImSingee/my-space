@@ -79,11 +79,7 @@ describe('Better Auth configuration', () => {
     });
     expect(mocks.betterAuth).toHaveBeenCalledWith(
       expect.objectContaining({
-        plugins: [
-          expect.objectContaining({ id: 'verification-retention' }),
-          'passkey',
-          'tanstack-start-cookies',
-        ],
+        plugins: ['passkey', 'tanstack-start-cookies'],
       }),
     );
   });

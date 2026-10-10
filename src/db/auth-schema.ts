@@ -85,10 +85,7 @@ export const verification = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [
-    index('verification_expiresAt_idx').on(table.expiresAt),
-    index('verification_identifier_idx').on(table.identifier),
-  ],
+  (table) => [index('verification_identifier_idx').on(table.identifier)],
 );
 
 export const passkey = pgTable(
