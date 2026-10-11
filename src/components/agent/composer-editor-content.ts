@@ -6,12 +6,36 @@ import {
 
 /** Build the plain paragraph document used when a chip/example seeds a draft. */
 export function plainTextComposerDocument(text: string): JSONContent {
+  return composerDocumentFromParts([{ type: 'text', text }]);
+}
+
+/** Build an editor document without losing inline snapshots or line breaks. */
+export function composerDocumentFromParts(
+  parts: ComposerInputPart[],
+): JSONContent {
+  const paragraphs: JSONContent[] = [{ type: 'paragraph', content: [] }];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      part.text.split('\n').forEach((line, index) => {
+        if (index > 0) paragraphs.push({ type: 'paragraph', content: [] });
+        if (line)
+          paragraphs.at(-1)!.content!.push({ type: 'text', text: line });
+      });
+    } else {
+      paragraphs.at(-1)!.content!.push({
+        type: 'mention',
+        attrs: {
+          id: part.id,
+          label: part.name,
+          resourceType: part.type,
+          ...(part.type === 'app' ? { slug: part.slug } : {}),
+        },
+      });
+    }
+  }
   return {
     type: 'doc',
-    content: text.split('\n').map((line) => ({
-      type: 'paragraph',
-      ...(line ? { content: [{ type: 'text', text: line }] } : {}),
-    })),
+    content: paragraphs,
   };
 }
 

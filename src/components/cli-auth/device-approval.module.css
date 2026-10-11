@@ -1,0 +1,188 @@
+/* Device approval: the same quiet, single-column surface as /login. One sheet
+   carries the decision; everything secondary is collapsed or in a footnote.
+   Colors come from Mantine variables so the page follows the color scheme. */
+
+.root {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  padding: 56px 20px 48px;
+  background:
+    radial-gradient(
+      72% 48% at 50% -8%,
+      var(--mantine-color-ember-light) 0%,
+      transparent 64%
+    ),
+    var(--mantine-color-body);
+}
+
+.column {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  animation: column-rise 360ms var(--ease-out-quart) both;
+}
+
+@keyframes column-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.header {
+  width: 100%;
+}
+
+.header h1:focus {
+  outline: none;
+}
+
+.lead {
+  max-width: 40ch;
+  line-height: 1.5;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+.footnote {
+  max-width: 36ch;
+  margin-top: -4px;
+  text-wrap: pretty;
+}
+
+.sheet {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-color-body);
+  box-shadow: var(--mantine-shadow-xs);
+}
+
+/* ── Code entry ─────────────────────────────────────────────────────────── */
+
+.codeLabel {
+  margin-bottom: 8px;
+}
+
+.codeInput {
+  height: 60px;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Review ─────────────────────────────────────────────────────────────── */
+
+.codeBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 12px 14px;
+  border-radius: var(--mantine-radius-md);
+  background: light-dark(var(--surface-panel), var(--mantine-color-dark-6));
+}
+
+.code {
+  margin: 0;
+  font-family: var(--mantine-font-family-monospace);
+  font-weight: 500;
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--mantine-color-text);
+}
+
+.codeDash {
+  color: var(--mantine-color-dimmed);
+}
+
+.codeCaption {
+  color: light-dark(
+    var(--mantine-color-secondary-5),
+    var(--mantine-color-dark-1)
+  );
+  text-align: center;
+  line-height: 1.5;
+}
+
+.access {
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.access strong {
+  font-weight: 600;
+}
+
+.decision {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 20px;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.confirmLabel {
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.45;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* ── Outcomes and problems ──────────────────────────────────────────────── */
+
+.status {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.inlineCode {
+  font-family: var(--mantine-font-family-monospace);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--mantine-color-text);
+}
+
+@media (max-width: 47.99em) {
+  .root {
+    padding: 40px 16px 32px;
+  }
+
+  .sheet {
+    padding: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .column {
+    animation: none;
+  }
+}

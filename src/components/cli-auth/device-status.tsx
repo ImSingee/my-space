@@ -1,0 +1,224 @@
+import { Button, Group, Text, ThemeIcon } from '@mantine/core';
+import {
+  IconBan,
+  IconCircleCheck,
+  IconClockX,
+  IconCloudX,
+  IconDevices,
+  IconHistory,
+  IconHourglassHigh,
+  IconLogin2,
+  IconWorldX,
+  type Icon,
+} from '@tabler/icons-react';
+import type { ReactNode } from 'react';
+import { formatUserCode, type DeviceOutcome } from './device-api';
+import { ViewHeader } from './layout';
+import { retryWait, type Problem } from './problems';
+import classes from './device-approval.module.css';
+
+type Action = 'new-code' | 'sign-in' | 'recheck' | 'home';
+
+type StatusCopy = {
+  icon: Icon;
+  color: string;
+  title: string;
+  body: string;
+  actions: Action[];
+};
+
+const PROBLEMS: Record<Problem, StatusCopy> = {
+  expired: {
+    icon: IconClockX,
+    color: 'gray',
+    title: 'This request has expired',
+    body: 'Start a new sign-in on your device, then enter the new code.',
+    actions: ['new-code'],
+  },
+  closed: {
+    icon: IconHistory,
+    color: 'gray',
+    title: 'This request is already closed',
+    body: 'It was approved, denied or cancelled earlier. Your device shows the result.',
+    actions: ['new-code'],
+  },
+  elsewhere: {
+    icon: IconDevices,
+    color: 'yellow',
+    title: 'Claimed by another account',
+    body: 'Another Hatch account already opened this request. Finish there, or start a new sign-in on your device.',
+    actions: ['new-code'],
+  },
+  'signed-out': {
+    icon: IconLogin2,
+    color: 'gray',
+    title: 'Sign in to continue',
+    body: 'Your session has ended. You’ll come back to this code after signing in.',
+    actions: ['sign-in'],
+  },
+  origin: {
+    icon: IconWorldX,
+    color: 'red',
+    title: 'Wrong address',
+    body: 'Nothing was approved. Open the link exactly as your device printed it.',
+    actions: ['home'],
+  },
+  'rate-limited': {
+    icon: IconHourglassHigh,
+    color: 'yellow',
+    title: 'Too many attempts',
+    body: 'Nothing was recorded.',
+    actions: ['recheck'],
+  },
+  unconfirmed: {
+    icon: IconCloudX,
+    color: 'yellow',
+    title: 'Couldn’t confirm your choice',
+    body: 'It may or may not have been saved. Your device shows the real result.',
+    actions: ['recheck', 'new-code'],
+  },
+};
+
+const OUTCOMES: Record<DeviceOutcome, StatusCopy> = {
+  approved: {
+    icon: IconCircleCheck,
+    color: 'green',
+    title: 'Device approved',
+    body: 'Return to your device to finish. You can close this tab.',
+    actions: [],
+  },
+  denied: {
+    icon: IconBan,
+    color: 'gray',
+    title: 'Request denied',
+    body: 'Your device won’t get access. You can close this tab.',
+    actions: [],
+  },
+};
+
+const ACTION_LABEL: Record<Action, string> = {
+  'new-code': 'Enter a new code',
+  'sign-in': 'Sign in again',
+  recheck: 'Check again',
+  home: 'Go to Hatch',
+};
+
+type Handlers = {
+  onNewCode: () => void;
+  onSignIn: () => void;
+  onRecheck: () => void;
+  /** The action currently in flight, shown as loading. */
+  pending: 'recheck' | null;
+};
+
+export function ProblemView({
+  problem,
+  userCode,
+  retryAfter,
+  handlers,
+}: {
+  problem: Problem;
+  userCode: string;
+  /** Server-reported wait for a rate-limited decision, in seconds. */
+  retryAfter: number | null;
+  handlers: Handlers;
+}) {
+  const base = PROBLEMS[problem];
+  const copy =
+    problem === 'rate-limited'
+      ? { ...base, body: `${base.body} ${retryWait(retryAfter)}` }
+      : base;
+  return (
+    <StatusLayout copy={copy} userCode={userCode}>
+      <Group justify="center" gap="sm">
+        {copy.actions.map((action, index) => (
+          <ActionButton
+            key={action}
+            action={action}
+            primary={index === 0}
+            handlers={handlers}
+          />
+        ))}
+      </Group>
+    </StatusLayout>
+  );
+}
+
+export function OutcomeView({
+  outcome,
+  userCode,
+}: {
+  outcome: DeviceOutcome;
+  userCode: string;
+}) {
+  return <StatusLayout copy={OUTCOMES[outcome]} userCode={userCode} />;
+}
+
+function StatusLayout({
+  copy,
+  userCode,
+  children,
+}: {
+  copy: StatusCopy;
+  userCode: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={classes.status}>
+      <ThemeIcon
+        size={52}
+        radius="xl"
+        variant="light"
+        color={copy.color}
+        aria-hidden
+      >
+        <copy.icon size={26} stroke={1.6} />
+      </ThemeIcon>
+      <ViewHeader title={copy.title} focus>
+        {copy.body}
+      </ViewHeader>
+      {userCode ? (
+        <Text size="sm" c="dimmed">
+          Code{' '}
+          <span className={classes.inlineCode}>{formatUserCode(userCode)}</span>
+        </Text>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+function ActionButton({
+  action,
+  primary,
+  handlers,
+}: {
+  action: Action;
+  primary: boolean;
+  handlers: Handlers;
+}) {
+  const variant = primary ? 'filled' : 'default';
+  if (action === 'home')
+    return (
+      <Button component="a" href="/dashboard" variant={variant}>
+        {ACTION_LABEL.home}
+      </Button>
+    );
+  const onClick = {
+    'new-code': handlers.onNewCode,
+    'sign-in': handlers.onSignIn,
+    recheck: handlers.onRecheck,
+  }[action];
+  const loading = handlers.pending === action;
+  return (
+    <Button
+      type="button"
+      variant={variant}
+      loading={loading}
+      disabled={handlers.pending !== null && !loading}
+      onClick={onClick}
+    >
+      {ACTION_LABEL[action]}
+    </Button>
+  );
+}

@@ -19,6 +19,7 @@ function baseState(): StreamState {
     runId: 'run_1',
     blocks: [],
     thinkingActive: false,
+    textActive: false,
     pendingAsk: undefined,
   };
 }

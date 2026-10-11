@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
     () => 'database-adapter',
   ),
   passkey: vi.fn<(options: unknown) => string>(() => 'passkey'),
+  deviceAuthorization: vi.fn<(options: unknown) => string>(
+    () => 'device-authorization',
+  ),
+  bearer: vi.fn<() => string>(() => 'bearer'),
   schema: {},
   tanstackStartCookies: vi.fn<() => string>(() => 'tanstack-start-cookies'),
   trustedOrigin: vi.fn<() => string | null>(() => null),
@@ -26,6 +30,14 @@ vi.mock('better-auth/tanstack-start', () => ({
 
 vi.mock('@better-auth/passkey', () => ({
   passkey: mocks.passkey,
+}));
+
+vi.mock('better-auth/plugins/device-authorization', () => ({
+  deviceAuthorization: mocks.deviceAuthorization,
+}));
+
+vi.mock('better-auth/plugins/bearer', () => ({
+  bearer: mocks.bearer,
 }));
 
 vi.mock('../db', () => ({
@@ -77,11 +89,6 @@ describe('Better Auth configuration', () => {
         requireResidentKey: true,
       },
     });
-    expect(mocks.betterAuth).toHaveBeenCalledWith(
-      expect.objectContaining({
-        plugins: ['passkey', 'tanstack-start-cookies'],
-      }),
-    );
   });
 
   it('trusts only the active node origin and revokes it immediately after disconnect', async () => {

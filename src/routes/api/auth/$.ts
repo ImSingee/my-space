@@ -5,10 +5,14 @@ export const Route = createFileRoute('/api/auth/$')({
   server: {
     handlers: {
       GET: async ({ request }: { request: Request }) => {
-        return await auth.handler(request);
+        const response = await auth.handler(request);
+        response.headers.set('cache-control', 'no-store');
+        return response;
       },
       POST: async ({ request }: { request: Request }) => {
-        return await auth.handler(request);
+        const response = await auth.handler(request);
+        response.headers.set('cache-control', 'no-store');
+        return response;
       },
     },
   },

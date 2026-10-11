@@ -1,7 +1,10 @@
 import { betterAuth } from 'better-auth/minimal';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter/relations-v2';
 import { passkey } from '@better-auth/passkey';
+import { apiKey } from '@better-auth/api-key';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
+import { bearer } from 'better-auth/plugins/bearer';
+import { deviceAuthorization } from 'better-auth/plugins/device-authorization';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 
 // FIXME: We have to use ../db (rather than ~db) here to make @better-auth/cli happy
@@ -10,6 +13,7 @@ import { db, schema } from '../db';
 import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 import { getPasskeyOriginError, getPasskeyRpId } from './passkey-origin';
+import { apiKeyOptions } from './api-key-options';
 
 const { appUrl, betterAuthSecret } = getPlatformEnv();
 const relyingPartyId = getPasskeyRpId(appUrl);
@@ -85,6 +89,7 @@ export const auth = betterAuth({
     // },
   },
   plugins: [
+    apiKey(apiKeyOptions),
     // Keep management endpoints and schema available even when ceremonies
     // are disabled. The hook above rejects them before any challenge is stored.
     passkey({
@@ -101,6 +106,17 @@ export const auth = betterAuth({
         requireSession: true,
       },
     }),
+    // CLI login: the device signs in through the browser approval page at
+    // /cli/authorize and receives an ordinary session token, which it sends as
+    // `Authorization: Bearer`. A CLI session has the same authority as a
+    // browser session.
+    deviceAuthorization({
+      expiresIn: '10m',
+      interval: '5s',
+      verificationUri: `${appUrl}/cli/authorize`,
+      validateClient: (clientId) => clientId === 'hatch-cli',
+    }),
+    bearer(),
     tanstackStartCookies(), // This should be the last plugin
   ],
 });

@@ -65,6 +65,8 @@ export type StreamState = {
   blocks: StreamBlock[];
   /** True while the latest thinking block is still streaming. */
   thinkingActive: boolean;
+  /** True while the current assistant message is streaming answer text. */
+  textActive: boolean;
   pendingAsk?: PendingAsk;
   pendingEnvRequest?: PendingEnvRequest;
   /** Terminal failure received from the run SSE stream. */
@@ -76,6 +78,7 @@ const IDLE: StreamState = {
   runId: undefined,
   blocks: [],
   thinkingActive: false,
+  textActive: false,
   pendingAsk: undefined,
   pendingEnvRequest: undefined,
 };
@@ -274,12 +277,13 @@ export function reduceStreamState(
     case 'assistant_start':
       // A fresh assistant message: close any open thinking phase so the next
       // reasoning delta starts its own block.
-      return { ...state, thinkingActive: false };
+      return { ...state, thinkingActive: false, textActive: false };
     case 'text':
       return {
         ...state,
         blocks: appendDelta(state.blocks, 'text', event.delta ?? '', true),
         thinkingActive: false,
+        textActive: state.textActive || Boolean(event.delta),
       };
     case 'thinking':
       return {
@@ -291,11 +295,13 @@ export function reduceStreamState(
           state.thinkingActive,
         ),
         thinkingActive: true,
+        textActive: false,
       };
     case 'ask':
       return {
         ...state,
         thinkingActive: false,
+        textActive: false,
         pendingAsk: { askId: event.askId, questions: event.questions },
         pendingEnvRequest: undefined,
       };
@@ -307,6 +313,7 @@ export function reduceStreamState(
       return {
         ...state,
         thinkingActive: false,
+        textActive: false,
         pendingEnvRequest: {
           requestId: event.requestId,
           reason: event.reason,
@@ -322,6 +329,7 @@ export function reduceStreamState(
       return {
         ...state,
         thinkingActive: false,
+        textActive: false,
         blocks: [
           ...state.blocks,
           {
@@ -366,6 +374,7 @@ export function reduceStreamState(
         ...state,
         active: false,
         thinkingActive: false,
+        textActive: false,
         pendingAsk: undefined,
         pendingEnvRequest: undefined,
         terminalError: event.message,

@@ -2,6 +2,8 @@ import { Group, Paper, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { shift } from '@floating-ui/dom';
 import { Mention } from '@tiptap/extension-mention';
 import { Placeholder } from '@tiptap/extension-placeholder';
+import { Slice } from '@tiptap/pm/model';
+import { closeHistory } from '@tiptap/pm/history';
 import { PluginKey } from '@tiptap/pm/state';
 import { EditorContent, ReactRenderer, useEditor } from '@tiptap/react';
 import { StarterKit } from '@tiptap/starter-kit';
@@ -23,6 +25,9 @@ import {
 } from 'react';
 import {
   MAX_COMPOSER_REFERENCE_PARTS,
+  composerModelText,
+  hasComposerReference,
+  parseComposerText,
   type ComposerInputPart,
 } from '~agent/composer-content';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -30,6 +35,7 @@ import { useEventCallback } from '~hooks/use-latest-committed';
 import type { AppListItem } from '~server/apps';
 import type { WorkflowListItem } from '~server/workflows';
 import {
+  composerDocumentFromParts,
   plainTextComposerDocument,
   serializeComposerDocument,
 } from './composer-editor-content';
@@ -751,11 +757,46 @@ export const ComposerEditor = forwardRef<
         }
         return false;
       },
-      handlePaste: (_view, event) => {
+      clipboardTextSerializer: (slice) =>
+        composerModelText(
+          serializeComposerDocument({
+            type: 'doc',
+            content: slice.content.toJSON(),
+          }),
+        ),
+      handlePaste: (view, event) => {
         const files = Array.from(event.clipboardData?.files ?? []);
-        if (files.length === 0) return false;
-        event.preventDefault();
-        emitPasteFiles(files);
+        if (files.length > 0) {
+          event.preventDefault();
+          emitPasteFiles(files);
+          return true;
+        }
+        const text = (event.clipboardData?.getData('text/plain') ?? '').replace(
+          /\r\n?/g,
+          '\n',
+        );
+        const parts = parseComposerText(text);
+        if (!hasComposerReference(parts)) return false;
+        const makeTransaction = (
+          document: ReturnType<typeof composerDocumentFromParts>,
+        ) =>
+          view.state.tr.replaceSelection(
+            Slice.maxOpen(view.state.schema.nodeFromJSON(document).content),
+          );
+        let transaction = makeTransaction(composerDocumentFromParts(parts));
+        let references = 0;
+        transaction.doc.descendants((node) => {
+          if (node.type.name === 'mention') references += 1;
+        });
+        if (references > MAX_COMPOSER_REFERENCE_PARTS) {
+          transaction = makeTransaction(plainTextComposerDocument(text));
+        }
+        view.dispatch(
+          closeHistory(transaction)
+            .setMeta('paste', true)
+            .setMeta('uiEvent', 'paste')
+            .scrollIntoView(),
+        );
         return true;
       },
     },
