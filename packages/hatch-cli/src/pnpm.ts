@@ -1,6 +1,6 @@
 /** Resolve Windows package-manager shims without executing batch-file contents. */
 import { stat, realpath, readFile } from 'node:fs/promises';
-import { dirname, join, resolve, isAbsolute } from 'node:path';
+import { dirname, join, resolve, isAbsolute, basename } from 'node:path';
 import { CliError } from './error';
 
 export async function pnpmInvocation(
@@ -23,7 +23,9 @@ export async function pnpmInvocation(
     // pnpm can replace its shim with a version-managed entry point. Interpret
     // only quoted filesystem paths; never evaluate batch commands/variables.
     const contents = await readFile(shim, 'utf8');
-    for (const match of contents.matchAll(/"([^"\r\n]+\.(?:cjs|mjs|js))"/gi)) {
+    for (const match of contents.matchAll(
+      /"([^"\r\n]+(?:\.(?:cjs|mjs|js)|pnpm\.exe))"/gi,
+    )) {
       const target = match[1].replace(
         /^%(?:dp0%|~dp0)[\\/]?/i,
         () => `${root}/`,
@@ -31,7 +33,9 @@ export async function pnpmInvocation(
       if (target.includes('%')) continue;
       const entry = isAbsolute(target) ? target : resolve(root, target);
       if (await isFile(entry))
-        return { executable: process.execPath, prefix: [entry] };
+        return basename(entry).toLowerCase() === 'pnpm.exe'
+          ? { executable: entry, prefix: [] }
+          : { executable: process.execPath, prefix: [entry] };
     }
     for (const entry of [
       join(root, 'pnpm.cjs'),
