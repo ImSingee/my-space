@@ -72,11 +72,9 @@ export function StreamingBubble({
   // This bubble only mounts while the turn is live, so whenever nothing else is
   // visibly in flight — before the first token, between tool calls, or during
   // whitespace-only reasoning — show a loading row so the agent never looks
-  // stalled. A running tool, an actively streaming thinking block, answer text,
-  // or a pending human-input request each carry their own progress signal.
-  const hasText = state.blocks.some(
-    (b) => b.kind === 'text' && b.text.length > 0,
-  );
+  // stalled. A running tool, an actively streaming thinking block, streaming
+  // answer text, or a pending human-input request carry their own progress
+  // signal. Earlier prose must not hide later waiting phases.
   const anyToolRunning = state.blocks.some(
     (b) => b.kind === 'tool' && !b.tool.done,
   );
@@ -90,7 +88,7 @@ export function StreamingBubble({
     !state.terminalError &&
     !ask &&
     !envRequest &&
-    !hasText &&
+    !state.textActive &&
     !thinkingVisible &&
     !anyToolRunning;
 
