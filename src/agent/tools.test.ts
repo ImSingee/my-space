@@ -106,25 +106,32 @@ describe('agent file tools', () => {
     ).rejects.toThrow('File not found: missing.ts');
   });
 
-  it('reads a complete file with the default pagination values', async () => {
-    const { root, getTool } = await setup({
-      'app.ts': 'const value = 1;\n',
-    });
+  it.each([
+    {},
+    ...[null, '', [], {}, 0].map((empty) => ({ offset: empty, limit: empty })),
+  ])(
+    'reads a complete file with default pagination for %j',
+    async (optional) => {
+      const { root, getTool } = await setup({
+        'app.ts': 'const value = 1;\n',
+      });
 
-    const result = await getTool('read_file').execute('read', {
-      path: 'app.ts',
-    });
+      const result = await getTool('read_file').execute('read', {
+        path: 'app.ts',
+        ...optional,
+      });
 
-    expect(textOf(result)).toBe('const value = 1;\n');
-    expect(result.details).toEqual({
-      path: 'app.ts',
-      relativePath: 'app.ts',
-      absolutePath: path.join(root, 'app.ts'),
-      offset: 0,
-      limit: MAX_FILE_CHARS,
-      truncated: false,
-    });
-  });
+      expect(textOf(result)).toBe('const value = 1;\n');
+      expect(result.details).toEqual({
+        path: 'app.ts',
+        relativePath: 'app.ts',
+        absolutePath: path.join(root, 'app.ts'),
+        offset: 0,
+        limit: MAX_FILE_CHARS,
+        truncated: false,
+      });
+    },
+  );
 
   it('returns a continuation offset when the default read is truncated', async () => {
     const firstPage = 'a'.repeat(MAX_FILE_CHARS);
@@ -269,14 +276,25 @@ describe('agent file tools', () => {
     ).toEqual({ path: 'app.ts', offset: 2, limit: MAX_FILE_CHARS });
     expect(readFileTool.parameters).toMatchObject({
       properties: {
-        offset: { type: 'integer' },
-        limit: { type: 'integer' },
+        offset: {
+          anyOf: expect.arrayContaining(
+            [{ type: 'integer' }, { const: '' }].map((member) =>
+              expect.objectContaining(member),
+            ),
+          ),
+        },
+        limit: {
+          anyOf: expect.arrayContaining(
+            [{ type: 'integer' }, { const: '' }].map((member) =>
+              expect.objectContaining(member),
+            ),
+          ),
+        },
       },
     });
     for (const arguments_ of [
       { path: 'app.ts', offset: -1 },
       { path: 'app.ts', offset: Number.MAX_SAFE_INTEGER + 1 },
-      { path: 'app.ts', limit: 0 },
       { path: 'app.ts', limit: MAX_FILE_CHARS + 1 },
     ]) {
       expect(() => validate(arguments_)).toThrow(
@@ -697,6 +715,31 @@ describe('agent file tools', () => {
 });
 
 describe('run_command sandbox', () => {
+  it.each([null, '', [], {}, 0])(
+    'uses omitted command defaults for optional controls %j',
+    async (empty) => {
+      const { getTool } = await setup();
+      const command = getTool('run_command');
+      const args = {
+        purpose: 'Check defaults',
+        command: 'true',
+        timeout_seconds: empty,
+        env_keys: empty,
+      };
+      expect(() =>
+        validateToolCall([command], {
+          type: 'toolCall',
+          id: 'defaults',
+          name: command.name,
+          arguments: args,
+        }),
+      ).not.toThrow();
+      const result = await command.execute('defaults', args);
+      expect(result.details).toEqual({ exitCode: 0 });
+      expect(args.timeout_seconds).toEqual(empty);
+      expect(args.env_keys).toEqual(empty);
+    },
+  );
   it('requires a concise purpose and validates bounded timeout overrides', async () => {
     const { getTool } = await setup();
     const commandTool = getTool('run_command');
@@ -732,9 +775,11 @@ describe('run_command sandbox', () => {
           description: expect.stringMatching(/very brief.+UI title.+concise/i),
         },
         timeout_seconds: {
-          type: 'integer',
-          minimum: 1,
-          maximum: 3600,
+          anyOf: expect.arrayContaining(
+            [{ type: 'integer', minimum: 1, maximum: 3600 }, { const: '' }].map(
+              (member) => expect.objectContaining(member),
+            ),
+          ),
           description: expect.stringMatching(
             /defaults to 120.+only after.+timed out.+long-running/i,
           ),
@@ -746,9 +791,9 @@ describe('run_command sandbox', () => {
     expect(() => validate({ purpose: '   ', command: 'true' })).toThrow(
       validationError,
     );
-    expect(() =>
-      validate({ purpose: 'Check', command: 'true', timeout_seconds: 0 }),
-    ).toThrow(validationError);
+    expect(
+      validate({ purpose: 'Check', command: 'true', timeout_seconds: 1 }),
+    ).toEqual({ purpose: 'Check', command: 'true', timeout_seconds: 1 });
     expect(() =>
       validate({ purpose: 'Check', command: 'true', timeout_seconds: 3601 }),
     ).toThrow(validationError);

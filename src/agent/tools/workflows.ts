@@ -23,6 +23,7 @@ import {
 } from '../worktree-materializer';
 import { resolveAgentWorkspacePath } from '../workspace-paths';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
+import { createWorkflowRequestSchema } from '~/platform-api/lifecycle-schemas';
 import {
   compatibilityDetailGuidance,
   compatibilityListSummary,
@@ -285,13 +286,14 @@ export function createWorkflowTools(options: {
     executionMode: 'sequential',
     parameters: Type.Object({
       slug: Type.String({
+        minLength: 1,
         maxLength: WORKFLOW_SLUG_MAX_LENGTH,
         description:
           'kebab-case URL slug, e.g. "digest" or "sync-stars". Used in ' +
           'the human-facing /workflow/<slug> URL and changeable later; ' +
           'technical APIs use the generated Workflow id.',
       }),
-      name: Type.String({ description: 'Human-readable name.' }),
+      name: Type.String({ minLength: 1, description: 'Human-readable name.' }),
       description: Type.Optional(
         Type.String({ description: 'One-line description.' }),
       ),
@@ -316,7 +318,8 @@ export function createWorkflowTools(options: {
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          const { target_path: requestedTargetPath, ...input } = params;
+          const { target_path: requestedTargetPath, ...rawInput } = params;
+          const input = createWorkflowRequestSchema.parse(rawInput);
           const targetPath =
             requestedTargetPath ??
             agentWorkflowWorkDir(sessionId, input.slug.trim());

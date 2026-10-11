@@ -462,14 +462,21 @@ export const queryAppDbRequestSchema = z.object({
   sql: z.string().min(1),
 });
 
+/** Empty means the first page; a continuation is a server-returned key. */
+export const queryAppKvCursorSchema = z.string().max(512);
+
 const queryAppKvListRequestSchema = z
   .object({
     action: z.literal('list'),
-    cursor: z.string().min(1).max(512).optional(),
+    cursor: queryAppKvCursorSchema.optional(),
     limit: z.number().int().min(1).max(100).default(100),
     revealSecrets: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .transform(({ cursor, ...input }) => ({
+    ...input,
+    ...(cursor === undefined || cursor === '' ? {} : { cursor }),
+  }));
 
 const queryAppKvGetRequestSchema = z
   .object({
@@ -533,6 +540,9 @@ export type QueryAppDataTableJsonValue =
   | { [key: string]: QueryAppDataTableJsonValue };
 
 export const QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH = 60_000;
+export const queryAppDataTableCursorSchema = z
+  .string()
+  .max(QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH);
 
 const queryAppDataTableJsonValueSchema: z.ZodType<QueryAppDataTableJsonValue> =
   z.lazy(() =>
@@ -557,9 +567,13 @@ const queryAppDataTableWhereSchema = z
 const queryAppDataTableInspectRequestSchema = z
   .object({
     action: z.literal('inspect'),
-    table: z.string().min(1).optional(),
+    table: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .transform(({ table, ...input }) => ({
+    ...input,
+    ...(table === undefined || table === '' ? {} : { table }),
+  }));
 
 const queryAppDataTableQueryRequestSchema = z
   .object({
@@ -573,14 +587,14 @@ const queryAppDataTableQueryRequestSchema = z
       })
       .strict()
       .optional(),
-    cursor: z
-      .string()
-      .min(1)
-      .max(QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH)
-      .optional(),
+    cursor: queryAppDataTableCursorSchema.optional(),
     limit: z.number().int().min(1).max(200).default(50),
   })
-  .strict();
+  .strict()
+  .transform(({ cursor, ...input }) => ({
+    ...input,
+    ...(cursor === undefined || cursor === '' ? {} : { cursor }),
+  }));
 
 const queryAppDataTableMutationSchema = z.discriminatedUnion('type', [
   z

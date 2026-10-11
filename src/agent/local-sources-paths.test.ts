@@ -385,9 +385,22 @@ describe('runner source paths', () => {
     const create = tools.find((candidate) => candidate.name === 'create_app');
     if (!create) throw new Error('Missing create_app tool.');
 
+    for (const input of [
+      { slug: '', name: 'App' },
+      { slug: 'valid', name: '' },
+    ]) {
+      await expect(create.execute('invalid', input)).rejects.toThrow(
+        /too small/i,
+      );
+    }
+    expect(createApp).not.toHaveBeenCalled();
+
     const result = await create.execute('create-default', {
       slug: 'human-slug',
       name: 'Human Slug',
+      description: [],
+      pin: 0,
+      target_path: null,
     });
 
     expect(result.details).toMatchObject({
@@ -428,9 +441,22 @@ describe('runner source paths', () => {
     );
     if (!create) throw new Error('Missing create_workflow tool.');
 
+    for (const input of [
+      { slug: '', name: 'Workflow' },
+      { slug: 'valid', name: '' },
+    ]) {
+      await expect(create.execute('invalid', input)).rejects.toThrow(
+        /too small/i,
+      );
+    }
+    expect(createWorkflow).not.toHaveBeenCalled();
+
     const result = await create.execute('create-workflow', {
       slug: 'daily-digest',
       name: 'Daily digest',
+      description: null,
+      pin: [],
+      target_path: {},
     });
 
     const worktree = path.join(
@@ -488,6 +514,8 @@ describe('runner source paths', () => {
       checkout.execute('update-without-path', {
         id: 'immutable-app-id',
         clone: false,
+        source_path: '',
+        force: '',
       }),
     ).rejects.toThrow('source_path is required when clone is false');
     expect(getApp).not.toHaveBeenCalled();
@@ -517,6 +545,8 @@ describe('runner source paths', () => {
     const cloned = await checkout.execute('clone-default', {
       id: 'immutable-app-id',
       clone: true,
+      source_path: 0,
+      force: null,
     });
     expect(cloned.details).toMatchObject({
       id: 'immutable-app-id',
@@ -567,6 +597,8 @@ describe('runner source paths', () => {
       checkout.execute('update-without-path', {
         id: '01immutableworkflow',
         clone: false,
+        source_path: '',
+        force: '',
       }),
     ).rejects.toThrow('source_path is required when clone is false');
     expect(getWorkflow).not.toHaveBeenCalled();
@@ -596,6 +628,8 @@ describe('runner source paths', () => {
     const cloned = await checkout.execute('clone-default', {
       id: '01immutableworkflow',
       clone: true,
+      source_path: [],
+      force: {},
     });
     expect(cloned.details).toMatchObject({
       id: '01immutableworkflow',

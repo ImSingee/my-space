@@ -110,7 +110,6 @@ describe('web tool schemas', () => {
     { query: '' },
     { query: ' '.repeat(3) },
     { query: 'x'.repeat(2_001) },
-    { query: 'x', max_results: 0 },
     { query: 'x', max_results: 11 },
     { query: 'x', search_depth: 'fast' },
     { query: 'x', topic: 'sports' },
@@ -126,7 +125,6 @@ describe('web tool schemas', () => {
   it.each([
     { url: '' },
     { url: 'x'.repeat(4_097) },
-    { url: 'https://example.com', query: '' },
     { url: 'https://example.com', query: ' '.repeat(3) },
     { url: 'https://example.com', query: 'x'.repeat(1_001) },
     { url: 'https://example.com', extract_depth: 'deep' },
@@ -138,6 +136,31 @@ describe('web tool schemas', () => {
 });
 
 describe('web_search', () => {
+  it.each([null, '', [], {}, 0])(
+    'sends the same request for optional %j controls and omitted controls',
+    async (empty) => {
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        Response.json(searchResponse()),
+      );
+      const search = findTool(
+        createWebTools({ fetchImpl: fetchMock }),
+        'web_search',
+      );
+      await search.execute('omitted', { query: 'battery research' });
+      const omitted = fetchCall(fetchMock).body;
+      fetchMock.mockClear();
+      await search.execute('empty', {
+        query: 'battery research',
+        max_results: empty,
+        search_depth: empty,
+        topic: empty,
+        time_range: empty,
+        include_domains: empty,
+        exclude_domains: empty,
+      });
+      expect(fetchCall(fetchMock).body).toEqual(omitted);
+    },
+  );
   it.each([undefined, '   '])(
     'uses only keyless authentication for API key %j',
     async (tavilyApiKey) => {
@@ -410,46 +433,56 @@ describe('web_search', () => {
 });
 
 describe('web_fetch', () => {
-  it('sends a single-URL Markdown extraction request without optional chunks', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({
-        results: [
-          {
-            url: 'https://redirected.example/article',
-            raw_content: '# Article\n\nReadable content.',
-            images: ['https://example.com/image.png'],
-          },
-        ],
-        failed_results: [],
-        response_time: 0.1,
-      }),
-    );
-    const fetchTool = findTool(
-      createWebTools({ fetchImpl: fetchMock }),
-      'web_fetch',
-    );
+  it.each([
+    {},
+    ...[null, '', [], {}, 0].map((empty) => ({
+      query: empty,
+      extract_depth: empty,
+    })),
+  ])(
+    'uses default Markdown extraction for optional fields %j',
+    async (optional) => {
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        Response.json({
+          results: [
+            {
+              url: 'https://redirected.example/article',
+              raw_content: '# Article\n\nReadable content.',
+              images: ['https://example.com/image.png'],
+            },
+          ],
+          failed_results: [],
+          response_time: 0.1,
+        }),
+      );
+      const fetchTool = findTool(
+        createWebTools({ fetchImpl: fetchMock }),
+        'web_fetch',
+      );
 
-    const result = await fetchTool.execute('fetch', {
-      url: 'https://example.com/article',
-    });
+      const result = await fetchTool.execute('fetch', {
+        url: 'https://example.com/article',
+        ...optional,
+      });
 
-    const request = fetchCall(fetchMock);
-    expect(request.url).toBe('https://api.tavily.com/extract');
-    expect(request.body).toEqual({
-      urls: ['https://example.com/article'],
-      extract_depth: 'basic',
-      include_images: false,
-      include_favicon: false,
-      format: 'markdown',
-      include_usage: false,
-    });
-    expect(jsonOf(result)).toEqual({
-      url: 'https://example.com/article',
-      content: '# Article\n\nReadable content.',
-      content_truncated: false,
-    });
-    expect(result.details).toEqual({});
-  });
+      const request = fetchCall(fetchMock);
+      expect(request.url).toBe('https://api.tavily.com/extract');
+      expect(request.body).toEqual({
+        urls: ['https://example.com/article'],
+        extract_depth: 'basic',
+        include_images: false,
+        include_favicon: false,
+        format: 'markdown',
+        include_usage: false,
+      });
+      expect(jsonOf(result)).toEqual({
+        url: 'https://example.com/article',
+        content: '# Article\n\nReadable content.',
+        content_truncated: false,
+      });
+      expect(result.details).toEqual({});
+    },
+  );
 
   it('adds reranking chunks, depth, keyed auth, and the cancellation signal', async () => {
     const signal = new AbortController().signal;

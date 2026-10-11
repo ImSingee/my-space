@@ -318,4 +318,51 @@ describe('queryAppKv operations', () => {
       hasMore: false,
     });
   });
+
+  it('uses a returned 512-character key as a list cursor', async () => {
+    await seedApp('cursor-boundary');
+    const key = 'a'.repeat(512);
+    for (const current of [key, 'b']) {
+      await queryAppKv('cursor-boundary', {
+        action: 'set',
+        key: current,
+        value: current,
+      });
+    }
+    const first = await queryAppKv('cursor-boundary', {
+      action: 'list',
+      limit: 1,
+    });
+    expect(first).toMatchObject({ items: [{ key }], nextCursor: key });
+    if (first.action !== 'list' || first.nextCursor === null)
+      throw new Error('Expected a continuation.');
+    await expect(
+      queryAppKv('cursor-boundary', {
+        action: 'list',
+        cursor: first.nextCursor,
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      items: [{ key: 'b' }],
+      nextCursor: null,
+    });
+  });
+
+  it('returns the same first page for an empty cursor and an omitted cursor', async () => {
+    await seedApp('empty-cursor');
+    for (const key of ['beta', 'alpha']) {
+      await queryAppKv('empty-cursor', { action: 'set', key, value: key });
+    }
+    const first = await queryAppKv('empty-cursor', {
+      action: 'list',
+      limit: 1,
+    });
+    expect(first).toMatchObject({
+      items: [{ key: 'alpha' }],
+      nextCursor: 'alpha',
+    });
+    await expect(
+      queryAppKv('empty-cursor', { action: 'list', cursor: '', limit: 1 }),
+    ).resolves.toEqual(first);
+  });
 });

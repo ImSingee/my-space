@@ -357,6 +357,47 @@ const appRouteCases = [
 ];
 
 describe('Agent Runner ID-only App internal API', () => {
+  it('accepts first-page and inspect aliases at the Data Table REST boundary', async () => {
+    for (const input of [
+      { action: 'inspect', table: '' },
+      { action: 'query', table: 'todos', cursor: '' },
+    ]) {
+      const res = await callRoute(
+        '/internal/api/apps/immutable-app-id/query-data-table',
+        'POST',
+        input,
+      );
+      expect(res.writeHead).toHaveBeenCalledWith(200, {
+        'content-type': 'application/json',
+      });
+      expect(mocks.queryAppDataTable).toHaveBeenLastCalledWith(
+        'immutable-app-id',
+        input.action === 'inspect'
+          ? { action: 'inspect' }
+          : { action: 'query', table: 'todos', where: [], limit: 50 },
+        undefined,
+      );
+    }
+  });
+  it('accepts an empty KV cursor as the first page at the REST boundary', async () => {
+    const res = await callRoute(
+      '/internal/api/apps/immutable-app-id/query-kv',
+      'POST',
+      {
+        action: 'list',
+        cursor: '',
+      },
+    );
+    expect(res.writeHead).toHaveBeenCalledWith(200, {
+      'content-type': 'application/json',
+    });
+    expect(mocks.queryAppKv).toHaveBeenCalledWith('immutable-app-id', {
+      action: 'list',
+      limit: 100,
+      revealSecrets: false,
+    });
+  });
+
   it.each(appRouteCases)('serves $name by immutable id', async (route) => {
     const res = await callRoute(
       `/internal/api/apps/immutable-app-id${route.suffix}`,
