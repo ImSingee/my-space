@@ -1,5 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
+import { notFound } from '@tanstack/react-router';
 import {
+  getAppBySlug,
   getAppOps,
   getDeploymentBuildLog,
   getNormalizedManifest,
@@ -15,6 +17,25 @@ export const appsQueryOptions = queryOptions({
   queryKey: ['apps'],
   queryFn: () => listApps(),
 });
+
+/**
+ * The App view's detail snapshot. Its deployment revision is the baseline the
+ * running iframe was loaded from, so it must only change when the view also
+ * remounts the iframe: the route loader (navigation) and the explicit reload
+ * fetch it with `staleTime: 0`, and nothing refetches it in the background.
+ * The key stays outside the `['apps']` prefix so list invalidations elsewhere
+ * cannot silently advance the baseline and hide a pending update.
+ */
+export const appViewQueryOptions = (slug: string) =>
+  queryOptions({
+    queryKey: ['app-view', slug],
+    queryFn: async () => {
+      const app = await getAppBySlug({ data: slug });
+      if (!app) throw notFound();
+      return app;
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 
 export const appBackendsQueryOptions = queryOptions({
   queryKey: ['apps', 'backends'],

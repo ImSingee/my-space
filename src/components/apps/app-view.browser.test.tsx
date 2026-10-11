@@ -1,4 +1,11 @@
 import { MantineProvider } from '@mantine/core';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  type AnyRootRoute,
+  RouterProvider,
+  createMemoryHistory,
+  createRouter,
+} from '@tanstack/react-router';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
@@ -8,30 +15,37 @@ import { appTheme } from '~/ui/theme';
 const mocks = vi.hoisted(() => ({
   app: null as AppDetail | null,
   pendingRevision: null as string | null,
-  invalidate: vi.fn<() => Promise<void>>(),
+  getAppBySlug: vi.fn<() => Promise<AppDetail | null>>(),
+  rootRoute: null as AnyRootRoute | null,
   toastError: vi.fn<(message: string) => void>(),
 }));
 
+// Mount the real route module on a real router so loaders, reloads and error
+// boundaries behave as in the app; only the file-route registration differs.
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@tanstack/react-router')>();
   const { createElement } = await import('react');
+  const rootRoute = actual.createRootRouteWithContext<{
+    queryClient: QueryClient;
+  }>()({
+    component: () =>
+      createElement(
+        'div',
+        null,
+        createElement('nav', null, 'App shell'),
+        createElement(actual.Outlet),
+      ),
+  });
+  mocks.rootRoute = rootRoute;
   return {
     ...actual,
-    createFileRoute: () => (options: object) => ({
-      ...options,
-      useLoaderData: () => mocks.app,
-    }),
-    Link: ({
-      children,
-      to,
-      ...props
-    }: {
-      children: React.ReactNode;
-      to?: string;
-    }) => createElement('a', { href: to, ...props }, children),
-    useRouter: () => ({ invalidate: mocks.invalidate }),
-    useRouterState: () => '',
+    createFileRoute: () => (options: object) =>
+      actual.createRoute({
+        ...options,
+        getParentRoute: () => rootRoute,
+        path: '/app/$appSlug',
+      }),
   };
 });
 
@@ -48,16 +62,28 @@ vi.mock('~components/apps/use-app-deployment-update', () => ({
   }),
 }));
 
-vi.mock('~server/apps', () => ({
-  getAppBySlug: vi.fn<() => void>(),
-  getAppDeploymentRevision: vi.fn<() => void>(),
-}));
+vi.mock('~server/apps', () => {
+  const unused = vi.fn<() => void>();
+  return {
+    getAppBySlug: mocks.getAppBySlug,
+    getAppDeploymentRevision: unused,
+    getAppOps: unused,
+    getDeploymentBuildLog: unused,
+    getNormalizedManifest: unused,
+    inspectAppDataTablesFn: unused,
+    listAppBackendsFn: unused,
+    listAppKvFn: unused,
+    listApps: unused,
+    listCronRunsFn: unused,
+    listDeployments: unused,
+  };
+});
 
 vi.mock('sonner', () => ({
   toast: { error: mocks.toastError },
 }));
 
-import { AppView } from '~/routes/_app/app/$appSlug';
+import { Route } from '~/routes/_app/app/$appSlug';
 
 const frontendCapabilities = {
   database: false,
@@ -95,26 +121,43 @@ function app(overrides: Partial<AppDetail> = {}): AppDetail {
 }
 
 async function renderAppView() {
-  return render(
+  const queryClient = new QueryClient();
+  const router = createRouter({
+    routeTree: mocks.rootRoute!.addChildren([Route]),
+    history: createMemoryHistory({ initialEntries: ['/app/app-one'] }),
+    context: { queryClient },
+  });
+  const screen = await render(
     <MantineProvider theme={appTheme}>
-      <AppView />
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
     </MantineProvider>,
   );
+  await expect.element(screen.getByText('App shell')).toBeVisible();
+  await expect.element(screen.getByText('Example app')).toBeVisible();
+  return screen;
+}
+
+/** Serve the current fixture for every fetch after the initial load. */
+function serveApp(next: Partial<AppDetail>) {
+  mocks.getAppBySlug.mockImplementation(async () => {
+    mocks.app = app(next);
+    return mocks.app;
+  });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.app = app();
   mocks.pendingRevision = null;
-  mocks.invalidate.mockResolvedValue();
+  mocks.getAppBySlug.mockImplementation(async () => mocks.app);
 });
 
 test('marks an update and remounts the iframe only after reload', async () => {
   mocks.pendingRevision = 'revision-two';
-  mocks.invalidate.mockImplementationOnce(async () => {
-    mocks.app = app({ deploymentRevision: 'revision-two' });
-  });
   const screen = await renderAppView();
+  serveApp({ deploymentRevision: 'revision-two' });
   const originalFrame = screen.container.querySelector('iframe');
   expect(originalFrame).toBeTruthy();
   expect(originalFrame).toHaveAttribute('src', '/app/app-one/embed/');
@@ -133,11 +176,7 @@ test('marks an update and remounts the iframe only after reload', async () => {
 
   await reload.click();
 
-  await vi.waitFor(() =>
-    expect(mocks.invalidate).toHaveBeenCalledWith({
-      sync: true,
-    }),
-  );
+  await vi.waitFor(() => expect(mocks.getAppBySlug).toHaveBeenCalledTimes(2));
   await vi.waitFor(() => {
     const refreshedFrame = screen.container.querySelector('iframe');
     expect(refreshedFrame).toBeTruthy();
@@ -197,10 +236,8 @@ test('offers reload for a first deployment and opens its frontend', async () => 
     deploymentRevision: null,
   });
   mocks.pendingRevision = 'revision-one';
-  mocks.invalidate.mockImplementationOnce(async () => {
-    mocks.app = app();
-  });
   const screen = await renderAppView();
+  serveApp({});
 
   expect(screen.container.querySelector('iframe')).toBeNull();
   await screen
@@ -214,13 +251,11 @@ test('offers reload for a first deployment and opens its frontend', async () => 
 
 test('removes the iframe when the activated deployment drops its frontend', async () => {
   mocks.pendingRevision = 'revision-two';
-  mocks.invalidate.mockImplementationOnce(async () => {
-    mocks.app = app({
-      capabilities: { ...frontendCapabilities, frontend: false, backend: true },
-      deploymentRevision: 'revision-two',
-    });
-  });
   const screen = await renderAppView();
+  serveApp({
+    capabilities: { ...frontendCapabilities, frontend: false, backend: true },
+    deploymentRevision: 'revision-two',
+  });
   expect(screen.container.querySelector('iframe')).toBeTruthy();
 
   await screen
@@ -231,10 +266,10 @@ test('removes the iframe when the activated deployment drops its frontend', asyn
   expect(screen.container.querySelector('iframe')).toBeNull();
 });
 
-test('keeps the existing iframe usable when invalidation fails', async () => {
-  const failure = new Error('Revision lookup failed');
-  mocks.invalidate.mockRejectedValueOnce(failure);
+test('keeps the app view and its running iframe when a reload request fails', async () => {
+  const failure = new Error('Failed to fetch');
   const screen = await renderAppView();
+  mocks.getAppBySlug.mockRejectedValueOnce(failure);
   const originalFrame = screen.container.querySelector('iframe');
 
   await screen.getByRole('button', { name: 'Reload app' }).click();
@@ -242,22 +277,34 @@ test('keeps the existing iframe usable when invalidation fails', async () => {
   await vi.waitFor(() =>
     expect(mocks.toastError).toHaveBeenCalledWith(failure.message),
   );
+  await expect.element(screen.getByText('App shell')).toBeVisible();
+  await expect.element(screen.getByText('Example app')).toBeVisible();
   expect(screen.container.querySelector('iframe')).toBe(originalFrame);
   await expect
     .element(screen.getByRole('button', { name: 'Reload app' }))
     .toBeEnabled();
 });
 
+test('shows not found when the app is gone on reload', async () => {
+  const screen = await renderAppView();
+  mocks.getAppBySlug.mockResolvedValue(null);
+
+  await screen.getByRole('button', { name: 'Reload app' }).click();
+
+  await expect.element(screen.getByText('Not Found')).toBeVisible();
+  expect(screen.container.querySelector('iframe')).toBeNull();
+});
+
 test('hands a pending update reload to the plain icon and restores the prompt on failure', async () => {
   mocks.pendingRevision = 'revision-two';
+  const screen = await renderAppView();
   let rejectReload: (error: Error) => void = () => undefined;
-  mocks.invalidate.mockImplementationOnce(
+  mocks.getAppBySlug.mockImplementationOnce(
     () =>
       new Promise((_resolve, reject) => {
         rejectReload = reject;
       }),
   );
-  const screen = await renderAppView();
 
   await screen
     .getByRole('button', { name: 'Update available — reload app' })

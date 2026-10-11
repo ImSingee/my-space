@@ -10,10 +10,11 @@ import {
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
+import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import {
   Link,
   createFileRoute,
-  notFound,
+  isNotFound,
   useRouter,
   useRouterState,
 } from '@tanstack/react-router';
@@ -31,23 +32,26 @@ import { toast } from 'sonner';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { getAppViewState } from '~components/apps/app-view-policy';
 import { useAppDeploymentUpdate } from '~components/apps/use-app-deployment-update';
-import { getAppBySlug, getAppDeploymentRevision } from '~server/apps';
+import { appViewQueryOptions } from '~queries/apps';
+import { getAppDeploymentRevision } from '~server/apps';
 import classes from './app-view.module.css';
 
 export const Route = createFileRoute('/_app/app/$appSlug/')({
-  loader: async ({ params }) => {
-    const app = await getAppBySlug({ data: params.appSlug });
-    if (!app) throw notFound();
-    return app;
-  },
+  loader: ({ context: { queryClient }, params }) =>
+    queryClient.fetchQuery({
+      ...appViewQueryOptions(params.appSlug),
+      staleTime: 0,
+    }),
   component: AppView,
 });
 
 const readDeploymentRevision = (appId: string) =>
   getAppDeploymentRevision({ data: appId });
 
-export function AppView() {
-  const app = Route.useLoaderData();
+function AppView() {
+  const { appSlug } = Route.useParams();
+  const appQueryOptions = appViewQueryOptions(appSlug);
+  const { data: app } = useSuspenseQuery(appQueryOptions);
   const frameRef = useRef<HTMLIFrameElement>(null);
   // The live iframe window, tracked so a hash change on the host (e.g. clicking
   // a sidebar pin with a custom entry point while the app is already open) can
@@ -210,15 +214,24 @@ export function AppView() {
   }, [hostHash, canOpen]);
 
   const router = useRouter();
+  const queryClient = useQueryClient();
   const reload = async () => {
     if (reloading) return;
     setReloading(true);
     setLoading(true);
     try {
-      await router.invalidate({ sync: true });
+      // Refetch through the query rather than invalidating the route: a failed
+      // route loader replaces the whole view with an error state, while a
+      // failed query refetch keeps the cached snapshot and its running iframe.
+      await queryClient.fetchQuery({ ...appQueryOptions, staleTime: 0 });
       setFrameKey((current) => current + 1);
     } catch (error) {
       setLoading(false);
+      if (isNotFound(error)) {
+        // The app was deleted or renamed; let the loader render not-found.
+        await router.invalidate();
+        return;
+      }
       toast.error(
         error instanceof Error ? error.message : 'Could not reload the app.',
       );
