@@ -286,41 +286,45 @@ describe('CLI authentication boundary', () => {
     },
   );
 
-  it('cancels pending device login without saving credentials', async () => {
-    deviceDecision = 'pending';
-    const child = spawn(
-      process.execPath,
-      [
-        '--import',
-        'tsx',
-        entry,
-        'auth',
-        'login',
-        '--url',
-        origin,
-        '--no-browser',
-        '--config',
-        config,
-      ],
-      {
-        env: {
-          ...process.env,
-          HATCH_CLI_URL: undefined,
-          HATCH_CLI_TOKEN: undefined,
+  // Windows kill(SIGINT) force-terminates a child; it is not a console Ctrl+C.
+  it.skipIf(process.platform === 'win32')(
+    'cancels pending device login without saving credentials',
+    async () => {
+      deviceDecision = 'pending';
+      const child = spawn(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          entry,
+          'auth',
+          'login',
+          '--url',
+          origin,
+          '--no-browser',
+          '--config',
+          config,
+        ],
+        {
+          env: {
+            ...process.env,
+            HATCH_CLI_URL: undefined,
+            HATCH_CLI_TOKEN: undefined,
+          },
+          stdio: 'pipe',
         },
-        stdio: 'pipe',
-      },
-    );
-    const code = await new Promise<number | null>((resolve, reject) => {
-      child.stderr.on('data', (chunk) => {
-        if (String(chunk).includes('Code:')) child.kill('SIGINT');
+      );
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child.stderr.on('data', (chunk) => {
+          if (String(chunk).includes('Code:')) child.kill('SIGINT');
+        });
+        child.once('error', reject);
+        child.once('close', resolve);
       });
-      child.once('error', reject);
-      child.once('close', resolve);
-    });
-    expect(code).toBe(130);
-    await expect(stat(config)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
+      expect(code).toBe(130);
+      await expect(stat(config)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
 
   it('uses the env pair without reading even a corrupt config, and verifies Run context', async () => {
     await writeFile(config, 'broken configuration');

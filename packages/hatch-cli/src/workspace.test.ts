@@ -1,5 +1,6 @@
 /** Durable CLI source/data boundaries through real child processes and Git. */
 import { createServer } from 'node:http';
+import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import {
   mkdtemp,
@@ -166,7 +167,7 @@ async function create() {
     '--directory',
     join(directory, 'source'),
   ]).result;
-  expect(result.code).toBe(0);
+  assert.equal(result.code, 0, JSON.stringify(result));
   return join(directory, 'source');
 }
 async function publish(root: string) {
@@ -311,7 +312,7 @@ describe('CLI workspace safety', () => {
         .pending,
     ).toBeUndefined();
   });
-  it('uses a cross-process lock and releases it on cancellation', async () => {
+  it('uses a cross-process lock and releases it after completion or POSIX cancellation', async () => {
     const root = await create();
     await publish(root);
     let release: () => void = () => {};
@@ -332,9 +333,11 @@ describe('CLI workspace safety', () => {
       (await run(['workflow', 'deploy', '--directory', root]).result).data.error
         .code,
     ).toBe('workspace_locked');
-    updating.child.kill('SIGINT');
+    if (process.platform !== 'win32') updating.child.kill('SIGINT');
     release();
-    expect((await updating.result).code).toBe(130);
+    expect((await updating.result).code).toBe(
+      process.platform === 'win32' ? 0 : 130,
+    );
     expect(
       (await readdir(directory)).filter((name) => name.endsWith('.lock')),
     ).toEqual([]);
@@ -345,11 +348,14 @@ describe('CLI workspace safety', () => {
     const captured = join(directory, 'child-env.json');
     const executable =
       process.platform === 'win32'
-        ? join(bin, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
+        ? join(bin, '.tools', 'pnpm 12 & literal', 'pnpm.cjs')
         : join(bin, 'pnpm');
-    await mkdir(join(bin, 'node_modules', 'pnpm', 'bin'), { recursive: true });
+    await mkdir(join(bin, '.tools', 'pnpm 12 & literal'), { recursive: true });
     if (process.platform === 'win32')
-      await writeFile(join(bin, 'pnpm.cmd'), '@echo off\r\nexit /b 99\r\n');
+      await writeFile(
+        join(bin, 'pnpm.cmd'),
+        '@echo off\r\nnode "%~dp0.tools\\pnpm 12 & literal\\pnpm.cjs" %*\r\nexit /b 99\r\n',
+      );
     await writeFile(
       executable,
       '#!/usr/bin/env node\n' +

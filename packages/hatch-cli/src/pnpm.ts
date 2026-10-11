@@ -1,6 +1,6 @@
 /** Resolve Windows package-manager shims without executing batch-file contents. */
-import { stat, realpath } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { stat, realpath, readFile } from 'node:fs/promises';
+import { dirname, join, resolve, isAbsolute } from 'node:path';
 import { CliError } from './error';
 
 export async function pnpmInvocation(
@@ -20,11 +20,26 @@ export async function pnpmInvocation(
     if (!(await isFile(shim))) continue;
     // npm globals, pnpm/action-setup, and Corepack use these Node entry points.
     const root = dirname(await realpath(shim));
+    // pnpm can replace its shim with a version-managed entry point. Interpret
+    // only quoted filesystem paths; never evaluate batch commands/variables.
+    const contents = await readFile(shim, 'utf8');
+    for (const match of contents.matchAll(/"([^"\r\n]+\.(?:cjs|mjs|js))"/gi)) {
+      const target = match[1].replace(
+        /^%(?:dp0%|~dp0)[\\/]?/i,
+        () => `${root}/`,
+      );
+      if (target.includes('%')) continue;
+      const entry = isAbsolute(target) ? target : resolve(root, target);
+      if (await isFile(entry))
+        return { executable: process.execPath, prefix: [entry] };
+    }
     for (const entry of [
       join(root, 'pnpm.cjs'),
       join(root, 'bin', 'pnpm.cjs'),
       join(root, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
       join(root, 'node_modules', 'corepack', 'dist', 'pnpm.js'),
+      join(root, '..', 'pnpm', 'bin', 'pnpm.cjs'),
+      join(root, '..', 'corepack', 'dist', 'pnpm.js'),
     ])
       if (await isFile(entry))
         return { executable: process.execPath, prefix: [entry] };
