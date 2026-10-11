@@ -74,6 +74,10 @@
     overflow-x: auto;
   }
 
+  .section {
+    width: 100%;
+  }
+
   .navItem {
     width: auto;
     white-space: nowrap;

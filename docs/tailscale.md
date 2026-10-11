@@ -99,11 +99,14 @@ confirm first. Use your original Hatch address to reconnect afterward.
 ## Independent App addresses
 
 Open **Settings → Tailscale → App addresses** to manage private addresses for all
-Apps. Choose an App with the searchable selector, then enter a dedicated service
-name (for example, `notes`) to use `https://notes.<tailnet>.ts.net/`. Each deployed
+Apps. The table lists each App, its advertised address and current status. Search
+by name or slug, then click **Configure** to enter a dedicated service name (for example, `notes`) to use `https://notes.<tailnet>.ts.net/`. Each deployed
 App can advertise one private HTTPS Tailscale Service. Address configuration,
 advertising controls and Tailscale setup guidance live only on this settings
-page; App management pages do not contain Tailscale configuration.
+page. When an App has an enabled binding, its management page shows a read-only
+**Tailscale Service** section with the state, address and ready-only open/copy
+actions, plus a link to these settings. Apps without an enabled binding do not
+show this section.
 The service name is independent of the mutable App slug; deployments, rollbacks
 and slug changes keep the address. Names must be unique within this Hatch
 installation and should identify the same App across every host of that Service.

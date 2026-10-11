@@ -116,41 +116,65 @@ export async function saveAppService(input: AppTailscaleConfig) {
   });
 }
 
-export async function appServiceStatus(
-  appId: string,
-): Promise<AppTailscaleStatus> {
+export async function appServiceStatuses(
+  appIds?: string[],
+): Promise<{ appId: string; status: AppTailscaleStatus }[]> {
   const { getTailscaleManager } = await import('../tailscale-manager');
   const manager = getTailscaleManager();
   const global = await manager.getStatus();
-  const binding = await db.query.appTailscaleServices.findFirst({
-    where: { appId },
+  const bindings = await db.query.appTailscaleServices.findMany({
+    where: appIds ? { appId: { in: appIds } } : undefined,
   });
-  const config = binding
-    ? { appId, serviceName: binding.serviceName, enabled: binding.enabled }
-    : null;
-  const base = {
-    config,
-    origin: null,
-    suffix: global.suffix ?? null,
-    message: null,
-  };
-  if (!binding?.enabled) return { ...base, state: 'disabled' };
-  if (!(await advertisedAppServices()).some((b) => b.appId === appId))
-    return {
-      ...base,
-      state: 'unavailable',
-      message: 'This App has no supported live deployment.',
+  const advertised = new Set(
+    (await advertisedAppServices()).map((binding) => binding.appId),
+  );
+  const byId = new Map(bindings.map((binding) => [binding.appId, binding]));
+  return (appIds ?? bindings.map((binding) => binding.appId)).map((appId) => {
+    const binding = byId.get(appId);
+    const config = binding
+      ? { appId, serviceName: binding.serviceName, enabled: binding.enabled }
+      : null;
+    const base: AppTailscaleStatus = {
+      config,
+      state: 'disabled',
+      origin: null,
+      suffix: global.suffix ?? null,
+      message: null,
     };
-  if (global.state !== 'connected')
+    if (!binding?.enabled) return { appId, status: base };
+    if (!advertised.has(appId))
+      return {
+        appId,
+        status: {
+          ...base,
+          state: 'unavailable',
+          message: 'This App has no supported live deployment.',
+        },
+      };
+    if (global.state !== 'connected')
+      return {
+        appId,
+        status: {
+          ...base,
+          state: 'disconnected',
+          message: 'Connect the platform to Tailscale first.',
+        },
+      };
+    const observed = manager.serviceSnapshot(appId);
     return {
-      ...base,
-      state: 'disconnected',
-      message: 'Connect the platform to Tailscale first.',
+      appId,
+      status: observed
+        ? { ...base, ...observed, config, origin: observed.origin || null }
+        : { ...base, state: 'starting' },
     };
-  const observed = manager.serviceSnapshot(appId);
-  return observed
-    ? { ...base, ...observed, config, origin: observed.origin || null }
-    : { ...base, state: 'starting' };
+  });
+}
+
+export async function appServiceStatus(
+  appId: string,
+): Promise<AppTailscaleStatus> {
+  const [entry] = await appServiceStatuses([appId]);
+  return entry.status;
 }
 
 /** Revalidate persisted identity and live deployment on every ingress request. */

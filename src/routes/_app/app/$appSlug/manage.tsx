@@ -42,6 +42,7 @@ import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { Page } from '~components/app-shell/page';
 import { ApiPanel } from '~components/apps/api-panel';
 import { AppCompatibilityNotice } from '~components/apps/app-compatibility-notice';
+import { AppTailscaleServiceSection } from '~components/apps/app-tailscale-service-section';
 import { AppGlyph } from '~components/apps/app-glyph';
 import { DeploymentHistory } from '~components/apps/deployment-history';
 import { OperationsPanel } from '~components/apps/operations-panel';
@@ -240,6 +241,7 @@ function AppDetailPage() {
     >
       <Stack gap="xl">
         <AppCompatibilityNotice compatibility={app.compatibility} />
+        <AppTailscaleServiceSection appId={app.id} />
 
         <Box component="section">
           <Text fw={600} fz="lg" mb="md">

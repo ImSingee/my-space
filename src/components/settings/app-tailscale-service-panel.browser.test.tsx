@@ -12,6 +12,7 @@ import { AppTailscaleServicePanel } from './app-tailscale-service-panel';
 vi.mock('~server/app-tailscale', () => ({
   configureAppTailscale: vi.fn<() => void>(),
   getAppTailscaleStatus: vi.fn<() => void>(),
+  listAppTailscaleStatuses: vi.fn<() => void>(),
 }));
 vi.mock('~server/tailscale', () => ({
   getTailscaleStatus: vi.fn<() => void>(),

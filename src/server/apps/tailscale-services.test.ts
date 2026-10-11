@@ -18,7 +18,11 @@ vi.mock('~agent/paths', () => ({
 }));
 vi.mock('../tailscale-manager', () => ({
   getTailscaleManager: () => ({
-    getStatus: async () => ({ hostname: 'hatch' }),
+    getStatus: async () => ({
+      hostname: 'hatch',
+      state: 'connected',
+      suffix: 'example.ts.net',
+    }),
     serviceSnapshot: mocks.observed,
     mutateServices: async (write: (hostname: string) => Promise<void>) => {
       await write('hatch');
@@ -27,8 +31,13 @@ vi.mock('../tailscale-manager', () => ({
   }),
 }));
 const { db, schema } = await import('~/db');
-const { advertisedAppServices, activeAppService, saveAppService } =
-  await import('./tailscale-services');
+const {
+  advertisedAppServices,
+  activeAppService,
+  saveAppService,
+  appServiceStatuses,
+  appServiceStatus,
+} = await import('./tailscale-services');
 const appId = 'service-app';
 const origin = 'https://notes.example.ts.net';
 beforeEach(async () => {
@@ -104,4 +113,32 @@ it('fails closed for stale observations and incompatible deployments, and does n
   await expect(
     saveAppService({ appId, serviceName: 'hatch', enabled: true }),
   ).rejects.toThrow(/node name/);
+});
+
+it('reports every persisted binding with the same live state as single-App reads', async () => {
+  await db
+    .insert(schema.apps)
+    .values({ id: 'disabled-app', slug: 'disabled', name: 'Disabled' });
+  await db.insert(schema.appTailscaleServices).values({
+    appId: 'disabled-app',
+    serviceName: 'disabled',
+    enabled: false,
+    revision: 'disabled-one',
+  });
+  const statuses = new Map(
+    (await appServiceStatuses()).map((entry) => [entry.appId, entry.status]),
+  );
+  expect(statuses.get(appId)).toEqual(await appServiceStatus(appId));
+  expect(statuses.get(appId)?.state).toBe('ready');
+  expect(statuses.get('disabled-app')?.state).toBe('disabled');
+  expect(statuses.get('disabled-app')?.origin).toBeNull();
+  expect((await appServiceStatus('unconfigured')).state).toBe('disabled');
+  await db
+    .update(schema.apps)
+    .set({ status: 'archived' })
+    .where(eq(schema.apps.id, appId));
+  expect(
+    (await appServiceStatuses()).find((entry) => entry.appId === appId)?.status
+      .state,
+  ).toBe('unavailable');
 });

@@ -1,7 +1,6 @@
 import {
   Alert,
   Anchor,
-  Badge,
   Box,
   Button,
   Code,
@@ -16,21 +15,14 @@ import { useState } from 'react';
 import copy from 'copy-to-clipboard';
 import { toast } from 'sonner';
 import { appTailscaleConfigSchema } from '~/app-tailscale';
-import { appTailscaleQueryOptions } from '~queries/app-tailscale';
+import {
+  appTailscaleQueryOptions,
+  appTailscaleStatusesQueryOptions,
+} from '~queries/app-tailscale';
 import { tailscaleQueryOptions } from '~queries/tailscale';
 import { configureAppTailscale } from '~server/app-tailscale';
+import { AppTailscaleBadge } from '~components/apps/app-tailscale-status';
 
-const labels = {
-  disabled: 'Not enabled',
-  disconnected: 'Connect Tailscale first',
-  unavailable: 'App unavailable',
-  starting: 'Advertising',
-  'needs-tag': 'Node needs a tag',
-  pending: 'Waiting for Tailscale configuration or approval',
-  'https-pending': 'Preparing HTTPS',
-  ready: 'Ready',
-  error: 'Needs attention',
-};
 export function AppTailscaleServicePanel({
   appId,
   slug,
@@ -59,6 +51,7 @@ export function AppTailscaleServicePanel({
       }),
     onSuccess: (data) => {
       queryClient.setQueryData(appTailscaleQueryOptions(appId).queryKey, data);
+      void queryClient.invalidateQueries(appTailscaleStatusesQueryOptions);
       setEditedName(null);
       toast.success(
         data.config?.enabled ? 'Service settings saved' : 'Service stopped',
@@ -110,9 +103,7 @@ export function AppTailscaleServicePanel({
           <Text fw={600} fz="lg">
             Access address
           </Text>
-          <Badge color={status.state === 'ready' ? 'green' : 'gray'}>
-            {labels[status.state]}
-          </Badge>
+          <AppTailscaleBadge state={status.state} />
         </Group>
         <Text size="sm" c="dimmed">
           Give this App its own private HTTPS address. Tailscale controls who

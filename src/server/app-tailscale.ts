@@ -21,3 +21,10 @@ export const configureAppTailscale = createServerFn({ method: 'POST' })
     await saveAppService(data);
     return appServiceStatus(data.appId);
   });
+
+export const listAppTailscaleStatuses = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const { appServiceStatuses } = await import('./apps/tailscale-services');
+    return appServiceStatuses();
+  });
