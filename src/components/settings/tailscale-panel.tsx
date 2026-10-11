@@ -8,13 +8,22 @@ import {
   Group,
   Skeleton,
   Stack,
+  Table,
   Text,
   TextInput,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { IconCheck, IconCopy, IconExternalLink } from '@tabler/icons-react';
+import {
+  IconCheck,
+  IconCircleCheck,
+  IconCircleX,
+  IconCopy,
+  IconExternalLink,
+  IconHelpCircle,
+} from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
+import dayjs from 'dayjs';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { tailscaleQueryOptions } from '~queries/tailscale';
@@ -36,6 +45,82 @@ const STATE_LABELS = {
   connected: 'Connected',
   error: 'Needs attention',
 } as const;
+
+const DNS_SETTINGS_URL = 'https://login.tailscale.com/admin/dns';
+
+type HttpsPhase = NonNullable<TailscaleStatus['https']>['phase'];
+
+// DNS settings only help when the certificate itself has stalled; a provider
+// rate limit or a listener failure is not fixed there.
+const HTTPS_PROBLEMS: Partial<
+  Record<
+    HttpsPhase,
+    { title: string; badge: string; color: string; dnsSettings: boolean }
+  >
+> = {
+  'certificate-delayed': {
+    title: 'HTTPS is taking longer than expected',
+    badge: 'HTTPS delayed',
+    color: 'yellow',
+    dnsSettings: true,
+  },
+  'rate-limited': {
+    title: 'Certificate requests are temporarily limited',
+    badge: 'Waiting to retry',
+    color: 'yellow',
+    dnsSettings: false,
+  },
+  'listener-error': {
+    title: 'Secure address could not start',
+    badge: 'Needs attention',
+    color: 'red',
+    dnsSettings: false,
+  },
+};
+
+function DnsSettingRow({
+  name,
+  enabled,
+}: {
+  name: string;
+  enabled?: boolean | null;
+}) {
+  // A missing value means the helper could not read the setting, not that it
+  // is off, so only an explicit false is reported as not enabled.
+  const { label, Icon, color } =
+    enabled === true
+      ? {
+          label: 'Enabled',
+          Icon: IconCircleCheck,
+          color: 'var(--mantine-color-green-7)',
+        }
+      : enabled === false
+        ? {
+            label: 'Not enabled',
+            Icon: IconCircleX,
+            color: 'var(--mantine-color-red-7)',
+          }
+        : {
+            label: 'Unknown',
+            Icon: IconHelpCircle,
+            color: 'var(--mantine-color-dimmed)',
+          };
+  return (
+    <Table.Tr>
+      <Table.Th scope="row" fw={400} pr="xl">
+        {name}
+      </Table.Th>
+      <Table.Td>
+        <Group gap={6} wrap="nowrap">
+          <Icon size={16} color={color} aria-hidden />
+          <Text span size="sm" fw={500}>
+            {label}
+          </Text>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
+  );
+}
 
 export function TailscaleSettings() {
   const queryClient = useQueryClient();
@@ -184,6 +269,34 @@ export function TailscalePanel({
       onConfirm: apply,
     });
   };
+  const httpsProblem =
+    status.state === 'error' && status.https
+      ? HTTPS_PROBLEMS[status.https.phase]
+      : undefined;
+  // Helpers without HTTPS phases only report an error with both DNS settings
+  // on when the certificate or HTTPS listener is not ready.
+  const httpsNotReady =
+    !status.https &&
+    status.dns?.magicDnsEnabled === true &&
+    status.dns.httpsCertificatesEnabled === true;
+  const retryAt =
+    status.https?.phase === 'rate-limited' ? status.https.retryAt : null;
+  const retryTime = retryAt ? dayjs(retryAt) : null;
+  // Typed helper statuses decide from their phase; older helpers only
+  // identify DNS or certificate settings problems through their message.
+  const showDnsSettings = httpsProblem
+    ? httpsProblem.dnsSettings
+    : Boolean(status.dns) ||
+      /dns|certificate settings/i.test(status.message ?? '');
+  const badge = httpsProblem ?? {
+    badge: STATE_LABELS[status.state],
+    color:
+      status.state === 'connected'
+        ? 'green'
+        : status.state === 'error'
+          ? 'red'
+          : 'gray',
+  };
 
   return (
     <Stack gap="lg">
@@ -195,18 +308,8 @@ export function TailscalePanel({
             tailnet rules, and visitors still sign in to Hatch.
           </Text>
         </Stack>
-        <Badge
-          variant="light"
-          color={
-            status.state === 'connected'
-              ? 'green'
-              : status.state === 'error'
-                ? 'red'
-                : 'gray'
-          }
-          aria-live="polite"
-        >
-          {STATE_LABELS[status.state]}
+        <Badge variant="light" color={badge.color} aria-live="polite">
+          {badge.badge}
         </Badge>
       </Group>
 
@@ -240,18 +343,63 @@ export function TailscalePanel({
         </Alert>
       )}
       {status.message && status.state !== 'preparing-https' && (
-        <Alert title="Connection needs attention" color="yellow">
-          <Text size="sm">{status.message}</Text>
-          {/dns/i.test(status.message) && (
-            <Anchor
-              href="https://login.tailscale.com/admin/dns"
-              target="_blank"
-              rel="noreferrer"
-              size="sm"
-            >
-              Open Tailscale DNS settings
-            </Anchor>
-          )}
+        <Alert
+          title={
+            httpsProblem?.title ??
+            (httpsNotReady
+              ? 'HTTPS is not ready'
+              : 'Connection needs attention')
+          }
+          color={httpsProblem?.color ?? 'yellow'}
+        >
+          <Stack gap="sm" align="flex-start">
+            <Text size="sm">{status.message}</Text>
+            {retryAt && retryTime?.isValid() && (
+              <Text size="sm">
+                Next automatic attempt:{' '}
+                <Text span fw={500} component="time" dateTime={retryAt}>
+                  {retryTime.format(
+                    retryTime.isSame(dayjs(), 'day')
+                      ? 'h:mm A'
+                      : 'MMM D [at] h:mm A',
+                  )}
+                </Text>
+              </Text>
+            )}
+            {status.dns && (
+              <Table
+                aria-label="Tailscale DNS settings"
+                w="auto"
+                fz="sm"
+                horizontalSpacing={0}
+                verticalSpacing={4}
+                withRowBorders={false}
+              >
+                <Table.Tbody>
+                  <DnsSettingRow
+                    name="MagicDNS"
+                    enabled={status.dns.magicDnsEnabled}
+                  />
+                  <DnsSettingRow
+                    name="HTTPS certificates"
+                    enabled={status.dns.httpsCertificatesEnabled}
+                  />
+                </Table.Tbody>
+              </Table>
+            )}
+            {showDnsSettings && (
+              <Button
+                component="a"
+                href={DNS_SETTINGS_URL}
+                target="_blank"
+                rel="noreferrer"
+                variant="default"
+                rightSection={<IconExternalLink size={16} />}
+              >
+                Open Tailscale DNS settings
+              </Button>
+            )}
+          </Stack>
         </Alert>
       )}
 
@@ -387,16 +535,19 @@ export function TailscalePanel({
 
       {status.enabled && (
         <Group>
-          {status.state === 'error' && (
-            <Button
-              type="button"
-              loading={pending}
-              disabled={!status.available}
-              onClick={() => void connect(status.hostname)}
-            >
-              Reconnect
-            </Button>
-          )}
+          {/* Restarting cannot lift a provider rate limit; the helper already
+              waits until the retry time. */}
+          {status.state === 'error' &&
+            status.https?.phase !== 'rate-limited' && (
+              <Button
+                type="button"
+                loading={pending}
+                disabled={!status.available}
+                onClick={() => void connect(status.hostname)}
+              >
+                Reconnect
+              </Button>
+            )}
           <Button
             type="button"
             variant="default"

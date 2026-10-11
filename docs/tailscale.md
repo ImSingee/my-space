@@ -120,8 +120,20 @@ continuing to retry. Missing DNS settings, certificate rate limits, and HTTPS
 listener failures show an actionable warning instead of the waiting message.
 Missing DNS or certificate settings are retried automatically. If the helper
 exits, select **Reconnect**.
-When the certificate provider supplies a retry delay, Hatch keeps the rate-limit
-warning visible and waits for that delay before requesting another certificate.
+The panel lists MagicDNS and HTTPS certificates separately as **Enabled**,
+**Not enabled**, or **Unknown**. Only missing settings need to be enabled.
+The **Open Tailscale DNS settings** button helps with missing settings or delayed
+certificate preparation. Normal preparation, provider rate limits, and listener
+failures do not suggest changing DNS settings.
+An enabled HTTPS setting does not mean the certificate or listener is ready;
+certificate or network failures are reported separately. Unknown settings are
+retried without assuming they are disabled.
+When the certificate provider supplies a retry time, Hatch keeps the rate-limit
+warning visible, waits until that time before requesting another certificate,
+and shows it in Settings. Reconnecting
+does not bypass the provider's limit. The preparation phase and retry time are
+structured helper diagnostics; helpers without them retain the generic status
+display.
 A missing executable shows installation guidance and disables connection.
 
 If you disconnect while visiting the private address, the panel asks you to
