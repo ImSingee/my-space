@@ -4,7 +4,7 @@ import {
   IconRobot,
   IconServer2,
   IconServerBolt,
-  IconShieldLock,
+  IconUserCircle,
   IconUsers,
   IconNetwork,
 } from '@tabler/icons-react';
@@ -20,7 +20,7 @@ const GROUPS = [
   {
     label: null,
     items: [
-      { to: '/settings/security', label: 'Security', icon: IconShieldLock },
+      { to: '/settings/account', label: 'Account', icon: IconUserCircle },
       { to: '/settings/providers', label: 'AI Providers', icon: IconServer2 },
       { to: '/settings/users', label: 'Users', icon: IconUsers },
       { to: '/settings/tailscale', label: 'Tailscale', icon: IconNetwork },
@@ -39,7 +39,7 @@ function SettingsLayout() {
   return (
     <Page
       title="Settings"
-      description="Manage security, providers, users, private access, and runtime status."
+      description="Manage your account, providers, users, private access, and runtime status."
       size={1040}
     >
       <Box className={classes.layout}>
