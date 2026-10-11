@@ -35,6 +35,14 @@ vi.mock('~queries/agent', () => ({
             type: 'text',
             text: `${id} reply ${index}\n\n${'A paragraph of conversation history.\n\n'.repeat(id === 'long' ? 18 : 2)}`,
           },
+          ...(id === 'nested' && index === 11
+            ? [
+                {
+                  type: 'thinking',
+                  thinking: 'Nested thinking line.\n'.repeat(100),
+                },
+              ]
+            : []),
         ],
       })),
       activeRun: fixtures.streaming
@@ -261,7 +269,7 @@ async function mountStreamingChat(sessionId = 'short') {
         ),
     ),
   );
-  const { router } = await mountChat(sessionId);
+  const { router, screen } = await mountChat(sessionId);
   await expect.poll(() => Boolean(controller)).toBe(true);
   let seq = 0;
   const emit = (delta: string) =>
@@ -270,7 +278,7 @@ async function mountStreamingChat(sessionId = 'short') {
         `data: ${JSON.stringify({ seq: ++seq, event: { type: 'text', delta } })}\n\n`,
       ),
     );
-  return { router, emit };
+  return { router, screen, emit };
 }
 
 test('follows streaming at the bottom and preserves manual history reading', async () => {
@@ -369,82 +377,145 @@ test('keeps mixed-case session URLs under the Chat scroll policy', async () => {
   expect(bottomGap()).toBeLessThanOrEqual(2);
 });
 
-function sendUpwardInput(viewport: HTMLDivElement, input: string) {
+function sendUpwardInput(viewport: HTMLDivElement, input: 'wheel' | 'touch') {
   if (input === 'wheel') {
-    viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }));
-  } else if (input === 'touch') {
+    viewport.dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaY: -200,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  } else {
     const touch = (clientY: number) =>
       new Touch({ identifier: 1, target: viewport, clientY });
     viewport.dispatchEvent(
-      new TouchEvent('touchstart', { touches: [touch(100)] }),
+      new TouchEvent('touchstart', {
+        touches: [touch(100)],
+        bubbles: true,
+        cancelable: true,
+      }),
     );
     viewport.dispatchEvent(
-      new TouchEvent('touchmove', { touches: [touch(300)] }),
+      new TouchEvent('touchmove', {
+        touches: [touch(300)],
+        bubbles: true,
+        cancelable: true,
+      }),
     );
-  } else {
-    viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }));
   }
 }
 
-test.each(['wheel', 'touch', 'keyboard'])(
-  'pauses streaming on upward %s input before its scroll event',
-  async (input) => {
-    const { emit } = await mountStreamingChat();
-    emit('First streaming reply.\n\n'.repeat(20));
-    await expect
-      .poll(() => chatViewport().textContent)
-      .toContain('First streaming reply.');
-    await expect.poll(bottomGap).toBeLessThanOrEqual(2);
-    await settleScroll();
-    const viewport = chatViewport();
-    sendUpwardInput(viewport, input);
-    const readingTop = viewport.scrollTop;
-    emit('More streaming output.\n\n'.repeat(20));
-    await expect
-      .poll(() => chatViewport().textContent)
-      .toContain('More streaming output.');
-    await settleScroll();
-    expect(viewport.scrollTop).toBe(readingTop);
-    expect(bottomGap()).toBeGreaterThan(500);
-    // Explicitly returning to the bottom resumes streaming follow.
-    viewport.scrollTop = viewport.scrollHeight;
-    await settleScroll();
-    emit('Follow resumed.\n\n'.repeat(20));
-    await expect
-      .poll(() => chatViewport().textContent)
-      .toContain('Follow resumed.');
-    await expect.poll(bottomGap).toBeLessThanOrEqual(2);
-  },
-);
+test('preserves manual upward scrolling before its scroll event', async () => {
+  const { emit } = await mountStreamingChat();
+  emit('First streaming reply.\n\n'.repeat(20));
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('First streaming reply.');
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  await settleScroll();
+  const viewport = chatViewport();
+  viewport.scrollTop -= 200;
+  const readingTop = viewport.scrollTop;
+  emit('More streaming output.\n\n'.repeat(20));
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('More streaming output.');
+  await settleScroll();
+  expect(viewport.scrollTop).toBe(readingTop);
+  expect(bottomGap()).toBeGreaterThan(500);
+  // Explicitly returning to the bottom resumes streaming follow.
+  viewport.scrollTop = viewport.scrollHeight;
+  await settleScroll();
+  emit('Follow resumed.\n\n'.repeat(20));
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('Follow resumed.');
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+});
 
-test.each(['wheel', 'touch', 'keyboard'])(
-  'keeps following after upward %s input cannot scroll a short reply',
-  async (input) => {
-    const { emit } = await mountStreamingChat('empty');
-    emit('A short streaming reply.');
-    await expect
-      .poll(() => chatViewport().textContent)
-      .toContain('A short streaming reply.');
-    await settleScroll();
-    const viewport = chatViewport();
-    expect(viewport.scrollHeight).toBe(viewport.clientHeight);
-    expect(viewport.scrollTop).toBe(0);
-    sendUpwardInput(viewport, input);
-    await settleScroll();
-    emit('The reply now fills the viewport.\n\n'.repeat(30));
-    await expect
-      .poll(() => viewport.scrollHeight)
-      .toBeGreaterThan(viewport.clientHeight + 500);
-    await expect.poll(bottomGap).toBeLessThanOrEqual(2);
-    // Once scrolling is possible, the same input must still pause follow.
-    sendUpwardInput(viewport, input);
-    const readingTop = viewport.scrollTop;
-    emit('More output while reading history.\n\n'.repeat(20));
-    await expect
-      .poll(() => viewport.textContent)
-      .toContain('More output while reading history.');
-    await settleScroll();
-    expect(viewport.scrollTop).toBe(readingTop);
-    expect(bottomGap()).toBeGreaterThan(500);
-  },
-);
+test('keeps following after an upward gesture cannot scroll a short reply', async () => {
+  const { emit } = await mountStreamingChat('empty');
+  emit('A short streaming reply.');
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('A short streaming reply.');
+  await settleScroll();
+  const viewport = chatViewport();
+  expect(viewport.scrollHeight).toBe(viewport.clientHeight);
+  expect(viewport.scrollTop).toBe(0);
+  sendUpwardInput(viewport, 'wheel');
+  await settleScroll();
+  emit('The reply now fills the viewport.\n\n'.repeat(30));
+  await expect
+    .poll(() => viewport.scrollHeight)
+    .toBeGreaterThan(viewport.clientHeight + 500);
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  // Once scrolling is possible, actual upward movement must pause follow.
+  sendUpwardInput(viewport, 'wheel');
+  viewport.scrollTop -= 200;
+  const readingTop = viewport.scrollTop;
+  emit('More output while reading history.\n\n'.repeat(20));
+  await expect
+    .poll(() => viewport.textContent)
+    .toContain('More output while reading history.');
+  await settleScroll();
+  expect(viewport.scrollTop).toBe(readingTop);
+  expect(bottomGap()).toBeGreaterThan(500);
+});
+
+async function mountNestedStreamingChat() {
+  const { screen, emit } = await mountStreamingChat('nested');
+  await screen.getByRole('button', { name: 'Thinking', exact: true }).click();
+  const nested = document.querySelector<HTMLDivElement>(
+    '[class*="stepBodyText"]',
+  )!;
+  await expect
+    .poll(
+      () =>
+        nested.clientHeight > 0 && nested.scrollHeight > nested.clientHeight,
+    )
+    .toBe(true);
+  // Wait for expansion to finish before measuring either scroll position.
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  return { nested, viewport: chatViewport(), emit };
+}
+
+test('keeps following while upward scrolling is consumed by nested content', async () => {
+  const { nested, viewport, emit } = await mountNestedStreamingChat();
+  nested.scrollTop = 400;
+  await settleScroll();
+  sendUpwardInput(nested, 'wheel');
+  nested.scrollTop -= 200;
+  emit('Output after nested reading.\n\n'.repeat(6));
+  await expect
+    .poll(() => viewport.textContent)
+    .toContain('Output after nested reading.');
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  // At the inner boundary an upward gesture may move the transcript.
+  // Preserve that movement even before its asynchronous scroll event.
+  nested.scrollTop = 0;
+  await settleScroll();
+  sendUpwardInput(nested, 'wheel');
+  viewport.scrollTop -= 200;
+  const readingTop = viewport.scrollTop;
+  emit('Output after reaching the boundary.\n\n'.repeat(20));
+  await expect
+    .poll(() => viewport.textContent)
+    .toContain('Output after reaching the boundary.');
+  await settleScroll();
+  expect(viewport.scrollTop).toBe(readingTop);
+  expect(bottomGap()).toBeGreaterThan(500);
+});
+
+test('keeps following when a nested upward gesture moves neither container', async () => {
+  const { nested, viewport, emit } = await mountNestedStreamingChat();
+  nested.scrollTop = 0;
+  sendUpwardInput(nested, 'touch');
+  emit('Output after an unmoving gesture.\n\n'.repeat(20));
+  await expect
+    .poll(() => viewport.textContent)
+    .toContain('Output after an unmoving gesture.');
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+});

@@ -508,72 +508,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
       }
       previousTopRef.current = el.scrollTop;
     };
-    // User intent must pause follow before the asynchronous scroll event, so
-    // a token or resize arriving in the same frame cannot override it.
-    const pauseFollowForUpwardInput = () => {
-      // At the top, an upward gesture cannot move the viewport and may emit
-      // no scroll event. Keep following short replies as they begin to grow.
-      if (el.scrollTop > 0) stickToBottomRef.current = false;
-    };
-    const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && event.deltaY < 0) pauseFollowForUpwardInput();
-    };
-    let touchY: number | undefined;
-    const onTouchStart = (event: TouchEvent) => {
-      touchY =
-        event.touches.length === 1 ? event.touches[0].clientY : undefined;
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      const nextY =
-        event.touches.length === 1 ? event.touches[0].clientY : undefined;
-      if (touchY !== undefined && nextY !== undefined && nextY > touchY) {
-        pauseFollowForUpwardInput();
-      }
-      touchY = nextY;
-    };
-    const onTouchEnd = () => {
-      touchY = undefined;
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey
-      )
-        return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          target.closest('input, textarea, select, button, a'))
-      )
-        return;
-      if (
-        event.key === 'ArrowUp' ||
-        event.key === 'PageUp' ||
-        event.key === 'Home' ||
-        (event.key === ' ' && event.shiftKey)
-      ) {
-        pauseFollowForUpwardInput();
-      }
-    };
+    // Follow depends on transcript movement, not bubbled gestures from nested
+    // outputs. scrollToBottom also detects upward movement before this event.
     el.addEventListener('scroll', onScroll, { passive: true });
-    el.addEventListener('wheel', onWheel, { passive: true });
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
-    el.addEventListener('touchend', onTouchEnd, { passive: true });
-    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
-    el.addEventListener('keydown', onKeyDown);
-    return () => {
-      el.removeEventListener('scroll', onScroll);
-      el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('touchend', onTouchEnd);
-      el.removeEventListener('touchcancel', onTouchEnd);
-      el.removeEventListener('keydown', onKeyDown);
-    };
+    return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
   // Initial layout, image decoding and composer resizing can change the bottom
