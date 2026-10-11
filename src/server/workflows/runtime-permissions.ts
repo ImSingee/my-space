@@ -6,7 +6,7 @@ import {
 export type WorkflowDenoArgsOptions = {
   bundlePath: string;
   artifactDir: string;
-  /** Missing only for legacy deployments, which retain unrestricted access. */
+  /** Absent when no policy was declared, which runs unrestricted. */
   network?: NetworkPolicy;
 };
 

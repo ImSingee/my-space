@@ -24,6 +24,10 @@ migrate JSON to TS unless the user explicitly requests the conversion, or as
 part of a user-requested upgrade to a released compatibility v3 or later that
 requires TS. The latest App contract is v2; v3+ is not available yet.
 
+In every compatibility version and in both formats, the manifest top level
+rejects undeclared fields. The retired top-level `version` and `userscripts`
+fields remain accepted and ignored until the proposal below removes them.
+
 TypeScript authoring does not introduce a new deployment compatibility version:
 the platform still stores parsed source JSON
 and normalized deployment JSON, and rollback uses stored deployment artifacts.

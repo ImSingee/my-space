@@ -114,7 +114,7 @@ export type NormalizedManifest = {
     runtime?: BackendRuntime;
     /** Absent on legacy source artifacts; set by the bundle build path. */
     format?: 'bundle-v1';
-    /** Absent on legacy deployments, which retain unrestricted access. */
+    /** Absent when no policy was declared, which runs unrestricted. */
     network?: NetworkPolicy;
   };
   /**

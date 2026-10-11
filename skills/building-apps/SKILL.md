@@ -231,8 +231,8 @@ subdomains; declare each subdomain or use `*.example.com`.
 The declaration controls Deno's single network permission category: HTTP,
 HTTPS, raw TCP and UDP, DNS resolution, and network listeners are not separate
 permissions. Set `"network": "unrestricted"` only when the App genuinely needs
-arbitrary networking. Omitting `network` is reserved for compatibility with
-older deployments and also runs unrestricted; never omit it from new source.
+arbitrary networking. Compatibility v1 and v2 still accept an omitted
+`network` and run it unrestricted; never omit it from new source.
 
 The platform automatically adds only the backend's exact loopback listener
 plus enabled Database, Data Tables, KV, and Workflow endpoints. These platform

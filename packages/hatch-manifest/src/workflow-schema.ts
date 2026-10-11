@@ -85,25 +85,32 @@ export const workflowTriggersSchema = z.object({
   webhook: z.boolean().default(false),
 });
 
-export const sourceWorkflowManifestSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .regex(
-      WORKFLOW_ID_RE,
-      'id must be lowercase letters, digits, and hyphens (a ULID or kebab id)',
-    ),
-  name: z.string().min(1),
-  description: z.string().default(''),
-  /** Removed; retained only so legacy manifests remain parseable. */
-  version: z.unknown().optional(),
-  compatibilityVersion: z.number().int().min(1),
-  /** Entry module exporting `defineWorkflow(...)` as default. */
-  entry: sourceRelativePath.default('workflow.ts'),
-  /** Missing only for legacy deployments, which retain unrestricted access. */
-  network: networkPolicySchema.optional(),
-  triggers: workflowTriggersSchema.default({ cron: [], webhook: false }),
-});
+/**
+ * Top-level fields are strict for both `manifest.ts` and `manifest.json`.
+ * Retired fields stay declared as `z.unknown().optional()` so historical
+ * source remains parseable; the platform ignores their values.
+ */
+export const sourceWorkflowManifestSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .regex(
+        WORKFLOW_ID_RE,
+        'id must be lowercase letters, digits, and hyphens (a ULID or kebab id)',
+      ),
+    name: z.string().min(1),
+    description: z.string().default(''),
+    /** Removed; retained only so legacy manifests remain parseable. */
+    version: z.unknown().optional(),
+    compatibilityVersion: z.number().int().min(1),
+    /** Entry module exporting `defineWorkflow(...)` as default. */
+    entry: sourceRelativePath.default('workflow.ts'),
+    /** Optional under compatibility v1; omission runs unrestricted. */
+    network: networkPolicySchema.optional(),
+    triggers: workflowTriggersSchema.default({ cron: [], webhook: false }),
+  })
+  .strict();
 
 export type SourceWorkflowManifest = z.infer<
   typeof sourceWorkflowManifestSchema

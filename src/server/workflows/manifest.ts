@@ -12,7 +12,7 @@ export type NormalizedWorkflowManifest = {
   name: string;
   description: string;
   entry: string;
-  /** Missing only for legacy deployments, which retain unrestricted access. */
+  /** Absent when no policy was declared, which runs unrestricted. */
   network?: NetworkPolicy;
   triggers: {
     cron: WorkflowCronJob[];

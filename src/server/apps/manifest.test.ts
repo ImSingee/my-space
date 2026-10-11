@@ -83,18 +83,33 @@ describe('App compatibility manifest', () => {
   );
 });
 
-describe('App manifest version', () => {
-  it('accepts the retired field without adding it to normalized manifests', () => {
-    const retiredVersion = { legacy: true };
+describe('App manifest top-level fields', () => {
+  it('accepts retired fields without adding them to normalized manifests', () => {
+    const retired = { legacy: true };
     const parsed = parseSourceManifest({
       id: 'demo',
       name: 'Demo',
-      version: retiredVersion,
+      version: retired,
+      userscripts: retired,
       capabilities: {},
     });
 
-    expect(parsed.version).toEqual(retiredVersion);
-    expect(normalizeManifest(parsed)).not.toHaveProperty('version');
+    expect(parsed.version).toEqual(retired);
+    expect(parsed.userscripts).toEqual(retired);
+    const normalized = normalizeManifest(parsed);
+    expect(normalized).not.toHaveProperty('version');
+    expect(normalized).not.toHaveProperty('userscripts');
+  });
+
+  it('rejects undeclared fields such as a misspelled backend', () => {
+    expect(() =>
+      parseSourceManifest({
+        id: 'demo',
+        name: 'Demo',
+        capabilities: {},
+        backned: { entry: 'backend/main.ts' },
+      }),
+    ).toThrow(/backned/);
   });
 });
 

@@ -300,6 +300,11 @@ export function isValidAppSlug(slug: string): boolean {
 export const backendRuntimeSchema = z.enum(['deno-run', 'deno-serve']);
 export type BackendRuntime = z.infer<typeof backendRuntimeSchema>;
 
+/**
+ * Top-level fields are strict for both `manifest.ts` and `manifest.json`.
+ * Retired fields stay declared as `z.unknown().optional()` so historical
+ * source remains parseable; the platform ignores their values.
+ */
 export const sourceManifestSchema = z
   .object({
     id: z
@@ -350,6 +355,7 @@ export const sourceManifestSchema = z
     /** Top-level workflows this app's backend may invoke (see appWorkflowRefSchema). */
     workflows: appWorkflowsSchema,
   })
+  .strict()
   .superRefine((manifest, ctx) => {
     if (
       manifest.capabilities.storage &&
