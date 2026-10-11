@@ -4,7 +4,11 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import type { AgentStreamEvent, AskAnswer } from '~agent/events';
 import { StreamingBubble } from './streaming-bubble';
-import { useAgentStream, type StreamState } from './use-agent-stream';
+import {
+  reduceStreamState,
+  useAgentStream,
+  type StreamState,
+} from './use-agent-stream';
 
 type TerminalCallback = (errorMessage?: string) => boolean | Promise<boolean>;
 
@@ -94,6 +98,117 @@ function StreamHarness({ onTerminal }: { onTerminal: TerminalCallback }) {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+test.each(['cancelled', 'answered'] as const)(
+  'shows only the pending form and retains the question after it is %s',
+  async (outcome) => {
+    const question = {
+      id: 'q1',
+      prompt: 'Which release should we use?',
+      options: [
+        { id: 'o1', label: 'Stable' },
+        { id: 'o2', label: 'Preview' },
+      ],
+      allowMultiple: false,
+    };
+    let state: StreamState = {
+      active: true,
+      runId: 'run-1',
+      blocks: [],
+      thinkingActive: false,
+      textActive: false,
+    };
+    state = reduceStreamState(state, {
+      type: 'tool_start',
+      id: 'ask-tool-1',
+      name: 'ask',
+      args: { questions: [question] },
+    });
+    state = reduceStreamState(state, {
+      type: 'ask',
+      askId: 'ask-1',
+      questions: [question],
+    });
+    const onAnswer = vi.fn<(askId: string, answers: AskAnswer[]) => void>();
+    const bubble = () => (
+      <MantineProvider>
+        <StreamingBubble
+          state={state}
+          onAnswer={onAnswer}
+          onSubmitEnv={noopEnv}
+        />
+      </MantineProvider>
+    );
+    const screen = await render(bubble());
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByText(question.prompt, { exact: true }))
+      .toBeVisible();
+    await screen.getByRole('radio', { name: 'Preview', exact: true }).click();
+    const cancelled = outcome === 'cancelled';
+    if (!cancelled) {
+      await screen.getByRole('button', { name: 'Send answer' }).click();
+      state = reduceStreamState(state, {
+        type: 'ask_answered',
+        askId: 'ask-1',
+      });
+    }
+    state = reduceStreamState(state, {
+      type: 'tool_end',
+      id: 'ask-tool-1',
+      name: 'ask',
+      isError: cancelled,
+      output: cancelled
+        ? 'The user canceled this question.'
+        : 'Q: Which release should we use?\nA: Preview',
+    });
+    if (cancelled) {
+      state = reduceStreamState(state, {
+        type: 'error',
+        message: 'Agent run was cancelled.',
+      });
+    }
+    await screen.rerender(bubble());
+    await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
+    await screen.getByRole('button', { name: 'Ask the user' }).click();
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .toMatchTextContent('Which release should we use?');
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .toMatchTextContent(/- Stable\s+- Preview/);
+    await expect
+      .element(
+        screen.getByRole('region', {
+          name: cancelled ? 'Canceled' : 'Output',
+        }),
+      )
+      .toMatchTextContent(
+        cancelled ? 'The user canceled this question.' : 'A: Preview',
+      );
+    await expect
+      .element(screen.getByRole('region', { name: 'Error' }))
+      .not.toBeInTheDocument();
+    expect(onAnswer.mock.calls).toEqual(
+      cancelled
+        ? []
+        : [
+            [
+              'ask-1',
+              [
+                {
+                  questionId: 'q1',
+                  selectedOptionIds: ['o2'],
+                  customText: undefined,
+                },
+              ],
+            ],
+          ],
+    );
+  },
+);
 
 test('restores the waiting indicator between tools after earlier prose', async () => {
   const emit = mockLiveStream();

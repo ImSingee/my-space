@@ -5,10 +5,12 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconChevronRight,
+  IconCircleMinus,
   IconSparkles,
 } from '@tabler/icons-react';
 import { type ReactNode, type Ref, useEffect, useId, useRef } from 'react';
 import { isEditFileDetails } from '~agent/edit-file-details';
+import { askCancellationMessage } from '~agent/ask-cancellation';
 import { isFilePathDetails, isFilePathTool } from '~agent/file-path-details';
 import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
@@ -106,7 +108,19 @@ function outputPresentation(
   isError: boolean,
   args: unknown,
   result?: ToolResult,
-): { label: string; emptyText: string } {
+): { label: string; emptyText: string; cancelled?: boolean; text?: string } {
+  const cancelledMessage =
+    name === 'ask' && isError
+      ? askCancellationMessage(result?.text ?? '')
+      : undefined;
+  if (cancelledMessage) {
+    return {
+      label: 'Canceled',
+      emptyText: '',
+      cancelled: true,
+      text: cancelledMessage,
+    };
+  }
   if (isError) return { label: 'Error', emptyText: '(no error details)' };
   if (name === 'read_file') {
     const resultDetails = detailsRecord(result?.details);
@@ -321,6 +335,8 @@ export function ToolStep({
   const icon =
     status === 'running' ? (
       <Loader size={11} color="gray" />
+    ) : output.cancelled ? (
+      <IconCircleMinus size={14} stroke={1.7} />
     ) : isError ? (
       <IconAlertTriangle size={14} stroke={1.7} />
     ) : (
@@ -331,12 +347,16 @@ export function ToolStep({
       icon={icon}
       label={toolDisplayLabel(name, args)}
       detail={resolvedToolDetail(name, args, result?.details, isError, detail)}
-      error={isError}
+      error={isError && !output.cancelled}
     >
       {inputs !== undefined || result ? (
         <ToolStepBody
           inputs={inputs}
-          output={hideSuccessfulWriteOutput ? undefined : result?.text}
+          output={
+            hideSuccessfulWriteOutput
+              ? undefined
+              : (output.text ?? result?.text)
+          }
           editDiff={editDetails?.diff}
           outputLabel={output.label}
           outputEmptyText={output.emptyText}
@@ -434,7 +454,11 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     isError: tool.isError,
   };
   const editDetails = successfulEditDetails(tool.name, result);
-  const inputs = resolvedToolInputs(tool.name, tool.args, result);
+  // The answer form owns the questions while an ask is running.
+  const inputs =
+    running && tool.name === 'ask'
+      ? undefined
+      : resolvedToolInputs(tool.name, tool.args, result);
   const outputPresentationDetails = outputPresentation(
     tool.name,
     isError,
@@ -445,11 +469,12 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     tool.done && !isError && hasCompleteWriteInput(tool.name, tool.args);
   const output = hideSuccessfulWriteOutput
     ? undefined
-    : tool.output !== undefined
-      ? tool.output
-      : tool.done && tool.name === 'run_command' && inputs !== undefined
-        ? ''
-        : undefined;
+    : (outputPresentationDetails.text ??
+      (tool.output !== undefined
+        ? tool.output
+        : tool.done && tool.name === 'run_command' && inputs !== undefined
+          ? ''
+          : undefined));
   const hasBody =
     inputs !== undefined || output !== undefined || editDetails !== undefined;
   const showBody = running ? hasBody : open && hasBody;
@@ -463,6 +488,8 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
 
   const icon = running ? (
     <Loader size={11} color="gray" />
+  ) : outputPresentationDetails.cancelled ? (
+    <IconCircleMinus size={14} stroke={1.7} />
   ) : isError ? (
     <IconAlertTriangle size={14} stroke={1.7} />
   ) : (
@@ -477,7 +504,13 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   const label = toolDisplayLabel(tool.name, tool.args, tool.label);
   const header = (
     <>
-      <span className={isError ? classes.stepIconError : classes.stepIcon}>
+      <span
+        className={
+          isError && !outputPresentationDetails.cancelled
+            ? classes.stepIconError
+            : classes.stepIcon
+        }
+      >
         {icon}
       </span>
       <span className={classes.stepLabel}>{label}</span>

@@ -269,6 +269,32 @@ export function toolInputDetails(
   }
   const args = toolArgumentsRecord(value);
   if (!args) return undefined;
+  if (name === 'ask' && Array.isArray(args.questions)) {
+    const questions = args.questions.flatMap((value, index) => {
+      const question = toolArgumentsRecord(value);
+      if (typeof question?.prompt !== 'string') return [];
+      const options = Array.isArray(question.options)
+        ? question.options.flatMap((value) => {
+            const option = toolArgumentsRecord(value);
+            return typeof option?.label === 'string'
+              ? [`- ${option.label}`]
+              : [];
+          })
+        : [];
+      return [
+        [
+          `${index + 1}. ${question.prompt}`,
+          ...(question.allowMultiple === true
+            ? ['Select multiple options.']
+            : []),
+          ...options,
+        ].join('\n'),
+      ];
+    });
+    return questions.length > 0
+      ? [{ label: 'Questions', value: questions.join('\n\n') }]
+      : undefined;
+  }
   if (name === 'run_command' && typeof args.command === 'string') {
     return [{ label: 'Command', value: args.command }];
   }
