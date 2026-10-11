@@ -274,6 +274,8 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     expect(
       (await mint(run.runId, { runnerId: 'other-runner' })).response.status,
     ).toBe(403);
+    for (const invalid of [{}, { runnerId, extra: true }])
+      expect((await mint(run.runId, invalid)).response.status).toBe(400);
     const before = await database.db.$count(database.schema.session);
     const minted = await mint(run.runId, { runnerId });
     expect(minted.response.status).toBe(200);

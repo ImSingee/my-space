@@ -175,13 +175,19 @@ export async function handleInternalApiRequest(
       method === 'POST'
     ) {
       const { z } = await import('zod');
-      const { runnerId } = z
+      const body = z
         .object({ runnerId: z.string().min(1).max(191) })
         .strict()
-        .parse(await readJsonBody(req));
+        .safeParse(await readJsonBody(req));
+      if (!body.success)
+        throw new AppError('Expected a body of exactly { runnerId }.', 400);
       const { mintRunToken } = await import('~server/cli/run-token');
       res.setHeader('cache-control', 'no-store');
-      json(res, 200, await mintRunToken(decodeURIComponent(rest[1]), runnerId));
+      json(
+        res,
+        200,
+        await mintRunToken(decodeURIComponent(rest[1]), body.data.runnerId),
+      );
       return;
     }
     if (resource === 'apps') {
