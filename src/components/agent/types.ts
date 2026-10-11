@@ -228,6 +228,62 @@ export function toolDetail(
   };
 }
 
+function isLosslessJson(value: unknown, ancestors: Set<object>): boolean {
+  if (value === null) return true;
+  if (typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || ancestors.has(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  const keys = Object.keys(value);
+  // JSON.stringify serializes array holes as null, ignores non-index array
+  // properties and symbol keys, and defers to toJSON on other prototypes.
+  // Arrays therefore need exactly one own enumerable key per index.
+  const plainShape = Array.isArray(value)
+    ? prototype === Array.prototype &&
+      keys.length === value.length &&
+      keys.every((key, index) => key === String(index))
+    : prototype === Object.prototype || prototype === null;
+  if (!plainShape || Object.getOwnPropertySymbols(value).length > 0) {
+    return false;
+  }
+  ancestors.add(value);
+  const lossless = keys.every((key) =>
+    isLosslessJson((value as Record<string, unknown>)[key], ancestors),
+  );
+  // Shared, non-cyclic references are valid JSON and serialize as copies.
+  ancestors.delete(value);
+  return lossless;
+}
+
+/**
+ * Model-supplied arguments as indented JSON, with KV write values masked unless
+ * the request explicitly makes the entry public. An omitted secret flag keeps
+ * an existing entry's flag, so its value must also be treated as sensitive.
+ * Returns undefined rather than displaying a lossy serialization.
+ */
+export function toolRequestJson(
+  name: string,
+  value: unknown,
+): string | undefined {
+  try {
+    if (!isLosslessJson(value, new Set())) return undefined;
+    const args = toolArgumentsRecord(value);
+    const redactValue =
+      name === 'query_app_kv' &&
+      args?.action === 'set' &&
+      args.secret !== false &&
+      Object.hasOwn(args, 'value');
+    return JSON.stringify(
+      redactValue ? { ...args, value: '[REDACTED]' } : value,
+      null,
+      2,
+    );
+  } catch {
+    // Throwing getters or proxies cannot be shown faithfully either.
+    return undefined;
+  }
+}
+
 export type ToolInputDetail = {
   label: string;
   value: string;
