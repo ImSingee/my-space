@@ -26,7 +26,7 @@
     "react/no-string-refs": "error",
     "react/self-closing-comp": "error",
     "react/void-dom-elements-no-children": "error",
-    "local/no-dynamic-import": "warn",
+    "local/no-dynamic-import": "error",
     "typescript/no-unnecessary-condition": "off"
   },
   "overrides": [

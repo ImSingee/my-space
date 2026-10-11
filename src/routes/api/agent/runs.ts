@@ -2,6 +2,8 @@ import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
 import { composerInputSchema, hasComposerText } from '~agent/composer-content';
 import { auth } from '~auth/server';
+import { startAgentRun } from '~server/agent-runs';
+import { errorResponse } from '~server/errors';
 
 /** ~25 MB: comfortably fits the composer's downscaled images plus prose. */
 const MAX_BODY_BYTES = 25_000_000;
@@ -148,8 +150,6 @@ export async function postAgentRun({
     return new Response('Bad request', { status: 400 });
   }
 
-  const { startAgentRun } = await import('~server/agent-runs');
-  const { errorResponse } = await import('~server/errors');
   try {
     const result = await startAgentRun(parsed);
     return Response.json(result);

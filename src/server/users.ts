@@ -17,6 +17,7 @@ import { db } from '~/db';
 import { authMiddleware, requireSession } from './auth';
 import { getPlatformConfig, setPlatformConfig } from './platform-config';
 import { idSchema } from './validation';
+import { removePlatformUser } from './users-store';
 
 export type PlatformUser = {
   id: string;
@@ -88,6 +89,5 @@ export const deleteUser = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }): Promise<void> => {
     const session = await requireSession();
-    const { removePlatformUser } = await import('./users-store');
     await removePlatformUser(data.userId, session.user.id);
   });

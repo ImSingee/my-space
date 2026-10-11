@@ -4,6 +4,7 @@ import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
 import { readEnvFile } from '../env-file';
 import { ENV_KEY_PATTERN, requireEnvKey } from '../env-keys';
 import { MAX_FILE_CHARS, text, tool } from './shared';
+import { wrapShellCommand } from '../shell-sandbox';
 
 /** Bounded tail of a running command's output kept in memory / per update. */
 const MAX_LIVE_OUTPUT = 16_000;
@@ -148,7 +149,6 @@ export function createCommandTool(
       // wrapShellCommand adds the macOS seatbelt deny-list (platform env
       // files, host credential dirs); the env allowlist alone doesn't stop a
       // command from reading those by path.
-      const { wrapShellCommand } = await import('../shell-sandbox');
       const res = await env.exec(wrapShellCommand(params.command, sessionId), {
         ...(selectedEnv ? { env: selectedEnv } : {}),
         timeout: timeoutSeconds,

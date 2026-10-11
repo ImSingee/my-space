@@ -1,5 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { auth } from '~auth/server';
+import { cancelAgentRun } from '~server/agent-runs';
+import { errorResponse } from '~server/errors';
 
 function parseRunId(request: Request): string | null {
   const url = new URL(request.url);
@@ -18,8 +20,6 @@ export const Route = createFileRoute('/api/agent/runs/$runId/cancel')({
         const runId = parseRunId(request);
         if (!runId) return new Response('Not found', { status: 404 });
 
-        const { cancelAgentRun } = await import('~server/agent-runs');
-        const { errorResponse } = await import('~server/errors');
         try {
           await cancelAgentRun(runId);
           return Response.json({ ok: true });

@@ -9,7 +9,23 @@
 import { z } from 'zod';
 import { auth } from '~auth/server';
 import { db } from '~/db';
+import { deployApp } from '~server/apps/deploy';
+import {
+  appMasterCommit,
+  exportAppMasterBundle,
+  stageAppBundleCheckout,
+} from '~server/apps/git';
+import { rollbackAppToVersion } from '~server/apps/manage';
+import { createApp } from '~server/apps/scaffold';
 import { AppError } from '~server/errors';
+import { deployWorkflow } from '~server/workflows/deploy';
+import {
+  exportWorkflowMasterBundle,
+  stageWorkflowBundleCheckout,
+  workflowMasterCommit,
+} from '~server/workflows/git';
+import { rollbackWorkflowToVersion } from '~server/workflows/manage';
+import { createWorkflow } from '~server/workflows/scaffold';
 import { CliError } from './error';
 import {
   createAppRequestSchema,
@@ -114,13 +130,11 @@ async function route(request: Request, path: string[]) {
     if (post) {
       const raw = await readJson(request);
       if (kind === 'app') {
-        const { createApp } = await import('~server/apps/scaffold');
         return createApp(
           createAppRequestSchema.strict().parse(raw),
           run ? { sessionId: run.sessionId } : {},
         );
       }
-      const { createWorkflow } = await import('~server/workflows/scaffold');
       return createWorkflow(createWorkflowRequestSchema.strict().parse(raw));
     }
     // Minimal inventory; internal Agent inspection includes webhook secrets
@@ -151,11 +165,8 @@ async function route(request: Request, path: string[]) {
       .strict()
       .parse(await readJson(request));
     if (kind === 'app') {
-      const { rollbackAppToVersion } = await import('~server/apps/manage');
       return rollbackAppToVersion(row.id, version);
     }
-    const { rollbackWorkflowToVersion } =
-      await import('~server/workflows/manage');
     return rollbackWorkflowToVersion(row.id, version);
   }
 
@@ -167,10 +178,8 @@ async function route(request: Request, path: string[]) {
       throw fail('resource_generation_conflict', 409);
     const bundle = Buffer.from(body.bundleBase64, 'base64');
     if (kind === 'app') {
-      const { stageAppBundleCheckout } = await import('~server/apps/git');
       const staged = await stageAppBundleCheckout(row.id, bundle);
       try {
-        const { deployApp } = await import('~server/apps/deploy');
         const result = await deployApp(row.id, {
           ...body,
           sourceDir: staged.dir,
@@ -184,11 +193,8 @@ async function route(request: Request, path: string[]) {
         await staged.cleanup();
       }
     }
-    const { stageWorkflowBundleCheckout } =
-      await import('~server/workflows/git');
     const staged = await stageWorkflowBundleCheckout(row.id, bundle);
     try {
-      const { deployWorkflow } = await import('~server/workflows/deploy');
       const result = await deployWorkflow(row.id, {
         ...body,
         sourceDir: staged.dir,
@@ -206,19 +212,17 @@ async function route(request: Request, path: string[]) {
 
   if (action === 'source') {
     if (kind === 'app') {
-      const git = await import('~server/apps/git');
-      const bundle = await git.exportAppMasterBundle(row.id);
+      const bundle = await exportAppMasterBundle(row.id);
       return {
         id: row.id,
-        masterCommit: await git.appMasterCommit(row.id),
+        masterCommit: await appMasterCommit(row.id),
         bundleBase64: bundle?.toString('base64') ?? null,
       };
     }
-    const git = await import('~server/workflows/git');
-    const bundle = await git.exportWorkflowMasterBundle(row.id);
+    const bundle = await exportWorkflowMasterBundle(row.id);
     return {
       id: row.id,
-      masterCommit: await git.workflowMasterCommit(row.id),
+      masterCommit: await workflowMasterCommit(row.id),
       bundleBase64: bundle?.toString('base64') ?? null,
     };
   }

@@ -4,6 +4,14 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn<(options: unknown) => Promise<unknown>>(),
   liveAppDeployment:
     vi.fn<(id: string, capability: string) => Promise<unknown>>(),
+  readLiveBuildFile:
+    vi.fn<
+      (
+        id: string,
+        expectedDeploymentId: string,
+        relativePath: string,
+      ) => Promise<unknown>
+    >(),
 }));
 
 vi.mock('~auth/server', () => ({
@@ -11,6 +19,9 @@ vi.mock('~auth/server', () => ({
 }));
 vi.mock('~server/apps/access', () => ({
   liveAppDeployment: mocks.liveAppDeployment,
+}));
+vi.mock('~server/apps/build-identity', () => ({
+  readLiveBuildFile: mocks.readLiveBuildFile,
 }));
 
 import { handleWidgetRequest } from './widget';

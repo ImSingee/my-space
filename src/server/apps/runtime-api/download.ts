@@ -1,6 +1,11 @@
 import { auth } from '~auth/server';
 import { db } from '~/db';
 import { parseAppApiPath } from './path';
+import {
+  buildDeploymentArtifactArchive,
+  buildAppSourceArchive,
+  buildAppRepoArchive,
+} from '~server/apps/download';
 
 type Archive = { filename: string; contentType: string; body: Buffer };
 
@@ -48,8 +53,6 @@ export async function handleDownloadRequest({
           })
         : null;
       if (!deployment) return new Response('Not found', { status: 404 });
-      const { buildDeploymentArtifactArchive } =
-        await import('~server/apps/download');
       return archiveResponse(
         await buildDeploymentArtifactArchive(
           id,
@@ -59,8 +62,6 @@ export async function handleDownloadRequest({
       );
     }
 
-    const { buildAppSourceArchive, buildAppRepoArchive } =
-      await import('~server/apps/download');
     const archive =
       mode === 'repo'
         ? await buildAppRepoArchive(id)

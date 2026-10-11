@@ -1,6 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router';
 import type { AgentRunStreamEvent } from '~agent/events';
 import { auth } from '~auth/server';
+import {
+  getAgentRun,
+  hasLiveLease,
+  interruptAgentRun,
+  isTerminalAgentRunStatus,
+  listRunEventsAfter,
+  subscribeToAgentRun,
+} from '~server/agent-runs';
 
 /** Page size for replaying persisted run events (keeps replay memory bounded). */
 const REPLAY_PAGE_SIZE = 500;
@@ -33,15 +41,6 @@ export const Route = createFileRoute('/api/agent/runs/$runId/events')({
 
         const parsed = parse(request);
         if (!parsed) return new Response('Not found', { status: 404 });
-
-        const {
-          getAgentRun,
-          hasLiveLease,
-          interruptAgentRun,
-          isTerminalAgentRunStatus,
-          listRunEventsAfter,
-          subscribeToAgentRun,
-        } = await import('~server/agent-runs');
 
         const run = await getAgentRun(parsed.runId);
         if (!run) return new Response('Not found', { status: 404 });

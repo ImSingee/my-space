@@ -2,6 +2,8 @@ import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
 import { auth } from '~auth/server';
 import { envEntriesSchema, envRequestIdSchema } from '~agent/protocol';
+import { submitAgentEnv } from '~server/agent-runs';
+import { AppError } from '~server/errors';
 
 const MAX_BODY_BYTES = 256 * 1024;
 const TOO_LARGE = Symbol('too-large');
@@ -84,11 +86,9 @@ async function handleAgentRunEnvPost({
   }
 
   try {
-    const { submitAgentEnv } = await import('~server/agent-runs');
     await submitAgentEnv(runId, parsed.requestId, parsed.entries);
     return jsonResponse({ ok: true });
   } catch (error) {
-    const { AppError } = await import('~server/errors');
     if (error instanceof AppError) {
       if (error.status === 400) return textResponse('Bad request', 400);
       if (error.status === 409) {

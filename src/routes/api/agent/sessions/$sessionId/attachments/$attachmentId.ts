@@ -1,5 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { auth } from '~auth/server';
+import { errorResponse } from '~server/errors';
+import { uploadAgentAttachment } from '~server/agent-attachments';
 
 function parse(
   request: Request,
@@ -35,10 +37,7 @@ export const Route = createFileRoute(
         }
 
         const declared = Number(request.headers.get('content-length'));
-        const { errorResponse } = await import('~server/errors');
         try {
-          const { uploadAgentAttachment } =
-            await import('~server/agent-attachments');
           const attachment = await uploadAgentAttachment({
             id: ids.attachmentId,
             sessionId: ids.sessionId,

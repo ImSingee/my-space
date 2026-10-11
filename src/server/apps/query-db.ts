@@ -3,6 +3,7 @@
  * database. Runs on the platform so the Agent Runner never receives database
  * connection strings; the runner calls this through the internal API.
  */
+import postgres from 'postgres';
 import { ensureAppDatabase } from './provision';
 
 /** Cap on rendered query output characters returned to the model. */
@@ -25,7 +26,6 @@ export async function queryAppDatabase(
   statement: string,
   signal?: AbortSignal,
 ): Promise<AppDbQueryResult> {
-  const postgres = (await import('postgres')).default;
   const url = await ensureAppDatabase(id);
   // Bound the statement so a runaway query (e.g. an accidental cross join or
   // `pg_sleep`) can't hang the tool — and thus the whole agent turn — for

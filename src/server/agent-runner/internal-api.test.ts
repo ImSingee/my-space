@@ -67,6 +67,8 @@ vi.mock('~/db', () => ({
   db: { query: { apps: { findFirst: mocks.findApp } } },
 }));
 
+vi.mock('~auth/server', () => ({ auth: {} }));
+
 vi.mock('~server/agent-session-apps', () => ({
   associateAgentSessionApp: mocks.associateAgentSessionApp,
 }));

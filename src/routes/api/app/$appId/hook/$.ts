@@ -4,6 +4,9 @@ import {
   appCompatibilityRuntimeMessage,
 } from '~/app-compatibility';
 import type { NormalizedManifest } from '~server/apps/manifest';
+import { db } from '~/db';
+import { proxyAppRequest } from '~server/apps/runtime';
+import { secretsMatch } from '~server/secrets';
 
 /**
  * Public inbound webhook endpoint (plain HTTP — never Connect RPC). Forwards any
@@ -29,7 +32,6 @@ export async function handle({
   if (!match) return new Response('Not found', { status: 404 });
   const id = match[1];
 
-  const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
     where: { id },
   });
@@ -58,7 +60,6 @@ export async function handle({
     (deployment?.manifestNormalized as NormalizedManifest | null)?.webhook
       ?.auth ?? 'platform';
 
-  const { proxyAppRequest } = await import('~server/apps/runtime');
   const base = `/api/app/${id}/hook`;
   // This endpoint is reachable without a session, so never echo internal error
   // detail (backend start failures embed the process log tail — stack traces,
@@ -94,7 +95,6 @@ export async function handle({
   }
   const headerSecret = request.headers.get('x-hatch-secret');
   const provided = headerSecret ?? url.searchParams.get('secret');
-  const { secretsMatch } = await import('~server/secrets');
   if (!secretsMatch(provided, app.webhookSecret)) {
     return new Response('Forbidden', { status: 403 });
   }

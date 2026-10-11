@@ -36,8 +36,38 @@ import {
   rollbackRequestSchema,
   type SourceBundleResponse,
 } from '~agent/protocol';
+import { z } from 'zod';
 import { AppError } from '~server/errors';
 import { mintRunToken, RunTokenError } from './run-auth';
+import { db } from '~/db';
+import { associateAgentSessionApp } from '~server/agent-session-apps';
+import { getAgentAttachment } from '~server/agent-attachments';
+import { listAppsForAgent, getAppDetailForAgent } from '~server/apps/inspect';
+import { createApp } from '~server/apps/scaffold';
+import {
+  appMasterCommit,
+  exportAppMasterBundle,
+  stageAppBundleCheckout,
+} from '~server/apps/git';
+import { deployApp } from '~server/apps/deploy';
+import { appSlug } from '~server/apps/access';
+import { projectAppManifestUrls } from '~server/apps/manifest';
+import { rollbackAppToVersion } from '~server/apps/manage';
+import { queryAppDatabase } from '~server/apps/query-db';
+import { queryAppKv } from '~server/apps/query-kv';
+import {
+  listWorkflowsForAgent,
+  getWorkflowDetailForAgent,
+} from '~server/workflows/inspect';
+import { createWorkflow } from '~server/workflows/scaffold';
+import {
+  workflowMasterCommit,
+  exportWorkflowMasterBundle,
+  stageWorkflowBundleCheckout,
+} from '~server/workflows/git';
+import { deployWorkflow } from '~server/workflows/deploy';
+import { rollbackWorkflowToVersion } from '~server/workflows/manage';
+import { queryAppDataTable } from '~server/apps/query-data-table';
 
 /**
  * JSON body cap. Deploy bundles ride in as base64 (~4/3 of the packfile), so
@@ -107,7 +137,6 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 }
 
 async function requireExistingAppId(appId: string): Promise<string> {
-  const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
     where: { id: appId },
     columns: { id: true },
@@ -117,7 +146,6 @@ async function requireExistingAppId(appId: string): Promise<string> {
 }
 
 async function requireAppGeneration(id: string): Promise<string> {
-  const { db } = await import('~/db');
   const row = await db.query.apps.findFirst({
     where: { id },
     columns: { createdAt: true },
@@ -129,7 +157,6 @@ async function requireAppGeneration(id: string): Promise<string> {
 async function requireWorkflow(
   workflowId: string,
 ): Promise<{ id: string; generation: string }> {
-  const { db } = await import('~/db');
   const row = await db.query.workflows.findFirst({
     where: { id: workflowId },
     columns: { id: true, createdAt: true },
@@ -175,7 +202,6 @@ export async function handleInternalApiRequest(
       rest[2] === 'token' &&
       method === 'POST'
     ) {
-      const { z } = await import('zod');
       const body = z
         .object({ runnerId: z.string().min(1).max(191) })
         .strict()
@@ -226,8 +252,6 @@ async function handleAgentSessions(
   if (method === 'POST' && rest.length === 3 && rest[1] === 'apps') {
     const sessionId = decodeURIComponent(rest[0]);
     const appId = decodeURIComponent(rest[2]);
-    const { associateAgentSessionApp } =
-      await import('~server/agent-session-apps');
     json(res, 200, await associateAgentSessionApp(sessionId, appId));
     return;
   }
@@ -236,7 +260,6 @@ async function handleAgentSessions(
   }
   const sessionId = decodeURIComponent(rest[0]);
   const attachmentId = decodeURIComponent(rest[2]);
-  const { getAgentAttachment } = await import('~server/agent-attachments');
   const got = await getAgentAttachment(attachmentId, sessionId);
   if (!got) throw new AppError('Attachment not found.', 404);
   res.writeHead(200, {
@@ -256,7 +279,6 @@ async function handleApps(
 ): Promise<void> {
   if (rest.length === 0) {
     if (method === 'GET') {
-      const { listAppsForAgent } = await import('~server/apps/inspect');
       json(res, 200, await listAppsForAgent());
       return;
     }
@@ -264,7 +286,6 @@ async function handleApps(
       const { sessionId, ...body } = createAppForSessionRequestSchema.parse(
         await readJsonBody(req),
       );
-      const { createApp } = await import('~server/apps/scaffold');
       json(res, 200, await createApp(body, { sessionId }));
       return;
     }
@@ -276,7 +297,6 @@ async function handleApps(
 
   if (!action) {
     if (method !== 'GET') throw new AppError('Method not allowed.', 405);
-    const { getAppDetailForAgent } = await import('~server/apps/inspect');
     const detail = await getAppDetailForAgent(appId);
     if (!detail) throw new AppError(`App "${appId}" not found.`, 404);
     json(res, 200, detail);
@@ -285,8 +305,6 @@ async function handleApps(
 
   if (action === 'source' && method === 'GET') {
     const id = await requireExistingAppId(appId);
-    const { appMasterCommit, exportAppMasterBundle } =
-      await import('~server/apps/git');
     const commit = await appMasterCommit(id);
     const bundle = await exportAppMasterBundle(id);
     const payload: SourceBundleResponse = {
@@ -307,21 +325,17 @@ async function handleApps(
       body.generation,
       await requireAppGeneration(id),
     );
-    const { stageAppBundleCheckout } = await import('~server/apps/git');
     const staged = await stageAppBundleCheckout(
       id,
       Buffer.from(body.bundleBase64, 'base64'),
     );
     try {
-      const { deployApp } = await import('~server/apps/deploy');
       const result = await deployApp(id, {
         sourceDir: staged.dir,
         message: body.message,
         allowDestructiveDataMigration: body.allowDestructiveDataMigration,
         dataMigrationApprovalToken: body.dataMigrationApprovalToken,
       });
-      const { appSlug } = await import('~server/apps/access');
-      const { projectAppManifestUrls } = await import('~server/apps/manifest');
       const slug = await appSlug(id);
       if (!slug) {
         throw new AppError(`App "${id}" not found after deployment.`, 500);
@@ -342,7 +356,6 @@ async function handleApps(
   if (action === 'rollback' && method === 'POST') {
     const id = await requireExistingAppId(appId);
     const body = rollbackRequestSchema.parse(await readJsonBody(req));
-    const { rollbackAppToVersion } = await import('~server/apps/manage');
     json(res, 200, await rollbackAppToVersion(id, body.version));
     return;
   }
@@ -350,7 +363,6 @@ async function handleApps(
   if (action === 'query-db' && method === 'POST') {
     const id = await requireExistingAppId(appId);
     const body = queryAppDbRequestSchema.parse(await readJsonBody(req));
-    const { queryAppDatabase } = await import('~server/apps/query-db');
     // When the runner aborts the request (run cancelled), tear down the
     // running statement instead of letting it run to its 30s timeout.
     const abort = new AbortController();
@@ -364,24 +376,22 @@ async function handleApps(
   if (action === 'query-kv' && method === 'POST') {
     const id = await requireExistingAppId(appId);
     const body = queryAppKvRequestSchema.parse(await readJsonBody(req));
-    const { queryAppKv } = await import('~server/apps/query-kv');
     json(res, 200, await queryAppKv(id, body));
     return;
   }
 
   if (action === 'query-data-table' && method === 'POST') {
     // Register before any await so a runner disconnect cannot be missed while
-    // resolving the App, reading the body, or loading the service module.
+    // resolving the App or reading the body.
     const abort = new AbortController();
     const onClose = () => {
       if (!res.writableEnded) abort.abort();
     };
     res.once('close', onClose);
     const bodyPromise = readJsonBody(req);
-    const [id, rawBody, { queryAppDataTable }] = await Promise.all([
+    const [id, rawBody] = await Promise.all([
       requireExistingAppId(appId),
       bodyPromise,
-      import('~server/apps/query-data-table'),
     ]);
     const body = queryAppDataTableRequestSchema.parse(rawBody);
     if (body.action !== 'raw_sql') {
@@ -410,14 +420,11 @@ async function handleWorkflows(
 ): Promise<void> {
   if (rest.length === 0) {
     if (method === 'GET') {
-      const { listWorkflowsForAgent } =
-        await import('~server/workflows/inspect');
       json(res, 200, await listWorkflowsForAgent());
       return;
     }
     if (method === 'POST') {
       const body = createWorkflowRequestSchema.parse(await readJsonBody(req));
-      const { createWorkflow } = await import('~server/workflows/scaffold');
       json(res, 200, await createWorkflow(body));
       return;
     }
@@ -429,8 +436,6 @@ async function handleWorkflows(
 
   if (!action) {
     if (method !== 'GET') throw new AppError('Method not allowed.', 405);
-    const { getWorkflowDetailForAgent } =
-      await import('~server/workflows/inspect');
     const detail = await getWorkflowDetailForAgent(workflowId);
     if (!detail) {
       throw new AppError(`Workflow "${workflowId}" not found.`, 404);
@@ -441,8 +446,6 @@ async function handleWorkflows(
 
   if (action === 'source' && method === 'GET') {
     await requireWorkflow(workflowId);
-    const { workflowMasterCommit, exportWorkflowMasterBundle } =
-      await import('~server/workflows/git');
     const commit = await workflowMasterCommit(workflowId);
     const bundle = await exportWorkflowMasterBundle(workflowId);
     const payload: SourceBundleResponse = {
@@ -463,14 +466,11 @@ async function handleWorkflows(
       body.generation,
       workflow.generation,
     );
-    const { stageWorkflowBundleCheckout } =
-      await import('~server/workflows/git');
     const staged = await stageWorkflowBundleCheckout(
       workflowId,
       Buffer.from(body.bundleBase64, 'base64'),
     );
     try {
-      const { deployWorkflow } = await import('~server/workflows/deploy');
       const result = await deployWorkflow(workflowId, {
         sourceDir: staged.dir,
         message: body.message,
@@ -491,8 +491,6 @@ async function handleWorkflows(
   if (action === 'rollback' && method === 'POST') {
     await requireWorkflow(workflowId);
     const body = rollbackRequestSchema.parse(await readJsonBody(req));
-    const { rollbackWorkflowToVersion } =
-      await import('~server/workflows/manage');
     json(res, 200, await rollbackWorkflowToVersion(workflowId, body.version));
     return;
   }

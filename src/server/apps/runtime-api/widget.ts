@@ -3,6 +3,8 @@ import { appCompatibilityRuntimeMessage } from '~/app-compatibility';
 import { appBuildDir } from '~agent/paths';
 import { auth } from '~auth/server';
 import { parseAppApiPath } from './path';
+import { liveAppDeployment } from '~server/apps/access';
+import { readLiveBuildFile } from '~server/apps/build-identity';
 
 export async function handleWidgetRequest({
   request,
@@ -25,7 +27,6 @@ export async function handleWidgetRequest({
   // Only serve a widget bundle for a live, non-archived widgets app and only
   // for an id that exists in its current manifest — otherwise stale placements
   // or direct URLs could keep executing a retired app's widget code.
-  const { liveAppDeployment } = await import('~server/apps/access');
   const live = await liveAppDeployment(id, 'widgets');
   if (!live) {
     return new Response('Not found', { status: 404 });
@@ -38,7 +39,6 @@ export async function handleWidgetRequest({
   if (!live.manifest.widgets.some((w) => w.id === widgetId)) {
     return new Response('Not found', { status: 404 });
   }
-  const { readLiveBuildFile } = await import('~server/apps/build-identity');
 
   const widgetsDir = path.join(appBuildDir(id), 'widgets');
   const filePath = path.normalize(path.join(widgetsDir, `${widgetId}.js`));

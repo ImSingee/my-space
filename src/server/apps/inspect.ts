@@ -9,6 +9,9 @@ import {
   type WebhookAuth,
   projectAppManifestUrls,
 } from './manifest';
+import { countKv } from './kv';
+import { isAppRunning } from './runtime';
+import { listCronJobs } from './scheduler';
 
 /** Capability flags in the same order the management UI lists them. */
 const CAPABILITY_KEYS = [
@@ -179,13 +182,8 @@ export async function getAppDetailForAgent(
     : null;
 
   const caps = app.capabilities;
-  const { isAppRunning } = await import('./runtime');
-  const cronJobs = caps?.cron
-    ? await import('./scheduler').then((m) => m.listCronJobs(id))
-    : [];
-  const kvCount = caps?.kv
-    ? await import('./kv').then((m) => m.countKv(id))
-    : 0;
+  const cronJobs = caps?.cron ? await listCronJobs(id) : [];
+  const kvCount = caps?.kv ? await countKv(id) : 0;
   const deployments = await listDeployments(id);
 
   return {
