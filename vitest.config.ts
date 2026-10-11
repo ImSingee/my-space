@@ -56,6 +56,11 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
+          env: {
+            // Runner code resolves its env snapshot when no OS sandbox is
+            // available (e.g. Linux without root), which requires APP_URL.
+            APP_URL: 'http://localhost:3700',
+          },
           include: ['src/**/*.{test,spec}.{ts,tsx}'],
           exclude: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
         },

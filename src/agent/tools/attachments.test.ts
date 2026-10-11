@@ -116,7 +116,7 @@ describe('download_attachment', () => {
 
     await expect(
       writeResolvedAgentWorkspaceFile(destination, Uint8Array.from([1, 2, 3])),
-    ).rejects.toThrow(/File operation/);
+    ).rejects.toThrow('A path component is not a directory.');
     await expect(
       readFile(path.join(outside, 'escaped.bin')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
