@@ -42,32 +42,36 @@ afterAll(async () => {
 });
 
 describe('download_attachment', () => {
-  it('writes binary bytes to the safe default attachment path', async () => {
-    const result = await tool.execute('download-default', {
-      attachment_id: 'attachment-a',
-    });
+  it.each([undefined, null, '', [], {}, 0])(
+    'writes binary bytes to the default path for %j',
+    async (requestedPath) => {
+      const result = await tool.execute('download-default', {
+        attachment_id: 'attachment-a',
+        ...(requestedPath === undefined ? {} : { path: requestedPath }),
+      });
 
-    const expected = path.join(
-      cwd,
-      'attachments',
-      'attachment-a',
-      'unsafe-name.bin',
-    );
-    await expect(readFile(expected)).resolves.toEqual(
-      Buffer.from([0, 1, 2, 255, 0, 9]),
-    );
-    expect(downloadAttachment).toHaveBeenCalledWith(
-      sessionId,
-      'attachment-a',
-      undefined,
-    );
-    expect(result.details).toMatchObject({
-      attachmentId: 'attachment-a',
-      path: 'attachments/attachment-a/unsafe-name.bin',
-      absolutePath: expected,
-      name: 'unsafe-name.bin',
-    });
-  });
+      const expected = path.join(
+        cwd,
+        'attachments',
+        'attachment-a',
+        'unsafe-name.bin',
+      );
+      await expect(readFile(expected)).resolves.toEqual(
+        Buffer.from([0, 1, 2, 255, 0, 9]),
+      );
+      expect(downloadAttachment).toHaveBeenCalledWith(
+        sessionId,
+        'attachment-a',
+        undefined,
+      );
+      expect(result.details).toMatchObject({
+        attachmentId: 'attachment-a',
+        path: 'attachments/attachment-a/unsafe-name.bin',
+        absolutePath: expected,
+        name: 'unsafe-name.bin',
+      });
+    },
+  );
 
   it('accepts a custom relative path inside the Agent workdir', async () => {
     const result = await tool.execute('download-custom', {

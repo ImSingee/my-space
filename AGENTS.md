@@ -160,6 +160,22 @@ Run `pnpm format` to format and fix lint errors in one step (runs Oxfmt, Oxlint 
 
 ## Coding Style & Naming Conventions
 
+### Agent tool call contracts
+
+Never assume a model can omit optional tool fields. Every schema-optional field
+must accept `null`, `""`, `[]`, `{}` and numeric `0` as omitted/default values
+in both the model-visible declaration and execution path. Passing any of these
+empty values must behave exactly like omitting the field. Preserve explicit
+`false` and required action data. Use the shared `tool()` boundary,
+preserve meaningful empty data and the original recorded arguments, and retain
+strict required/action-specific validation.
+Validate original nonempty types and enum membership before provider coercion;
+an invalid string such as `"0"` must not become an empty numeric `0` default.
+Read
+[`skills/tool-call-contracts/SKILL.md`](skills/tool-call-contracts/SKILL.md)
+when implementing or reviewing Agent tools. Verify calls that populate optional
+fields with every empty spelling, not only calls that omit them.
+
 Write TypeScript React function components. Oxfmt enforces semicolons, single quotes, trailing commas, and an 80-column print width.
 
 Use PascalCase for components (`DashboardCard.tsx`), camelCase for hooks/utilities. Mantine styles should live beside their component, leveraging Mantine's theming utilities before reaching for raw CSS.

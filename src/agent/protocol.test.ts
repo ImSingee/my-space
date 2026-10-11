@@ -668,6 +668,12 @@ describe('query app KV requests', () => {
       { action: 'set', key: 'token' },
       { action: 'delete', key: 'token', value: 'extra' },
       { action: 'list', key: 'extra' },
+      { action: 'list', cursor: 'x'.repeat(513) },
+      { action: 'list', cursor: null },
+      { action: 'list', cursor: 123 },
+      { action: 'get', key: 'token', cursor: '' },
+      { action: 'set', key: 'token', value: '', cursor: '' },
+      { action: 'delete', key: 'token', cursor: '' },
       { action: 'list', limit: 0 },
       { action: 'list', limit: 101 },
       { action: 'list', limit: 1.5 },
@@ -676,9 +682,42 @@ describe('query app KV requests', () => {
       expect(queryAppKvRequestSchema.safeParse(input).success).toBe(false);
     }
   });
+
+  it('accepts cursor length boundaries unchanged for list continuations', () => {
+    for (const cursor of ['a', 'x'.repeat(512)]) {
+      expect(queryAppKvRequestSchema.parse({ action: 'list', cursor })).toEqual(
+        {
+          action: 'list',
+          cursor,
+          limit: 100,
+          revealSecrets: false,
+        },
+      );
+    }
+  });
+
+  it('normalizes an empty list cursor to first-page omission without changing the request', () => {
+    const input = { action: 'list', cursor: '' };
+    expect(queryAppKvRequestSchema.parse(input)).toEqual(
+      queryAppKvRequestSchema.parse({ action: 'list' }),
+    );
+    expect(input).toEqual({ action: 'list', cursor: '' });
+  });
 });
 
 describe('query app Data Table requests', () => {
+  it('normalizes empty inspect tables and query cursors to omission', () => {
+    const inspect = { action: 'inspect', table: '' };
+    const query = { action: 'query', table: 'todos', cursor: '' };
+    expect(queryAppDataTableRequestSchema.parse(inspect)).toEqual({
+      action: 'inspect',
+    });
+    expect(queryAppDataTableRequestSchema.parse(query)).toEqual(
+      queryAppDataTableRequestSchema.parse({ action: 'query', table: 'todos' }),
+    );
+    expect(inspect.table).toBe('');
+    expect(query.cursor).toBe('');
+  });
   it('parses inspect and defaults structured query fields', () => {
     expect(queryAppDataTableRequestSchema.parse({ action: 'inspect' })).toEqual(
       { action: 'inspect' },

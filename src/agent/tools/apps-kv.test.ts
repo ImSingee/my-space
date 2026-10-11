@@ -1,6 +1,8 @@
+import { validateToolArguments } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { PlatformClient } from '../platform-client';
 import { createAppTools } from './apps';
+import { queryAppKvRequestSchema } from '../protocol';
 
 function toolText(result: { content: { type: string; text?: string }[] }) {
   return result.content
@@ -18,6 +20,183 @@ function queryKvTool(platform: PlatformClient, sessionId?: string) {
 }
 
 describe('query_app_kv', () => {
+  it('accepts all optional placeholders and preserves an active empty write', async () => {
+    const queryAppKv = vi
+      .fn<PlatformClient['queryAppKv']>()
+      .mockResolvedValueOnce({ action: 'list', items: [], nextCursor: null })
+      .mockResolvedValueOnce({
+        action: 'set',
+        record: {
+          key: 'empty',
+          value: '',
+          secret: false,
+          createdAt: '',
+          updatedAt: '',
+        },
+      });
+    const query = queryKvTool({ queryAppKv } as unknown as PlatformClient);
+    const placeholders = {
+      id: 'sample-app',
+      key: '',
+      value: '',
+      secret: '',
+      cursor: '',
+      limit: '',
+      reveal_secrets: '',
+    };
+    for (const args of [
+      { ...placeholders, action: 'list' },
+      { ...placeholders, action: 'set', key: 'empty' },
+    ]) {
+      const original = structuredClone(args);
+      expect(() =>
+        validateToolArguments(query, {
+          type: 'toolCall',
+          id: 'schema',
+          name: query.name,
+          arguments: args,
+        }),
+      ).not.toThrow();
+      const prepared = query.prepareArguments!(args);
+      const validated = validateToolArguments(query, {
+        type: 'toolCall',
+        id: 'filled',
+        name: query.name,
+        arguments: prepared as Record<string, unknown>,
+      });
+      await query.execute('filled', validated);
+      expect(args).toEqual(original);
+    }
+    expect(queryAppKv.mock.calls.map(([, input]) => input)).toEqual([
+      { action: 'list', limit: 100, revealSecrets: false },
+      { action: 'set', key: 'empty', value: '' },
+    ]);
+    queryAppKv.mockClear();
+    for (const args of [
+      { ...placeholders, action: 'get' },
+      { ...placeholders, action: 'delete' },
+      { ...placeholders, action: 'list', key: 'unexpected' },
+      { ...placeholders, action: 'list', unknown: '' },
+    ]) {
+      await expect(query.execute('invalid', args)).rejects.toThrow(
+        /key|unrecognized/i,
+      );
+    }
+    expect(queryAppKv).not.toHaveBeenCalled();
+  });
+  it('aligns model and runtime cursor bounds without changing first-page requests', async () => {
+    const queryAppKv = vi.fn<PlatformClient['queryAppKv']>().mockResolvedValue({
+      action: 'list',
+      items: [],
+      nextCursor: null,
+    });
+    const query = queryKvTool({ queryAppKv } as unknown as PlatformClient);
+
+    for (const cursor of [
+      undefined,
+      null,
+      '',
+      [],
+      {},
+      0,
+      'a',
+      'x'.repeat(512),
+    ]) {
+      const input = {
+        action: 'list',
+        ...(cursor === undefined ? {} : { cursor }),
+      };
+      const args = { id: 'sample-app', ...input };
+      const prepared = query.prepareArguments!(args) as Record<string, unknown>;
+      expect(
+        validateToolArguments(query, {
+          type: 'toolCall',
+          id: 'valid',
+          name: query.name,
+          arguments: prepared,
+        }),
+      ).toEqual(prepared);
+      await query.execute('valid', args);
+      expect(queryAppKv).toHaveBeenLastCalledWith(
+        'sample-app',
+        queryAppKvRequestSchema.parse({
+          action: 'list',
+          ...(typeof cursor === 'string' && cursor !== '' ? { cursor } : {}),
+        }),
+        undefined,
+      );
+      expect(Object.hasOwn(queryAppKv.mock.lastCall?.[1] ?? {}, 'cursor')).toBe(
+        typeof cursor === 'string' && cursor !== '',
+      );
+      expect(args).toEqual({ id: 'sample-app', ...input });
+    }
+    queryAppKv.mockClear();
+    for (const cursor of ['x'.repeat(513)]) {
+      const input = { action: 'list', cursor };
+      const args = { id: 'sample-app', ...input };
+      expect(() =>
+        validateToolArguments(query, {
+          type: 'toolCall',
+          id: 'invalid',
+          name: query.name,
+          arguments: args,
+        }),
+      ).toThrow(/cursor/);
+      expect(queryAppKvRequestSchema.safeParse(input).success).toBe(false);
+      await expect(query.execute('invalid', args)).rejects.toThrow(/cursor/);
+      expect(args).toEqual({ id: 'sample-app', ...input });
+    }
+    for (const cursor of [123, false, ['nonempty'], { nonempty: true }]) {
+      await expect(
+        query.execute('invalid-type', {
+          id: 'sample-app',
+          action: 'list',
+          cursor,
+        }),
+      ).rejects.toThrow(/cursor/);
+    }
+    expect(queryAppKv).not.toHaveBeenCalled();
+  });
+
+  it('uses the returned cursor for the next list without mutating either request', async () => {
+    const record = {
+      key: 'alpha',
+      value: 'one',
+      secret: false,
+      createdAt: '',
+      updatedAt: '',
+    };
+    const queryAppKv = vi
+      .fn<PlatformClient['queryAppKv']>()
+      .mockResolvedValueOnce({
+        action: 'list',
+        items: [record],
+        nextCursor: 'alpha',
+      })
+      .mockResolvedValueOnce({
+        action: 'list',
+        items: [{ ...record, key: 'beta' }],
+        nextCursor: null,
+      });
+    const query = queryKvTool({ queryAppKv } as unknown as PlatformClient);
+    const first = { id: 'sample-app', action: 'list', limit: 1 };
+    const result = await query.execute('first', first);
+    expect(toolText(result)).toContain('Continue with cursor: "alpha"');
+    const second = {
+      ...first,
+      cursor: (result.details as { nextCursor: string }).nextCursor,
+    };
+    const last = await query.execute('second', second);
+    expect(toolText(last)).toContain('beta');
+    expect(toolText(last)).not.toContain('Continue with cursor:');
+    expect(queryAppKv.mock.calls.map(([, input]) => input)).toEqual([
+      { action: 'list', limit: 1, revealSecrets: false },
+      { action: 'list', limit: 1, revealSecrets: false, cursor: 'alpha' },
+    ]);
+    expect(first).toEqual({ id: 'sample-app', action: 'list', limit: 1 });
+    expect(second.cursor).toBe('alpha');
+  });
+
   it('exposes an Anthropic-compatible object root and integer limit', () => {
     const query = queryKvTool({} as PlatformClient);
     const schema = query.parameters as {
@@ -40,7 +219,13 @@ describe('query_app_kv', () => {
       'reveal_secrets',
     ]);
     expect(schema.required).toEqual(['id', 'action']);
-    expect(schema.properties?.limit?.type).toBe('integer');
+    expect(schema.properties?.limit).toMatchObject({
+      anyOf: expect.arrayContaining(
+        [{ type: 'integer', minimum: 1, maximum: 100 }, { const: '' }].map(
+          (member) => expect.objectContaining(member),
+        ),
+      ),
+    });
   });
 
   it('validates action-specific fields before calling the platform', async () => {

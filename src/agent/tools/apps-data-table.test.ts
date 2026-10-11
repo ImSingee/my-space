@@ -1,3 +1,4 @@
+import { validateToolArguments } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { PlatformClient } from '../platform-client';
 import { buildSystemPrompt } from '../system-prompt';
@@ -19,6 +20,181 @@ function queryDataTableTool(platform: PlatformClient, sessionId?: string) {
 }
 
 describe('query_app_data_table', () => {
+  it('uses defaults for populated placeholders without changing JSON data', async () => {
+    const queryAppDataTable = vi
+      .fn<PlatformClient['queryAppDataTable']>()
+      .mockResolvedValueOnce({ action: 'inspect', data: null })
+      .mockResolvedValueOnce({
+        action: 'query',
+        items: [],
+        cursor: null,
+        revision: 1,
+        truncated: false,
+      })
+      .mockResolvedValueOnce({ action: 'mutate', results: [], revision: 2 });
+    const query = queryDataTableTool({
+      queryAppDataTable,
+    } as unknown as PlatformClient);
+    const optional = {
+      table: '',
+      where: '',
+      order_by: '',
+      cursor: '',
+      limit: '',
+      operations: '',
+      sql: '',
+      timeout_ms: '',
+    };
+    const requests = [
+      { id: 'sample-app', action: 'inspect', ...optional },
+      {
+        id: 'sample-app',
+        action: 'query',
+        ...optional,
+        table: 'todos',
+        where: [{ field: 'title', op: 'eq', value: '' }],
+        order_by: { field: 'title', direction: '' },
+      },
+      {
+        id: 'sample-app',
+        action: 'mutate',
+        ...optional,
+        operations: [
+          {
+            type: 'insert',
+            table: 'todos',
+            id: '',
+            field: '',
+            amount: '',
+            unset: '',
+            value: {
+              title: '',
+              done: false,
+              count: 0,
+              json: { empty: '', nullable: null },
+            },
+          },
+        ],
+      },
+    ];
+    for (const args of requests) {
+      const original = structuredClone(args);
+      expect(() =>
+        validateToolArguments(query, {
+          type: 'toolCall',
+          id: 'schema',
+          name: query.name,
+          arguments: args,
+        }),
+      ).not.toThrow();
+      const prepared = query.prepareArguments!(args);
+      await query.execute(
+        'filled',
+        validateToolArguments(query, {
+          type: 'toolCall',
+          id: 'filled',
+          name: query.name,
+          arguments: prepared as Record<string, unknown>,
+        }),
+      );
+      expect(args).toEqual(original);
+    }
+    expect(queryAppDataTable.mock.calls.map(([, input]) => input)).toEqual([
+      { action: 'inspect' },
+      {
+        action: 'query',
+        table: 'todos',
+        where: [{ field: 'title', op: 'eq', value: '' }],
+        orderBy: { field: 'title', direction: 'asc' },
+        limit: 50,
+      },
+      {
+        action: 'mutate',
+        operations: [
+          {
+            type: 'insert',
+            table: 'todos',
+            value: {
+              title: '',
+              done: false,
+              count: 0,
+              json: { empty: '', nullable: null },
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('preserves cursor bounds and rejects invalid types before platform calls', async () => {
+    const queryAppDataTable = vi
+      .fn<PlatformClient['queryAppDataTable']>()
+      .mockResolvedValue({
+        action: 'query',
+        items: [],
+        cursor: null,
+        revision: 1,
+        truncated: false,
+      });
+    const query = queryDataTableTool({
+      queryAppDataTable,
+    } as unknown as PlatformClient);
+    for (const cursor of [
+      null,
+      '',
+      [],
+      {},
+      0,
+      'next-page',
+      'x'.repeat(60_000),
+    ]) {
+      await query.execute('page', {
+        id: 'sample-app',
+        action: 'query',
+        table: 'todos',
+        cursor,
+      });
+      expect(queryAppDataTable.mock.lastCall?.[1]).toEqual({
+        action: 'query',
+        table: 'todos',
+        where: [],
+        limit: 50,
+        ...(typeof cursor === 'string' && cursor !== '' ? { cursor } : {}),
+      });
+    }
+    queryAppDataTable.mockClear();
+    for (const cursor of [
+      123,
+      false,
+      ['nonempty'],
+      { nonempty: true },
+      'x'.repeat(60_001),
+    ]) {
+      await expect(
+        query.execute('invalid', {
+          id: 'sample-app',
+          action: 'query',
+          table: 'todos',
+          cursor,
+        }),
+      ).rejects.toThrow(/cursor/i);
+    }
+    for (const args of [
+      { id: 'sample-app', action: 'query', table: '' },
+      { id: 'sample-app', action: 'inspect', unknown: '' },
+      { id: 'sample-app', action: 'inspect', cursor: 'nonempty' },
+      {
+        id: 'sample-app',
+        action: 'mutate',
+        operations: [{ type: 'delete', table: 'todos', id: '' }],
+      },
+    ]) {
+      await expect(query.execute('invalid', args)).rejects.toThrow(
+        /table|id|unrecognized/i,
+      );
+    }
+    expect(queryAppDataTable).not.toHaveBeenCalled();
+  });
   it('exposes an Anthropic-compatible object root and bounded integers', () => {
     const query = queryDataTableTool({} as PlatformClient);
     const schema = query.parameters as {
@@ -55,27 +231,37 @@ describe('query_app_data_table', () => {
     ]);
     expect(schema.required).toEqual(['id', 'action']);
     expect(schema.properties?.limit).toMatchObject({
-      type: 'integer',
-      minimum: 1,
-      maximum: 200,
+      anyOf: expect.arrayContaining(
+        [{ type: 'integer', minimum: 1, maximum: 200 }, { const: '' }].map(
+          (member) => expect.objectContaining(member),
+        ),
+      ),
     });
     expect(schema.properties?.operations).toMatchObject({
-      type: 'array',
-      minItems: 1,
-      maxItems: 100,
+      anyOf: expect.arrayContaining(
+        [{ type: 'array', minItems: 1, maxItems: 100 }, { const: '' }].map(
+          (member) => expect.objectContaining(member),
+        ),
+      ),
     });
     expect(schema.properties?.timeout_ms).toMatchObject({
-      type: 'integer',
-      minimum: 1_000,
-      maximum: 1_800_000,
+      anyOf: expect.arrayContaining(
+        [
+          { type: 'integer', minimum: 1_000, maximum: 1_800_000 },
+          { const: '' },
+        ].map((member) => expect.objectContaining(member)),
+      ),
       description:
         'raw_sql only: timeout for the Raw SQL database operation, ' +
         'including statement execution, in milliseconds. It does not cover ' +
         'App resolution or capability preflight. Defaults to 30000.',
     });
     expect(schema.properties?.cursor).toMatchObject({
-      type: 'string',
-      maxLength: 60_000,
+      anyOf: expect.arrayContaining(
+        [{ type: 'string', maxLength: 60_000 }, { const: '' }].map((member) =>
+          expect.objectContaining(member),
+        ),
+      ),
     });
   });
 

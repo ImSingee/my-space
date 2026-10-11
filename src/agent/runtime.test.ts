@@ -105,6 +105,261 @@ async function runWithResponses(
 }
 
 describe('runAgentTurn terminal outcomes', () => {
+  it.each([
+    {
+      name: 'query_app_data_table',
+      args: {
+        id: 'sample-app',
+        action: 'query',
+        table: 'todos',
+        order_by: { field: 'title', direction: '0' },
+      },
+      field: 'order_by.direction',
+    },
+    ...['search_depth', 'topic', 'time_range'].map((field) => ({
+      name: 'web_search',
+      args: { query: 'battery research', [field]: '0' },
+      field,
+    })),
+    {
+      name: 'web_fetch',
+      args: { url: 'https://example.com/article', extract_depth: '0' },
+      field: 'extract_depth',
+    },
+  ])(
+    'rejects nonempty enum $field before coercion or external calls',
+    async ({ name, args, field }) => {
+      const queryAppDataTable = vi
+        .fn<PlatformClient['queryAppDataTable']>()
+        .mockResolvedValue({
+          action: 'query',
+          items: [],
+          cursor: null,
+          revision: 1,
+          truncated: false,
+        });
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        Response.json({ query: 'battery research', results: [] }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const events: AgentStreamEvent[] = [];
+      const original = structuredClone(args);
+      const result = await runWithResponses(
+        [
+          fauxAssistantMessage(fauxToolCall(name, args)),
+          fauxAssistantMessage('done'),
+        ],
+        `invalid-enum-${field}`,
+        (event) => events.push(event),
+        { queryAppDataTable } as unknown as PlatformClient,
+      );
+      expect(queryAppDataTable).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
+        isError: true,
+        output: expect.stringContaining(field),
+      });
+      expect(events.find((event) => event.type === 'tool_start')).toMatchObject(
+        {
+          args: original,
+        },
+      );
+      expect(result.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: 'assistant',
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'toolCall',
+                arguments: original,
+              }),
+            ]),
+          }),
+        ]),
+      );
+      expect(args).toEqual(original);
+    },
+  );
+
+  it.each([null, '', [], {}, 0])(
+    'executes query and insert empty controls %j identically to omitted controls',
+    async (empty) => {
+      const queryArgs = {
+        id: 'sample-app',
+        action: 'query',
+        table: 'todos',
+        where: empty,
+      };
+      const insertArgs = {
+        id: 'sample-app',
+        action: 'mutate',
+        operations: [
+          {
+            type: 'insert',
+            table: 'todos',
+            id: empty,
+            value: { title: 'test' },
+          },
+        ],
+      };
+      const queryAppDataTable = vi
+        .fn<PlatformClient['queryAppDataTable']>()
+        .mockResolvedValueOnce({
+          action: 'query',
+          items: [],
+          cursor: null,
+          revision: 1,
+          truncated: false,
+        })
+        .mockResolvedValueOnce({ action: 'mutate', results: [], revision: 2 });
+      const events: AgentStreamEvent[] = [];
+      const result = await runWithResponses(
+        [
+          fauxAssistantMessage(fauxToolCall('query_app_data_table', queryArgs)),
+          fauxAssistantMessage(
+            fauxToolCall('query_app_data_table', insertArgs),
+          ),
+          fauxAssistantMessage('done'),
+        ],
+        `empty-data-control-${JSON.stringify(empty)}`,
+        (event) => events.push(event),
+        { queryAppDataTable } as unknown as PlatformClient,
+      );
+      expect(queryAppDataTable.mock.calls.map(([, input]) => input)).toEqual([
+        { action: 'query', table: 'todos', where: [], limit: 50 },
+        {
+          action: 'mutate',
+          operations: [
+            { type: 'insert', table: 'todos', value: { title: 'test' } },
+          ],
+        },
+      ]);
+      expect(events.filter((event) => event.type === 'tool_end')).toEqual([
+        expect.objectContaining({ isError: false }),
+        expect.objectContaining({ isError: false }),
+      ]);
+      for (const args of [queryArgs, insertArgs]) {
+        expect(events.filter((event) => event.type === 'tool_start')).toEqual(
+          expect.arrayContaining([expect.objectContaining({ args })]),
+        );
+        expect(result.messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              role: 'assistant',
+              content: expect.arrayContaining([
+                expect.objectContaining({ type: 'toolCall', arguments: args }),
+              ]),
+            }),
+          ]),
+        );
+      }
+    },
+  );
+  it.each([null, '', [], {}, 0])(
+    'treats empty KV cursor %j as omission and preserves raw history',
+    async (cursor) => {
+      const args = { id: 'sample-app', action: 'list', cursor };
+      const queryAppKv = vi
+        .fn<PlatformClient['queryAppKv']>()
+        .mockResolvedValue({ action: 'list', items: [], nextCursor: null });
+      const events: AgentStreamEvent[] = [];
+      const result = await runWithResponses(
+        [
+          fauxAssistantMessage(fauxToolCall('query_app_kv', args)),
+          fauxAssistantMessage('done'),
+        ],
+        `empty-kv-cursor-${JSON.stringify(cursor)}`,
+        (event) => events.push(event),
+        { queryAppKv } as unknown as PlatformClient,
+      );
+      expect(queryAppKv).toHaveBeenCalledExactlyOnceWith(
+        'sample-app',
+        { action: 'list', limit: 100, revealSecrets: false },
+        expect.any(AbortSignal),
+      );
+      expect(events.find((event) => event.type === 'tool_start')).toMatchObject(
+        { args },
+      );
+      expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
+        isError: false,
+      });
+      expect(result.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: 'assistant',
+            content: expect.arrayContaining([
+              expect.objectContaining({ type: 'toolCall', arguments: args }),
+            ]),
+          }),
+        ]),
+      );
+    },
+  );
+
+  it('executes an empty KV cursor as the first page while preserving the original call in events and history', async () => {
+    const args = {
+      id: 'sample-app',
+      action: 'list',
+      cursor: '',
+      key: '',
+      value: '',
+      secret: '',
+      limit: '',
+      reveal_secrets: '',
+    };
+    const events: AgentStreamEvent[] = [];
+    const queryAppKv = vi.fn<PlatformClient['queryAppKv']>().mockResolvedValue({
+      action: 'list',
+      items: [],
+      nextCursor: null,
+    });
+    const result = await runWithResponses(
+      [
+        fauxAssistantMessage(
+          fauxToolCall('query_app_kv', args, { id: 'empty-kv-cursor' }),
+        ),
+        fauxAssistantMessage('done'),
+      ],
+      'empty-kv-cursor',
+      (event) => events.push(event),
+      { queryAppKv } as unknown as PlatformClient,
+    );
+
+    expect(queryAppKv).toHaveBeenCalledExactlyOnceWith(
+      'sample-app',
+      { action: 'list', limit: 100, revealSecrets: false },
+      expect.any(AbortSignal),
+    );
+    expect(events.find((event) => event.type === 'tool_start')).toMatchObject({
+      name: 'query_app_kv',
+      args,
+    });
+    expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
+      name: 'query_app_kv',
+      isError: false,
+      output: 'App "sample-app" has no KV entries.',
+    });
+    expect(result.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'toolCall',
+              name: 'query_app_kv',
+              arguments: args,
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          role: 'toolResult',
+          toolName: 'query_app_kv',
+          isError: false,
+        }),
+      ]),
+    );
+  });
+
   it('keeps resource snapshot metadata while exposing inline text to the model', async () => {
     const composerContent: AgentComposerContentPart[] = [
       { type: 'text', text: 'Review ' },

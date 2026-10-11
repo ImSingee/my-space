@@ -355,6 +355,14 @@ describe('Agent App tool identity contract', () => {
     } as unknown as PlatformClient;
     const rollback = appTool('rollback_app', platform);
     const queryDb = appTool('query_app_db', platform);
+
+    await expect(
+      queryDb.execute('empty-sql', {
+        id: 'immutable-app-id',
+        sql: '',
+      }),
+    ).rejects.toThrow(/too small/i);
+    expect(queryAppDb).not.toHaveBeenCalled();
     const abort = new AbortController();
 
     await rollback.execute('rollback', {

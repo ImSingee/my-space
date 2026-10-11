@@ -7,6 +7,7 @@
  */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
+import { z } from 'zod';
 import { APP_NAME_MAX_LENGTH, APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import {
   AppPreparationError,
@@ -26,7 +27,11 @@ import type { PlatformClient } from '../platform-client';
 import {
   QUERY_APP_DATA_TABLE_CURSOR_MAX_LENGTH,
   queryAppDataTableRequestSchema,
+  queryAppDataTableCursorSchema,
+  queryAppDbRequestSchema,
+  queryAppKvCursorSchema,
   queryAppKvRequestSchema,
+  createAppRequestSchema,
 } from '../protocol';
 import { writeScaffoldFiles } from '../scaffold-files';
 import {
@@ -347,6 +352,7 @@ export function createAppTools(options: {
     executionMode: 'sequential',
     parameters: Type.Object({
       slug: Type.String({
+        minLength: 1,
         maxLength: APP_SLUG_MAX_LENGTH,
         description:
           'kebab-case URL slug, e.g. "todo" or "habit-tracker". Used in the ' +
@@ -355,6 +361,7 @@ export function createAppTools(options: {
           'technical APIs use the immutable app id.',
       }),
       name: Type.String({
+        minLength: 1,
         maxLength: APP_NAME_MAX_LENGTH,
         description: 'Human-readable name.',
       }),
@@ -383,7 +390,8 @@ export function createAppTools(options: {
       return withSourceWorkspaceLock(
         sessionId,
         async () => {
-          const { target_path: requestedTargetPath, ...input } = params;
+          const { target_path: requestedTargetPath, ...rawInput } = params;
+          const input = createAppRequestSchema.parse(rawInput);
           const targetPath =
             requestedTargetPath ??
             agentAppWorkDir(sessionId, input.slug.trim());
@@ -585,10 +593,14 @@ export function createAppTools(options: {
       id: Type.String({
         description: 'App id.',
       }),
-      sql: Type.String({ description: 'SQL statement to execute.' }),
+      sql: Type.String({
+        minLength: 1,
+        description: 'SQL statement to execute.',
+      }),
     }),
     execute: async (_id, params, signal) => {
       requireIdSlug(params.id);
+      queryAppDbRequestSchema.parse({ sql: params.sql });
       // Forward the abort signal so cancelling the run aborts the platform
       // request, which in turn tears down the running statement.
       const res = await platform.queryAppDb(params.id, params.sql, signal);
@@ -599,11 +611,15 @@ export function createAppTools(options: {
   const queryAppKv = tool({
     name: 'query_app_kv',
     label: 'Query app KV',
+    preserveEmptyValue: (field, input) =>
+      field === 'value' && input.action === 'set',
     description:
       "List, read, write, or permanently delete entries in a deployed app's " +
       'KV store. Secret values are masked by default. For list and get, set ' +
       'reveal_secrets to true only when their plaintext is needed in the model ' +
-      'context. The app must already have the kv capability enabled.',
+      'context. For the first list, omit cursor or pass an empty string. ' +
+      'To continue, use the nonempty cursor returned by the previous list. ' +
+      'The app must already have the kv capability enabled.',
     // Keep the root object-shaped: the Anthropic adapter forwards root
     // properties/required fields and would discard a root anyOf schema.
     parameters: Type.Object({
@@ -634,8 +650,12 @@ export function createAppTools(options: {
         }),
       ),
       cursor: Type.Optional(
-        Type.String({
-          description: 'List only: cursor returned by the previous call.',
+        Type.Unsafe<string>({
+          // Derive provider constraints from the platform contract.
+          ...z.toJSONSchema(queryAppKvCursorSchema, { target: 'openapi-3.0' }),
+          description:
+            'List only: cursor returned by the previous call (up to 512 ' +
+            'characters). Omit or pass an empty string for the first page.',
         }),
       ),
       limit: Type.Optional(
@@ -653,6 +673,17 @@ export function createAppTools(options: {
         }),
       ),
     }),
+    prepareArguments: (args) => {
+      if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        throw new Error('KV tool arguments must be an object.');
+      }
+      // Shared preparation has already removed every empty cursor spelling.
+      // Validate nonempty continuations before pi-ai can coerce their types.
+      if ('cursor' in args) {
+        z.object({ cursor: queryAppKvCursorSchema.optional() }).parse(args);
+      }
+      return args;
+    },
     execute: async (_id, params, signal) => {
       requireIdSlug(params.id);
       const { id, reveal_secrets: revealSecrets, ...rawInput } = params;
@@ -704,6 +735,31 @@ export function createAppTools(options: {
   const queryAppDataTable = tool({
     name: 'query_app_data_table',
     label: 'Query app Data Table',
+    preserveEmptyValue: (field, input) => {
+      const match = /^operations\.(\d+)\.(value|amount)$/.exec(field);
+      if (
+        !match ||
+        input.action !== 'mutate' ||
+        !Array.isArray(input.operations)
+      )
+        return false;
+      const operation = input.operations[Number(match[1])];
+      if (!operation || typeof operation !== 'object') return false;
+      return match[2] === 'value'
+        ? operation.type === 'insert' || operation.type === 'patch'
+        : operation.type === 'increment';
+    },
+    prepareArguments: (args) => {
+      if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        throw new Error('Data Table tool arguments must be an object.');
+      }
+      if ('cursor' in args) {
+        z.object({ cursor: queryAppDataTableCursorSchema.optional() }).parse(
+          args,
+        );
+      }
+      return args;
+    },
     description:
       "Inspect, query, or mutate a deployed app's managed Data Tables. " +
       'Always prefer the structured inspect, query, and mutate actions. ' +

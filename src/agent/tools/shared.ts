@@ -1,6 +1,11 @@
 /** Shared helpers for the Agent tool modules. */
-import { type Static, type TSchema } from '@earendil-works/pi-ai';
+import { Type, type Static, type TSchema } from '@earendil-works/pi-ai';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
+import {
+  normalizeEmptyOptionalFields,
+  withEmptyOptionalFields,
+  type PreserveEmptyValue,
+} from './empty-arguments';
 
 export type StreamDetailsSelector = (details: unknown) => unknown;
 export type StreamStartDetailsSelector = (
@@ -21,6 +26,8 @@ export function tool<S extends TSchema>(def: {
   label: string;
   description: string;
   parameters: S;
+  prepareArguments?: AgentTool['prepareArguments'];
+  preserveEmptyValue?: PreserveEmptyValue;
   executionMode?: AgentTool['executionMode'];
   selectStreamStartDetails?: StreamStartDetailsSelector;
   selectStreamDetails?: StreamDetailsSelector;
@@ -32,7 +39,37 @@ export function tool<S extends TSchema>(def: {
     onUpdate?: (partial: unknown) => void,
   ) => Promise<AgentToolResult<unknown>>;
 }): AgentToolWithStreamDetails {
-  return def as unknown as AgentToolWithStreamDetails;
+  const { preserveEmptyValue, ...definition } = def;
+  const parameters = Type.Unsafe<Static<S>>(
+    withEmptyOptionalFields(def.parameters),
+  );
+  const prepareArguments = (args: unknown): Static<S> => {
+    const input = args;
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('Tool arguments must be an object.');
+    }
+    const normalized = normalizeEmptyOptionalFields(
+      input as Record<string, unknown>,
+      def.parameters,
+      preserveEmptyValue,
+    );
+    return (
+      def.prepareArguments ? def.prepareArguments(normalized) : normalized
+    ) as Static<S>;
+  };
+  const execute: typeof def.execute = async (id, args, signal, onUpdate) =>
+    def.execute(id, prepareArguments(args), signal, onUpdate);
+  return {
+    ...definition,
+    description:
+      def.description +
+      ' Optional control fields accept null, an empty string, empty array, ' +
+      'empty object or numeric zero as omission/default. Explicit false and ' +
+      'required data values keep their meaning.',
+    parameters,
+    prepareArguments,
+    execute,
+  } as unknown as AgentToolWithStreamDetails;
 }
 
 export function text(content: string, details: unknown = {}) {
