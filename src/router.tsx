@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { routeTree } from './routeTree.gen';
 import { AppLoading } from '~components/system/app-loading.tsx';
 import { NotFoundElement } from '~components/system/not-found.tsx';
+import { RouteError } from '~components/system/route-error.tsx';
 import { parseSearch, stringifySearch } from './search-params';
 
 // Create a new router instance
@@ -46,6 +47,9 @@ export const getRouter = () => {
     defaultPreload: 'intent',
     defaultPendingComponent: AppLoading,
     defaultNotFoundComponent: NotFoundElement,
+    // Without a default, routes get no error boundary of their own and any
+    // loader failure replaces the entire app shell with the bare global one.
+    defaultErrorComponent: RouteError,
     Wrap: ({ children }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
