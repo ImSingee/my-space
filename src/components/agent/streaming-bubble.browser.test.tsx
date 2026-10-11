@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
-import type { AskAnswer } from '~agent/events';
+import type { AgentStreamEvent, AskAnswer } from '~agent/events';
 import { StreamingBubble } from './streaming-bubble';
 import { useAgentStream, type StreamState } from './use-agent-stream';
 
@@ -40,6 +40,36 @@ function openResponse(signal?: AbortSignal | null): Response {
   );
 }
 
+function mockLiveStream() {
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  let seq = 0;
+  let closed = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      controller = streamController;
+    },
+  });
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    controller.close();
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (_input, init) => {
+      init?.signal?.addEventListener('abort', close, { once: true });
+      return new Response(body, { status: 200 });
+    }),
+  );
+  return (event: AgentStreamEvent) => {
+    seq += 1;
+    controller.enqueue(
+      new TextEncoder().encode(`data: ${JSON.stringify({ seq, event })}\n\n`),
+    );
+    if (event.type === 'done') close();
+  };
+}
+
 function StreamHarness({ onTerminal }: { onTerminal: TerminalCallback }) {
   const [runId, setRunId] = useState('run-1');
   const { state, connect } = useAgentStream(noop, onTerminal);
@@ -65,12 +95,153 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test('restores the waiting indicator between tools after earlier prose', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(<StreamHarness onTerminal={() => false} />);
+  const thinking = screen.getByText('Thinking…', { exact: true });
+  await expect.element(thinking).toBeVisible();
+
+  emit({ type: 'text', delta: 'I will inspect the files.' });
+  await expect
+    .element(screen.getByText('I will inspect the files.'))
+    .toBeVisible();
+  await expect.element(thinking).not.toBeInTheDocument();
+
+  for (const id of ['tool-1', 'tool-2']) {
+    emit({
+      type: 'tool_start',
+      id,
+      name: 'read_file',
+      label: `Inspect ${id}`,
+      args: {},
+    });
+    await expect.element(screen.getByText(`Inspect ${id}`)).toBeVisible();
+    await expect.element(thinking).not.toBeInTheDocument();
+    emit({ type: 'tool_end', id, name: 'read_file', isError: false });
+    await expect.element(thinking).toBeVisible();
+    await expect
+      .element(screen.getByText('I will inspect the files.'))
+      .toBeVisible();
+  }
+
+  emit({ type: 'text', delta: 'The files are ready.' });
+  await expect.element(screen.getByText('The files are ready.')).toBeVisible();
+  await expect.element(thinking).not.toBeInTheDocument();
+  emit({ type: 'assistant_start' });
+  await expect.element(thinking).toBeVisible();
+  emit({ type: 'done' });
+  await expect.element(thinking).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByTestId('stream-state'))
+    .toHaveTextContent('none:idle');
+});
+
+test('waits for every concurrent tool and stops indicating work on failure', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(
+    <StreamHarness
+      onTerminal={async () => {
+        throw new Error('Keep the live error visible');
+      }}
+    />,
+  );
+  const thinking = screen.getByText('Thinking…', { exact: true });
+  await expect.element(thinking).toBeVisible();
+  emit({ type: 'text', delta: 'Checking both files.' });
+  await expect.element(screen.getByText('Checking both files.')).toBeVisible();
+  emit({
+    type: 'tool_start',
+    id: 'tool-1',
+    name: 'read_file',
+    label: 'Read first file',
+    args: {},
+  });
+  emit({ type: 'tool_start', id: 'tool-2', name: 'read_file', args: {} });
+  emit({
+    type: 'tool_end',
+    id: 'tool-1',
+    name: 'read_file',
+    isError: false,
+    output: 'First file contents',
+  });
+  await expect
+    .element(screen.getByRole('button', { name: 'Read first file' }))
+    .toBeVisible();
+  await expect.element(thinking).not.toBeInTheDocument();
+  emit({ type: 'tool_end', id: 'tool-2', name: 'read_file', isError: false });
+  await expect.element(thinking).toBeVisible();
+  emit({ type: 'error', message: 'Provider unavailable' });
+  await expect
+    .element(screen.getByRole('alert'))
+    .toHaveTextContent('Provider unavailable');
+  await expect.element(thinking).not.toBeInTheDocument();
+});
+
+test('shows one reasoning indicator and pauses it for human input', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(<StreamHarness onTerminal={() => false} />);
+  const thinking = screen.getByText('Thinking…', { exact: true });
+  await expect.element(thinking).toBeVisible();
+  emit({ type: 'text', delta: 'Reviewing the request.' });
+  await expect
+    .element(screen.getByText('Reviewing the request.'))
+    .toBeVisible();
+  emit({ type: 'thinking', delta: '\n\n' });
+  await expect.element(thinking).toBeVisible();
+  emit({ type: 'thinking', delta: 'Consider the available options.' });
+  await expect
+    .element(screen.getByText('Consider the available options.'))
+    .toBeVisible();
+  await expect.element(thinking).toBeVisible();
+  emit({
+    type: 'ask',
+    askId: 'ask-1',
+    questions: [
+      {
+        id: 'choice',
+        prompt: 'Which option?',
+        options: [{ id: 'first', label: 'First option' }],
+        allowMultiple: false,
+      },
+    ],
+  });
+  await expect.element(screen.getByText('Which option?')).toBeVisible();
+  await expect.element(thinking).not.toBeInTheDocument();
+  emit({ type: 'ask_answered', askId: 'ask-1' });
+  await expect.element(thinking).toBeVisible();
+  emit({
+    type: 'env_request',
+    requestId: 'env-1',
+    reason: 'Connect to GitHub.',
+    variables: [
+      {
+        key: 'GITHUB_TOKEN',
+        description: 'Repository access token',
+        secret: true,
+      },
+    ],
+  });
+  await expect
+    .element(screen.getByLabelText(/^GITHUB_TOKEN(?: \*)?$/))
+    .toBeVisible();
+  await expect.element(thinking).not.toBeInTheDocument();
+  emit({
+    type: 'env_stored',
+    requestId: 'env-1',
+    variables: [{ key: 'GITHUB_TOKEN', secret: true }],
+  });
+  await expect.element(thinking).toBeVisible();
+  emit({ type: 'cancelled' });
+  await expect.element(thinking).not.toBeInTheDocument();
+});
+
 test('keeps partial output and announces a live terminal error', async () => {
   const state: StreamState = {
     active: false,
     runId: 'run-1',
     blocks: [{ kind: 'text', text: 'Partial reply' }],
     thinkingActive: false,
+    textActive: false,
     terminalError: 'OpenAI API error (402)',
   };
   const onAnswer = vi.fn<(askId: string, answers: AskAnswer[]) => void>();
@@ -157,6 +328,7 @@ test('does not carry an env value into a later run with the same request id', as
     runId,
     blocks: [],
     thinkingActive: false,
+    textActive: false,
     pendingEnvRequest: envRequest,
   });
   const screen = await render(
