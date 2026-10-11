@@ -1,4 +1,6 @@
+import { Stack } from '@mantine/core';
 import { createFileRoute } from '@tanstack/react-router';
+import { ApiKeysPanel } from '~components/settings/api-keys-panel';
 import { PasskeysPanel } from '~components/settings/passkeys-panel';
 import { SectionHead } from '~components/settings/section-head';
 import { passkeyOriginQueryOptions } from '~queries/passkeys';
@@ -15,9 +17,12 @@ function SecurityRoute() {
     <>
       <SectionHead
         title="Security"
-        description="Manage the sign-in methods linked to your account."
+        description="Manage how you and your tools sign in to this space."
       />
-      <PasskeysPanel appOrigin={appOrigin} />
+      <Stack gap="4xl">
+        <PasskeysPanel appOrigin={appOrigin} />
+        <ApiKeysPanel />
+      </Stack>
     </>
   );
 }

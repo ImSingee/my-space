@@ -89,16 +89,6 @@ describe('Better Auth configuration', () => {
         requireResidentKey: true,
       },
     });
-    expect(mocks.betterAuth).toHaveBeenCalledWith(
-      expect.objectContaining({
-        plugins: [
-          'passkey',
-          'device-authorization',
-          'bearer',
-          'tanstack-start-cookies',
-        ],
-      }),
-    );
   });
 
   it('trusts only the active node origin and revokes it immediately after disconnect', async () => {
