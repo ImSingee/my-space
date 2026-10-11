@@ -16,6 +16,8 @@ import {
   getActiveAgentRun,
   type ActiveAgentRun,
 } from './agent-runs';
+import { deleteAgentSessionAttachments } from './agent-attachments';
+import { broadcastSessionWorkspaceCleanup } from './agent-runner/hub';
 import { authMiddleware } from './auth';
 
 export type SessionSummary = {
@@ -202,14 +204,10 @@ export const deleteSession = createServerFn({ method: 'POST' })
     // gone — and late event inserts would hit already-deleted rows.
     const active = await getActiveAgentRun(data.id);
     if (active) await cancelAgentRun(active.id);
-    const [{ deleteAgentSessionAttachments }, hub] = await Promise.all([
-      import('./agent-attachments'),
-      import('./agent-runner/hub'),
-    ]);
     await db
       .delete(schema.agentSessions)
       .where(eq(schema.agentSessions.id, data.id));
-    hub.broadcastSessionWorkspaceCleanup(data.id);
+    broadcastSessionWorkspaceCleanup(data.id);
     await deleteAgentSessionAttachments(data.id);
     return { ok: true };
   });

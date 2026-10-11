@@ -164,6 +164,27 @@ Write TypeScript React function components. Oxfmt enforces semicolons, single qu
 
 Use PascalCase for components (`DashboardCard.tsx`), camelCase for hooks/utilities. Mantine styles should live beside their component, leveraging Mantine's theming utilities before reaching for raw CSS.
 
+### Imports
+
+- Use static top-level imports. The local Oxlint rule
+  `local/no-dynamic-import` (`oxlint-plugins/no-dynamic-import.js`) flags
+  `import()` outside test files.
+- Do not use `import()` to keep server-only modules out of the client bundle.
+  TanStack Start removes `createServerFn(...).handler(...)` bodies and route
+  `server.handlers` from the client build and drops imports referenced only
+  there, so static imports used inside handlers are safe.
+- Server code leaks into the client only through references that survive the
+  client transform: module top-level code, plain (non-server-function)
+  exports, or value imports used in exported type annotations. Use
+  `import type` for types and wrap server-only helpers in
+  `createServerOnlyFn`.
+- Do not use `import()` to break an import cycle. A cycle means the module
+  boundaries are wrong: refactor so dependencies point one way, for example by
+  moving shared code into a lower-level module or by having the higher-level
+  module (or the composition root) pass callbacks into the lower-level one.
+- Tests may use `import()` after `vi.resetModules()`, `vi.stubEnv()`, or
+  `vi.mock()` to load a fresh module instance.
+
 ## Commit & Pull Request Guidelines
 
 Commits should mirror the existing short, imperative pattern (`use mantine components for index page`). Keep changes scoped and meaningful. PRs must include: a concise summary, linked issue/ticket, before/after screenshots for UI work, and confirmation that `pnpm lint` and `pnpm check:types` passed. Mention any config or env changes up front so reviewers can reproduce.

@@ -45,6 +45,14 @@ import {
 } from '~agent/protocol';
 import { AppError } from '~server/errors';
 import { parseRetryableAgentTurn } from './agent-retry';
+import {
+  connectedRunnerCount,
+  dispatchRun,
+  sendRunAnswer,
+  sendRunCancel,
+  sendRunEnvAndWait,
+  waitForRunFinished,
+} from './agent-runner/hub';
 
 export type AgentRunInput =
   | {
@@ -416,8 +424,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
 
   const model = await resolveRunModelConfig(input.providerId, input.modelId);
 
-  const hub = await import('./agent-runner/hub');
-  if (hub.connectedRunnerCount() === 0) {
+  if (connectedRunnerCount() === 0) {
     throw new AppError(
       'No Agent Runner is connected. Start the agent-runner service, then retry.',
       503,
@@ -615,16 +622,26 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     prepared;
 
   try {
-    await hub.dispatchRun({
-      runId: run.id,
-      sessionId: input.sessionId,
-      userText,
-      composerContent,
-      images,
-      attachments,
-      priorMessages: baseMessages,
-      model,
-    });
+    const affinity = await getSessionWorkspaceAffinity(input.sessionId);
+    await dispatchRun(
+      {
+        runId: run.id,
+        sessionId: input.sessionId,
+        userText,
+        composerContent,
+        images,
+        attachments,
+        priorMessages: baseMessages,
+        model,
+      },
+      {
+        ownerRunnerId: affinity.runnerId,
+        assign: (runnerId) =>
+          assignRunToRunner(run.id, input.sessionId, runnerId),
+        finalize: (runnerId) =>
+          finalizeRunWorkspaceAffinity(run.id, runnerId, input.sessionId),
+      },
+    );
   } catch (error) {
     // Dispatch failed (runner vanished between the check and the send, or
     // never accepted). Fail the run gracefully: the client's SSE connection
@@ -1242,8 +1259,7 @@ export async function answerAgentRun(
     throw new Error('Agent run is no longer active.');
   }
 
-  const hub = await import('./agent-runner/hub');
-  hub.sendRunAnswer(run.runnerId, runId, askId, answers);
+  sendRunAnswer(run.runnerId, runId, askId, answers);
 }
 
 /** ================== environment request / delivery ================== */
@@ -1297,9 +1313,8 @@ export async function submitAgentEnv(
     }
     const validatedEntries = validateEnvEntries(pending, entries);
 
-    const hub = await import('./agent-runner/hub');
     return {
-      result: hub.sendRunEnvAndWait(
+      result: sendRunEnvAndWait(
         run.runnerId,
         runId,
         requestId,
@@ -1343,9 +1358,8 @@ export async function cancelAgentRun(runId: string): Promise<void> {
   // session. When the runner is offline the run is already terminal; whatever
   // partial transcript arrives later is still persisted by
   // completeRunFromRunner.
-  const hub = await import('./agent-runner/hub');
-  if (hub.sendRunCancel(run.runnerId, runId)) {
-    await hub.waitForRunFinished(runId, 15000);
+  if (sendRunCancel(run.runnerId, runId)) {
+    await waitForRunFinished(runId, 15000);
   }
 }
 

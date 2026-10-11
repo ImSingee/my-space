@@ -45,6 +45,7 @@ import {
 import { closeDataRealtime } from './data-table/realtime';
 import { ensureAppRunning, setKeepAlive, stopApp } from './runtime';
 import { reloadScheduler } from './scheduler';
+import { appSlugExists } from './access';
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -226,7 +227,6 @@ export async function renameAppSlug(
 
   // Slugs are unique only within the human-facing URL namespace. App ids are
   // addressed independently at every technical boundary.
-  const { appSlugExists } = await import('./access');
   if (await appSlugExists(slug, id)) {
     throw new Error(`Slug "${slug}" is already in use.`);
   }

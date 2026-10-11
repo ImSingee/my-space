@@ -157,14 +157,17 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     auth = (await import('~auth/server')).auth;
     api = (await import('./api')).handleCliApiRequest;
     cookie = await signup();
-    const { createInternalHttpHandler } =
+    const { createInternalHttpHandler, runnerHubHandlers } =
       await import('~server/agent-runner/internal-server');
     const { handleRunnerSocket, listConnectedRunners } =
       await import('~server/agent-runner/hub');
     server = http.createServer(createInternalHttpHandler('test-fleet-token'));
     websocketServer = new WebSocketServer({ server });
     websocketServer.on('connection', (client) =>
-      handleRunnerSocket(client, { betaFeatures: [] }),
+      handleRunnerSocket(client, {
+        betaFeatures: [],
+        handlers: runnerHubHandlers,
+      }),
     );
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');

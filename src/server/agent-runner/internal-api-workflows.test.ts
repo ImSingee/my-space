@@ -45,6 +45,8 @@ vi.mock('~/db', () => ({
   },
 }));
 
+vi.mock('~auth/server', () => ({ auth: {} }));
+
 vi.mock('~server/workflows/inspect', () => ({
   listWorkflowsForAgent: mocks.listWorkflowsForAgent,
   getWorkflowDetailForAgent: mocks.getWorkflowDetailForAgent,

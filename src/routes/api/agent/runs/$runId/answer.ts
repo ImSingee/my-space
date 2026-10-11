@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
 import { auth } from '~auth/server';
+import { answerAgentRun } from '~server/agent-runs';
+import { errorResponse } from '~server/errors';
 
 const bodySchema = z.object({
   askId: z.string().min(1),
@@ -40,8 +42,6 @@ export const Route = createFileRoute('/api/agent/runs/$runId/answer')({
           return new Response('Bad request', { status: 400 });
         }
 
-        const { answerAgentRun } = await import('~server/agent-runs');
-        const { errorResponse } = await import('~server/errors');
         try {
           await answerAgentRun(runId, parsed.askId, parsed.answers);
           return Response.json({ ok: true });

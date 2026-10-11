@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { ProviderApiType } from '~/db/schema';
 import { authMiddleware } from './auth';
+import { seedDefaultProviders } from '~agent/seed-providers';
 
 const apiTypeSchema = z.enum([
   'anthropic-messages',
@@ -40,7 +41,6 @@ export type ProviderWithModels = {
 export const listProviders = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async (): Promise<ProviderWithModels[]> => {
-    const { seedDefaultProviders } = await import('~agent/seed-providers');
     await seedDefaultProviders();
 
     const providers = await db.query.agentProviders.findMany({

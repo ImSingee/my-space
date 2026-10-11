@@ -5,6 +5,15 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { TailscaleManager } from './tailscale-manager';
 import type { TailscaleConfig } from '../tailscale';
 
+// Managers under test get injected load/save; the default persistence is unused.
+vi.mock('./platform-config', () => {
+  type PlatformConfig = typeof import('./platform-config');
+  return {
+    getPlatformConfig: vi.fn<PlatformConfig['getPlatformConfig']>(),
+    setPlatformConfig: vi.fn<PlatformConfig['setPlatformConfig']>(),
+  };
+});
+
 const managers: TailscaleManager[] = [];
 const directories: string[] = [];
 afterEach(async () => {

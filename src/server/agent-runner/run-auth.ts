@@ -4,6 +4,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { db } from '~/db';
+import { auth } from '~auth/server';
+import { listConnectedRunners } from '~server/agent-runner/hub';
 
 const LIFETIME_SECONDS = 300;
 
@@ -34,7 +37,6 @@ const claimsSchema = z.object({
 });
 
 async function requireLiveRun(context: RunTokenContext) {
-  const { db } = await import('~/db');
   const run = await db.query.agentRuns.findFirst({
     where: { id: context.runId },
     columns: {
@@ -61,10 +63,8 @@ async function requireLiveRun(context: RunTokenContext) {
  * not a distinct Runner identity.
  */
 export async function mintRunToken(runId: string, runnerId: string) {
-  const { listConnectedRunners } = await import('~server/agent-runner/hub');
   if (!listConnectedRunners().some((runner) => runner.runnerId === runnerId))
     throw new RunTokenError('runner_not_connected');
-  const { db } = await import('~/db');
   const run = await db.query.agentRuns.findFirst({
     where: { id: runId },
     columns: { sessionId: true },
@@ -74,7 +74,6 @@ export async function mintRunToken(runId: string, runnerId: string) {
   await requireLiveRun(context);
   const issuedAt = Math.floor(Date.now() / 1000);
   const expiresAt = new Date((issuedAt + LIFETIME_SECONDS) * 1000);
-  const { auth } = await import('~auth/server');
   const { token } = await auth.api.signJWT({
     body: {
       payload: {
@@ -94,7 +93,6 @@ export async function mintRunToken(runId: string, runnerId: string) {
 export async function verifyRunToken(token: string): Promise<RunTokenContext> {
   let claims: z.infer<typeof claimsSchema>;
   try {
-    const { auth } = await import('~auth/server');
     const { payload } = await auth.api.verifyJWT({ body: { token } });
     claims = claimsSchema.parse(payload);
   } catch {

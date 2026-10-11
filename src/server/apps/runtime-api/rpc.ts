@@ -1,5 +1,9 @@
 import { auth } from '~auth/server';
 import { parseAppApiPath } from './path';
+import { db } from '~/db';
+import { assertSupportedDeployment } from '~server/apps/compatibility';
+import { errorResponse } from '~server/errors';
+import { proxyAppRequest } from '~server/apps/runtime';
 
 export async function handleRpcRequest({
   request,
@@ -20,7 +24,6 @@ export async function handleRpcRequest({
   // proxyAppRequest would cold-start it. Gate on a live deployment + backend
   // capability rather than status === 'deployed' so a redeploy (status
   // 'building', previous backend still valid) keeps serving without downtime.
-  const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
     where: { id },
   });
@@ -33,14 +36,10 @@ export async function handleRpcRequest({
     return new Response('Not found', { status: 404 });
   }
   try {
-    const { assertSupportedDeployment } =
-      await import('~server/apps/compatibility');
     await assertSupportedDeployment(app.currentDeploymentId);
   } catch (error) {
-    const { errorResponse } = await import('~server/errors');
     return errorResponse(error, 503);
   }
-  const { proxyAppRequest } = await import('~server/apps/runtime');
   try {
     // Sign the forward with the per-app key so the backend can distinguish
     // platform-vetted calls from direct localhost traffic (another app's

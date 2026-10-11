@@ -16,6 +16,7 @@ import {
   startAppBackend,
   stopApp,
 } from './runtime';
+import { assertSupportedDeployment } from './compatibility';
 
 type BackendMode = 'serverless' | 'long-running';
 
@@ -130,7 +131,6 @@ async function requireBackendApp(
     throw new AppError('This app has never been deployed.', 400);
   }
   if (options.requireSupportedCompatibility) {
-    const { assertSupportedDeployment } = await import('./compatibility');
     await assertSupportedDeployment(app.currentDeploymentId);
   }
   return {

@@ -13,6 +13,7 @@ import {
   type TailscaleConfig,
   type TailscaleStatus,
 } from '../tailscale';
+import { getPlatformConfig, setPlatformConfig } from './platform-config';
 
 const helperStatusSchema = z.object({
   state: z.enum([
@@ -256,11 +257,9 @@ export function getTailscaleManager() {
     stateDir: path.join(WORKSPACE_ROOT, '.tailscale'),
     port,
     load: async () => {
-      const { getPlatformConfig } = await import('./platform-config');
       return getPlatformConfig('network.tailscale');
     },
     save: async (config) => {
-      const { setPlatformConfig } = await import('./platform-config');
       await setPlatformConfig('network.tailscale', config);
     },
   });

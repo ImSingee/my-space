@@ -1,4 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { db } from '~/db';
+import { secretsMatch } from '~server/secrets';
+import { coerceWorkflowQueryInput } from '~server/workflows/validate';
+import { startWorkflowRun } from '~server/workflows/execute';
+import { AppError } from '~server/errors';
+import { WorkflowDeploymentCompatibilityError } from '~server/workflows/compatibility';
 
 // Cap inbound webhook payloads: this endpoint authenticates with only the
 // per-workflow secret, so without a limit any valid caller could send an
@@ -56,7 +62,6 @@ export async function handle({
   if (!match) return new Response('Not found', { status: 404 });
   const workflowId = match[1];
 
-  const { db } = await import('~/db');
   const workflow = await db.query.workflows.findFirst({
     where: { id: workflowId },
   });
@@ -78,7 +83,6 @@ export async function handle({
 
   const provided =
     request.headers.get('x-hatch-secret') ?? url.searchParams.get('secret');
-  const { secretsMatch } = await import('~server/secrets');
   if (!secretsMatch(provided, workflow.webhookSecret)) {
     return new Response('Forbidden', { status: 403 });
   }
@@ -87,8 +91,6 @@ export async function handle({
   delete query.secret;
   // Query params are always strings; coerce them toward the workflow's input
   // schema so numeric/boolean fields don't fail validation on GET/DELETE hooks.
-  const { coerceWorkflowQueryInput } =
-    await import('~server/workflows/validate');
   let input: unknown = coerceWorkflowQueryInput(workflow.inputSchema, query);
   if (request.method === 'POST' || request.method === 'PUT') {
     const declared = Number(request.headers.get('content-length'));
@@ -108,10 +110,6 @@ export async function handle({
     }
   }
 
-  const { startWorkflowRun } = await import('~server/workflows/execute');
-  const { AppError } = await import('~server/errors');
-  const { WorkflowDeploymentCompatibilityError } =
-    await import('~server/workflows/compatibility');
   try {
     const result = await startWorkflowRun(workflowId, {
       trigger: 'webhook',

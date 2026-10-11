@@ -50,6 +50,7 @@ import {
   recordBackendStartFailure,
   recordBackendStopped,
 } from './runtime-state';
+import { getWorkflowCallability } from '../workflows/external';
 
 export type BackendArtifact = {
   /** Validated absolute path to the runtime entry inside artifact/backend/. */
@@ -321,7 +322,6 @@ async function buildWorkflowsEnv(
 ): Promise<{ env: string; urls: string[] } | null> {
   const refs = readWorkflowRefs(buildDir);
   if (refs.length === 0) return null;
-  const { getWorkflowCallability } = await import('../workflows/external');
   const map: Record<
     string,
     { workflow: string; name: string; url: string; secret: string }

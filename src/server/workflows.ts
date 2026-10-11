@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { db } from '~/db';
+import { db, schema } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
 import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
@@ -14,6 +14,23 @@ import {
   workflowNetworkPolicyFromManifest,
   workflowWebhookUrl,
 } from './workflows/manifest';
+import {
+  deleteWorkflow,
+  getWorkflowRun as loadWorkflowRun,
+  listRecentWorkflowRuns,
+  listWorkflowDeployments as loadWorkflowDeployments,
+  listWorkflowRuns as loadWorkflowRuns,
+  renameWorkflowSlug,
+  rollbackWorkflow,
+  setWorkflowArchived,
+  workflowDeploymentBuildLog,
+} from './workflows/manage';
+import { eq } from 'drizzle-orm';
+import {
+  ensureWorkflowScheduler,
+  listWorkflowCronJobs,
+} from './workflows/scheduler';
+import { startWorkflowRun, cancelWorkflowRun } from './workflows/execute';
 
 /** Public list projection: never includes `webhookSecret`/`repoPath`/manifest. */
 export type WorkflowListItem = {
@@ -32,9 +49,7 @@ export const listWorkflows = createServerFn({ method: 'GET' })
   .handler(async (): Promise<WorkflowListItem[]> => {
     // Opportunistically (re)start the workflow cron scheduler so schedules
     // survive a platform restart without requiring a redeploy.
-    void import('./workflows/scheduler').then((m) =>
-      m.ensureWorkflowScheduler(),
-    );
+    ensureWorkflowScheduler();
     // Select explicit columns: the raw row carries `webhookSecret`, `repoPath`,
     // and source metadata the list/sidebar UI never needs and that must not be
     // shipped to the browser. The webhook secret is disclosed only by the
@@ -122,9 +137,7 @@ export const listWorkflowDeployments = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { listWorkflowDeployments: list } =
-      await import('./workflows/manage');
-    return list(id);
+    return loadWorkflowDeployments(id);
   });
 
 export const getWorkflowDeploymentBuildLog = createServerFn({ method: 'GET' })
@@ -133,7 +146,6 @@ export const getWorkflowDeploymentBuildLog = createServerFn({ method: 'GET' })
     idAndDeploymentSchema.parse(input),
   )
   .handler(async ({ data }) => {
-    const { workflowDeploymentBuildLog } = await import('./workflows/manage');
     return workflowDeploymentBuildLog(data.id, data.deploymentId);
   });
 
@@ -143,7 +155,6 @@ export const rollbackWorkflowFn = createServerFn({ method: 'POST' })
     idAndDeploymentSchema.parse(input),
   )
   .handler(async ({ data }) => {
-    const { rollbackWorkflow } = await import('./workflows/manage');
     return rollbackWorkflow(data.id, data.deploymentId);
   });
 
@@ -153,7 +164,6 @@ export const archiveWorkflowFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, archived: z.boolean() }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { setWorkflowArchived } = await import('./workflows/manage');
     return setWorkflowArchived(data.id, data.archived);
   });
 
@@ -161,7 +171,6 @@ export const deleteWorkflowFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { deleteWorkflow } = await import('./workflows/manage');
     return deleteWorkflow(id);
   });
 
@@ -171,8 +180,6 @@ export const setWorkflowPinFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, pinned: z.boolean() }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { eq } = await import('drizzle-orm');
-    const { schema } = await import('~/db');
     await db
       .update(schema.workflows)
       .set({ pinned: data.pinned })
@@ -191,7 +198,6 @@ export const setWorkflowSlugFn = createServerFn({ method: 'POST' })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    const { renameWorkflowSlug } = await import('./workflows/manage');
     return renameWorkflowSlug(data.id, data.slug);
   });
 
@@ -226,7 +232,6 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
         cron: { enabled: false, jobs: [] },
       };
     }
-    const { listWorkflowCronJobs } = await import('./workflows/scheduler');
     const jobs = await listWorkflowCronJobs(id);
     let webhookEnabled = false;
     let network: NetworkAccessView | null = null;
@@ -270,7 +275,6 @@ export const runWorkflowFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, input: z.unknown().optional() }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { startWorkflowRun } = await import('./workflows/execute');
     return startWorkflowRun(data.id, {
       trigger: 'manual',
       input: data.input ?? {},
@@ -281,14 +285,12 @@ export const listWorkflowRuns = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { listWorkflowRuns: list } = await import('./workflows/manage');
-    return list(id);
+    return loadWorkflowRuns(id);
   });
 
 export const listAllWorkflowRuns = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async () => {
-    const { listRecentWorkflowRuns } = await import('./workflows/manage');
     return listRecentWorkflowRuns();
   });
 
@@ -296,14 +298,12 @@ export const getWorkflowRun = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((runId: string) => idSchema.parse(runId))
   .handler(async ({ data: runId }) => {
-    const { getWorkflowRun: get } = await import('./workflows/manage');
-    return get(runId);
+    return loadWorkflowRun(runId);
   });
 
 export const cancelWorkflowRunFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((runId: string) => idSchema.parse(runId))
   .handler(async ({ data: runId }) => {
-    const { cancelWorkflowRun } = await import('./workflows/execute');
     return cancelWorkflowRun(runId);
   });

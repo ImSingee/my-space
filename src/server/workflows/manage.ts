@@ -27,6 +27,8 @@ import { workflowDeployLock } from './deploy';
 import { moveMasterToDeploymentTag } from './git';
 import { isValidWorkflowId, isValidWorkflowSlug } from './manifest';
 import { reloadWorkflowScheduler } from './scheduler';
+import { workflowSlugExists } from './access';
+import { killActiveWorkflowRuns } from './execute';
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -160,7 +162,6 @@ export async function renameWorkflowSlug(
   if (!workflow) throw new Error(`Workflow "${id}" not found.`);
   if (workflow.slug === slug) return { slug };
 
-  const { workflowSlugExists } = await import('./access');
   if (await workflowSlugExists(slug, id)) {
     throw new Error(`Slug "${slug}" is already in use.`);
   }
@@ -292,7 +293,6 @@ export async function deleteWorkflow(id: string): Promise<{ ok: true }> {
   }
   // Kill any in-flight run processes first so deleting the rows below cannot
   // strand an orphaned Deno child that keeps causing side effects.
-  const { killActiveWorkflowRuns } = await import('./execute');
   await killActiveWorkflowRuns(id);
   // Cascades to deployments, runs, and run steps.
   await db.delete(schema.workflows).where(eq(schema.workflows.id, id));

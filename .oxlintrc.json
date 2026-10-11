@@ -9,6 +9,7 @@
     "vitest",
     "import"
   ],
+  "jsPlugins": ["./oxlint-plugins/no-dynamic-import.js"],
   "categories": {
     "correctness": "error"
   },
@@ -25,8 +26,17 @@
     "react/no-string-refs": "error",
     "react/self-closing-comp": "error",
     "react/void-dom-elements-no-children": "error",
+    "local/no-dynamic-import": "error",
     "typescript/no-unnecessary-condition": "off"
   },
+  "overrides": [
+    {
+      "files": ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
+      "rules": {
+        "local/no-dynamic-import": "off"
+      }
+    }
+  ],
   "settings": {
     "react": {
       "version": "19"

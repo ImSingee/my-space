@@ -15,6 +15,7 @@ import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 import { getPasskeyOriginError, getPasskeyRpId } from './passkey-origin';
 import { apiKeyOptions } from './api-key-options';
+import { getTailscaleManager } from '../server/tailscale-manager';
 
 const { appUrl, betterAuthSecret } = getPlatformEnv();
 const relyingPartyId = getPasskeyRpId(appUrl);
@@ -41,7 +42,6 @@ export const auth = betterAuth({
   // Do not expose session-to-JWT issuance or an unused public JWKS endpoint.
   disabledPaths: ['/token', '/jwks'],
   trustedOrigins: async () => {
-    const { getTailscaleManager } = await import('../server/tailscale-manager');
     const origin = getTailscaleManager().trustedOrigin();
     return origin ? [origin] : [];
   },

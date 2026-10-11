@@ -12,9 +12,25 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { RUNNER_WS_PATH } from '~agent/protocol';
 import { getPlatformEnv } from '~env';
+import {
+  completeRunFromRunner,
+  ingestRunnerEvent,
+  reconcileRunnerRuns,
+  renewRunnerLeases,
+} from '~server/agent-runs';
+import { reconcileRunnerWorkspaces } from '~server/agent-workspaces';
 import { secretsMatch } from '~server/secrets';
 import { handleInternalApiRequest } from './internal-api';
-import { handleRunnerSocket } from './hub';
+import { handleRunnerSocket, type RunnerHubHandlers } from './hub';
+
+/** Control-plane persistence the Runner Hub drives from runner messages. */
+export const runnerHubHandlers: RunnerHubHandlers = {
+  reconcileRunnerRuns,
+  reconcileRunnerWorkspaces,
+  renewRunnerLeases,
+  ingestRunnerEvent,
+  completeRunFromRunner,
+};
 
 type InternalServerGlobal = typeof globalThis & {
   __hatchInternalServer__?: { server: http.Server; port: number };
@@ -65,7 +81,7 @@ export function startAgentInternalServer(): void {
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      handleRunnerSocket(ws, { betaFeatures });
+      handleRunnerSocket(ws, { betaFeatures, handlers: runnerHubHandlers });
     });
   });
 

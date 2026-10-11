@@ -3,59 +3,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { PROTOCOL_VERSION, type RunStartPayload } from '~agent/protocol';
 
-// The hub reaches into the run control plane on hello (reconcile) and ping
-// (lease renewal); these tests only exercise connection bookkeeping, so stub
-// the database-touching module out.
-vi.mock('~server/agent-runs', () => {
-  type AgentRuns = typeof import('~server/agent-runs');
-  return {
-    getSessionWorkspaceAffinity: vi.fn<
-      AgentRuns['getSessionWorkspaceAffinity']
-    >(async () => ({ state: 'uninitialized', runnerId: null })),
-    assignRunToRunner: vi.fn<AgentRuns['assignRunToRunner']>(async () => {}),
-    finalizeRunWorkspaceAffinity: vi.fn<
-      AgentRuns['finalizeRunWorkspaceAffinity']
-    >(async (_runId, _runnerId, expectedSessionId) =>
-      Promise.resolve(expectedSessionId ?? 'session-from-run'),
-    ),
-    reconcileRunnerRuns: vi.fn<AgentRuns['reconcileRunnerRuns']>(async () => ({
-      resumed: [],
-      stale: [],
-      pendingAnswers: [],
-    })),
-    renewRunnerLeases: vi.fn<AgentRuns['renewRunnerLeases']>(async () => {}),
-    ingestRunnerEvent: vi.fn<AgentRuns['ingestRunnerEvent']>(async () => ({
-      status: 'ok',
-      sessionId: 'session-from-event',
-    })),
-    completeRunFromRunner: vi.fn<AgentRuns['completeRunFromRunner']>(
-      async () => null,
-    ),
-  };
-});
-
-vi.mock('~server/agent-workspaces', () => {
-  type Workspaces = typeof import('~server/agent-workspaces');
-  return {
-    reconcileRunnerWorkspaces: vi.fn<Workspaces['reconcileRunnerWorkspaces']>(
-      async (_runnerId, sessionIds) => ({
-        ownedSessionIds: sessionIds,
-        staleSessionIds: [],
-      }),
-    ),
-  };
-});
-
-const agentRuns = await import('~server/agent-runs');
-const agentWorkspaces = await import('~server/agent-workspaces');
-const {
+import {
   broadcastSessionWorkspaceCleanup,
   connectedRunnerCount,
+  dispatchRun,
   handleRunnerSocket,
   listConnectedRunners,
-  dispatchRun,
   sendRunEnvAndWait,
-} = await import('~server/agent-runner/hub');
+  type RunDispatchPlan,
+  type RunnerHubHandlers,
+} from '~server/agent-runner/hub';
+
+// The hub drives control-plane persistence only through injected callbacks;
+// these tests exercise connection bookkeeping, so the callbacks are fakes.
+const handlers = {
+  reconcileRunnerRuns: vi.fn<RunnerHubHandlers['reconcileRunnerRuns']>(),
+  reconcileRunnerWorkspaces:
+    vi.fn<RunnerHubHandlers['reconcileRunnerWorkspaces']>(),
+  renewRunnerLeases: vi.fn<RunnerHubHandlers['renewRunnerLeases']>(),
+  ingestRunnerEvent: vi.fn<RunnerHubHandlers['ingestRunnerEvent']>(),
+  completeRunFromRunner: vi.fn<RunnerHubHandlers['completeRunFromRunner']>(),
+} satisfies RunnerHubHandlers;
+
+const dispatch = {
+  assign: vi.fn<RunDispatchPlan['assign']>(),
+  finalize: vi.fn<RunDispatchPlan['finalize']>(),
+};
+
+function dispatchPlan(ownerRunnerId: string | null = null): RunDispatchPlan {
+  return { ownerRunnerId, ...dispatch };
+}
 
 const DEFAULT_BETA_FEATURES = ['workflow'] as const;
 
@@ -92,7 +69,7 @@ async function connectRunner(
   betaFeatures: readonly string[] = DEFAULT_BETA_FEATURES,
 ) {
   const socket = new FakeSocket();
-  handleRunnerSocket(socket.asWebSocket(), { betaFeatures });
+  handleRunnerSocket(socket.asWebSocket(), { betaFeatures, handlers });
   socket.emit(
     'message',
     JSON.stringify({
@@ -117,26 +94,26 @@ beforeEach(() => {
   // The hub keeps its state on globalThis (dev-reload safety); start each
   // test from a clean slate.
   delete (globalThis as { __hatchRunnerHub__?: unknown }).__hatchRunnerHub__;
-  vi.clearAllMocks();
-  vi.mocked(agentRuns.getSessionWorkspaceAffinity).mockResolvedValue({
-    state: 'uninitialized',
-    runnerId: null,
+  vi.resetAllMocks();
+  handlers.reconcileRunnerRuns.mockResolvedValue({
+    resumed: [],
+    stale: [],
+    pendingAnswers: [],
   });
-  vi.mocked(agentRuns.finalizeRunWorkspaceAffinity).mockImplementation(
-    async (_runId, _runnerId, expectedSessionId) =>
-      Promise.resolve(expectedSessionId ?? 'session-from-run'),
-  );
-  vi.mocked(agentRuns.ingestRunnerEvent).mockResolvedValue({
-    status: 'ok',
-    sessionId: 'session-from-event',
-  });
-  vi.mocked(agentRuns.completeRunFromRunner).mockResolvedValue(null);
-  vi.mocked(agentWorkspaces.reconcileRunnerWorkspaces).mockImplementation(
+  handlers.reconcileRunnerWorkspaces.mockImplementation(
     async (_runnerId, sessionIds) => ({
       ownedSessionIds: sessionIds,
       staleSessionIds: [],
     }),
   );
+  handlers.renewRunnerLeases.mockResolvedValue();
+  handlers.ingestRunnerEvent.mockResolvedValue({
+    status: 'ok',
+    sessionId: 'session-from-event',
+  });
+  handlers.completeRunFromRunner.mockResolvedValue(null);
+  dispatch.assign.mockResolvedValue();
+  dispatch.finalize.mockResolvedValue(runPayload.sessionId);
   // Fake only Date so lastSeen deltas are deterministic; timers stay real
   // because the hub's async message handling relies on them (vi.waitFor).
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -180,12 +157,8 @@ describe('workspace-affine dispatch', () => {
       [runPayload.sessionId],
     );
     const other = await connectRunner('runner-other');
-    vi.mocked(agentRuns.getSessionWorkspaceAffinity).mockResolvedValueOnce({
-      state: 'claimed',
-      runnerId: 'runner-owner',
-    });
 
-    const dispatched = dispatchRun(runPayload);
+    const dispatched = dispatchRun(runPayload, dispatchPlan('runner-owner'));
     await vi.waitFor(() =>
       expect(owner.sent.some((message) => message.type === 'run.start')).toBe(
         true,
@@ -200,54 +173,38 @@ describe('workspace-affine dispatch', () => {
     );
 
     await expect(dispatched).resolves.toBe('runner-owner');
-    expect(agentRuns.assignRunToRunner).toHaveBeenCalledWith(
-      runPayload.runId,
-      runPayload.sessionId,
-      'runner-owner',
-    );
-    expect(agentRuns.finalizeRunWorkspaceAffinity).toHaveBeenCalledWith(
-      runPayload.runId,
-      'runner-owner',
-      runPayload.sessionId,
-    );
+    expect(dispatch.assign).toHaveBeenCalledWith('runner-owner');
+    expect(dispatch.finalize).toHaveBeenCalledWith('runner-owner');
   });
 
   it('fails instead of switching when the workspace owner is unavailable', async () => {
     const other = await connectRunner('runner-other');
-    vi.mocked(agentRuns.getSessionWorkspaceAffinity).mockResolvedValueOnce({
-      state: 'claimed',
-      runnerId: 'runner-offline',
-    });
 
-    await expect(dispatchRun(runPayload)).rejects.toThrow(
-      'owns this chat workspace is unavailable',
-    );
+    await expect(
+      dispatchRun(runPayload, dispatchPlan('runner-offline')),
+    ).rejects.toThrow('owns this chat workspace is unavailable');
     expect(other.sent.some((message) => message.type === 'run.start')).toBe(
       false,
     );
-    expect(agentRuns.assignRunToRunner).not.toHaveBeenCalled();
+    expect(dispatch.assign).not.toHaveBeenCalled();
   });
 
   it('fails closed when the owner connection did not report the workspace', async () => {
     const owner = await connectRunner('runner-owner');
-    vi.mocked(agentRuns.getSessionWorkspaceAffinity).mockResolvedValueOnce({
-      state: 'claimed',
-      runnerId: 'runner-owner',
-    });
 
-    await expect(dispatchRun(runPayload)).rejects.toThrow(
-      'did not report its local data',
-    );
+    await expect(
+      dispatchRun(runPayload, dispatchPlan('runner-owner')),
+    ).rejects.toThrow('did not report its local data');
     expect(owner.sent.some((message) => message.type === 'run.start')).toBe(
       false,
     );
-    expect(agentRuns.assignRunToRunner).not.toHaveBeenCalled();
+    expect(dispatch.assign).not.toHaveBeenCalled();
   });
 
   it('accepts a dispatch only from the exact selected connection', async () => {
     const selected = await connectRunner('runner-a');
     const other = await connectRunner('runner-b');
-    const dispatched = dispatchRun(runPayload);
+    const dispatched = dispatchRun(runPayload, dispatchPlan());
     await vi.waitFor(() =>
       expect(
         selected.sent.some((message) => message.type === 'run.start'),
@@ -260,19 +217,19 @@ describe('workspace-affine dispatch', () => {
     );
     await Promise.resolve();
     await Promise.resolve();
-    expect(agentRuns.finalizeRunWorkspaceAffinity).not.toHaveBeenCalled();
+    expect(dispatch.finalize).not.toHaveBeenCalled();
 
     selected.emit(
       'message',
       JSON.stringify({ type: 'run.accepted', runId: runPayload.runId }),
     );
     await expect(dispatched).resolves.toBe('runner-a');
-    expect(agentRuns.finalizeRunWorkspaceAffinity).toHaveBeenCalledOnce();
+    expect(dispatch.finalize).toHaveBeenCalledOnce();
   });
 
   it('accepts a dispatch when a valid event arrives before its acceptance frame', async () => {
     const selected = await connectRunner('runner-a');
-    const dispatched = dispatchRun(runPayload);
+    const dispatched = dispatchRun(runPayload, dispatchPlan());
     await vi.waitFor(() =>
       expect(
         selected.sent.some((message) => message.type === 'run.start'),
@@ -290,18 +247,18 @@ describe('workspace-affine dispatch', () => {
     );
 
     await expect(dispatched).resolves.toBe('runner-a');
-    expect(agentRuns.ingestRunnerEvent).toHaveBeenCalledWith('runner-a', {
+    expect(handlers.ingestRunnerEvent).toHaveBeenCalledWith('runner-a', {
       type: 'run.event',
       runId: runPayload.runId,
       runnerSeq: 1,
       event: { type: 'text', delta: 'started' },
     });
-    expect(agentRuns.finalizeRunWorkspaceAffinity).toHaveBeenCalledOnce();
+    expect(dispatch.finalize).toHaveBeenCalledOnce();
   });
 
   it('rejects an exact dispatch waiter when its connection is replaced', async () => {
     const selected = await connectRunner('runner-a');
-    const dispatched = dispatchRun(runPayload);
+    const dispatched = dispatchRun(runPayload, dispatchPlan());
     const outcome = dispatched.catch((error: unknown) => error);
     await vi.waitFor(() =>
       expect(
@@ -314,12 +271,12 @@ describe('workspace-affine dispatch', () => {
     const error = await outcome;
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('connection was replaced');
-    expect(agentRuns.finalizeRunWorkspaceAffinity).not.toHaveBeenCalled();
+    expect(dispatch.finalize).not.toHaveBeenCalled();
   });
 
   it('rejects an exact dispatch waiter when its connection closes', async () => {
     const selected = await connectRunner('runner-a');
-    const dispatched = dispatchRun(runPayload);
+    const dispatched = dispatchRun(runPayload, dispatchPlan());
     const outcome = dispatched.catch((error: unknown) => error);
     await vi.waitFor(() =>
       expect(
@@ -332,12 +289,12 @@ describe('workspace-affine dispatch', () => {
     const error = await outcome;
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('Runner disconnected');
-    expect(agentRuns.finalizeRunWorkspaceAffinity).not.toHaveBeenCalled();
+    expect(dispatch.finalize).not.toHaveBeenCalled();
   });
 
   it('does not finalize affinity when the selected runner rejects or send fails', async () => {
     const rejectedSocket = await connectRunner('runner-reject');
-    const rejectedDispatch = dispatchRun(runPayload);
+    const rejectedDispatch = dispatchRun(runPayload, dispatchPlan());
     await vi.waitFor(() =>
       expect(
         rejectedSocket.sent.some((message) => message.type === 'run.start'),
@@ -352,14 +309,10 @@ describe('workspace-affine dispatch', () => {
       }),
     );
     await expect(rejectedDispatch).rejects.toThrow('busy');
-    expect(agentRuns.finalizeRunWorkspaceAffinity).not.toHaveBeenCalled();
+    expect(dispatch.finalize).not.toHaveBeenCalled();
 
     delete (globalThis as { __hatchRunnerHub__?: unknown }).__hatchRunnerHub__;
     vi.clearAllMocks();
-    vi.mocked(agentRuns.getSessionWorkspaceAffinity).mockResolvedValue({
-      state: 'uninitialized',
-      runnerId: null,
-    });
     const failedSocket = await connectRunner('runner-send-fail');
     const consoleError = vi
       .spyOn(console, 'error')
@@ -368,10 +321,10 @@ describe('workspace-affine dispatch', () => {
       throw new Error('send failed');
     };
 
-    await expect(dispatchRun(runPayload)).rejects.toThrow(
+    await expect(dispatchRun(runPayload, dispatchPlan())).rejects.toThrow(
       'connection is closed',
     );
-    expect(agentRuns.finalizeRunWorkspaceAffinity).not.toHaveBeenCalled();
+    expect(dispatch.finalize).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
 });
@@ -381,6 +334,7 @@ describe('runner connection snapshot', () => {
     const socket = new FakeSocket();
     handleRunnerSocket(socket.asWebSocket(), {
       betaFeatures: DEFAULT_BETA_FEATURES,
+      handlers,
     });
     const consoleError = vi
       .spyOn(console, 'error')
@@ -399,6 +353,7 @@ describe('runner connection snapshot', () => {
     const socket = new FakeSocket();
     handleRunnerSocket(socket.asWebSocket(), {
       betaFeatures: DEFAULT_BETA_FEATURES,
+      handlers,
     });
     socket.emit(
       'message',
@@ -418,7 +373,7 @@ describe('runner connection snapshot', () => {
       }),
     );
     expect(connectedRunnerCount()).toBe(0);
-    expect(agentWorkspaces.reconcileRunnerWorkspaces).not.toHaveBeenCalled();
+    expect(handlers.reconcileRunnerWorkspaces).not.toHaveBeenCalled();
   });
 
   it('lists a registered runner with its hello metadata', async () => {
@@ -438,7 +393,7 @@ describe('runner connection snapshot', () => {
   });
 
   it('counts runs reclaimed on reconnect as active', async () => {
-    vi.mocked(agentRuns.reconcileRunnerRuns).mockResolvedValueOnce({
+    vi.mocked(handlers.reconcileRunnerRuns).mockResolvedValueOnce({
       resumed: ['run-1', 'run-2'],
       stale: [],
       pendingAnswers: [],
@@ -456,7 +411,7 @@ describe('runner connection snapshot', () => {
     await vi.waitFor(() =>
       expect(socket.sent.some((m) => m.type === 'hub.pong')).toBe(true),
     );
-    expect(agentRuns.renewRunnerLeases).toHaveBeenCalledWith('runner-a');
+    expect(handlers.renewRunnerLeases).toHaveBeenCalledWith('runner-a');
     expect(listConnectedRunners()[0]).toMatchObject({
       connectedAt: '2026-07-07T10:00:00.000Z',
       lastSeenAt: '2026-07-07T10:00:15.000Z',
@@ -519,7 +474,7 @@ describe('runner connection snapshot', () => {
   });
 
   it('returns the Platform reconciliation snapshot on reconnect', async () => {
-    vi.mocked(agentWorkspaces.reconcileRunnerWorkspaces).mockResolvedValueOnce({
+    vi.mocked(handlers.reconcileRunnerWorkspaces).mockResolvedValueOnce({
       ownedSessionIds: ['active-session'],
       staleSessionIds: ['deleted-session'],
     });
@@ -530,7 +485,7 @@ describe('runner connection snapshot', () => {
       ['active-session', 'deleted-session'],
     );
 
-    expect(agentWorkspaces.reconcileRunnerWorkspaces).toHaveBeenCalledWith(
+    expect(handlers.reconcileRunnerWorkspaces).toHaveBeenCalledWith(
       'runner-a',
       ['active-session', 'deleted-session'],
     );
@@ -550,7 +505,7 @@ describe('runner connection snapshot', () => {
           staleSessionIds: string[];
         }) => void)
       | undefined;
-    vi.mocked(agentWorkspaces.reconcileRunnerWorkspaces).mockImplementationOnce(
+    vi.mocked(handlers.reconcileRunnerWorkspaces).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finish = resolve;
@@ -559,6 +514,7 @@ describe('runner connection snapshot', () => {
     const socket = new FakeSocket();
     handleRunnerSocket(socket.asWebSocket(), {
       betaFeatures: DEFAULT_BETA_FEATURES,
+      handlers,
     });
     socket.emit(
       'message',
@@ -571,7 +527,7 @@ describe('runner connection snapshot', () => {
       }),
     );
     await vi.waitFor(() =>
-      expect(agentWorkspaces.reconcileRunnerWorkspaces).toHaveBeenCalledOnce(),
+      expect(handlers.reconcileRunnerWorkspaces).toHaveBeenCalledOnce(),
     );
 
     expect(connectedRunnerCount()).toBe(0);

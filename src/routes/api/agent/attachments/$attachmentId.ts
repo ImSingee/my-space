@@ -1,5 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { auth } from '~auth/server';
+import {
+  attachmentDisposition,
+  getAgentAttachment,
+} from '~server/agent-attachments';
 
 function parseAttachmentId(request: Request): string | null {
   const match = new URL(request.url).pathname.match(
@@ -17,8 +21,6 @@ export const Route = createFileRoute('/api/agent/attachments/$attachmentId')({
         const id = parseAttachmentId(request);
         if (!id) return new Response('Not found', { status: 404 });
 
-        const { attachmentDisposition, getAgentAttachment } =
-          await import('~server/agent-attachments');
         const got = await getAgentAttachment(id);
         if (!got) return new Response('Not found', { status: 404 });
         return new Response(Uint8Array.from(got.body).buffer, {

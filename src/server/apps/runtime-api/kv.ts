@@ -1,4 +1,13 @@
 import { parseAppApiPath } from './path';
+import { db } from '~/db';
+import {
+  verifyHatchSignature,
+  HATCH_TIMESTAMP_HEADER,
+  HATCH_SIGNATURE_HEADER,
+} from '~server/secrets';
+import { assertSupportedDeployment } from '~server/apps/compatibility';
+import { errorResponse } from '~server/errors';
+import { deleteKv, getKv, listKv, setKv } from '~server/apps/kv';
 
 // Cap inbound KV bodies: this endpoint authenticates with only the per-app HMAC
 // signature, so without a limit any caller could stream an unbounded body and
@@ -78,7 +87,6 @@ export async function handleKvRequest({
   if (!parsed) return new Response('Not found', { status: 404 });
   const { id, key } = parsed;
 
-  const { db } = await import('~/db');
   const app = await db.query.apps.findFirst({
     where: { id },
     columns: {
@@ -122,11 +130,6 @@ export async function handleKvRequest({
     rawBody = text;
   }
 
-  const {
-    verifyHatchSignature,
-    HATCH_TIMESTAMP_HEADER,
-    HATCH_SIGNATURE_HEADER,
-  } = await import('~server/secrets');
   const verified = verifyHatchSignature({
     secret: app.signingSecret,
     timestamp: request.headers.get(HATCH_TIMESTAMP_HEADER),
@@ -136,19 +139,15 @@ export async function handleKvRequest({
   if (!verified) return new Response('Forbidden', { status: 403 });
 
   try {
-    const { assertSupportedDeployment } =
-      await import('~server/apps/compatibility');
     await assertSupportedDeployment(app.currentDeploymentId);
   } catch (error) {
-    const { errorResponse } = await import('~server/errors');
     return errorResponse(error, 503);
   }
 
-  const kv = await import('~server/apps/kv');
   try {
     if (request.method === 'GET') {
-      if (!key) return Response.json({ items: await kv.listKv(id) });
-      const rec = await kv.getKv(id, key);
+      if (!key) return Response.json({ items: await listKv(id) });
+      const rec = await getKv(id, key);
       if (!rec) return new Response('Not found', { status: 404 });
       return Response.json(rec);
     }
@@ -162,19 +161,18 @@ export async function handleKvRequest({
         return new Response('Invalid JSON body', { status: 400 });
       }
       const secret = typeof body.secret === 'boolean' ? body.secret : undefined;
-      const rec = await kv.setKv(id, key, body.value as string, { secret });
+      const rec = await setKv(id, key, body.value as string, { secret });
       return Response.json(rec);
     }
 
     if (request.method === 'DELETE') {
       if (!key) return new Response('KV key required', { status: 400 });
-      return Response.json({ ok: await kv.deleteKv(id, key) });
+      return Response.json({ ok: await deleteKv(id, key) });
     }
 
     return new Response('Method not allowed', { status: 405 });
   } catch (error) {
     // KvError extends AppError, so its status flows through automatically.
-    const { errorResponse } = await import('~server/errors');
     return errorResponse(error, 400);
   }
 }

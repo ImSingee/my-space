@@ -36,6 +36,8 @@ import {
   recoverCurrentDataSchema,
 } from './data-table/migrate';
 import { appDataDbName, withAppDataCutoverLock } from './data-table/provision';
+import { getWorkflowCallability } from '../workflows/external';
+import { workflowCompatibilityRuntimeMessage } from '~/workflow-compatibility';
 
 export type DeployResult = {
   deploymentId: string;
@@ -557,9 +559,6 @@ async function deployAppInner(
       );
     }
     if (build.normalized.workflows && build.normalized.workflows.length > 0) {
-      const { getWorkflowCallability } = await import('../workflows/external');
-      const { workflowCompatibilityRuntimeMessage } =
-        await import('~/workflow-compatibility');
       for (const ref of build.normalized.workflows) {
         const callability = await getWorkflowCallability(ref.workflow);
         if (callability.state === 'unsupported') {

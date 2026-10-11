@@ -8,6 +8,10 @@
  */
 import { sql } from 'drizzle-orm';
 import { db } from '~/db';
+import {
+  pruneOrphanedAgentAttachmentSessions,
+  prunePendingAgentAttachments,
+} from './agent-attachments';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -61,8 +65,6 @@ export async function pruneHistory(): Promise<void> {
           and coalesce(r.completed_at, r.created_at)
               < ${cutoff(RETENTION_DAYS.agentRunEvents)}::timestamptz`,
   );
-  const { pruneOrphanedAgentAttachmentSessions, prunePendingAgentAttachments } =
-    await import('./agent-attachments');
   await prunePendingAgentAttachments();
   await pruneOrphanedAgentAttachmentSessions();
 }

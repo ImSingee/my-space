@@ -11,7 +11,13 @@ import type { AppCapabilities, AppStatus } from '~/db/schema';
 import { type NetworkAccessView, networkAccessView } from '~/network-policy';
 import { normalizedManifestFor } from './apps/access';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
-import type { AppCronRunView } from './apps/scheduler';
+import {
+  type AppCronRunView,
+  ensureScheduler,
+  listCronJobs,
+  listCronRuns,
+  runCronJobNow,
+} from './apps/scheduler';
 import { authMiddleware } from './auth';
 import { AppError } from './errors';
 import {
@@ -20,6 +26,26 @@ import {
   idSchema,
   nameSchema,
 } from './validation';
+import {
+  deleteApp,
+  deploymentBuildLog,
+  listDeployments as loadAppDeployments,
+  renameAppSlug,
+  rollbackApp,
+  setAppArchived,
+} from './apps/manage';
+import {
+  listAppBackends,
+  startBackendForApp,
+  stopBackendForApp,
+  restartBackendForApp,
+} from './apps/backends';
+import { listKv, setKv, deleteKv } from './apps/kv';
+import {
+  inspectDataTables,
+  queryDataTable,
+  mutateDataTable,
+} from './apps/data-table/service';
 
 export type { AppCronRunView } from './apps/scheduler';
 export type { AppBackendRuntime, AppBackendView } from './apps/backends';
@@ -40,7 +66,7 @@ export const listApps = createServerFn({ method: 'GET' })
   .handler(async (): Promise<AppListItem[]> => {
     // Opportunistically (re)start the cron scheduler on app load so schedules
     // survive a platform restart without requiring a redeploy.
-    void import('./apps/scheduler').then((m) => m.ensureScheduler());
+    ensureScheduler();
     // Project to a safe view model: the raw row carries secrets/internal columns
     // (webhookSecret, dbName, repoPath, source commit, raw manifest) the app
     // list UI never needs and must not ship to the browser.
@@ -148,8 +174,7 @@ export const listDeployments = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { listDeployments: list } = await import('./apps/manage');
-    return list(id);
+    return loadAppDeployments(id);
   });
 
 export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
@@ -158,7 +183,6 @@ export const getDeploymentBuildLog = createServerFn({ method: 'GET' })
     idAndDeploymentSchema.parse(input),
   )
   .handler(async ({ data }) => {
-    const { deploymentBuildLog } = await import('./apps/manage');
     return deploymentBuildLog(data.id, data.deploymentId);
   });
 
@@ -168,7 +192,6 @@ export const rollbackAppFn = createServerFn({ method: 'POST' })
     idAndDeploymentSchema.parse(input),
   )
   .handler(async ({ data }) => {
-    const { rollbackApp } = await import('./apps/manage');
     return rollbackApp(data.id, data.deploymentId);
   });
 
@@ -178,7 +201,6 @@ export const archiveAppFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, archived: z.boolean() }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { setAppArchived } = await import('./apps/manage');
     return setAppArchived(data.id, data.archived);
   });
 
@@ -186,7 +208,6 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { deleteApp } = await import('./apps/manage');
     return deleteApp(id);
   });
 
@@ -201,7 +222,6 @@ export const setAppSlugFn = createServerFn({ method: 'POST' })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    const { renameAppSlug } = await import('./apps/manage');
     return renameAppSlug(data.id, data.slug);
   });
 
@@ -269,9 +289,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
     const caps = app.capabilities;
     const manifest: NormalizedManifest | null = await normalizedManifestFor(id);
 
-    const cronJobs = caps?.cron
-      ? await import('./apps/scheduler').then((m) => m.listCronJobs(id))
-      : [];
+    const cronJobs = caps?.cron ? await listCronJobs(id) : [];
     return {
       backend: {
         capable: Boolean(caps?.backend),
@@ -308,7 +326,6 @@ export const getAppOps = createServerFn({ method: 'GET' })
 export const listAppBackendsFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .handler(async () => {
-    const { listAppBackends } = await import('./apps/backends');
     return listAppBackends();
   });
 
@@ -316,7 +333,6 @@ export const startAppBackendFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { startBackendForApp } = await import('./apps/backends');
     return startBackendForApp(id);
   });
 
@@ -324,7 +340,6 @@ export const stopAppBackendFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { stopBackendForApp } = await import('./apps/backends');
     return stopBackendForApp(id);
   });
 
@@ -332,7 +347,6 @@ export const restartAppBackendFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
-    const { restartBackendForApp } = await import('./apps/backends');
     return restartBackendForApp(id);
   });
 
@@ -342,7 +356,6 @@ export const runCronJobFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, name: nameSchema }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { runCronJobNow } = await import('./apps/scheduler');
     return runCronJobNow(data.id, data.name);
   });
 
@@ -350,7 +363,6 @@ export const listCronRunsFn = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<AppCronRunView[]> => {
-    const { listCronRuns } = await import('./apps/scheduler');
     return listCronRuns(id);
   });
 
@@ -379,7 +391,6 @@ export const listAppKvFn = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }): Promise<AppKvEntryView[]> => {
     await requireKvApp(id);
-    const { listKv } = await import('./apps/kv');
     const records = await listKv(id, { revealSecrets: false });
     // Mask secret values: the manage UI may overwrite them but never read them.
     return records.map((r) => ({
@@ -407,7 +418,6 @@ export const setAppKvFn = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => {
     await requireKvApp(data.id);
-    const { setKv } = await import('./apps/kv');
     const rec = await setKv(data.id, data.key, data.value, {
       secret: data.secret,
     });
@@ -421,7 +431,6 @@ export const deleteAppKvFn = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => {
     await requireKvApp(data.id);
-    const { deleteKv } = await import('./apps/kv');
     return { ok: await deleteKv(data.id, data.key) };
   });
 
@@ -455,7 +464,6 @@ export const inspectAppDataTablesFn = createServerFn({ method: 'GET' })
   .validator((id: string) => idSchema.parse(id))
   .handler(async ({ data: id }) => {
     await requireDataTableApp(id);
-    const { inspectDataTables } = await import('./apps/data-table/service');
     return inspectDataTables(id);
   });
 
@@ -466,7 +474,6 @@ export const queryAppDataTableFn = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => {
     await requireDataTableApp(data.id);
-    const { queryDataTable } = await import('./apps/data-table/service');
     return queryDataTable(data.id, data.query);
   });
 
@@ -477,6 +484,5 @@ export const mutateAppDataTableFn = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => {
     await requireDataTableApp(data.id);
-    const { mutateDataTable } = await import('./apps/data-table/service');
     return mutateDataTable(data.id, data.mutation);
   });

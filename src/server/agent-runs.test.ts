@@ -429,19 +429,22 @@ describe('startAgentRun retry', () => {
       modelId: MODEL_B_ID,
     });
 
-    expect(hub.dispatchRun).toHaveBeenCalledWith({
-      runId,
-      sessionId: 'session-retry',
-      userText: 'Failed request',
-      composerContent: [],
-      images: [{ data: 'aW1hZ2U=', mimeType: 'image/png' }],
-      attachments: [],
-      priorMessages: baseMessages,
-      model: expect.objectContaining({
-        providerId: PROVIDER_B_ID,
-        model: expect.objectContaining({ id: MODEL_B_ID }),
-      }),
-    });
+    expect(hub.dispatchRun).toHaveBeenCalledWith(
+      {
+        runId,
+        sessionId: 'session-retry',
+        userText: 'Failed request',
+        composerContent: [],
+        images: [{ data: 'aW1hZ2U=', mimeType: 'image/png' }],
+        attachments: [],
+        priorMessages: baseMessages,
+        model: expect.objectContaining({
+          providerId: PROVIDER_B_ID,
+          model: expect.objectContaining({ id: MODEL_B_ID }),
+        }),
+      },
+      expect.objectContaining({ ownerRunnerId: null }),
+    );
 
     const run = await db.query.agentRuns.findFirst({
       where: { id: runId },
@@ -455,6 +458,20 @@ describe('startAgentRun retry', () => {
         images: [{ mimeType: 'image/png' }],
       },
     });
+
+    // The dispatch plan leases this run and claims this session's workspace
+    // for whichever runner the hub selects.
+    const [, plan] = vi.mocked(hub.dispatchRun).mock.calls[0];
+    await plan.assign('runner-selected');
+    await expect(plan.finalize('runner-selected')).resolves.toBe(
+      'session-retry',
+    );
+    await expect(
+      db.query.agentRuns.findFirst({ where: { id: runId } }),
+    ).resolves.toMatchObject({ runnerId: 'runner-selected' });
+    await expect(getSessionWorkspaceAffinity('session-retry')).resolves.toEqual(
+      { state: 'claimed', runnerId: 'runner-selected' },
+    );
   });
 
   it('rejects a stale retry after a newer retry has failed again', async () => {
@@ -652,6 +669,7 @@ describe('startAgentRun retry', () => {
           model: expect.objectContaining({ id: MODEL_B_ID }),
         }),
       }),
+      expect.anything(),
     );
   });
 
@@ -713,6 +731,7 @@ describe('startAgentRun retry', () => {
         userText: modelText,
         composerContent,
       }),
+      expect.anything(),
     );
   });
 
@@ -760,6 +779,7 @@ describe('startAgentRun retry', () => {
         composerContent,
         priorMessages: originalMessages,
       }),
+      expect.anything(),
     );
   });
 
@@ -831,6 +851,7 @@ describe('startAgentRun retry', () => {
           },
         ],
       }),
+      expect.anything(),
     );
 
     await db

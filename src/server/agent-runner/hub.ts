@@ -2,11 +2,16 @@
  * Server-only: Runner Hub — the platform side of the Agent Runner control
  * channel. Runners open an outbound WebSocket to the internal server and this
  * module tracks who is connected, dispatches new runs, forwards
- * cancel/answer/environment commands, and feeds runner events into
- * `~server/agent-runs`.
+ * cancel/answer/environment commands, and feeds runner events into the run
+ * control plane.
  *
  * The platform never connects out to a runner: everything here reacts to
  * runner-initiated connections and messages.
+ *
+ * This is the transport layer below `~server/agent-runs`: it never imports the
+ * control plane. Persistence driven by runner messages arrives as
+ * {@link RunnerHubHandlers} from the composition root, and dispatch-specific
+ * persistence arrives as a {@link RunDispatchPlan} from the dispatching caller.
  */
 import type { WebSocket } from 'ws';
 import {
@@ -38,10 +43,56 @@ type RunnerConn = {
 
 type DispatchWaiter = {
   conn: RunnerConn;
-  sessionId: string;
+  finalize: RunDispatchPlan['finalize'];
   resolve: () => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+};
+
+/** Control-plane persistence driven by runner messages on a connection. */
+export type RunnerHubHandlers = {
+  /** Reconcile the runs a reconnecting runner claims against the database. */
+  reconcileRunnerRuns(
+    runnerId: string,
+    claimedRunIds: string[],
+  ): Promise<{
+    resumed: string[];
+    stale: string[];
+    pendingAnswers: {
+      runId: string;
+      askId: string;
+      answers: AskAnswerPayload[];
+    }[];
+  }>;
+  /** Reconcile the session workspaces present on the runner's volume. */
+  reconcileRunnerWorkspaces(
+    runnerId: string,
+    sessionIds: string[],
+  ): Promise<{ ownedSessionIds: string[]; staleSessionIds: string[] }>;
+  renewRunnerLeases(runnerId: string): Promise<void>;
+  /** Persist one stream event; `stale` tells the runner to abort the run. */
+  ingestRunnerEvent(
+    runnerId: string,
+    message: Extract<RunnerMessage, { type: 'run.event' }>,
+  ): Promise<{ status: 'ok'; sessionId: string } | { status: 'stale' }>;
+  /** Persist a final report; returns the run's session id when accepted. */
+  completeRunFromRunner(
+    runnerId: string,
+    message: Extract<RunnerMessage, { type: 'run.finished' }>,
+  ): Promise<string | null>;
+};
+
+/** Workspace ownership and persistence steps for one run dispatch. */
+export type RunDispatchPlan = {
+  /** Runner owning the session workspace; null until a run is accepted. */
+  ownerRunnerId: string | null;
+  /** Provisionally lease the run to the selected runner before sending it. */
+  assign(runnerId: string): Promise<void>;
+  /**
+   * Commit workspace affinity once the selected connection accepted the run.
+   * Resolves with the run's session id.
+   */
+  finalize(runnerId: string): Promise<string>;
 };
 
 export type RunEnvDeliveryResult =
@@ -157,15 +208,15 @@ function pickRunner(): RunnerConn | null {
  * and wait for the runner to accept. Throws when no runner is available, the
  * runner rejects, or the accept times out — the caller fails the run.
  */
-export async function dispatchRun(payload: RunStartPayload): Promise<string> {
-  const { assignRunToRunner, getSessionWorkspaceAffinity } =
-    await import('~server/agent-runs');
-  const affinity = await getSessionWorkspaceAffinity(payload.sessionId);
-  const conn =
-    affinity.state === 'claimed' ? ownerConn(affinity.runnerId) : pickRunner();
+export async function dispatchRun(
+  payload: RunStartPayload,
+  plan: RunDispatchPlan,
+): Promise<string> {
+  const { ownerRunnerId } = plan;
+  const conn = ownerRunnerId !== null ? ownerConn(ownerRunnerId) : pickRunner();
   if (!conn) {
     throw new Error(
-      affinity.state === 'claimed'
+      ownerRunnerId !== null
         ? 'The Agent Runner that owns this chat workspace is unavailable.'
         : 'No Agent Runner is connected to the platform.',
     );
@@ -176,7 +227,7 @@ export async function dispatchRun(payload: RunStartPayload): Promise<string> {
     );
   }
   if (
-    affinity.state === 'claimed' &&
+    ownerRunnerId !== null &&
     !conn.workspaceSessionIds.has(payload.sessionId)
   ) {
     throw new Error(
@@ -184,7 +235,7 @@ export async function dispatchRun(payload: RunStartPayload): Promise<string> {
     );
   }
 
-  await assignRunToRunner(payload.runId, payload.sessionId, conn.runnerId);
+  await plan.assign(conn.runnerId);
   conn.activeRunIds.add(payload.runId);
 
   const state = hubState();
@@ -197,7 +248,7 @@ export async function dispatchRun(payload: RunStartPayload): Promise<string> {
     }, DISPATCH_ACCEPT_TIMEOUT_MS);
     Object.assign(waiter, {
       conn,
-      sessionId: payload.sessionId,
+      finalize: plan.finalize,
       resolve,
       reject,
       timer,
@@ -252,12 +303,7 @@ async function acceptDispatch(conn: RunnerConn, runId: string): Promise<void> {
   state.dispatchWaiters.delete(runId);
   clearTimeout(waiter.timer);
   try {
-    const { finalizeRunWorkspaceAffinity } = await import('~server/agent-runs');
-    const sessionId = await finalizeRunWorkspaceAffinity(
-      runId,
-      conn.runnerId,
-      waiter.sessionId,
-    );
+    const sessionId = await waiter.finalize(conn.runnerId);
     conn.workspaceSessionIds.add(sessionId);
     waiter.resolve();
   } catch (error) {
@@ -429,7 +475,7 @@ function notifyRunFinished(runId: string): void {
  */
 export function handleRunnerSocket(
   socket: WebSocket,
-  options: { betaFeatures: readonly string[] },
+  options: { betaFeatures: readonly string[]; handlers: RunnerHubHandlers },
 ): void {
   let conn: RunnerConn | null = null;
 
@@ -484,7 +530,7 @@ export function handleRunnerSocket(
 
       conn.lastSeenAt = Date.now();
       try {
-        await handleMessage(conn, message);
+        await handleMessage(conn, message, options.handlers);
       } catch (error) {
         // Keep the connection: a transient DB failure must not kick the
         // runner (it would abort perfectly healthy runs on reconnect churn).
@@ -538,8 +584,9 @@ export function handleRunnerSocket(
 async function registerRunner(
   socket: WebSocket,
   hello: Extract<RunnerMessage, { type: 'runner.hello' }>,
-  options: { betaFeatures: readonly string[] },
+  options: { betaFeatures: readonly string[]; handlers: RunnerHubHandlers },
 ): Promise<RunnerConn | null> {
+  const { handlers } = options;
   const state = hubState();
   const existing = state.runners.get(hello.runnerId);
   if (existing) {
@@ -571,29 +618,18 @@ async function registerRunner(
   // keeps it out of new-run dispatch until runner.ready arrives.
   state.runners.set(hello.runnerId, conn);
 
-  let resumed: string[];
-  let stale: string[];
-  let pendingAnswers: {
-    runId: string;
-    askId: string;
-    answers: AskAnswerPayload[];
-  }[];
+  let runs: Awaited<ReturnType<RunnerHubHandlers['reconcileRunnerRuns']>>;
   let workspace: Awaited<
-    ReturnType<
-      typeof import('~server/agent-workspaces').reconcileRunnerWorkspaces
-    >
+    ReturnType<RunnerHubHandlers['reconcileRunnerWorkspaces']>
   >;
   try {
-    const { reconcileRunnerRuns } = await import('~server/agent-runs');
-    ({ resumed, stale, pendingAnswers } = await reconcileRunnerRuns(
+    runs = await handlers.reconcileRunnerRuns(
       hello.runnerId,
       hello.activeRunIds,
-    ));
-    for (const runId of resumed) conn.activeRunIds.add(runId);
+    );
+    for (const runId of runs.resumed) conn.activeRunIds.add(runId);
 
-    const { reconcileRunnerWorkspaces } =
-      await import('~server/agent-workspaces');
-    workspace = await reconcileRunnerWorkspaces(
+    workspace = await handlers.reconcileRunnerWorkspaces(
       hello.runnerId,
       hello.workspaceSessionIds,
     );
@@ -622,8 +658,8 @@ async function registerRunner(
     !send(conn, {
       type: 'hub.hello_ack',
       betaFeatures: [...options.betaFeatures],
-      resumedRunIds: resumed,
-      staleRunIds: stale,
+      resumedRunIds: runs.resumed,
+      staleRunIds: runs.stale,
       staleWorkspaceSessionIds: workspace.staleSessionIds,
     })
   ) {
@@ -634,7 +670,7 @@ async function registerRunner(
   }
   // Answers that arrived while the runner was offline: deliver now that the
   // runner reclaimed the runs.
-  for (const pending of pendingAnswers) {
+  for (const pending of runs.pendingAnswers) {
     send(conn, {
       type: 'run.answer',
       runId: pending.runId,
@@ -649,6 +685,7 @@ async function registerRunner(
 async function handleMessage(
   conn: RunnerConn,
   message: RunnerMessage,
+  handlers: RunnerHubHandlers,
 ): Promise<void> {
   switch (message.type) {
     case 'runner.hello': {
@@ -666,8 +703,7 @@ async function handleMessage(
       return;
     }
     case 'runner.ping': {
-      const { renewRunnerLeases } = await import('~server/agent-runs');
-      await renewRunnerLeases(conn.runnerId);
+      await handlers.renewRunnerLeases(conn.runnerId);
       send(conn, { type: 'hub.pong' });
       return;
     }
@@ -684,8 +720,7 @@ async function handleMessage(
       return;
     }
     case 'run.event': {
-      const { ingestRunnerEvent } = await import('~server/agent-runs');
-      const result = await ingestRunnerEvent(conn.runnerId, message);
+      const result = await handlers.ingestRunnerEvent(conn.runnerId, message);
       if (result.status === 'stale') {
         // The run no longer belongs to this runner (finished, interrupted,
         // …). Tell it to abort so it stops burning tokens on dead work.
@@ -722,8 +757,10 @@ async function handleMessage(
       return;
     }
     case 'run.finished': {
-      const { completeRunFromRunner } = await import('~server/agent-runs');
-      const sessionId = await completeRunFromRunner(conn.runnerId, message);
+      const sessionId = await handlers.completeRunFromRunner(
+        conn.runnerId,
+        message,
+      );
       if (sessionId) {
         conn.workspaceSessionIds.add(sessionId);
         // A final report is also definitive proof of acceptance. Completion
