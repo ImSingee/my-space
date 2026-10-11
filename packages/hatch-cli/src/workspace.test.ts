@@ -189,7 +189,8 @@ function commit(root: string, message: string) {
     message,
   );
 }
-describe('CLI workspace safety', () => {
+// These tests launch real Git and package-manager processes, including on CI.
+describe('CLI workspace safety', { timeout: 30_000 }, () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'hatch-cli-boundary-'));
     generation = new Date().toISOString();
