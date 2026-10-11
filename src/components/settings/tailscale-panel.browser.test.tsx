@@ -1,4 +1,5 @@
 import { MantineProvider } from '@mantine/core';
+import dayjs from 'dayjs';
 import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { TailscalePanel } from './tailscale-panel';
@@ -40,6 +41,46 @@ const connected: TailscaleStatus = {
 const preparingHTTPS: TailscaleStatus = {
   ...starting,
   state: 'preparing-https',
+};
+const dnsError: TailscaleStatus = {
+  ...starting,
+  state: 'error',
+  message:
+    'Enable MagicDNS in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically.',
+  dns: { magicDnsEnabled: false, httpsCertificatesEnabled: true },
+};
+const settingsEnabled = {
+  magicDnsEnabled: true,
+  httpsCertificatesEnabled: true,
+};
+const preparingCertificate: TailscaleStatus = {
+  ...preparingHTTPS,
+  dns: settingsEnabled,
+  https: { phase: 'certificate', retryAt: null },
+};
+const certificateDelayed: TailscaleStatus = {
+  ...preparingCertificate,
+  state: 'error',
+  message:
+    'Your device is connected to Tailscale, but its HTTPS certificate is taking longer than expected. Hatch is still retrying automatically. Check this installation’s internet connection and Tailscale DNS settings.',
+  https: { phase: 'certificate-delayed', retryAt: null },
+};
+const rateLimited: TailscaleStatus = {
+  ...certificateDelayed,
+  message:
+    'The certificate provider has temporarily limited HTTPS certificate requests. Hatch will retry automatically. Reconnecting will not speed this up.',
+  https: { phase: 'rate-limited', retryAt: null },
+};
+const listenerError: TailscaleStatus = {
+  ...certificateDelayed,
+  message:
+    'Your HTTPS certificate is ready, but Hatch could not start its private HTTPS listener. Retrying automatically.',
+  https: { phase: 'listener-error', retryAt: null },
+};
+const httpsReady: TailscaleStatus = {
+  ...connected,
+  dns: settingsEnabled,
+  https: { phase: 'ready', retryAt: null },
 };
 
 function popupFixture() {
@@ -215,4 +256,238 @@ test('opening Settings during pending enrollment never opens an unsolicited wind
   await screen.rerender(view({ ...needsLogin }, configure));
   expect(open).not.toHaveBeenCalled();
   expect(configure).not.toHaveBeenCalled();
+});
+
+type Screen = Awaited<ReturnType<typeof render>>;
+
+const dnsSettingsButton = (screen: Screen) =>
+  screen.getByRole('link', { name: 'Open Tailscale DNS settings' });
+
+async function expectDnsSettings(
+  screen: Screen,
+  magicDns: string,
+  httpsCertificates: string,
+) {
+  await expect
+    .element(
+      screen.getByRole('row', { name: `MagicDNS ${magicDns}`, exact: true }),
+    )
+    .toBeVisible();
+  await expect
+    .element(
+      screen.getByRole('row', {
+        name: `HTTPS certificates ${httpsCertificates}`,
+        exact: true,
+      }),
+    )
+    .toBeVisible();
+}
+
+test('DNS diagnostics name the missing setting beside the server guidance and an external settings button', async () => {
+  const configure = vi.fn<Configure>();
+  const screen = await render(view(dnsError, configure));
+  await expect.element(screen.getByText(dnsError.message!)).toBeVisible();
+  await expectDnsSettings(screen, 'Not enabled', 'Enabled');
+  const button = dnsSettingsButton(screen);
+  await expect
+    .element(button)
+    .toHaveAttribute('href', 'https://login.tailscale.com/admin/dns');
+  await expect.element(button).toHaveAttribute('target', '_blank');
+  await expect.element(button).toHaveAttribute('rel', 'noreferrer');
+
+  await screen.rerender(
+    view(
+      {
+        ...connected,
+        dns: { magicDnsEnabled: true, httpsCertificatesEnabled: true },
+      },
+      configure,
+    ),
+  );
+  await expect
+    .element(screen.getByText(dnsError.message!))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('table', { name: 'Tailscale DNS settings' }))
+    .not.toBeInTheDocument();
+  await expect.element(dnsSettingsButton(screen)).not.toBeInTheDocument();
+});
+
+test('unreadable settings stay unknown, and errors without an HTTPS phase keep both enabled settings as HTTPS not ready', async () => {
+  const configure = vi.fn<Configure>();
+  const screen = await render(
+    view(
+      {
+        ...dnsError,
+        message:
+          'Cannot read the MagicDNS setting from Tailscale yet. Retrying automatically.',
+        dns: { magicDnsEnabled: null, httpsCertificatesEnabled: true },
+      },
+      configure,
+    ),
+  );
+  await expectDnsSettings(screen, 'Unknown', 'Enabled');
+  await expect.element(screen.getByText('Not enabled')).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('alert', { name: 'HTTPS is not ready' }))
+    .not.toBeInTheDocument();
+  await expect.element(dnsSettingsButton(screen)).toBeVisible();
+
+  const certificateFailure =
+    'HTTPS certificates are enabled, but Hatch could not obtain a certificate. Check network connectivity and your Tailscale HTTPS certificate settings. Retrying automatically.';
+  await screen.rerender(
+    view(
+      { ...dnsError, message: certificateFailure, dns: settingsEnabled },
+      configure,
+    ),
+  );
+  await expect
+    .element(screen.getByRole('alert', { name: 'HTTPS is not ready' }))
+    .toBeVisible();
+  await expect.element(screen.getByText(certificateFailure)).toBeVisible();
+  await expectDnsSettings(screen, 'Enabled', 'Enabled');
+  await expect.element(dnsSettingsButton(screen)).toBeVisible();
+});
+
+test('helpers without typed diagnostics keep the settings button only for DNS or certificate settings messages', async () => {
+  const configure = vi.fn<Configure>();
+  const legacyMessage =
+    'HTTPS is not ready. Check Tailscale certificate settings and network connectivity. Retrying automatically.';
+  const legacy: TailscaleStatus = {
+    ...starting,
+    state: 'error',
+    message: legacyMessage,
+  };
+  const screen = await render(view(legacy, configure));
+  await expect.element(screen.getByText(legacyMessage)).toBeVisible();
+  await expect
+    .element(dnsSettingsButton(screen))
+    .toHaveAttribute('href', 'https://login.tailscale.com/admin/dns');
+  await expect
+    .element(screen.getByRole('table', { name: 'Tailscale DNS settings' }))
+    .not.toBeInTheDocument();
+
+  for (const message of [rateLimited.message!, listenerError.message!]) {
+    await screen.rerender(view({ ...legacy, message }, configure));
+    await expect.element(screen.getByText(message)).toBeVisible();
+    await expect.element(dnsSettingsButton(screen)).not.toBeInTheDocument();
+  }
+
+  const unrelated =
+    'Unable to start Tailscale. Check the private state directory.';
+  await screen.rerender(view({ ...legacy, message: unrelated }, configure));
+  await expect.element(screen.getByText(unrelated)).toBeVisible();
+  await expect.element(dnsSettingsButton(screen)).not.toBeInTheDocument();
+});
+
+test('typed HTTPS phases move from a calm preparation note through delay, rate-limit, and listener warnings to the ready address', async () => {
+  const configure = vi.fn<Configure>();
+  const screen = await render(view(preparingCertificate, configure));
+  const reconnect = screen.getByRole('button', { name: 'Reconnect' });
+  await expect.element(screen.getByRole('note')).toBeVisible();
+  await expect
+    .element(screen.getByText('Preparing HTTPS', { exact: true }))
+    .toBeVisible();
+  await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('table', { name: 'Tailscale DNS settings' }))
+    .not.toBeInTheDocument();
+  await expect.element(dnsSettingsButton(screen)).not.toBeInTheDocument();
+  await expect.element(reconnect).not.toBeInTheDocument();
+
+  await screen.rerender(view(certificateDelayed, configure));
+  await expect.element(screen.getByRole('note')).not.toBeInTheDocument();
+  await expect
+    .element(
+      screen.getByRole('alert', {
+        name: 'HTTPS is taking longer than expected',
+      }),
+    )
+    .toBeVisible();
+  await expect
+    .element(screen.getByText('HTTPS delayed', { exact: true }))
+    .toBeVisible();
+  await expectDnsSettings(screen, 'Enabled', 'Enabled');
+  await expect.element(dnsSettingsButton(screen)).toBeVisible();
+  await expect.element(reconnect).toBeEnabled();
+
+  await screen.rerender(view(rateLimited, configure));
+  await expect
+    .element(
+      screen.getByRole('alert', {
+        name: 'Certificate requests are temporarily limited',
+      }),
+    )
+    .toBeVisible();
+  await expect
+    .element(screen.getByText('Waiting to retry', { exact: true }))
+    .toBeVisible();
+  await expectDnsSettings(screen, 'Enabled', 'Enabled');
+  await expect.element(dnsSettingsButton(screen)).not.toBeInTheDocument();
+  await expect.element(reconnect).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByText(/Next automatic attempt/))
+    .not.toBeInTheDocument();
+  const retryAt = '2030-01-15T15:45:00Z';
+  await screen.rerender(
+    view(
+      { ...rateLimited, https: { phase: 'rate-limited', retryAt } },
+      configure,
+    ),
+  );
+  await expect
+    .element(
+      screen.getByText(dayjs(retryAt).format('MMM D [at] h:mm A'), {
+        exact: true,
+      }),
+    )
+    .toHaveAttribute('datetime', retryAt);
+
+  await screen.rerender(view(listenerError, configure));
+  await expect
+    .element(
+      screen.getByRole('alert', { name: 'Secure address could not start' }),
+    )
+    .toBeVisible();
+  await expect.element(dnsSettingsButton(screen)).not.toBeInTheDocument();
+  await expect.element(reconnect).toBeEnabled();
+
+  await screen.rerender(view(httpsReady, configure));
+  await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('note')).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByText('Connected', { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('link', { name: 'Open Hatch' }))
+    .toHaveAttribute('href', httpsReady.origin);
+});
+
+test('rate limits only offer disconnecting, while listener failures reconnect without leaving an authorization window open', async () => {
+  const configure = vi
+    .fn<Configure>()
+    .mockResolvedValueOnce(disconnected)
+    .mockResolvedValueOnce(preparingCertificate);
+  const screen = await render(view(rateLimited, configure));
+  await expect
+    .element(screen.getByRole('button', { name: 'Reconnect' }))
+    .not.toBeInTheDocument();
+  await screen.getByRole('button', { name: 'Disconnect' }).click();
+  expect(configure).toHaveBeenLastCalledWith({
+    enabled: false,
+    hostname: 'hatch',
+  });
+
+  const { popup, open } = popupFixture();
+  await screen.rerender(view(listenerError, configure));
+  await screen.getByRole('button', { name: 'Reconnect' }).click();
+  expect(open).toHaveBeenCalledOnce();
+  expect(configure).toHaveBeenLastCalledWith({
+    enabled: true,
+    hostname: 'hatch',
+  });
+  await screen.rerender(view(preparingCertificate, configure));
+  await expect.poll(() => popup.closed).toBe(true);
+  expect(popup.location.replace).not.toHaveBeenCalled();
+  await expect.element(screen.getByRole('note')).toBeVisible();
 });

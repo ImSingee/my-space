@@ -16,14 +16,48 @@ import (
 	"syscall"
 	"time"
 
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
 )
 
+type dnsStatus struct {
+	MagicDNSEnabled          *bool `json:"magicDnsEnabled"`
+	HTTPSCertificatesEnabled *bool `json:"httpsCertificatesEnabled"`
+}
+
 type snapshot struct {
-	State    string `json:"state"`
-	LoginURL string `json:"loginUrl"`
-	Origin   string `json:"origin"`
-	Message  string `json:"message"`
+	State    string       `json:"state"`
+	LoginURL string       `json:"loginUrl"`
+	Origin   string       `json:"origin"`
+	Message  string       `json:"message"`
+	DNS      *dnsStatus   `json:"dns,omitempty"`
+	HTTPS    *httpsStatus `json:"https,omitempty"`
+}
+
+// Keep unknown tailnet data distinct from a setting reported as disabled.
+func connectionDNS(st *ipnstate.Status) (*dnsStatus, string) {
+	dns := &dnsStatus{}
+	if st.CurrentTailnet != nil {
+		dns.MagicDNSEnabled = &st.CurrentTailnet.MagicDNSEnabled
+		httpsEnabled := len(st.CertDomains) > 0
+		dns.HTTPSCertificatesEnabled = &httpsEnabled
+	} else if len(st.CertDomains) > 0 {
+		httpsEnabled := true
+		dns.HTTPSCertificatesEnabled = &httpsEnabled
+	}
+	if dns.MagicDNSEnabled == nil {
+		return dns, "Cannot read the MagicDNS setting from Tailscale yet. Retrying automatically."
+	}
+	if !*dns.MagicDNSEnabled && !*dns.HTTPSCertificatesEnabled {
+		return dns, "Enable MagicDNS and HTTPS certificates in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically."
+	}
+	if !*dns.MagicDNSEnabled {
+		return dns, "Enable MagicDNS in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically."
+	}
+	if !*dns.HTTPSCertificatesEnabled {
+		return dns, "Enable HTTPS certificates in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically."
+	}
+	return dns, ""
 }
 
 func main() {
@@ -96,10 +130,12 @@ func main() {
 				https.startedAt = time.Time{}
 				v.State = "needs-approval"
 			case "Running":
-				if st.CurrentTailnet == nil || !st.CurrentTailnet.MagicDNSEnabled || len(st.CertDomains) == 0 {
+				dns, message := connectionDNS(st)
+				if message != "" {
 					https.startedAt = time.Time{}
-					v = snapshot{State: "error", Message: "Enable MagicDNS and HTTPS certificates in your Tailscale DNS settings. This page will retry automatically."}
+					v = snapshot{State: "error", DNS: dns, Message: message}
 				} else {
+					https.dns = dns
 					v = https.prepare(pollCtx, st.CertDomains[0])
 				}
 			}

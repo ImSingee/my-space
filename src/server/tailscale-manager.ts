@@ -8,6 +8,8 @@ import { WORKSPACE_ROOT } from '../agent/paths';
 import { resolveTailscalePort } from '../platform-port';
 import {
   tailscaleConfigSchema,
+  tailscaleDnsStatusSchema,
+  tailscaleHttpsStatusSchema,
   tailscaleLoginUrlSchema,
   tailscaleOriginSchema,
   type TailscaleConfig,
@@ -27,6 +29,8 @@ const helperStatusSchema = z.object({
   loginUrl: z.string().max(2048),
   origin: z.string().max(253),
   message: z.string().max(1000),
+  dns: tailscaleDnsStatusSchema.nullish(),
+  https: tailscaleHttpsStatusSchema.nullish(),
 });
 
 type Dependencies = {
@@ -51,6 +55,8 @@ export class TailscaleManager {
     loginUrl: null,
     origin: null,
     message: null,
+    dns: null,
+    https: null,
   };
 
   constructor(private readonly deps: Dependencies) {}
@@ -92,6 +98,8 @@ export class TailscaleManager {
       origin: null,
       loginUrl: null,
       message,
+      dns: null,
+      https: null,
     };
   }
 
@@ -199,6 +207,8 @@ export class TailscaleManager {
           origin,
           loginUrl,
           message: next.message || null,
+          dns: next.dns ?? null,
+          https: next.https ?? null,
         };
       } catch {
         this.clear(

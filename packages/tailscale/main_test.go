@@ -2,13 +2,57 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
+
+	"tailscale.com/ipn/ipnstate"
 )
+
+func TestDNSDiagnosisContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		tailnet  *ipnstate.TailnetStatus
+		domains  []string
+		magicDNS any
+		https    any
+		message  string
+	}{
+		{"both-disabled", &ipnstate.TailnetStatus{}, nil, false, false, "Enable MagicDNS and HTTPS certificates in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically."},
+		{"magicdns-disabled", &ipnstate.TailnetStatus{}, []string{"hatch.example.ts.net"}, false, true, "Enable MagicDNS in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically."},
+		{"https-disabled", &ipnstate.TailnetStatus{MagicDNSEnabled: true}, nil, true, false, "Enable HTTPS certificates in your Tailscale DNS settings. Hatch will detect the change and continue connecting automatically."},
+		{"enabled", &ipnstate.TailnetStatus{MagicDNSEnabled: true}, []string{"hatch.example.ts.net"}, true, true, ""},
+		{"tailnet-unknown", nil, nil, nil, nil, "Cannot read the MagicDNS setting from Tailscale yet. Retrying automatically."},
+		{"magicdns-unknown-https-enabled", nil, []string{"hatch.example.ts.net"}, nil, true, "Cannot read the MagicDNS setting from Tailscale yet. Retrying automatically."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dns, message := connectionDNS(&ipnstate.Status{CurrentTailnet: tc.tailnet, CertDomains: tc.domains})
+			v := snapshot{State: "error", DNS: dns, Message: message}
+			if message == "" {
+				v.State = "connected"
+				v.Origin = "https://hatch.example.ts.net"
+			}
+			encoded, err := json.Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				DNS map[string]any `json:"dns"`
+			}
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.DNS["magicDnsEnabled"] != tc.magicDNS || got.DNS["httpsCertificatesEnabled"] != tc.https || message != tc.message {
+				t.Fatalf("incorrect setting diagnosis: %s", encoded)
+			}
+			t.Log(string(encoded))
+		})
+	}
+}
 
 func TestProxyPreservesAuthenticationAndOriginWithoutTrustingIdentityHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
