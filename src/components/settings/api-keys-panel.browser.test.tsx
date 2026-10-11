@@ -389,7 +389,7 @@ test('copy failure keeps the one-time secret available for manual recovery', asy
   expect(mocks.toastSuccess).not.toHaveBeenCalledWith('API key copied');
 });
 
-test('leaving Security cancels old account reads and discards metadata before another login', async () => {
+test('leaving Account cancels old account reads and discards metadata before another login', async () => {
   let respond!: (response: Response) => void;
   replies.list = () => new Promise((resolve) => (respond = resolve));
   const first = await renderPanel();

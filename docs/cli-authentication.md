@@ -9,12 +9,12 @@ constants and source/deployment/data contracts are unchanged.
 
 ## Model
 
-| Credential         | How it is obtained                                  | Lifetime                                     | Authority                          |
-| ------------------ | --------------------------------------------------- | -------------------------------------------- | ---------------------------------- |
-| CLI session        | Device login, approved by a signed-in browser user  | Better Auth session (7 days, renewed on use) | Same as a browser session          |
-| API key            | Settings → Security, created by its signed-in owner | User-selected expiry or no expiry; revocable | All public platform API procedures |
-| Run token (JWT)    | Trusted Runner, for a live Agent Run                | 5 minutes, only while the Run is live        | All public platform API procedures |
-| Runner fleet token | Deployment operator                                 | Existing configuration                       | Trusted internal REST/WS only      |
+| Credential         | How it is obtained                                 | Lifetime                                     | Authority                          |
+| ------------------ | -------------------------------------------------- | -------------------------------------------- | ---------------------------------- |
+| CLI session        | Device login, approved by a signed-in browser user | Better Auth session (7 days, renewed on use) | Same as a browser session          |
+| API key            | Settings → Account, created by its signed-in owner | User-selected expiry or no expiry; revocable | All public platform API procedures |
+| Run token (JWT)    | Trusted Runner, for a live Agent Run               | 5 minutes, only while the Run is live        | All public platform API procedures |
+| Runner fleet token | Deployment operator                                | Existing configuration                       | Trusted internal REST/WS only      |
 
 There are no scopes or resource permissions: a CLI session is a full
 Better Auth session, and a Run token or API key can call every public platform API procedure.
@@ -23,14 +23,14 @@ and Workflows. Key ownership controls credential management, not resource access
 
 ## API keys for scripts
 
-Open **Settings → Security → API keys**, give the key a name, and select its
+Open **Settings → Account → API keys**, give the key a name, and select its
 lifetime (or no expiration). Save the full value from the creation dialog; it
 is displayed only once and cannot be recovered after closing. The list contains
 only the name, a partial masked identifier, creation/expiration and last-use
 timestamps. Revoke ends the key immediately and removes it from the list.
 Expired keys are rejected and may be removed by the plugin's expiration cleanup.
 
-The Security UI passes `hatch_` as its creation prefix. Native API callers may
+The Account UI passes `hatch_` as its creation prefix. Native API callers may
 choose another prefix or omit it; CLI authentication delegates validity to the
 plugin without checking a prefix, length or character pattern. Send keys only
 in **`x-api-key`**, never in
@@ -256,5 +256,5 @@ log in, approve and deny real requests, and inspect screenshots and network
 outcomes; `src/components/cli-auth/device-approval.browser.test.tsx` covers the
 page's decision boundaries with a stubbed `fetch` and does not replace it.
 
-Full browser acceptance additionally drives the real Security page and calls
+Full browser acceptance additionally drives the real Account page and calls
 the public API with the very key it creates, before and after UI revocation.
