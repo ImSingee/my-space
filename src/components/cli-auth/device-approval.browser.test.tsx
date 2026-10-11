@@ -213,3 +213,15 @@ test('a request claimed by another account cannot be reviewed here', async () =>
     .toBeVisible();
   expect(screen.container.querySelector('input[type="checkbox"]')).toBeNull();
 });
+
+test('a rate-limited review reports the server’s remaining wait', async () => {
+  replies.claim = Response.json(
+    { message: 'Too many requests. Please try again later.' },
+    { status: 429, headers: { 'X-Retry-After': '420' } },
+  );
+  const screen = await renderPage();
+  await screen.getByRole('button', { name: 'Review request' }).click();
+  await expect
+    .element(screen.getByRole('alert'))
+    .toHaveTextContent('Too many attempts. Try again in about 7 minutes.');
+});

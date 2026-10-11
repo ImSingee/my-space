@@ -14,7 +14,7 @@ import {
 import type { ReactNode } from 'react';
 import { formatUserCode, type DeviceOutcome } from './device-api';
 import { ViewHeader } from './layout';
-import type { Problem } from './problems';
+import { retryWait, type Problem } from './problems';
 import classes from './device-approval.module.css';
 
 type Action = 'new-code' | 'sign-in' | 'recheck' | 'home';
@@ -67,7 +67,7 @@ const PROBLEMS: Record<Problem, StatusCopy> = {
     icon: IconHourglassHigh,
     color: 'yellow',
     title: 'Too many attempts',
-    body: 'Nothing was recorded. Wait a minute, then try again.',
+    body: 'Nothing was recorded.',
     actions: ['recheck'],
   },
   unconfirmed: {
@@ -114,13 +114,20 @@ type Handlers = {
 export function ProblemView({
   problem,
   userCode,
+  retryAfter,
   handlers,
 }: {
   problem: Problem;
   userCode: string;
+  /** Server-reported wait for a rate-limited decision, in seconds. */
+  retryAfter: number | null;
   handlers: Handlers;
 }) {
-  const copy = PROBLEMS[problem];
+  const base = PROBLEMS[problem];
+  const copy =
+    problem === 'rate-limited'
+      ? { ...base, body: `${base.body} ${retryWait(retryAfter)}` }
+      : base;
   return (
     <StatusLayout copy={copy} userCode={userCode}>
       <Group justify="center" gap="sm">

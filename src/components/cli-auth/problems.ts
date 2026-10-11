@@ -16,6 +16,19 @@ export type Problem =
 const codeOf = (error: unknown) =>
   error instanceof DeviceAuthError ? error.code : 'unexpected_response';
 
+/** Seconds the server asked us to wait before retrying, if it said. */
+export const retryAfterOf = (error: unknown) =>
+  error instanceof DeviceAuthError ? error.retryAfter : null;
+
+/** "Try again in about 7 minutes." from the server's remaining wait. */
+export function retryWait(seconds: number | null): string {
+  if (!seconds) return 'Try again later.';
+  if (seconds < 60)
+    return `Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`;
+  const minutes = Math.ceil(seconds / 60);
+  return `Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+}
+
 export function classifyClaimError(
   error: unknown,
 ): { entry: EntryProblem } | { problem: Problem } {

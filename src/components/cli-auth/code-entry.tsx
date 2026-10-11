@@ -7,11 +7,13 @@ import {
   USER_CODE_LENGTH,
 } from './device-api';
 import { ViewHeader } from './layout';
-import type { EntryProblem } from './problems';
+import { retryWait, type EntryProblem } from './problems';
 import classes from './device-approval.module.css';
 
-const PROBLEM_TEXT: Record<Exclude<EntryProblem, 'invalid'>, string> = {
-  'rate-limited': 'Too many attempts. Wait a minute, then try again.',
+const PROBLEM_TEXT: Record<
+  Exclude<EntryProblem, 'invalid' | 'rate-limited'>,
+  string
+> = {
   network: 'Couldn’t reach Hatch. Check your connection and try again.',
   server: 'Hatch couldn’t open this request. Try again in a moment.',
 };
@@ -22,6 +24,8 @@ type CodeEntryProps = {
   onSubmit: () => void;
   pending: boolean;
   problem: EntryProblem | null;
+  /** Server-reported wait for a rate-limited review, in seconds. */
+  retryAfter: number | null;
   account: string | null;
   onSwitchAccount: () => void;
   /** Move focus to the field: no code was supplied, or the person started over. */
@@ -34,6 +38,7 @@ export function CodeEntry({
   onSubmit,
   pending,
   problem,
+  retryAfter,
   account,
   onSwitchAccount,
   focus,
@@ -96,7 +101,9 @@ export function CodeEntry({
             icon={<IconAlertTriangle size={18} stroke={1.75} />}
             role="alert"
           >
-            {PROBLEM_TEXT[problem]}
+            {problem === 'rate-limited'
+              ? `Too many attempts. ${retryWait(retryAfter)}`
+              : PROBLEM_TEXT[problem]}
           </Alert>
         ) : null}
         <Button type="submit" size="md" fullWidth loading={pending}>

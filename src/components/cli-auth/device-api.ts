@@ -36,6 +36,8 @@ export class DeviceAuthError extends Error {
   constructor(
     readonly code: string,
     readonly status: number | null,
+    /** Seconds until a rate-limited call may be retried, when the server said. */
+    readonly retryAfter: number | null = null,
   ) {
     super(code);
     this.name = 'DeviceAuthError';
@@ -68,14 +70,21 @@ async function call(path: string, init: RequestInit = {}) {
   } catch {
     // Fall through: a body that is not JSON is an unexpected response.
   }
+  if (response.status === 429) {
+    // Better Auth's limit on reviews lasts as long as a grant (10 minutes),
+    // so report its actual remaining wait rather than guessing.
+    const seconds = Number(response.headers.get('x-retry-after'));
+    throw new DeviceAuthError(
+      'rate_limited',
+      429,
+      Number.isFinite(seconds) && seconds > 0 ? seconds : null,
+    );
+  }
   if (!response.ok) {
     const parsed = errorSchema.safeParse(body);
-    const code =
-      response.status === 429
-        ? 'rate_limited'
-        : parsed.success
-          ? (parsed.data.error ?? parsed.data.code?.toLowerCase())
-          : undefined;
+    const code = parsed.success
+      ? (parsed.data.error ?? parsed.data.code?.toLowerCase())
+      : undefined;
     throw new DeviceAuthError(code ?? 'unexpected_response', response.status);
   }
   return { body, response };

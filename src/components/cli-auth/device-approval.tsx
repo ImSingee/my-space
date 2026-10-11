@@ -14,16 +14,22 @@ import { DeviceLayout } from './layout';
 import {
   classifyClaimError,
   classifyDecisionError,
+  retryAfterOf,
   type EntryProblem,
   type Problem,
 } from './problems';
 import { RequestReview } from './request-review';
 
 type Stage =
-  | { kind: 'entry'; problem: EntryProblem | null }
+  | { kind: 'entry'; problem: EntryProblem | null; retryAfter?: number | null }
   | { kind: 'review'; request: DeviceRequest }
   | { kind: 'outcome'; outcome: DeviceOutcome; request: DeviceRequest }
-  | { kind: 'problem'; problem: Problem; userCode: string };
+  | {
+      kind: 'problem';
+      problem: Problem;
+      userCode: string;
+      retryAfter?: number | null;
+    };
 
 export type DeviceApprovalProps = {
   /** Code from the verification link; it only prefills the form. */
@@ -96,10 +102,17 @@ function DeviceApprovalFlow({
       onSuccess: (request) => go({ kind: 'review', request }),
       onError: (error) => {
         const result = classifyClaimError(error);
+        const retryAfter = retryAfterOf(error);
         if ('entry' in result) {
           setCode(userCode);
-          go({ kind: 'entry', problem: result.entry });
-        } else go({ kind: 'problem', problem: result.problem, userCode });
+          go({ kind: 'entry', problem: result.entry, retryAfter });
+        } else
+          go({
+            kind: 'problem',
+            problem: result.problem,
+            userCode,
+            retryAfter,
+          });
       },
       onSettled: () => {
         inFlight.current = false;
@@ -119,6 +132,7 @@ function DeviceApprovalFlow({
             kind: 'problem',
             problem: classifyDecisionError(error),
             userCode: request.userCode,
+            retryAfter: retryAfterOf(error),
           }),
         onSettled: () => {
           inFlight.current = false;
@@ -147,6 +161,7 @@ function DeviceApprovalFlow({
             onSubmit={() => review(code)}
             pending={claim.isPending}
             problem={stage.problem}
+            retryAfter={stage.retryAfter ?? null}
             account={account}
             onSwitchAccount={() => onSwitchAccount(code)}
             focus={transitions > 0 || !code}
@@ -169,6 +184,7 @@ function DeviceApprovalFlow({
           <ProblemView
             problem={stage.problem}
             userCode={stage.userCode}
+            retryAfter={stage.retryAfter ?? null}
             handlers={{
               onNewCode: startOver,
               onSignIn: () => onSignIn(stage.userCode),
