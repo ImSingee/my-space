@@ -334,13 +334,13 @@ export function TailscalePanel({
             {status.origin}
           </Anchor>
           <Alert
-            title="App addresses"
+            title="Service hosting"
             color={status.tags?.length ? 'blue' : 'yellow'}
           >
             <Stack gap="xs">
               <Text size="sm">
                 {status.tags?.length
-                  ? `This node can advertise App Services (${status.tags.join(', ')}). Enable an address from each App's management page.`
+                  ? `This node can advertise App Services (${status.tags.join(', ')}). Configure private addresses in the App addresses section below.`
                   : 'To advertise independent App addresses, assign a tag to this Hatch node in Tailscale. No additional sign-in is needed.'}
               </Text>
               <Anchor

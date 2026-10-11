@@ -40,7 +40,6 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { APP_SLUG_MAX_LENGTH } from '~/app-identity';
 import { Page } from '~components/app-shell/page';
-import { AppTailscaleServicePanel } from '~components/apps/tailscale-service-panel';
 import { ApiPanel } from '~components/apps/api-panel';
 import { AppCompatibilityNotice } from '~components/apps/app-compatibility-notice';
 import { AppGlyph } from '~components/apps/app-glyph';
@@ -241,7 +240,6 @@ function AppDetailPage() {
     >
       <Stack gap="xl">
         <AppCompatibilityNotice compatibility={app.compatibility} />
-        <AppTailscaleServicePanel appId={app.id} slug={app.slug} />
 
         <Box component="section">
           <Text fw={600} fz="lg" mb="md">
