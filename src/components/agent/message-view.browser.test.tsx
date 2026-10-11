@@ -667,6 +667,183 @@ test('renders resource snapshots as @ mentions instead of internal model text', 
   );
   expect(document.body.textContent).not.toContain(internal);
 });
+// Lines narrower than the toggle target, like a short pasted config.
+const configLines = (count: number) =>
+  Array.from({ length: count }, (_, index) => `x${index}=1`).join('\n');
+
+const longPrompt =
+  'Build a tracker that groups expenses by month and flags unusual spending. '.repeat(
+    12,
+  );
+
+function userText(text: string): ChatMessage {
+  return { role: 'user', content: [{ type: 'text', text }] };
+}
+
+/** The text region an expand / collapse toggle controls. */
+function controlledRegion(toggle: Element): HTMLElement {
+  const region = document.getElementById(
+    toggle.getAttribute('aria-controls') ?? '',
+  );
+  if (!region) throw new TypeError('Expected the toggle to control a region');
+  return region;
+}
+
+function isClipped(region: HTMLElement): boolean {
+  return region.scrollHeight > region.clientHeight + 1;
+}
+
+test('shows short user messages in full and collapses text taller than eight lines', async () => {
+  const messages = {
+    short: userText('Short request'),
+    eight: userText(configLines(8)),
+    nine: userText(configLines(9)),
+    paragraph: userText(longPrompt),
+  };
+  const screen = await render(
+    <MantineProvider>
+      <Box w={760}>
+        {Object.entries(messages).map(([id, message]) => (
+          <Box key={id} data-testid={id}>
+            <MessageView message={message} />
+          </Box>
+        ))}
+      </Box>
+    </MantineProvider>,
+  );
+
+  const nine = screen
+    .getByTestId('nine')
+    .getByRole('button', { name: 'Expand message' });
+  const paragraph = screen
+    .getByTestId('paragraph')
+    .getByRole('button', { name: 'Expand message' });
+  await expect.element(nine).toBeVisible();
+  await expect.element(paragraph).toBeVisible();
+  for (const id of ['short', 'eight']) {
+    expect(screen.getByTestId(id).getByRole('button').elements()).toHaveLength(
+      0,
+    );
+    const region = screen
+      .getByTestId(id)
+      .element()
+      .querySelector<HTMLElement>('[role="region"]')!;
+    expect(isClipped(region)).toBe(false);
+  }
+  for (const toggle of [nine, paragraph]) {
+    const region = controlledRegion(toggle.element());
+    expect(region.clientHeight).toBeLessThanOrEqual(180);
+    expect(isClipped(region)).toBe(true);
+    // An icon-only control still needs a comfortable target below the text.
+    const toggleRect = toggle.element().getBoundingClientRect();
+    expect(toggleRect.height).toBeGreaterThanOrEqual(32);
+    expect(toggleRect.top).toBeGreaterThanOrEqual(
+      region.getBoundingClientRect().bottom,
+    );
+  }
+
+  // Short config lines make a narrow bubble; it must contain the toggle
+  // without overflowing.
+  const bubble = nine.element().closest('.mantine-Paper-root')!;
+  const bubbleRect = bubble.getBoundingClientRect();
+  const toggleRect = nine.element().getBoundingClientRect();
+  expect(toggleRect.left).toBeGreaterThanOrEqual(bubbleRect.left);
+  expect(toggleRect.right).toBeLessThanOrEqual(bubbleRect.right);
+  expect(toggleRect.bottom).toBeLessThanOrEqual(bubbleRect.bottom);
+  expect(bubble.scrollWidth).toBeLessThanOrEqual(bubble.clientWidth);
+});
+
+test('toggles a long user message from the keyboard and pointer', async () => {
+  const screen = await renderMessage(userText(longPrompt), { width: 760 });
+  const expand = screen.getByRole('button', { name: 'Expand message' });
+  const collapse = screen.getByRole('button', { name: 'Collapse message' });
+  await expect.element(expand).toHaveAttribute('aria-expanded', 'false');
+  const region = controlledRegion(expand.element());
+  const text = screen.getByText(/Build a tracker/).element();
+  expect(isClipped(region)).toBe(true);
+  // The clipped tail fades out instead of ending on a hard cut.
+  expect(getComputedStyle(region).maskImage).toContain('linear-gradient');
+
+  await userEvent.tab();
+  expect(document.activeElement).toBe(expand.element());
+  await userEvent.keyboard('{Enter}');
+  await expect.element(collapse).toHaveAttribute('aria-expanded', 'true');
+  expect(isClipped(region)).toBe(false);
+  expect(region.clientHeight).toBeGreaterThan(180);
+  expect(getComputedStyle(region).maskImage).toBe('none');
+  // The full text ends above the collapse control, leaving its last line clear.
+  expect(text.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+    collapse.element().getBoundingClientRect().top,
+  );
+
+  await userEvent.keyboard(' ');
+  await expect.element(expand).toHaveAttribute('aria-expanded', 'false');
+  expect(isClipped(region)).toBe(true);
+
+  await expand.click();
+  await expect.element(collapse).toHaveAttribute('aria-expanded', 'true');
+  expect(isClipped(region)).toBe(false);
+});
+
+test('re-evaluates a user message collapse when the bubble rewraps', async () => {
+  const prompt =
+    'Plan a weekly meal tracker with shopping lists and reminders. '.repeat(5);
+  const screen = await renderMessage(userText(prompt), { width: 760 });
+  const shell = screen.getByTestId('message-shell').element() as HTMLElement;
+  const region = shell.querySelector<HTMLElement>('[role="region"]')!;
+  await expect.element(screen.getByText(/Plan a weekly meal/)).toBeVisible();
+  expect(isClipped(region)).toBe(false);
+
+  shell.style.width = '320px';
+  const toggle = screen.getByRole('button', { name: 'Expand message' });
+  await expect.element(toggle).toBeVisible();
+  expect(isClipped(region)).toBe(true);
+
+  shell.style.width = '760px';
+  await expect.element(toggle).not.toBeInTheDocument();
+  expect(isClipped(region)).toBe(false);
+});
+
+test('keeps image and file attachments visible outside a collapsed message', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: longPrompt },
+        {
+          type: 'image',
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          mimeType: 'image/png',
+        },
+      ],
+      attachments: [
+        {
+          id: 'attachment-a',
+          name: 'report.pdf',
+          mimeType: 'application/pdf',
+          size: 2048,
+        },
+      ],
+    },
+    { width: 760 },
+  );
+
+  const toggle = screen.getByRole('button', { name: 'Expand message' });
+  await expect.element(toggle).toBeVisible();
+  const region = controlledRegion(toggle.element());
+  const image = screen.getByRole('img', { name: 'Attached image' });
+  const file = screen.getByTitle('report.pdf (2.0 KB)');
+  await expect.element(image).toBeVisible();
+  await expect.element(file).toBeVisible();
+  expect(region.contains(image.element())).toBe(false);
+  expect(region.contains(file.element())).toBe(false);
+  for (const attachment of [image, file]) {
+    expect(
+      attachment.element().getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(region.getBoundingClientRect().top);
+  }
+});
+
 test('keeps the tail of a persisted read path visible in a narrow header', async () => {
   const screen = await renderMessage(
     {

@@ -63,16 +63,6 @@ export function useComposerMessageCopy(enabled: boolean) {
         if (references.size === 0) return;
         const container = document.createElement('div');
         container.append(copyRange.cloneContents());
-        const html = container.innerHTML;
-        for (const element of container.querySelectorAll<HTMLElement>(
-          referenceSelector,
-        )) {
-          const reference = references.get(
-            element.dataset.composerReferenceKey!,
-          );
-          if (reference)
-            element.replaceWith(document.createTextNode(reference));
-        }
         // innerText preserves rendered block boundaries across messages. A
         // detached fragment's textContent would join separate bubbles together.
         container.style.cssText =
@@ -80,6 +70,29 @@ export function useComposerMessageCopy(enabled: boolean) {
         container.setAttribute('aria-hidden', 'true');
         document.body.append(container);
         try {
+          // Native copying skips unselectable chrome such as a message's Show
+          // more toggle; drop it from the clone before serializing either type.
+          // Read every style before removing anything to avoid repeated
+          // style recalculation.
+          const unselectable = [...container.querySelectorAll('*')].filter(
+            (element) => {
+              const style = getComputedStyle(element);
+              return (
+                style.userSelect === 'none' || style.webkitUserSelect === 'none'
+              );
+            },
+          );
+          for (const element of unselectable) element.remove();
+          const html = container.innerHTML;
+          for (const element of container.querySelectorAll<HTMLElement>(
+            referenceSelector,
+          )) {
+            const reference = references.get(
+              element.dataset.composerReferenceKey!,
+            );
+            if (reference)
+              element.replaceWith(document.createTextNode(reference));
+          }
           event.clipboardData.setData('text/plain', container.innerText);
           event.clipboardData.setData('text/html', html);
           event.preventDefault();

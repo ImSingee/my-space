@@ -229,6 +229,52 @@ test('preserves block boundaries when copying snapshots across multiple messages
   );
 });
 
+test('copies collapsed long messages without their expand controls', async () => {
+  const lines = Array.from(
+    { length: 12 },
+    (_, index) => `step ${index + 1}`,
+  ).join('\n');
+  const longContent: ComposerInputPart[] = [
+    ...content,
+    { type: 'text', text: `\n${lines}` },
+  ];
+  const screen = await render(
+    <MantineProvider>
+      <div data-testid="transcript">
+        <MessageView
+          message={{
+            role: 'user',
+            content: [{ type: 'text', text: composerModelText(longContent) }],
+            composerContent: longContent,
+          }}
+        />
+        <MessageView message={{ role: 'user', content: lines }} />
+      </div>
+      <textarea aria-label="Plain text transfer" />
+    </MantineProvider>,
+  );
+  const toggles = screen.getByRole('button', { name: 'Expand message' });
+  await expect.element(toggles.nth(1)).toBeVisible();
+  expect(toggles.elements()).toHaveLength(2);
+
+  selectContents(screen.getByTestId('transcript').element());
+  const copied = copySelection(document.body);
+  expect(copied.clipboardData.getData('text/plain')).toBe(
+    composerModelText(longContent) + '\n\n' + lines,
+  );
+  const html = copied.clipboardData.getData('text/html');
+  expect(html).not.toContain('<button');
+  expect(html).not.toContain('<svg');
+
+  // Without snapshots the browser copies natively and must skip it as well.
+  selectContents(toggles.nth(1).element().closest('.mantine-Paper-root')!);
+  await userEvent.copy();
+  const transfer = screen.getByRole('textbox', { name: 'Plain text transfer' });
+  await transfer.click();
+  await userEvent.paste();
+  await expect.element(transfer).toHaveValue(lines);
+});
+
 test('round-trips native browser clipboard through a plain textarea back into the composer', async () => {
   const onSubmit = vi.fn<() => Promise<boolean>>(async () => true);
   const screen = await render(
