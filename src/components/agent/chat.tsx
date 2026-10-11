@@ -57,6 +57,13 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const retryingRef = useRef(false);
+  // Whether the viewport is pinned near the bottom. While streaming we only
+  // auto-follow when it is, so a user who scrolls up to read earlier output
+  // isn't yanked back down on every token.
+  const stickToBottomRef = useRef(true);
+  // Set when the reader toggles a long prompt. Follow then stays paused,
+  // wherever the viewport ends up, until a real new message lands.
+  const readPausedRef = useRef(false);
   const RECONNECT_TOAST_ID = 'agent-reconnect';
 
   const clearReconnectTimer = useCallback(() => {
@@ -365,6 +372,24 @@ export function Chat({ sessionId }: { sessionId: string }) {
     sessionId,
   ]);
 
+  // A reader toggling a long prompt is reading history, so streamed output
+  // must not pull them away before the next message. Collapsing can leave the
+  // viewport below the shortened bubble; bring its top back into view so the
+  // reader keeps their place.
+  const onUserMessageToggle = useCallback(
+    (bubble: HTMLElement, expanded: boolean) => {
+      readPausedRef.current = true;
+      stickToBottomRef.current = false;
+      const viewport = viewportRef.current;
+      if (expanded || !viewport) return;
+      const offset =
+        bubble.getBoundingClientRect().top -
+        viewport.getBoundingClientRect().top;
+      if (offset < 0) viewport.scrollTop += offset;
+    },
+    [],
+  );
+
   const renderedTurns = useMemo(
     () =>
       turns.map((turn) => {
@@ -393,6 +418,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             onRetry={showRetry ? retry : undefined}
             retrying={showRetry && retrying}
             retryDisabled={showRetry && !effectiveModelParts}
+            onUserMessageToggle={onUserMessageToggle}
           />
         );
       }),
@@ -401,6 +427,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       appsQuery.data,
       workflowsQuery.data,
       effectiveModelParts,
+      onUserMessageToggle,
       retry,
       retryableTurnKey,
       retrying,
@@ -468,14 +495,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
 
-  // Track whether the viewport is pinned near the bottom. While streaming we
-  // only auto-follow when it is, so a user who scrolls up to read earlier
-  // output isn't yanked back down on every token.
-  const stickToBottomRef = useRef(true);
   const previousTopRef = useRef(0);
   const scrollToBottom = useCallback((force = false) => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
+    if (!viewport || (!force && readPausedRef.current)) return;
     const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
     // A second follow attempt can run before the user's scroll event, too.
     // Observe that pending upward movement before overwriting its position.
@@ -493,11 +516,15 @@ export function Chat({ sessionId }: { sessionId: string }) {
     viewport.scrollTo({ top });
   }, []);
 
+  // Re-evaluate the bottom pin whenever the viewport scrolls. During a reading
+  // pause, scroll events (collapse alignment, clamping when content shrinks,
+  // scroll anchoring) must not re-pin, even at the bottom.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     previousTopRef.current = el.scrollTop;
     const onScroll = () => {
+      if (readPausedRef.current) return;
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (distance < 80) {
         stickToBottomRef.current = true;
@@ -531,13 +558,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
   }, [scrollToBottom]);
 
   // A new message (user send / finished turn) always scrolls to the bottom and
-  // re-pins follow; this also covers the initial load.
+  // re-pins follow, ending any reading pause; this also covers the initial
+  // load. Stream state changes are not messages and never end the pause.
   useEffect(() => {
+    readPausedRef.current = false;
     stickToBottomRef.current = true;
     scrollToBottom(true);
   }, [messages.length, scrollToBottom]);
 
-  // Streaming tokens follow only when pinned to the bottom.
+  // Stream state changes follow only while pinned and never end a reading
+  // pause. The observer above also follows late layout changes.
   useEffect(() => {
     if (!stickToBottomRef.current) return;
     scrollToBottom();

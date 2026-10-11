@@ -1,7 +1,18 @@
 /** Persisted chat messages: user bubbles, assistant blocks, tool timelines. */
-import { Box, Group, Image, Paper, Stack, Text } from '@mantine/core';
-import { IconDownload, IconFile } from '@tabler/icons-react';
-import { useId, type ReactNode } from 'react';
+import { Box, Group, Image, Paper, Spoiler, Stack, Text } from '@mantine/core';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconDownload,
+  IconFile,
+} from '@tabler/icons-react';
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   composerModelText,
   type AgentComposerContentPart,
@@ -30,6 +41,15 @@ import {
 import classes from './chat.module.css';
 
 type ToolResultMap = Map<string, ToolResultMessage>;
+
+/** Called after a reader expands or collapses a long user message. */
+export type UserMessageToggle = (
+  bubble: HTMLElement,
+  expanded: boolean,
+) => void;
+
+/** Rendered prompt text taller than this (about 8 lines) starts collapsed. */
+const USER_MESSAGE_MAX_HEIGHT = 180;
 
 function UserComposerText({
   content,
@@ -61,6 +81,64 @@ function UserComposerText({
             ),
           )}
     </span>
+  );
+}
+
+function UserMessageBubble({
+  content,
+  fallback,
+  onToggle,
+}: {
+  content: AgentComposerContentPart[] | undefined;
+  fallback: string;
+  onToggle?: UserMessageToggle;
+}) {
+  // Local state survives session refetches (the turn key is stable) but resets
+  // when the chat remounts, so every visit starts with long prompts collapsed.
+  const [expanded, setExpanded] = useState(false);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const toggledRef = useRef(false);
+
+  // Report only reader toggles, after the new height is laid out but before
+  // paint, so the chat can adjust scrolling without a visible jump.
+  useLayoutEffect(() => {
+    if (!toggledRef.current || !bubbleRef.current) return;
+    toggledRef.current = false;
+    onToggle?.(bubbleRef.current, expanded);
+  }, [expanded, onToggle]);
+
+  return (
+    <Paper
+      ref={bubbleRef}
+      className={classes.userBubble}
+      radius="md"
+      px="sm"
+      py={6}
+    >
+      <Spoiler
+        maxHeight={USER_MESSAGE_MAX_HEIGHT}
+        showLabel={<IconChevronDown size={16} stroke={1.7} aria-hidden />}
+        hideLabel={<IconChevronUp size={16} stroke={1.7} aria-hidden />}
+        showAriaLabel="Expand message"
+        hideAriaLabel="Collapse message"
+        expanded={expanded}
+        onExpandedChange={(next) => {
+          toggledRef.current = true;
+          setExpanded(next);
+        }}
+        transitionDuration={0}
+        mod={{ expanded }}
+        classNames={{
+          root: classes.userMessageSpoiler,
+          content: classes.userMessageContent,
+          control: classes.userMessageToggle,
+        }}
+      >
+        <Text className={classes.messageText}>
+          <UserComposerText content={content} fallback={fallback} />
+        </Text>
+      </Spoiler>
+    </Paper>
   );
 }
 
@@ -129,6 +207,7 @@ export function MessageView({
   retryDisabled = false,
   apps,
   workflows,
+  onUserMessageToggle,
 }: {
   message: ChatMessage;
   toolResults?: ToolResultMap;
@@ -137,6 +216,7 @@ export function MessageView({
   retryDisabled?: boolean;
   apps?: AppListItem[];
   workflows?: WorkflowListItem[];
+  onUserMessageToggle?: UserMessageToggle;
 }) {
   if (message.role === 'user') {
     const text = partsToText(
@@ -188,14 +268,11 @@ export function MessageView({
             </Box>
           ) : null}
           {text ? (
-            <Paper className={classes.userBubble} radius="md" px="sm" py={6}>
-              <Text className={classes.messageText}>
-                <UserComposerText
-                  content={message.composerContent}
-                  fallback={text}
-                />
-              </Text>
-            </Paper>
+            <UserMessageBubble
+              content={message.composerContent}
+              fallback={text}
+              onToggle={onUserMessageToggle}
+            />
           ) : null}
         </Stack>
       </Box>
