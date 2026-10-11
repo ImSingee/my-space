@@ -60,6 +60,12 @@ test('keeps button sign-in available when conditional mediation is unsupported',
   expect(mocks.toastSuccess).toHaveBeenCalledWith('Welcome back');
 });
 
+test('allows sign-in from a domain different from the canonical APP_URL', async () => {
+  const screen = await renderPasskeySignIn('https://hatch.example.test');
+  await screen.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await vi.waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledOnce());
+});
+
 test('completes conditional sign-in through the official SDK', async () => {
   fixtures.autofill = true;
   await renderPasskeySignIn();

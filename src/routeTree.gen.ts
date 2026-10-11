@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DotwellKnownWebauthnRouteImport } from './routes/[.]well-known/webauthn'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
@@ -77,6 +78,11 @@ const AppRoute = AppRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownWebauthnRoute = DotwellKnownWebauthnRouteImport.update({
+  id: '/.well-known/webauthn',
+  path: '/.well-known/webauthn',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAgentRoute = AppAgentRouteImport.update({
@@ -323,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
+  '/.well-known/webauthn': typeof DotwellKnownWebauthnRoute
   '/agent': typeof AppAgentRouteWithChildren
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
@@ -374,6 +381,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
+  '/.well-known/webauthn': typeof DotwellKnownWebauthnRoute
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/api/$': typeof ApiSplatRoute
@@ -425,6 +433,7 @@ export interface FileRoutesById {
   '/404': typeof R404Route
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/.well-known/webauthn': typeof DotwellKnownWebauthnRoute
   '/_app/agent': typeof AppAgentRouteWithChildren
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/executions': typeof AppExecutionsRoute
@@ -478,6 +487,7 @@ export interface FileRouteTypes {
     | '/'
     | '/404'
     | '/login'
+    | '/.well-known/webauthn'
     | '/agent'
     | '/dashboards'
     | '/executions'
@@ -529,6 +539,7 @@ export interface FileRouteTypes {
     | '/'
     | '/404'
     | '/login'
+    | '/.well-known/webauthn'
     | '/dashboards'
     | '/executions'
     | '/api/$'
@@ -579,6 +590,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/_app'
     | '/login'
+    | '/.well-known/webauthn'
     | '/_app/agent'
     | '/_app/dashboards'
     | '/_app/executions'
@@ -632,6 +644,7 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  DotwellKnownWebauthnRoute: typeof DotwellKnownWebauthnRoute
   ApiSplatRoute: typeof ApiSplatRoute
   ApiEventsRoute: typeof ApiEventsRoute
   CliAuthorizeRoute: typeof CliAuthorizeRoute
@@ -681,6 +694,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/webauthn': {
+      id: '/.well-known/webauthn'
+      path: '/.well-known/webauthn'
+      fullPath: '/.well-known/webauthn'
+      preLoaderRoute: typeof DotwellKnownWebauthnRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/agent': {
@@ -1107,6 +1127,7 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  DotwellKnownWebauthnRoute: DotwellKnownWebauthnRoute,
   ApiSplatRoute: ApiSplatRoute,
   ApiEventsRoute: ApiEventsRoute,
   CliAuthorizeRoute: CliAuthorizeRoute,
