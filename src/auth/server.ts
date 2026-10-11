@@ -17,7 +17,6 @@ import { db, schema } from '../db';
 import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 import { getPasskeyOriginError, getPasskeyRpId } from './passkey-origin';
-import { issuanceEnabled } from './cli-policy';
 
 const { appUrl, betterAuthSecret } = getPlatformEnv();
 const relyingPartyId = getPasskeyRpId(appUrl);
@@ -41,7 +40,7 @@ const hatchDeviceGrant = {
     hatchSessionId: { type: 'string', required: false },
   },
   authorizeRequest: ({ request }: { request: DeviceAuthorizationRequest }) => {
-    if (!issuanceEnabled() || request.user_id) throw new APIError('FORBIDDEN');
+    if (request.user_id) throw new APIError('FORBIDDEN');
     const fields = z.object(deviceFields).parse(request);
     return {
       clientId: 'hatch-cli',

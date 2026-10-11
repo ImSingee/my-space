@@ -6,19 +6,13 @@ import {
   scopesSchema,
 } from '~auth/cli-policy';
 import { db, schema, type TX } from '~/db';
-import {
-  AuthError,
-  issueCredential,
-  requireIssuance,
-  validateResources,
-} from './credentials';
+import { AuthError, issueCredential, validateResources } from './credentials';
 
 const normalizeCode = (code: string) => code.replace(/-/g, '').toUpperCase();
 type Device = typeof schema.deviceCode.$inferSelect;
 type Session = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
 export async function createDevice(raw: unknown) {
-  requireIssuance();
   const input = deviceRequestSchema.parse(raw);
   await validateResources(input.resources);
   return auth.api.deviceCode({
@@ -71,7 +65,6 @@ function grantOf(row: Device) {
 
 /** Bind a pending grant to this exact user and Cookie session, then describe it. */
 export async function claimDevice(userCode: string, session: Session) {
-  requireIssuance();
   return db.transaction(async (tx) => {
     const row = await lockedCode(tx, 'userCode', userCode);
     checkPending(row);
@@ -97,7 +90,6 @@ export async function decideDevice(
   session: Session,
   approve: boolean,
 ) {
-  requireIssuance();
   await db.transaction(async (tx) => {
     const row = await lockedCode(tx, 'userCode', userCode);
     checkPending(row);
@@ -132,7 +124,6 @@ export async function cancelDevice(deviceCode: string) {
  * Poll errors are returned from the transaction so interval updates do commit.
  */
 export async function redeemDevice(deviceCode: string) {
-  requireIssuance();
   const result = await db.transaction(async (tx) => {
     const row = await lockedCode(tx, 'deviceCode', deviceCode);
     if (row.status === 'consumed')

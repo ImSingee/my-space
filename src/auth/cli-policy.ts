@@ -91,7 +91,3 @@ export function isSealedAuthPath(pathname: string): boolean {
   }
   return /^\/api\/auth\/(?:api-key(?:\/|$)|device(?:\/|$))/.test(path);
 }
-
-export function issuanceEnabled(): boolean {
-  return process.env.HATCH_CLI_AUTH_ENABLED === 'true';
-}

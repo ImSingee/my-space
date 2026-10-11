@@ -4,7 +4,7 @@ The user rejected the first authorization page's visual design and requested
 that it be deleted and replaced by the Lody P6 role. The original
 `src/routes/cli/authorize.tsx` has been removed. Backend authentication remains
 in this working tree. Implement the replacement, rather than restoring the
-old card layout. Keep issuance disabled until the replacement is verified.
+old card layout.
 
 ## Scope and design
 
@@ -39,7 +39,7 @@ must be English; user-facing review explanations may be Chinese.
 5. Show clear approved/denied outcomes and instruct the person to return to
    their requesting device. Browser approval itself never receives or stores
    the issued key; the device redeems it through the server polling endpoint.
-6. Handle loading, invalid/missing code, expiration, issuance disabled,
+6. Handle loading, invalid/missing code, expiration,
    authentication loss, request already processed, cancellation, another
    account/session's claim, network failure and decision conflict. Do not show
    an approval that the server did not confirm. Never retry a decision implicitly.

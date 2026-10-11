@@ -174,7 +174,6 @@ describe.runIf(Boolean(databaseUrl))(
       process.env.APP_URL = origin;
       process.env.SECRET =
         'hatch-auth-integration-secret-longer-than-thirty-two';
-      process.env.HATCH_CLI_AUTH_ENABLED = 'true';
       process.env.HATCH_DATA_DIR = `/tmp/hatch-auth-integration-${randomUUID()}`;
       database = await import('~/db');
       const { migrate } = await import('drizzle-orm/postgres-js/migrator');
@@ -829,7 +828,7 @@ describe.runIf(Boolean(databaseUrl))(
       ).toBe(200);
     });
 
-    it('grants nothing to plugin keys without Hatch metadata, and keeps verification while issuance is off', async () => {
+    it('grants nothing to plugin keys without Hatch metadata', async () => {
       const pluginOnly = await auth.api.createApiKey({
         body: {
           configId: 'hatch',
@@ -847,40 +846,18 @@ describe.runIf(Boolean(databaseUrl))(
         ).response.status,
       ).toBe(401);
       const key = await newKey();
-      process.env.HATCH_CLI_AUTH_ENABLED = 'false';
-      try {
-        expect(
-          (
-            await call(
-              'auth/keys',
-              {
-                name: 'Disabled',
-                expiresIn: 300,
-                scopes: ['app.read'],
-                resources: { mode: 'all' },
-              },
-              { cookie },
-            )
-          ).response.status,
-        ).toBe(503);
-        expect(
-          (await call('auth/status', undefined, bearer(key))).response.status,
-        ).toBe(200);
-        expect(
-          (await call(`auth/keys/${key.id}/revoke`, {}, { cookie })).response
-            .status,
-        ).toBe(200);
-        expect(
-          (await call('auth/status', undefined, bearer(key))).response.status,
-        ).toBe(401);
-        expect(
-          Boolean(
-            await auth.api.getSession({ headers: new Headers({ cookie }) }),
-          ),
-        ).toBe(true);
-      } finally {
-        process.env.HATCH_CLI_AUTH_ENABLED = 'true';
-      }
+      expect(
+        (await call(`auth/keys/${key.id}/revoke`, {}, { cookie })).response
+          .status,
+      ).toBe(200);
+      expect(
+        (await call('auth/status', undefined, bearer(key))).response.status,
+      ).toBe(401);
+      expect(
+        Boolean(
+          await auth.api.getSession({ headers: new Headers({ cookie }) }),
+        ),
+      ).toBe(true);
     });
   },
 );

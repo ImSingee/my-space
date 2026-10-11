@@ -14,22 +14,19 @@ and source/deployment/data contracts are unchanged.
    It creates Better Auth's `apikey` and `device_code` tables and adds a nullable
    `agent_runs.started_by_user_id`; existing users, accounts, sessions and Cookie
    logins are untouched, and no historical Run receives a guessed issuer.
-3. Deploy the server with issuance initially disabled (the default). Set
-   `HATCH_CLI_AUTH_ENABLED=true` only when migrations and acceptance succeed.
+3. Deploy the server. The capability is always on; there is no feature flag.
    `APP_URL` remains the canonical public origin. Use HTTPS in production; the
    existing internal server must remain inside the trusted deployment network.
 4. Validate the Cookie login, approval page, key management and a connected
-   protocol-18 Runner before enabling callers. Revocation remains available when
-   issuance is disabled. Cookie permissions remain the existing single-tenant
+   protocol-18 Runner. Cookie permissions remain the existing single-tenant
    administrator permissions; this feature does not introduce multi-tenancy.
 
-To stop issuance, unset `HATCH_CLI_AUTH_ENABLED` and restart. Existing credentials
-continue to be checked and can be revoked. To invalidate every issued credential at
-once (emergency rollback, restoring a backup, cloning an installation or a
-suspected compromise), run `UPDATE apikey SET enabled = false WHERE config_id =
-'hatch'` before serving traffic. Rolling back to older server code preserves Cookie
-login, but that code has no public credential API; keep the tables and migration
-journal entries and apply the same migration on the next upgrade.
+To invalidate every issued credential at once (emergency rollback, restoring a
+backup, cloning an installation or a suspected compromise), run `UPDATE apikey SET
+enabled = false WHERE config_id = 'hatch'` before serving traffic. Rolling back to
+older server code preserves Cookie login, but that code has no public credential
+API; keep the tables and migration journal entries and apply the same migration on
+the next upgrade.
 
 Generated auth schema is owned by `pnpm auth:generate`; never edit
 `src/db/auth-schema.ts` manually. Generate schema migrations with
@@ -161,8 +158,8 @@ Responses/errors are not authorization caches.
 Errors use stable `error` codes with HTTP 400 (invalid request/grant/poll state),
 401 (missing/expired/revoked credential or ended Run), 403 (scope/resource/approval
 or Origin denial), 404 (missing/excluded route/resource), 409 (decision/rotation/
-generation conflict), 413/415 (body size/type), 429 (budget exhausted), 503
-(issuance disabled), or 500 (unknown internal failure without exception text).
+generation conflict), 413/415 (body size/type), 429 (budget exhausted), or 500
+(unknown internal failure without exception text).
 Device creation has a shared in-memory per-minute budget; Cookie management and
 code claims have per-account budgets. Deployments should also use a trusted edge's
 per-peer rate limits; forwarded IP headers alone are not identity.
@@ -193,7 +190,7 @@ server-confirmed `approved`/`denied` status is shown as an outcome. A network
 failure or unreadable response says the choice may not have been saved and points
 to the device; "Check again" re-claims, which reports a decided, cancelled or
 consumed grant as closed. Expiry, another session's claim, session loss, deleted
-resources, rate limiting, issuance being disabled and origin mismatch each have
+resources, rate limiting and origin mismatch each have
 their own state. A different code in the URL starts a separate review. The browser
 never receives the device code or the issued key and stores nothing.
 
@@ -316,6 +313,5 @@ that real-server acceptance. Exercise source/read and real lifecycle creation,
 default exclusions, scope and resource denial without mutation, ID-before-slug
 resolution, slow-down/expiry and exchange/decision races, key
 rotation/revocation/expiry, password change and user deletion, plugin keys without
-Hatch metadata, Run isolation/terminal/cancel/lease lapse and renewal, and
-issuance-off behavior. Inspect raw artifacts for secret leakage; passing legacy
+Hatch metadata, and Run isolation/terminal/cancel/lease lapse and renewal. Inspect raw artifacts for secret leakage; passing legacy
 tests alone is not acceptance of this feature.

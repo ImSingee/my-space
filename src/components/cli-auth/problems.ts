@@ -10,7 +10,6 @@ export type Problem =
   | 'elsewhere'
   | 'signed-out'
   | 'session-ended'
-  | 'disabled'
   | 'origin'
   | 'unapprovable'
   | 'rate-limited'
@@ -28,8 +27,6 @@ function terminalProblem(code: string): Problem | null {
       return 'closed';
     case 'grant_claimed_by_another_session':
       return 'elsewhere';
-    case 'issuance_disabled':
-      return 'disabled';
     case 'invalid_origin':
     case 'instance_origin_mismatch':
       return 'origin';

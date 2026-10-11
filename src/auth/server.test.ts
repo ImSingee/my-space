@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
     () => 'database-adapter',
   ),
   passkey: vi.fn<(options: unknown) => string>(() => 'passkey'),
+  apiKey: vi.fn<(options: unknown) => string>(() => 'api-key'),
+  deviceAuthorization: vi.fn<(options: unknown) => string>(
+    () => 'device-authorization',
+  ),
   schema: {},
   tanstackStartCookies: vi.fn<() => string>(() => 'tanstack-start-cookies'),
   trustedOrigin: vi.fn<() => string | null>(() => null),
@@ -26,6 +30,14 @@ vi.mock('better-auth/tanstack-start', () => ({
 
 vi.mock('@better-auth/passkey', () => ({
   passkey: mocks.passkey,
+}));
+
+vi.mock('@better-auth/api-key', () => ({
+  apiKey: mocks.apiKey,
+}));
+
+vi.mock('better-auth/plugins/device-authorization', () => ({
+  deviceAuthorization: mocks.deviceAuthorization,
 }));
 
 vi.mock('../db', () => ({
@@ -79,7 +91,12 @@ describe('Better Auth configuration', () => {
     });
     expect(mocks.betterAuth).toHaveBeenCalledWith(
       expect.objectContaining({
-        plugins: ['passkey', 'tanstack-start-cookies'],
+        plugins: [
+          'passkey',
+          'api-key',
+          'device-authorization',
+          'tanstack-start-cookies',
+        ],
       }),
     );
   });

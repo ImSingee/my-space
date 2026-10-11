@@ -9,7 +9,6 @@ import {
   IconHistory,
   IconHourglassHigh,
   IconLogin2,
-  IconPlugConnectedX,
   IconWorldX,
   type Icon,
 } from '@tabler/icons-react';
@@ -64,14 +63,6 @@ const PROBLEMS: Record<Problem, StatusCopy> = {
     title: 'Your session ended',
     body: 'Nothing was approved. Sign in again, then start a new sign-in on your device.',
     actions: ['sign-in'],
-  },
-  disabled: {
-    icon: IconPlugConnectedX,
-    color: 'gray',
-    // Non-breaking hyphen: never split "sign-in" across title lines.
-    title: 'Device sign\u2011in is turned off',
-    body: 'Nothing was approved. Ask whoever runs this Hatch to turn it on.',
-    actions: ['home'],
   },
   origin: {
     icon: IconWorldX,

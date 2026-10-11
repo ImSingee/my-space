@@ -9,7 +9,6 @@ import { z } from 'zod';
 import { auth } from '~auth/server';
 import {
   grantSchema,
-  issuanceEnabled,
   permissionsFor,
   resourceRangeSchema,
   scopesFrom,
@@ -28,9 +27,6 @@ export class AuthError extends AppError {
   ) {
     super(code, status);
   }
-}
-export function requireIssuance(): void {
-  if (!issuanceEnabled()) throw new AuthError('issuance_disabled', 503);
 }
 
 const CONFIG_ID = 'hatch';
@@ -291,7 +287,6 @@ export type IssueInput = {
 
 /** One plugin call: the key is complete, and authoritative, once it exists. */
 export async function issueCredential(input: IssueInput) {
-  requireIssuance();
   grantSchema.parse({ scopes: input.scopes, resources: input.resources });
   const maximum =
     input.credentialType === 'interactive_key' ? 30 * 86400 : 90 * 86400;
