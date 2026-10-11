@@ -2,8 +2,9 @@
  * Public CLI API under `/api/cli/v1`: App and Workflow lifecycle for the
  * `hatch` CLI. Callers authenticate with a Better Auth session (Cookie, or
  * `Authorization: Bearer <session token>` from device login) or with a Run
- * token. Both currently carry the full authority of a signed-in user over these
- * routes. Data, secrets, providers, users and Runner control have no route here.
+ * token, or a user-owned API key in `x-api-key`. These carry the authority of
+ * a signed-in user over these routes. Data, secrets, providers, users and Runner
+ * control have no route here.
  */
 import { z } from 'zod';
 import { auth } from '~auth/server';
@@ -59,6 +60,21 @@ async function readJson(request: Request, limit = 16384) {
 
 /** A Run token is a three-part JWT; anything else is a Better Auth session. */
 async function authenticate(request: Request): Promise<RunTokenContext | null> {
+  if (request.headers.has('x-api-key')) {
+    const key = request.headers.get('x-api-key') ?? '';
+    const result = await auth.api.verifyApiKey({
+      body: { key, configId: 'default' },
+    });
+    if (!result.valid || !result.key) throw fail('unauthorized', 401);
+    // Plugin references are not foreign keys. A deleted account must not leave
+    // a usable orphan credential behind.
+    const owner = await db.query.user.findFirst({
+      where: { id: result.key.referenceId },
+      columns: { id: true },
+    });
+    if (!owner) throw fail('unauthorized', 401);
+    return null;
+  }
   const bearer = /^Bearer\s+(\S+)$/i.exec(
     request.headers.get('authorization') ?? '',
   )?.[1];

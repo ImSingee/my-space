@@ -1,0 +1,108 @@
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--mantine-color-default-border);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+  min-height: 66px;
+  padding: var(--mantine-spacing-sm) 0;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.badge {
+  flex-shrink: 0;
+}
+
+.identifier {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaClip {
+  overflow: hidden;
+}
+
+/* Every item carries a leading separator; the list is shifted left by one
+   separator so the dot that starts a wrapped line is clipped away. */
+.meta {
+  --separator-width: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  margin-left: calc(-1 * var(--separator-width));
+}
+
+.meta > span::before {
+  content: '·';
+  display: inline-block;
+  width: var(--separator-width);
+  text-align: center;
+}
+
+.revoke {
+  flex-shrink: 0;
+}
+
+.addButton {
+  flex-shrink: 0;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mantine-spacing-sm);
+  min-height: 180px;
+  padding: var(--mantine-spacing-xl);
+  border-block: 1px solid var(--mantine-color-default-border);
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.secretInput {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-sm);
+  word-break: break-all;
+}
+
+@media (max-width: 36em) {
+  .header {
+    flex-direction: column;
+  }
+
+  .addButton {
+    width: 100%;
+  }
+
+  .row {
+    align-items: flex-start;
+  }
+
+  .footer > * {
+    flex: 1;
+  }
+}

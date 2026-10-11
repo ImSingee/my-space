@@ -289,6 +289,21 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     expect((await cli('apps', bearer(minted.data.token))).response.status).toBe(
       200,
     );
+    // Run JWTs cannot manage credentials; user API keys cannot impersonate
+    // the trusted Runner fleet on its separate internal authentication entry.
+    expect(
+      (await authCall('api-key/list', { headers: bearer(minted.data.token) }))
+        .response.status,
+    ).toBe(401);
+    const owner = await auth.api.getSession({
+      headers: new Headers({ cookie }),
+    });
+    const key = await auth.api.createApiKey({
+      body: { userId: owner!.user.id, name: 'Fleet boundary fixture' },
+    });
+    expect((await mint(run.runId, { runnerId }, key.key)).response.status).toBe(
+      401,
+    );
     const tampered = `${minted.data.token.slice(0, -2)}xx`;
     expect((await cli('apps', bearer(tampered))).response.status).toBe(401);
     const renewed = await mint(run.runId, { runnerId });

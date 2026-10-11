@@ -1,21 +1,99 @@
 # CLI authentication
 
-How the `hatch` CLI and Agent Runs authenticate to the platform. This change
-adds the server side and the browser approval page; it does not implement the
-CLI, profile storage, environment injection or changes to Agent Tools/Skills.
+How scripts, the future `hatch` CLI and Agent Runs authenticate to the platform.
+The platform provides device authorization, user-managed API keys and Run JWTs;
+it does not implement the CLI, profile storage, environment injection or changes
+to Agent Tools/Skills.
 Platform/Runner protocol stays at **18**; App and Workflow compatibility
 constants and source/deployment/data contracts are unchanged.
 
 ## Model
 
-| Credential         | How it is obtained                                 | Lifetime                                     | Authority                     |
-| ------------------ | -------------------------------------------------- | -------------------------------------------- | ----------------------------- |
-| CLI session        | Device login, approved by a signed-in browser user | Better Auth session (7 days, renewed on use) | Same as a browser session     |
-| Run token (JWT)    | Trusted Runner, for a live Agent Run               | 5 minutes, only while the Run is live        | All CLI API routes            |
-| Runner fleet token | Deployment operator                                | Existing configuration                       | Trusted internal REST/WS only |
+| Credential         | How it is obtained                                  | Lifetime                                     | Authority                             |
+| ------------------ | --------------------------------------------------- | -------------------------------------------- | ------------------------------------- |
+| CLI session        | Device login, approved by a signed-in browser user  | Better Auth session (7 days, renewed on use) | Same as a browser session             |
+| API key            | Settings → Security, created by its signed-in owner | User-selected expiry or no expiry; revocable | Existing CLI App/Workflow routes only |
+| Run token (JWT)    | Trusted Runner, for a live Agent Run                | 5 minutes, only while the Run is live        | All CLI API routes                    |
+| Runner fleet token | Deployment operator                                 | Existing configuration                       | Trusted internal REST/WS only         |
 
 There is no scope or resource configuration yet: a CLI session is a full
-Better Auth session, and a Run token can call every CLI API route.
+Better Auth session, and a Run token or API key can call every CLI API route.
+The platform remains single-tenant: authenticated callers can manage all Apps
+and Workflows. Key ownership controls credential management, not resource access.
+
+## API keys for scripts
+
+Open **Settings → Security → API keys**, give the key a name, and select its
+lifetime (or no expiration). Save the full value from the creation dialog; it
+is displayed only once and cannot be recovered after closing. The list contains
+only the name, a partial masked identifier, creation/expiration and last-use
+timestamps. Revoke ends the key immediately and removes it from the list.
+Expired keys are rejected and may be removed by the plugin's expiration cleanup.
+
+The Security UI passes `hatch_` as its creation prefix. Native API callers may
+choose another prefix or omit it; CLI authentication delegates validity to the
+plugin without checking a prefix, length or character pattern. Send keys only
+in **`x-api-key`**, never in
+a URL or `Authorization: Bearer`. Bearer retains its existing device session
+and Run JWT meaning. When `x-api-key` is present it takes precedence; an invalid,
+expired, disabled, orphaned or revoked key fails with 401 even if another valid
+credential accompanies it. API keys are accepted only by `/api/cli/v1` and do
+not authenticate Settings, Better Auth, data queries or internal Runner APIs.
+
+For example, with an API key already provided in the process environment:
+
+```sh
+curl --fail --silent --show-error \
+  --header "x-api-key: ${HATCH_API_KEY}" \
+  https://hatch.example.com/api/cli/v1/apps
+```
+
+`HATCH_API_KEY` is an example script variable, not a new platform configuration
+or implemented CLI option. Do not enable shell tracing or verbose HTTP logging
+for calls containing credentials. CLI environment/config-file storage remains
+future client work.
+
+The server uses the official `@better-auth/api-key` **1.7.7** plugin with its
+default hash storage ([plugin documentation](https://www.better-auth.com/docs/plugins/api-key)).
+Every verification reads PostgreSQL; there is no key
+lookup cache, secondary storage or API-key session emulation. Usage updates are
+awaited. Revocation deletes the owner-scoped row, so requests begun after the
+revoke response cannot authenticate it; a request authorized before revocation
+may finish. API keys deliberately have no extra quota/rate limit or scopes.
+
+Management uses Better Auth's native `/api/auth/api-key/*` endpoints:
+
+- `GET /list` returns `{ apiKeys, total, limit, offset }`.
+- `POST /create` accepts, for example,
+  `{ "name": "Automation", "expiresIn": 2592000, "prefix": "hatch_" }`.
+  Lifetime is in seconds (1–315360000), or `null` for no expiry. The response
+  contains metadata and the one-time raw `key` at the top level.
+- `GET /get?id=…`, `POST /update` and `POST /delete` use the plugin's native
+  contracts. Delete accepts `{ "keyId": "…" }`. The UI uses list/create/delete;
+  native update remains available to the owner, including changing expiry or
+  enabled status.
+
+The plugin requires an ordinary session and checks user ownership. API keys do
+not become sessions and cannot manage keys on their own. If a Cookie/session
+accompanies an API key, that session supplies the management identity; another
+user's key is still inaccessible. Client requests cannot supply a different
+`userId` or server-only permissions/quota settings. Existing session Bearer
+credentials retain their ordinary management authority. Verify and expired-key
+cleanup methods remain server-only, without public HTTP routes.
+
+The auth route sends `Cache-Control: no-store`. Native list/get responses omit
+the `key` field; only create returns the raw key. The UI uses the standard Better
+Auth client and inferred response types, and holds the secret in transient
+component memory, outside query/mutation caches and browser persistence.
+
+The locked 1.7.7 API key plugin has a local pnpm patch: its list implementation
+must collect every owner record before configuration filtering and public
+pagination. The Better Auth adapter otherwise defaults an omitted internal
+limit to 100, causing the native endpoint to truncate both the list and `total`.
+The patch uses the owner record count as an explicit internal fetch limit
+instead of relying on the adapter default. Native list parameters and credential
+management remain unchanged; the UI requests the complete list. Keep the patch
+until an upstream version passes `src/auth/api-key-pagination.test.ts` without it.
 
 ## Device login (CLI sessions)
 
@@ -91,9 +169,9 @@ to its Agent environment. No environment injection is implemented here.
 
 ## CLI API (`/api/cli/v1`)
 
-`src/server/cli/api.ts`. Callers authenticate with a session (Cookie or Bearer)
-or a Run token; a Bearer value with three dot-separated parts is treated as a Run
-token. Responses are JSON with `Cache-Control: no-store` and
+`src/server/cli/api.ts`. Callers authenticate with a session (Cookie or Bearer),
+a Run token, or an API key (`x-api-key`); a Bearer value with three dot-separated
+parts is treated as a Run token. Responses are JSON with `Cache-Control: no-store` and
 `Referrer-Policy: no-referrer`. POST bodies must be `application/json` (Git
 deployment bundles up to 256 MiB, others 16 KiB), which a cross-site form cannot
 send.
@@ -120,6 +198,12 @@ queries, KV, secrets, providers, users and Runner controls have no route here.
 
 Apply the additive migration (`pnpm migrations:apply`); it creates Better Auth's
 `device_code` table and leaves existing users, accounts and sessions untouched.
+The API key migration `20261011102409_giant_colossus` adds `apikey` and its
+lookup indexes without modifying existing tables. Apply migrations before
+deploying the updated server; the migration journal makes repeated applies
+safe. No new environment variables, protocol fields or compatibility bump are
+required. Keep the new table if reverting the server; keys remain hashed and
+cannot authenticate an older server that has no key support.
 There is no feature flag. To sign every CLI out at once, delete the sessions you
 want to end; Run tokens end with their Runs or when the auth secret changes.
 
@@ -141,3 +225,6 @@ acceptance. Browser acceptance must additionally load the built approval page,
 log in, approve and deny real requests, and inspect screenshots and network
 outcomes; `src/components/cli-auth/device-approval.browser.test.tsx` covers the
 page's decision boundaries with a stubbed `fetch` and does not replace it.
+
+Full browser acceptance additionally drives the real Security page and calls
+the CLI API with the very key it creates, before and after UI revocation.
