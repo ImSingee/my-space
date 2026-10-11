@@ -1,6 +1,6 @@
 import manifest from '../package.json' with { type: 'json' };
 import { commandDefinitions, globalOptions } from './commands';
-import { authCommandOffset, runAuth } from './auth';
+import { runAuth } from './auth';
 import { runLifecycle } from './lifecycle';
 import { publicError } from './client';
 import { CliError } from './error';
@@ -59,14 +59,13 @@ try {
       throw new CliError('invalid_arguments', 'Version accepts only --json.');
     output({ version: manifest.version }, manifest.version);
   } else if (name === 'auth') {
-    const authOffset = authCommandOffset(args);
-    if (authOffset === null)
+    if (!['login', 'status', 'logout'].includes(operation))
       throw new CliError(
         'unsupported_command',
         'API key management is available in Settings; this CLI only supports auth login/status/logout.',
         8,
       );
-    await runAuth(args, authOffset, controller.signal);
+    await runAuth(args, offset, controller.signal);
   } else if (name === 'operation')
     throw new CliError(
       'unsupported_command',

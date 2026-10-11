@@ -11,7 +11,7 @@ import {
   symlink,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 const entry = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -343,8 +343,15 @@ describe('CLI workspace safety', () => {
     const bin = join(directory, 'bin');
     await mkdir(bin);
     const captured = join(directory, 'child-env.json');
+    const executable =
+      process.platform === 'win32'
+        ? join(bin, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
+        : join(bin, 'pnpm');
+    await mkdir(join(bin, 'node_modules', 'pnpm', 'bin'), { recursive: true });
+    if (process.platform === 'win32')
+      await writeFile(join(bin, 'pnpm.cmd'), '@echo off\r\nexit /b 99\r\n');
     await writeFile(
-      join(bin, 'pnpm'),
+      executable,
       '#!/usr/bin/env node\n' +
         "require('node:fs').writeFileSync(" +
         JSON.stringify(captured) +
@@ -363,7 +370,7 @@ describe('CLI workspace safety', () => {
         join(directory, 'source'),
       ],
       {
-        PATH: `${bin}:${process.env.PATH}`,
+        PATH: `${bin}${delimiter}${process.env.PATH}`,
         AGENT_RUNNER_TOKEN: 'fixture-fleet',
         DATABASE_URL: 'fixture-database',
         ANTHROPIC_API_KEY: 'fixture-provider',
@@ -373,16 +380,19 @@ describe('CLI workspace safety', () => {
     expect(JSON.parse(await readFile(captured, 'utf8'))).toEqual([]);
   });
 
-  it('rejects tracked symlinks and leaves source unchanged', async () => {
-    const root = await create();
-    await symlink('manifest.ts', join(root, 'link'));
-    commit(root, 'Symlink');
-    const head = git(root, 'rev-parse', 'HEAD');
-    expect(
-      (await run(['workflow', 'deploy', '--directory', root]).result).data.error
-        .code,
-    ).toBe('unsafe_source');
-    expect(git(root, 'rev-parse', 'HEAD')).toBe(head);
-    expect(deploys).toBe(0);
-  });
+  it.skipIf(process.platform === 'win32')(
+    'rejects tracked symlinks and leaves source unchanged',
+    async () => {
+      const root = await create();
+      await symlink('manifest.ts', join(root, 'link'));
+      commit(root, 'Symlink');
+      const head = git(root, 'rev-parse', 'HEAD');
+      expect(
+        (await run(['workflow', 'deploy', '--directory', root]).result).data
+          .error.code,
+      ).toBe('unsafe_source');
+      expect(git(root, 'rev-parse', 'HEAD')).toBe(head);
+      expect(deploys).toBe(0);
+    },
+  );
 });

@@ -17,6 +17,7 @@ import { dirname, join, resolve, basename } from 'node:path';
 import { CliError } from './error';
 import type { Profile } from './config';
 import { platformClient } from './client';
+import { pnpmInvocation } from './pnpm';
 
 export type Kind = 'app' | 'workflow';
 export type Workspace = {
@@ -368,10 +369,10 @@ export async function installSdk(
       '\n.hatch/\n.hatch-stage-*/\n.hatch-backup-*/\nnode_modules/\ngen/\n',
       { flag: 'a' },
     );
-    const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+    const pnpm = await pnpmInvocation();
     await command(
-      pnpm,
-      ['install', '--ignore-scripts', '--lockfile=false'],
+      pnpm.executable,
+      [...pnpm.prefix, 'install', '--ignore-scripts', '--lockfile=false'],
       root,
       signal,
     );
@@ -387,8 +388,9 @@ export async function installSdk(
       if (gen?.isSymbolicLink())
         throw new CliError('unsafe_codegen', 'gen must not be a symlink.', 6);
       await command(
-        pnpm,
+        pnpm.executable,
         [
+          ...pnpm.prefix,
           'dlx',
           '--allow-build',
           '@bufbuild/buf',

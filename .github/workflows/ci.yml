@@ -73,6 +73,22 @@ jobs:
       - name: Build
         run: pnpm build
 
+  windows-cli:
+    name: Windows CLI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+      - uses: pnpm/action-setup@v6
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build standalone CLI
+        run: pnpm build:cli
+      - name: Verify CLI authentication, stdin and workspace lifecycles
+        run: pnpm exec vitest run --project unit packages/hatch-cli/src
+
   browser:
     name: Browser tests
     runs-on: ubuntu-latest

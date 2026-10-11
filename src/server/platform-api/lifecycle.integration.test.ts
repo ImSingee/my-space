@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { eq, sql } from 'drizzle-orm';
 import { createORPCClient } from '@orpc/client';
@@ -25,10 +26,9 @@ import { platformApiContract } from '~/platform-api/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION, RUNNER_WS_PATH } from '~agent/protocol';
 
-const cliExecutable = new URL(
-  '../../../packages/hatch-cli/dist/main.mjs',
-  import.meta.url,
-).pathname;
+const cliExecutable = fileURLToPath(
+  new URL('../../../packages/hatch-cli/dist/main.mjs', import.meta.url),
+);
 const databaseUrl = process.env.HATCH_PLATFORM_TEST_DATABASE_URL;
 const secret = 'disposable-platform-api-test-secret-32-characters';
 const fleet = 'disposable-platform-api-fleet';

@@ -30,6 +30,7 @@ let directory: string;
 let config: string;
 let origin: string;
 let statusCode = 200;
+let wrongCredentialType = false;
 let deviceDecision = 'approved';
 let polls = 0;
 let onSignOut: (() => Promise<void>) | undefined;
@@ -68,6 +69,7 @@ const server = createServer(async (incoming, outgoing) => {
         },
         statusCode,
       );
+    else if (wrongCredentialType) send(sessionStatus);
     else if (incoming.headers['x-api-key'] === 'fixture-key-secret')
       send({
         ...sessionStatus,
@@ -181,6 +183,7 @@ describe('CLI authentication boundary', () => {
     directory = await mkdtemp(join(tmpdir(), 'hatch-cli-test-'));
     config = join(directory, 'config.json');
     statusCode = 200;
+    wrongCredentialType = false;
     deviceDecision = 'approved';
     polls = 0;
     calls = [];
@@ -393,8 +396,10 @@ describe('CLI authentication boundary', () => {
       '--no-browser',
       '--config',
       config,
+      '--json',
     ]);
     expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).error.code).toBe('run_token_not_persisted');
     await expect(stat(config)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -480,7 +485,40 @@ describe('CLI authentication boundary', () => {
     }
     const invalid = await invoke(['auth', 'login', '--token-stdin', '--json']);
     expect(invalid.code).toBe(2);
+    const workdir = await invoke([
+      '--workdir',
+      '.',
+      'auth',
+      'status',
+      '--json',
+    ]);
+    expect(JSON.parse(workdir.stdout).error.code).toBe('invalid_arguments');
     expect(calls).toEqual([]);
+  });
+
+  it('reports a credential-type mismatch without saving or replacing a profile', async () => {
+    await stored();
+    const before = await readFile(config, 'utf8');
+    const key = join(directory, 'key');
+    await writeFile(key, 'fixture-key-secret', { mode: 0o600 });
+    wrongCredentialType = true;
+    const result = await invoke([
+      'auth',
+      'login',
+      '--url',
+      origin,
+      '--api-key-file',
+      key,
+      '--config',
+      config,
+      '--json',
+    ]);
+    expect(JSON.parse(result.stdout).error.code).toBe(
+      'credential_type_mismatch',
+    );
+    expect(result.code).toBe(2);
+    expect(await readFile(config, 'utf8')).toBe(before);
+    expect(result.stdout + result.stderr).not.toContain('fixture-key-secret');
   });
 
   it('uses API keys with their own header and preserves the config/env boundary', async () => {

@@ -41,7 +41,7 @@ for (const input of Object.keys(result.metafile.inputs)) {
       (value) => JSON.parse(value) as { name: string; version: string },
       () => null,
     );
-    if (manifest) {
+    if (manifest?.name) {
       for (const filename of [
         'LICENSE',
         'LICENSE.md',

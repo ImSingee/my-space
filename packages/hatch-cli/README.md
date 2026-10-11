@@ -20,7 +20,12 @@ pnpm exec hatch help
 published. `scripts/build-cli.ts` bundles the pure contract and client, and
 rejects server-only imports in its build graph. The production Dockerfile
 installs `/usr/local/bin/hatch` in the shared Platform/Runner image, executable
-from any workdir with Node alone. CLI/SDK outputs must be rebuilt before packing.
+from any workdir with Node alone. The image also provides the pinned pnpm needed
+for workspace dependency installation/codegen. CLI/SDK outputs must be rebuilt
+before packing. On Windows, npm-global/Corepack pnpm shims are resolved to their
+Node entry point; standalone `pnpm.exe` is supported directly. Batch scripts
+are never executed through a shell. `--workdir` applies to source lifecycle
+commands; auth rejects it as an invalid argument.
 
 ## Login, profiles and environment credentials
 

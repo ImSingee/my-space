@@ -21,6 +21,7 @@ export async function readInput(
       AbortSignal.any([signal, AbortSignal.timeout(30000)]),
       process.stdin,
     );
+    process.stdin.setEncoding('utf8');
     contents = '';
     try {
       for await (const chunk of process.stdin) {

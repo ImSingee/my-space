@@ -15,22 +15,6 @@ import {
 import { getStatus, record, request } from './http';
 import type { AuthStatus } from './http';
 
-/** Strip only known leading globals when deciding whether auth is implemented. */
-export function authCommandOffset(args: readonly string[]): number | null {
-  let index = 0;
-  while (args[index]?.startsWith('--')) {
-    const [flag, inline] = args[index].split('=');
-    if (flag === '--json') index++;
-    else if (['--profile', '--config', '--timeout'].includes(flag))
-      index += inline === undefined ? 2 : 1;
-    else return null;
-  }
-  return args[index] === 'auth' &&
-    ['login', 'status', 'logout'].includes(args[index + 1])
-    ? index
-    : null;
-}
-
 async function openBrowser(url: string): Promise<boolean> {
   const command =
     process.platform === 'darwin'
@@ -373,15 +357,16 @@ export async function runAuth(
         token: await deviceLogin(url, !!values['no-browser'], timeout, signal),
       };
   const status = await getStatus(credential, Math.min(timeout, 15000), signal);
-  if (
-    status.credentialType === 'run' ||
-    (credential.apiKey
-      ? status.credentialType !== 'api-key'
-      : status.credentialType !== 'session')
-  )
+  if (status.credentialType === 'run')
     throw new CliError(
       'run_token_not_persisted',
       'Run tokens must be supplied through HATCH_CLI_URL and HATCH_CLI_TOKEN.',
+    );
+  const expected = credential.apiKey ? 'api-key' : 'session';
+  if (status.credentialType !== expected)
+    throw new CliError(
+      'credential_type_mismatch',
+      `Expected a ${expected} credential; the server reported ${status.credentialType}. No credential was saved.`,
     );
   if (signal.aborted) throw new CliError('cancelled', 'Cancelled.', 130);
   const name = selectedProfile ?? 'default';

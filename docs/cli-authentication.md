@@ -52,8 +52,8 @@ curl --fail --silent --show-error \
 
 `HATCH_API_KEY` is an example script variable, not a new platform configuration
 or implemented CLI option. Do not enable shell tracing or verbose HTTP logging
-for calls containing credentials. CLI environment/config-file storage remains
-future client work.
+for calls containing credentials. For CLI authentication, see `HATCH_CLI_API_KEY`
+and `hatch auth login --api-key-file` in the [CLI README](../packages/hatch-cli/README.md).
 
 The server uses the official `@better-auth/api-key` **1.7.7** plugin with its
 default hash storage ([plugin documentation](https://www.better-auth.com/docs/plugins/api-key)).
