@@ -96,6 +96,8 @@ continuing to retry. Missing DNS settings, certificate rate limits, and HTTPS
 listener failures show an actionable warning instead of the waiting message.
 Missing DNS or certificate settings are retried automatically. If the helper
 exits, select **Reconnect**.
+When the certificate provider supplies a retry delay, Hatch keeps the rate-limit
+warning visible and waits for that delay before requesting another certificate.
 A missing executable shows installation guidance and disables connection.
 
 If you disconnect while visiting the private address, the panel asks you to

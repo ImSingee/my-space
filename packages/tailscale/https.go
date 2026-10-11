@@ -16,6 +16,7 @@ type httpsPreparation struct {
 	emit        func(snapshot)
 	now         func() time.Time
 	startedAt   time.Time
+	retryAt     time.Time
 	ready       bool
 }
 
@@ -31,14 +32,20 @@ func (p *httpsPreparation) prepare(ctx context.Context, domain string) snapshot 
 	if p.ready {
 		return connected
 	}
+	rateLimitWarning := snapshot{State: "error", Message: "The certificate provider has temporarily limited HTTPS certificate requests. Hatch will retry automatically. Reconnecting will not speed this up."}
+	if p.now().Before(p.retryAt) {
+		return rateLimitWarning
+	}
+	p.retryAt = time.Time{}
 	if p.startedAt.IsZero() {
 		p.startedAt = p.now()
 		// Publish progress before the first blocking certificate request.
 		p.emit(p.waiting())
 	}
 	if err := p.certificate(ctx, domain); err != nil {
-		if _, limited := local.RateLimitRetryAfter(err); limited {
-			return snapshot{State: "error", Message: "The certificate provider has temporarily limited HTTPS certificate requests. Hatch will retry automatically. Reconnecting will not speed this up."}
+		if retryAfter, limited := local.RateLimitRetryAfter(err); limited {
+			p.retryAt = p.now().Add(retryAfter)
+			return rateLimitWarning
 		}
 		return p.waiting()
 	}
