@@ -28,31 +28,41 @@ vi.mock('~queries/agent', () => ({
       modelId: null,
       updatedAt: '2026-10-11T12:00:00.000Z',
       // Equal message counts ensure only the session identity resets scrolling.
-      messages: Array.from({ length: id === 'empty' ? 0 : 12 }, (_, index) => ({
-        role: 'assistant',
-        content: [
-          {
-            type: 'text',
-            text: `${id} reply ${index}\n\n${'A paragraph of conversation history.\n\n'.repeat(id === 'long' ? 18 : 2)}`,
-          },
-          ...(id === 'nested' && index === 11
-            ? [
-                {
-                  type: 'thinking',
-                  thinking: 'Nested thinking line.\n'.repeat(100),
-                },
-              ]
-            : []),
-        ],
-      })),
+      // Each reply answers its own prompt: consecutive assistant messages are
+      // one reply, whose earlier messages fold into its work process.
+      messages: Array.from({ length: id === 'empty' ? 0 : 12 }, (_, index) => [
+        { role: 'user', content: `${id} prompt ${index}` },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: `${id} reply ${index}\n\n${'A paragraph of conversation history.\n\n'.repeat(id === 'long' ? 18 : 2)}`,
+            },
+            ...(id === 'nested' && index === 11
+              ? [
+                  {
+                    type: 'thinking',
+                    thinking: 'Nested thinking line.\n'.repeat(100),
+                  },
+                ]
+              : []),
+          ],
+        },
+      ]).flat(),
       activeRun: fixtures.streaming
         ? {
             id: 'scroll-run',
             status: 'running',
+            startedAt: '2026-10-11T12:00:00.000Z',
+            userTurn: null,
             pendingAsk: null,
             pendingEnvRequest: null,
           }
         : null,
+      runs: [],
+      serverTime: '2026-10-11T12:00:00.000Z',
+      clockOffsetMs: 0,
     }),
   }),
 }));
@@ -228,7 +238,7 @@ test('stays at the bottom when loaded content changes height without a new messa
         ? {
             ...old,
             messages: old.messages.map((message, index) =>
-              index === 0
+              index === 1
                 ? {
                     role: 'assistant',
                     content: [

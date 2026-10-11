@@ -588,7 +588,10 @@ export const agentRuns = snakeCase.table(
     providerId: ulid('provider_id').notNull(),
     modelId: text('model_id').notNull(),
     status: text().$type<AgentRunStatus>().notNull().default('running'),
-    /** The user input that started the run, stored for diagnostics/replay. */
+    /**
+     * The user input that started the run, stored for diagnostics/replay,
+     * plus its `userTurn` binding to the transcript (`~agent/user-turns`).
+     */
     input: jsonb().$type<JsonObject>().notNull(),
     /** The currently pending ask, if the run is blocked waiting for the user. */
     pendingAsk: jsonb('pending_ask').$type<JsonObject>(),

@@ -13,9 +13,9 @@
  *   Cancel/answer/environment flow platform → runner over the same channel.
  *   A sweeper interrupts active runs whose lease expired (runner died).
  */
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
-import { db, schema } from '~/db';
+import { db, schema, type DB, type TX } from '~/db';
 import type { AgentRunStatus, JsonObject, JsonValue } from '~/db/schema';
 import type {
   AgentRunStreamEvent,
@@ -43,6 +43,7 @@ import {
   type RunModelConfig,
   type SendImage,
 } from '~agent/protocol';
+import { nextUserTurn, parseUserTurn } from '~agent/user-turns';
 import { AppError } from '~server/errors';
 import { parseRetryableAgentTurn } from './agent-retry';
 import {
@@ -91,8 +92,32 @@ export type PendingEnvRequestPayload = {
 export type ActiveAgentRun = {
   id: string;
   status: AgentRunStatus;
+  /** Run creation time (ISO); the live work timer counts from here. */
+  startedAt: string;
+  /**
+   * User turn the run answers (`~agent/user-turns`); null when the run
+   * predates the binding and no transcript snapshot was available to derive it.
+   */
+  userTurn: number | null;
   pendingAsk: PendingAskPayload | null;
   pendingEnvRequest: PendingEnvRequestPayload | null;
+};
+
+/** Timing of the run that produced the reply to one user turn. */
+export type SessionRunTiming = {
+  id: string;
+  status: AgentRunStatus;
+  /** See `~agent/user-turns`. */
+  userTurn: number;
+  startedAt: string;
+  /** Null while the run is active. */
+  completedAt: string | null;
+  /**
+   * Why a failed or interrupted run ended. The transcript may not carry it:
+   * an interrupted run (or a stopped one whose Runner never reported) has no
+   * persisted reply, so history renders this notice instead.
+   */
+  error: string | null;
 };
 
 type Subscriber = (event: AgentRunStreamEvent) => void;
@@ -301,8 +326,9 @@ function isActiveRunConflict(error: unknown): boolean {
 
 export async function getActiveAgentRun(
   sessionId: string,
+  executor: DB | TX = db,
 ): Promise<ActiveAgentRun | null> {
-  const row = await db.query.agentRuns.findFirst({
+  const row = await executor.query.agentRuns.findFirst({
     where: { sessionId, status: { in: ACTIVE_STATUSES } },
     orderBy: { createdAt: 'desc' },
   });
@@ -310,9 +336,52 @@ export async function getActiveAgentRun(
   return {
     id: row.id,
     status: row.status,
+    startedAt: row.createdAt.toISOString(),
+    userTurn: parseUserTurn(row.input.userTurn),
     pendingAsk: asPendingAsk(row.pendingAsk ?? null),
     pendingEnvRequest: asPendingEnvRequest(row.pendingEnvRequest ?? null),
   };
+}
+
+/**
+ * Timing for the newest run of each user turn in a session.
+ *
+ * Retry replays a failed turn at the same user turn, so older runs for that
+ * turn no longer describe the reply in the transcript. Runs created before
+ * the binding existed have no user turn and are omitted rather than guessed.
+ */
+export async function listSessionRunTimings(
+  sessionId: string,
+  executor: DB | TX = db,
+): Promise<SessionRunTiming[]> {
+  const rows = await executor
+    .select({
+      id: schema.agentRuns.id,
+      status: schema.agentRuns.status,
+      userTurn: sql<string | null>`case
+        when jsonb_typeof(${schema.agentRuns.input} -> 'userTurn') = 'number'
+        then ${schema.agentRuns.input} ->> 'userTurn' end`,
+      createdAt: schema.agentRuns.createdAt,
+      completedAt: schema.agentRuns.completedAt,
+      error: schema.agentRuns.error,
+    })
+    .from(schema.agentRuns)
+    .where(eq(schema.agentRuns.sessionId, sessionId))
+    .orderBy(asc(schema.agentRuns.createdAt), asc(schema.agentRuns.id));
+  const byTurn = new Map<number, SessionRunTiming>();
+  for (const row of rows) {
+    const userTurn = parseUserTurn(row.userTurn);
+    if (userTurn === null) continue;
+    byTurn.set(userTurn, {
+      id: row.id,
+      status: row.status,
+      userTurn,
+      startedAt: row.createdAt.toISOString(),
+      completedAt: row.completedAt?.toISOString() ?? null,
+      error: row.error,
+    });
+  }
+  return [...byTurn.values()].sort((a, b) => a.userTurn - b.userTurn);
 }
 
 export async function getAgentRun(runId: string) {
@@ -399,6 +468,7 @@ async function resolveRunModelConfig(
 
 export async function startAgentRun(input: AgentRunInput): Promise<{
   runId: string;
+  startedAt: string;
 }> {
   const sessionRow = await db.query.agentSessions.findFirst({
     where: { id: input.sessionId },
@@ -562,14 +632,19 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
           status: 'running',
           // Covers the dispatch window; the accepting runner renews from here.
           leaseExpiresAt: leaseDeadline(),
-          // Diagnostics only (no reader reconstructs the run from this). Store
-          // image metadata, not the base64 payloads — those already live in the
-          // persisted session message, and duplicating them here bloated the row.
+          // Same clock as `completedAt` (finishRun), so their difference is
+          // the run's real duration.
+          createdAt: new Date(),
+          // Store image metadata, not the base64 payloads — those already
+          // live in the persisted session message, and duplicating them here
+          // bloated the row. `userTurn` binds the run to the user message
+          // appended below (see `~agent/user-turns`); the rest is diagnostics.
           input: {
             userText,
             composerContent,
             images: images.map((image) => ({ mimeType: image.mimeType })),
             attachments,
+            userTurn: nextUserTurn(baseMessages),
           },
         })
         .returning();
@@ -656,7 +731,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     });
   }
 
-  return { runId: run.id };
+  return { runId: run.id, startedAt: run.createdAt.toISOString() };
 }
 
 /** ================== hub callbacks (runner lifecycle) ================== */

@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  getRetryableErrorInput,
-  groupTurns,
-  hasPersistedAgentError,
-} from './chat-turns';
+import { nextUserTurn } from '~agent/user-turns';
+import { getRetryableErrorInput, groupTurns } from './chat-turns';
 import {
   type AssistantBlock,
   type ChatMessage,
@@ -72,10 +69,11 @@ describe('groupTurns', () => {
     ];
 
     expect(groupTurns(messages)).toEqual([
-      { kind: 'user', key: 'm0', message: messages[0] },
+      { kind: 'user', key: 'm0', userTurn: 0, message: messages[0] },
       {
         kind: 'assistant',
         key: 'm1',
+        userTurn: 0,
         blocks: [{ type: 'text', text: 'I started the work.' }],
         stopReason: 'error',
         errorMessage: 'OpenAI API error (402): no body',
@@ -101,35 +99,33 @@ describe('groupTurns', () => {
       errorMessage: 'Provider unavailable',
     });
   });
-});
 
-describe('hasPersistedAgentError', () => {
-  it('only accepts a terminal provider error at the end of the transcript', () => {
-    expect(
-      hasPersistedAgentError([
-        { role: 'user', content: 'Hello' },
-        {
-          role: 'assistant',
-          content: [],
-          stopReason: 'error',
-          errorMessage: 'Provider unavailable',
-        },
-      ]),
-    ).toBe(true);
+  it('binds each reply to the user turn its run recorded', () => {
+    // Matches the platform's count: the n-th `role: 'user'` message is user
+    // turn n, including a prompt whose run never produced a reply.
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'First' },
+      { role: 'user', content: 'Dispatch failed for this one' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'call-1', name: 'list_apps', arguments: {} },
+        ],
+      },
+      { role: 'toolResult', toolName: 'list_apps', content: [] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      { role: 'user', content: 'Third' },
+    ];
 
     expect(
-      hasPersistedAgentError([
-        {
-          role: 'assistant',
-          content: [],
-          stopReason: 'aborted',
-          errorMessage: 'Request was aborted',
-        },
-      ]),
-    ).toBe(false);
-    expect(hasPersistedAgentError([{ role: 'user', content: 'Retry' }])).toBe(
-      false,
-    );
+      groupTurns(messages).map((turn) => [turn.kind, turn.userTurn]),
+    ).toEqual([
+      ['user', 0],
+      ['user', 1],
+      ['assistant', 1],
+      ['user', 2],
+    ]);
+    expect(nextUserTurn(messages)).toBe(3);
   });
 });
 

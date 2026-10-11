@@ -33,6 +33,7 @@ const fixtures = vi.hoisted(() => ({
     activeRun: null as null | {
       id: string;
       status: 'running';
+      startedAt: string;
       pendingAsk: null;
       pendingEnvRequest: null | {
         requestId: string;
@@ -40,6 +41,9 @@ const fixtures = vi.hoisted(() => ({
         variables: { key: string; description: string; secret: boolean }[];
       };
     },
+    runs: [],
+    serverTime: '2026-07-11T12:00:00.000Z',
+    clockOffsetMs: 0,
   },
   providers: [
     {
@@ -184,6 +188,7 @@ test('hydrates a pending env request from the active session run', async () => {
   fixtures.session.activeRun = {
     id: 'run-waiting-for-env',
     status: 'running',
+    startedAt: '2026-07-11T12:00:00.000Z',
     pendingAsk: null,
     pendingEnvRequest: {
       requestId: 'env-from-session',
@@ -234,6 +239,7 @@ test('syncs changed prompt metadata without reconnecting the active stream', asy
   fixtures.session.activeRun = {
     id: 'run-with-refreshed-seed',
     status: 'running',
+    startedAt: '2026-07-11T12:00:00.000Z',
     pendingAsk: null,
     pendingEnvRequest: null,
   };
@@ -284,6 +290,7 @@ test('keeps reconnect backoff when an unchanged session refetch succeeds', async
   fixtures.session.activeRun = {
     id: 'run-with-outage',
     status: 'running',
+    startedAt: '2026-07-11T12:00:00.000Z',
     pendingAsk: null,
     pendingEnvRequest: null,
   };
@@ -416,6 +423,7 @@ test('refreshes a stale error after another tab has consumed its Retry', async (
     fixtures.session.activeRun = {
       id: 'run-from-another-tab',
       status: 'running',
+      startedAt: '2026-07-11T12:01:00.000Z',
       pendingAsk: null,
       pendingEnvRequest: null,
     };

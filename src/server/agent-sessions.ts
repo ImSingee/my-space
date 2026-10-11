@@ -11,10 +11,13 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
+import { nextUserTurn } from '~agent/user-turns';
 import {
   cancelAgentRun,
   getActiveAgentRun,
+  listSessionRunTimings,
   type ActiveAgentRun,
+  type SessionRunTiming,
 } from './agent-runs';
 import { deleteAgentSessionAttachments } from './agent-attachments';
 import { broadcastSessionWorkspaceCleanup } from './agent-runner/hub';
@@ -112,34 +115,59 @@ export type SessionDetail = {
   updatedAt: string;
   messages: JsonValue[];
   activeRun: ActiveAgentRun | null;
+  /** Newest run per user turn, read in the same snapshot as `messages`. */
+  runs: SessionRunTiming[];
+  /** Server clock when the snapshot was read, for live timer alignment. */
+  serverTime: string;
 };
 
 export const getSession = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
   .validator((id: string) => z.string().parse(id))
-  .handler(async ({ data: id }): Promise<SessionDetail | null> => {
-    const row = await db.query.agentSessions.findFirst({
-      where: { id },
-    });
-    if (!row) return null;
-    const [associations, activeRun] = await Promise.all([
-      db
-        .select({ appId: schema.agentSessionApps.appId })
-        .from(schema.agentSessionApps)
-        .where(eq(schema.agentSessionApps.sessionId, row.id)),
-      getActiveAgentRun(row.id),
-    ]);
-    return {
-      id: row.id,
-      title: row.title,
-      appIds: associations.map((association) => association.appId).sort(),
-      providerId: row.providerId,
-      modelId: row.modelId,
-      updatedAt: row.updatedAt.toISOString(),
-      messages: row.messages,
-      activeRun,
-    };
-  });
+  .handler(async ({ data: id }): Promise<SessionDetail | null> =>
+    // One snapshot for the transcript and its runs. A run that completes has
+    // its transcript persisted before it turns `completed`, so a completed run
+    // seen here guarantees `messages` holds its reply. Cancellation and
+    // interruption can turn a run terminal before (or without) its partial
+    // transcript; the chat waits for the reply itself in those cases.
+    db.transaction(
+      async (tx) => {
+        const row = await tx.query.agentSessions.findFirst({
+          where: { id },
+        });
+        if (!row) return null;
+        const [associations, active, runs] = await Promise.all([
+          tx
+            .select({ appId: schema.agentSessionApps.appId })
+            .from(schema.agentSessionApps)
+            .where(eq(schema.agentSessionApps.sessionId, row.id)),
+          getActiveAgentRun(row.id, tx),
+          listSessionRunTimings(row.id, tx),
+        ]);
+        // A run created before runs recorded their user turn still answers the
+        // last user message of this same snapshot: no other run can append one
+        // while it is active.
+        const lastUserTurn = nextUserTurn(row.messages) - 1;
+        const activeRun =
+          active && active.userTurn === null && lastUserTurn >= 0
+            ? { ...active, userTurn: lastUserTurn }
+            : active;
+        return {
+          id: row.id,
+          title: row.title,
+          appIds: associations.map((association) => association.appId).sort(),
+          providerId: row.providerId,
+          modelId: row.modelId,
+          updatedAt: row.updatedAt.toISOString(),
+          messages: row.messages,
+          activeRun,
+          runs,
+          serverTime: new Date().toISOString(),
+        };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    ),
+  );
 
 const createSchema = z.object({
   title: z.string().optional(),

@@ -18,9 +18,14 @@ const fixtures = vi.hoisted(() => ({
     activeRun: null as null | {
       id: string;
       status: 'running';
+      startedAt: string;
+      userTurn: number | null;
       pendingAsk: null;
       pendingEnvRequest: null;
     },
+    runs: [],
+    serverTime: '2026-10-12T12:00:00.000Z',
+    clockOffsetMs: 0,
   },
   providers: [
     {
@@ -222,6 +227,9 @@ test('keeps streaming follow paused after a tail prompt toggle until a real new 
   fixtures.session.activeRun = {
     id: 'run-follow',
     status: 'running',
+    startedAt: '2026-10-12T12:00:00.000Z',
+    // The run answers the trailing long prompt.
+    userTurn: 1,
     pendingAsk: null,
     pendingEnvRequest: null,
   };
