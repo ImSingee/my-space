@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # --- Deno binary (used to run each app's backend) -------------------------
-FROM denoland/deno:bin-2.9.6 AS deno
+FROM denoland/deno:bin-2.9.7 AS deno
 
 # Private in-panel Tailscale node (userspace, no TUN or privileged container).
-FROM golang:1.26.6 AS tailscale
+FROM golang:1.27.2 AS tailscale
 WORKDIR /build
 COPY packages/tailscale/go.mod packages/tailscale/go.sum ./
 RUN go mod download
@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /hatch-tailscale .
 # --- Base image with pnpm ----------------------------------------------------
 FROM node:26-slim AS base
 WORKDIR /app
-RUN npm install --global pnpm@11.24.0
+RUN npm install --global pnpm@12.11.2
 
 # --- Dependencies ------------------------------------------------------------
 # Install ALL deps (including dev) and DO run install scripts: the platform

@@ -88,7 +88,7 @@ test('keeps partial output and announces a live terminal error', async () => {
   await expect.element(screen.getByText('Partial reply')).toBeVisible();
   await expect
     .element(screen.getByRole('alert'))
-    .toHaveTextContent('OpenAI API error (402)');
+    .toMatchTextContent('OpenAI API error (402)');
 });
 
 test('keeps the live error when transcript refresh fails', async () => {
@@ -104,7 +104,7 @@ test('keeps the live error when transcript refresh fails', async () => {
 
   await expect
     .element(screen.getByRole('alert'))
-    .toHaveTextContent('Provider unavailable');
+    .toMatchTextContent('Provider unavailable');
   await expect
     .element(screen.getByTestId('stream-state'))
     .toHaveTextContent('run-1:idle');
