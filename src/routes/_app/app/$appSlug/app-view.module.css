@@ -14,14 +14,26 @@
   border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
-.updateBadge {
-  animation: update-badge-in var(--transition-base) both;
+.update {
+  display: inline-flex;
+  margin-inline-end: 4px;
+  animation: update-in var(--transition-base) both;
 }
 
-@keyframes update-badge-in {
+@media (prefers-reduced-motion: no-preference) {
+  .updateIcon {
+    transition: transform var(--transition-base);
+  }
+
+  .updateButton:hover .updateIcon {
+    transform: rotate(180deg);
+  }
+}
+
+@keyframes update-in {
   from {
     opacity: 0;
-    transform: translateX(4px) scale(0.96);
+    transform: translateX(4px);
   }
 
   to {
@@ -61,7 +73,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .updateBadge {
+  .update {
     animation: none;
   }
 }

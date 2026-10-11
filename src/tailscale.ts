@@ -12,6 +12,7 @@ export type TailscaleStatus = TailscaleConfig & {
   state:
     | 'disconnected'
     | 'starting'
+    | 'preparing-https'
     | 'needs-login'
     | 'needs-approval'
     | 'connected'

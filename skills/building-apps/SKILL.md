@@ -25,10 +25,14 @@ Do not import generated files or execution modules from the manifest.
 ## Core workflow
 
 1. For a new App, call `list_apps` and use existing `slug · name` pairs to match
-   the user's naming style. Ask for the name and slug in two separate `ask`
-   calls, name first. Explain that both can be changed later. After both are
-   confirmed, call `create_app`; pin user-facing Apps and leave backend-only or
-   widget-only Apps unpinned.
+   the user's naming style. Confirm the name and slug in one `ask` call with
+   two separate entries in `questions`: name first, slug second. Offer
+   style-matched name choices and slug suggestions based on the recommended
+   name; let the user choose or enter each value independently. Explain that
+   both can be changed later. Reuse values the user has already explicitly
+   provided and ask only for missing fields; if both are provided, skip `ask`.
+   After both are confirmed, call `create_app`; pin user-facing Apps and leave
+   backend-only or widget-only Apps unpinned.
    The slug is the human-facing `/app/<slug>` segment. Hatch generates a
    separate immutable id for the repository, data relations, and technical
    `/api/app/<id>/...` URLs.

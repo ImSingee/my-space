@@ -315,14 +315,14 @@ async function acceptDispatch(conn: RunnerConn, runId: string): Promise<void> {
   }
 }
 
-/** Forward a cancel to the runner executing the run (no-op when offline). */
+/** Forward the user's cancel to the executing runner (no-op when offline). */
 export function sendRunCancel(
   runnerId: string | null | undefined,
   runId: string,
 ): boolean {
   const conn = ownerConn(runnerId);
   if (!conn) return false;
-  return send(conn, { type: 'run.cancel', runId });
+  return send(conn, { type: 'run.cancel', runId, userInitiated: true });
 }
 
 /** Forward the user's answers to the runner (no-op when offline). */

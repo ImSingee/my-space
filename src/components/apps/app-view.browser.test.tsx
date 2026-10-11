@@ -247,3 +247,39 @@ test('keeps the existing iframe usable when invalidation fails', async () => {
     .element(screen.getByRole('button', { name: 'Reload app' }))
     .toBeEnabled();
 });
+
+test('hands a pending update reload to the plain icon and restores the prompt on failure', async () => {
+  mocks.pendingRevision = 'revision-two';
+  let rejectReload: (error: Error) => void = () => undefined;
+  mocks.invalidate.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectReload = reject;
+      }),
+  );
+  const screen = await renderAppView();
+
+  await screen
+    .getByRole('button', { name: 'Update available — reload app' })
+    .click();
+
+  await vi.waitFor(() =>
+    expect(screen.container.querySelector('output')).toBeNull(),
+  );
+  await expect
+    .element(
+      screen.getByRole('button', { name: 'Update available — reload app' }),
+    )
+    .toBeDisabled();
+
+  rejectReload(new Error('Revision lookup failed'));
+
+  await expect
+    .element(screen.getByRole('status'))
+    .toHaveTextContent('Update available');
+  await expect
+    .element(
+      screen.getByRole('button', { name: 'Update available — reload app' }),
+    )
+    .toBeEnabled();
+});

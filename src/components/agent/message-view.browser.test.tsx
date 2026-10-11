@@ -15,6 +15,7 @@ import type { AppListItem } from '~server/apps';
 import type { EditFileDetails } from '~agent/edit-file-details';
 import type { WorkflowListItem } from '~server/workflows';
 import type { ChatMessage, ToolResultMessage, ToolCallBlock } from './types';
+import { pairToolResults } from './types';
 
 type RenderOptions = {
   width?: number;
@@ -79,6 +80,183 @@ function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
   });
   return render(<RouterProvider router={router as never} />);
 }
+
+test.each(['Question cancelled.', 'The user canceled this question.'])(
+  'keeps cancelled questions and choices inspectable in a reloaded transcript (%s)',
+  async (cancellationText) => {
+    const prompt = `Which release should we use? ${'release-details-'.repeat(30)}`;
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'cancelled-ask',
+            name: 'ask',
+            arguments: {
+              questions: [
+                {
+                  prompt,
+                  options: [
+                    { label: 'Stable release' },
+                    { label: 'Preview release' },
+                  ],
+                },
+                {
+                  prompt: 'Which platforms should be included?',
+                  options: [{ label: 'Web' }, { label: 'Desktop' }],
+                  allowMultiple: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolName: 'ask',
+        content: [{ type: 'text', text: cancellationText }],
+        isError: true,
+      },
+    ];
+    // Reload from the stored JSON rather than retaining the live ask form.
+    const reloaded: ChatMessage[] = JSON.parse(JSON.stringify(messages));
+    const screen = await renderMessage(reloaded[0], {
+      width: 320,
+      toolResults: pairToolResults(reloaded),
+    });
+    const header = screen.getByRole('button', { name: 'Ask the user' });
+    await expect.element(header).toHaveAttribute('aria-expanded', 'false');
+    await header.click();
+    const questions = screen.getByRole('region', { name: 'Questions' });
+    await expect.element(questions).toBeVisible();
+    expect(questions.element().textContent).toContain(
+      `${prompt}\n- Stable release\n- Preview release`,
+    );
+    expect(questions.element().textContent).toContain(
+      'Which platforms should be included?\nSelect multiple options.\n- Web\n- Desktop',
+    );
+    await expect
+      .element(screen.getByRole('region', { name: 'Canceled' }))
+      .toMatchTextContent(
+        cancellationText === 'Question cancelled.'
+          ? 'This question was canceled.'
+          : cancellationText,
+      );
+    await expect
+      .element(screen.getByRole('region', { name: 'Error' }))
+      .not.toBeInTheDocument();
+    expect(
+      screen.getByTestId('message-shell').element().scrollWidth,
+    ).toBeLessThanOrEqual(320);
+    await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('checkbox')).not.toBeInTheDocument();
+    await header.click();
+    await expect.element(header).toHaveAttribute('aria-expanded', 'false');
+    await header.click();
+    await expect.element(questions).toBeVisible();
+  },
+);
+
+test.each([false, true])(
+  'shows ask input with a missing or successful result (answered: %s)',
+  async (answered) => {
+    const screen = await renderMessage(
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'ask-1',
+            name: 'ask',
+            arguments: {
+              questions: [
+                {
+                  prompt: 'Which release?',
+                  options: [{ label: 'Stable' }, { label: 'Preview' }],
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        toolResults: answered
+          ? new Map([
+              [
+                'ask-1',
+                {
+                  role: 'toolResult',
+                  toolName: 'ask',
+                  content: [
+                    { type: 'text', text: 'Q: Which release?\nA: Stable' },
+                  ],
+                  isError: false,
+                },
+              ],
+            ])
+          : undefined,
+      },
+    );
+    await screen.getByRole('button', { name: 'Ask the user' }).click();
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .toMatchTextContent('Which release?');
+    expect(screen.getByTestId('message-shell').element().textContent).toContain(
+      answered ? 'A: Stable' : 'Which release?',
+    );
+  },
+);
+
+test.each([
+  {
+    questions: [
+      null,
+      { prompt: 5 },
+      {
+        prompt: 'Valid question',
+        options: [null, { label: 8 }, { label: 'Valid choice' }],
+      },
+    ],
+  },
+  { questions: 'invalid' },
+  undefined,
+])('renders malformed ask arguments without hiding the error', async (args) => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'bad-ask', name: 'ask', arguments: args },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'bad-ask',
+          {
+            role: 'toolResult',
+            toolName: 'ask',
+            isError: true,
+            content: [{ type: 'text', text: 'Invalid question input.' }],
+          },
+        ],
+      ]),
+    },
+  );
+  await screen.getByRole('button', { name: 'Ask the user' }).click();
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toMatchTextContent('Invalid question input.');
+  const questionText = screen
+    .getByTestId('message-shell')
+    .element()
+    .querySelector('section[aria-label="Questions"]')?.textContent;
+  expect(questionText).toBe(
+    Array.isArray(args?.questions)
+      ? 'Questions3. Valid question\n- Valid choice'
+      : undefined,
+  );
+});
 
 const capabilities = (frontend: boolean) => ({
   database: false,

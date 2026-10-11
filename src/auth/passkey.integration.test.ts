@@ -1,5 +1,6 @@
 import type { AddressInfo } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,6 +24,10 @@ import {
 
 const fixture = vi.hoisted(() => ({
   close: undefined as (() => Promise<void>) | undefined,
+  tailscaleOrigin: 'https://hatch.example.ts.net' as string | null,
+}));
+vi.mock('../server/tailscale-manager', () => ({
+  getTailscaleManager: () => ({ trustedOrigin: () => fixture.tailscaleOrigin }),
 }));
 vi.mock('~/db', async () => {
   const { createTestDb } = await import('~/db/test-db');
@@ -41,10 +46,13 @@ let cdp: CDPSession;
 let authenticatorId: string;
 let origin: string;
 let handleAuth: (request: Request) => Promise<Response>;
+let handleRelatedOrigins: () => Response;
+let relatedOriginRequests = 0;
 type ApiResult = { error: { code?: string; message: string } | null };
 
 // Serve the production component, SDK and auth handler together. Only the
-// authenticator and database are virtual; HTTP cookies and ceremonies are real.
+// authenticator, database and Tailscale connection are virtual; HTTP cookies,
+// browser related-origin validation and signed ceremonies are real.
 const html = `<!doctype html><html><body>
   <input autocomplete="username webauthn" aria-label="Email" />
   <div id="root"></div><script type="module">
@@ -81,16 +89,46 @@ const html = `<!doctype html><html><body>
 
 beforeAll(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), 'hatch-passkey-regression-'));
+  const keyPath = join(cacheDir, 'key.pem');
+  const certPath = join(cacheDir, 'cert.pem');
+  // Generate a disposable TLS key; never commit or reuse deployment credentials.
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-days',
+      '1',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-subj',
+      '/CN=hatch.example.test',
+      '-addext',
+      'subjectAltName=DNS:hatch.example.test,DNS:hatch.example.ts.net',
+    ],
+    { stdio: 'ignore' },
+  );
   const middleware: Connect.NextHandleFunction = async (req, res, next) => {
     try {
       if (req.url?.startsWith('/api/auth/')) {
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
         const body = Buffer.concat(chunks);
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(req.headers)) {
+          if (!name.startsWith(':') && value !== undefined) {
+            headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+          }
+        }
         const response = await handleAuth(
           new Request(`${origin}${req.url}`, {
             method: req.method,
-            headers: req.headers as Record<string, string>,
+            headers,
             ...(body.length ? { body } : {}),
           }),
         );
@@ -100,9 +138,22 @@ beforeAll(async () => {
         });
         res.setHeader('set-cookie', response.headers.getSetCookie());
         res.end(Buffer.from(await response.arrayBuffer()));
+      } else if (req.url === '/.well-known/webauthn') {
+        relatedOriginRequests++;
+        const response = handleRelatedOrigins();
+        response.headers.forEach((value, key) => res.setHeader(key, value));
+        res.end(await response.text());
       } else if (req.url === '/__passkey_regression') {
         res.setHeader('content-type', 'text/html');
-        res.end(await server.transformIndexHtml(req.url, html));
+        res.end(
+          await server.transformIndexHtml(
+            req.url,
+            html.replace(
+              'appOrigin: location.origin',
+              `appOrigin: ${JSON.stringify(origin)}`,
+            ),
+          ),
+        );
       } else next();
     } catch (error) {
       next(error as Error);
@@ -137,20 +188,47 @@ beforeAll(async () => {
     ],
     // This is an immutable test fixture, not a live editing surface. HMR can
     // otherwise remount the login component during concurrent repo checks.
-    server: { host: 'localhost', port: 0, hmr: false, watch: null },
+    server: {
+      host: '127.0.0.1',
+      port: 0,
+      hmr: false,
+      watch: null,
+      https: { key: await readFile(keyPath), cert: await readFile(certPath) },
+      allowedHosts: ['hatch.example.test', 'hatch.example.ts.net'],
+    },
   });
   await server.listen();
-  origin = `http://localhost:${(server.httpServer!.address() as AddressInfo).port}`;
+  const port = (server.httpServer!.address() as AddressInfo).port;
+  origin = 'https://hatch.example.test';
   console.info(`Passkey regression fixture: ${origin}/__passkey_regression`);
   vi.stubEnv('APP_URL', origin);
   vi.stubEnv('SECRET', 'passkey-regression-secret-at-least-32-characters');
   vi.stubEnv('AGENT_RUNNER_TOKEN', 'passkey-regression-runner');
   const { auth } = await import('./server');
+  // Exercise production security; Better Auth defaults to bypassing it in tests.
+  (await auth.$context).skipOriginCheck = false;
   handleAuth = (request) => auth.handler(request);
-  browser = await chromium.launch({ headless: true });
+  ({ passkeyRelatedOriginsResponse: handleRelatedOrigins } =
+    await import('../server/passkey-related-origins'));
+  browser = await chromium.launch({
+    headless: true,
+    // Isolate fixture traffic from system proxies and external DNS. Chromium's
+    // fixed HTTPS port also covers its internal /.well-known/webauthn fetch.
+    proxy: {
+      server: 'http://127.0.0.1:9',
+      bypass: 'hatch.example.test,hatch.example.ts.net',
+    },
+    args: [
+      '--ignore-certificate-errors',
+      '--host-resolver-rules=MAP hatch.example.test 127.0.0.1, MAP hatch.example.ts.net 127.0.0.1',
+      `--testing-fixed-https-port=${port}`,
+    ],
+  });
 }, 30_000);
 
 beforeEach(async () => {
+  fixture.tailscaleOrigin = 'https://hatch.example.ts.net';
+  relatedOriginRequests = 0;
   await db.delete(schema.user);
   await db.delete(schema.verification);
   context = await browser.newContext();
@@ -211,6 +289,97 @@ async function completeNativeAuthentication() {
   );
   expect(session.data.user.email).toBe('passkey@example.test');
 }
+
+test.each(['canonical', 'tailscale'])(
+  'shares a passkey registered at %s with the other HTTPS origin',
+  async (enrollmentOrigin) => {
+    const tailscaleOrigin = fixture.tailscaleOrigin!;
+    let login: ApiResult = { error: null };
+    if (enrollmentOrigin === 'tailscale') {
+      await page.goto(`${tailscaleOrigin}/__passkey_regression`);
+      await page.waitForFunction('window.ready === true');
+      login = await page.evaluate<ApiResult>(`window.client.signIn.email({
+        email: 'passkey@example.test', password: 'passkey-regression-password'
+      })`);
+    }
+    expect(login.error).toBeNull();
+    await enrollAndOpenLogin();
+    await page.goto(
+      `${enrollmentOrigin === 'canonical' ? tailscaleOrigin : origin}/__passkey_regression`,
+    );
+    await page.waitForFunction('window.ready === true');
+    await page.evaluate('window.mount()');
+    await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+    await completeNativeAuthentication();
+    const { credentials } = await cdp.send('WebAuthn.getCredentials', {
+      authenticatorId,
+    });
+    expect(credentials).toHaveLength(1);
+    expect(credentials[0].rpId).toBe('hatch.example.test');
+    expect(relatedOriginRequests).toBeGreaterThan(0);
+    await expect(db.select().from(schema.passkey)).resolves.toHaveLength(1);
+  },
+  20_000,
+);
+
+test('the browser rejects an origin missing from the related-origin declaration', async () => {
+  await enrollAndOpenLogin();
+  await page.goto(`${fixture.tailscaleOrigin}/__passkey_regression`);
+  await page.waitForFunction('window.ready === true');
+  fixture.tailscaleOrigin = null;
+  let verificationRequests = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/passkey/verify-authentication')) {
+      verificationRequests++;
+    }
+  });
+  const result = await page.evaluate<ApiResult>(
+    'window.client.signIn.passkey()',
+  );
+  expect(result.error).not.toBeNull();
+  expect(relatedOriginRequests).toBeGreaterThan(0);
+  expect(verificationRequests).toBe(0);
+  await expect(db.select().from(schema.session)).resolves.toEqual([]);
+}, 20_000);
+
+test.each(['disconnected', 'mismatched signed origin'])(
+  'rejects cross-domain authentication when %s without creating a session',
+  async (failure) => {
+    await enrollAndOpenLogin();
+    await page.goto(`${fixture.tailscaleOrigin}/__passkey_regression`);
+    await page.waitForFunction('window.ready === true');
+    const sessionsBefore = await db.select().from(schema.session);
+    await page.route('**/passkey/verify-authentication', async (route) => {
+      if (failure === 'disconnected') {
+        fixture.tailscaleOrigin = null;
+        return route.continue();
+      }
+      // Both origins are trusted, but the signature was produced on Tailscale.
+      const response = await handleAuth(
+        new Request(route.request().url(), {
+          method: 'POST',
+          headers: { ...route.request().headers(), origin },
+          body: route.request().postData(),
+        }),
+      );
+      return route.fulfill({
+        status: response.status,
+        headers: Object.fromEntries(response.headers),
+        body: await response.text(),
+      });
+    });
+    const result = await page.evaluate<ApiResult>(
+      'window.client.signIn.passkey()',
+    );
+    expect(result.error?.code).toBe(
+      failure === 'disconnected' ? 'INVALID_ORIGIN' : 'AUTHENTICATION_FAILED',
+    );
+    await expect(db.select().from(schema.session)).resolves.toHaveLength(
+      sessionsBefore.length,
+    );
+  },
+  20_000,
+);
 
 test.each(['explicit', 'conditional'])(
   'retries navigation after SDK %s authentication without another ceremony or session',
@@ -337,10 +506,12 @@ test('rejects enrollment on authenticators without resident credential support',
       automaticPresenceSimulation: true,
     },
   }));
-  await page.route('**/passkey/generate-register-options*', async (route) => {
-    const response = await route.fetch();
-    const options = await response.json();
-    await route.fulfill({ response, json: { ...options, timeout: 1_000 } });
+  await page.evaluate(() => {
+    const create = navigator.credentials.create.bind(navigator.credentials);
+    navigator.credentials.create = (options) => {
+      if (options?.publicKey) options.publicKey.timeout = 1_000;
+      return create(options);
+    };
   });
   const registration = await page.evaluate<ApiResult>('window.register()');
   expect(registration.error).not.toBeNull();

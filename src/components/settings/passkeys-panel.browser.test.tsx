@@ -98,6 +98,12 @@ test('adds a passkey from the empty security state', async () => {
   expect(mocks.toastSuccess).toHaveBeenCalledWith('Passkey added');
 });
 
+test('allows enrollment from a domain different from the canonical APP_URL', async () => {
+  const screen = await renderPanel('https://hatch.example.test');
+  await screen.getByRole('button', { name: 'Add passkey' }).click();
+  await vi.waitFor(() => expect(mocks.addPasskey).toHaveBeenCalledOnce());
+});
+
 test('keeps rename and delete working on an IP origin with creation disabled', async () => {
   fixtures.passkeys = [passkeyFixture()];
   const screen = await renderPanel('http://[::1]:3700');

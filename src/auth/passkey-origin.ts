@@ -33,7 +33,4 @@ export function getPasskeyOriginError(
   if (!getPasskeyRpId(appOrigin)) return ORIGIN_REQUIREMENT;
   if (requestOrigin === undefined) return;
   if (!getPasskeyRpId(requestOrigin)) return ORIGIN_REQUIREMENT;
-  if (new URL(requestOrigin).origin !== new URL(appOrigin).origin) {
-    return `Open Hatch at ${new URL(appOrigin).origin} to add or use a passkey.`;
-  }
 }

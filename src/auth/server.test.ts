@@ -82,7 +82,6 @@ describe('Better Auth configuration', () => {
     expect(mocks.passkey).toHaveBeenCalledWith({
       rpID: 'app.example.test',
       rpName: 'Hatch',
-      origin: 'https://app.example.test:8443',
       registration: { requireSession: true },
       authenticatorSelection: {
         residentKey: 'required',

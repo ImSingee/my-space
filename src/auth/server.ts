@@ -108,7 +108,9 @@ export const auth = betterAuth({
       },
       rpID: relyingPartyId,
       rpName: 'Hatch',
-      origin: appUrl,
+      // Verify the signed client origin against the request's Origin header.
+      // Better Auth's shared CSRF gate validates the challenge-cookie request
+      // against APP_URL and the currently trusted Tailscale origin.
       registration: {
         // Passkeys are an additional sign-in method for an existing account.
         // New accounts continue to use the email/password sign-up flow.

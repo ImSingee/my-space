@@ -331,6 +331,7 @@ export type RunStartPayload = Omit<z.infer<typeof runStartSchema>, 'type'>;
 export const runCancelSchema = z.object({
   type: z.literal('run.cancel'),
   runId: z.string().min(1),
+  userInitiated: z.boolean().optional(),
 });
 
 export const runAnswerSchema = z.object({

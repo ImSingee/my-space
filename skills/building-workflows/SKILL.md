@@ -274,10 +274,13 @@ replace platform validation of paths, cross-field requirements, or serializabili
 
 ## Git workflow
 
-1. For a new workflow, confirm the name and slug in two separate `ask` calls,
-   name first. Offer style-matched name choices and derive slug suggestions
-   from the chosen name. Explain that both are editable later. The slug is the
-   human-facing `/workflow/<slug>` segment;
+1. For a new workflow, confirm the name and slug in one `ask` call with two
+   separate entries in `questions`: name first, slug second. Offer style-matched
+   name choices and slug suggestions based on the recommended name; let the
+   user choose or enter each value independently. Explain that both are
+   editable later. Reuse values the user has already explicitly provided and
+   ask only for missing fields; if both are provided, skip `ask`.
+   The slug is the human-facing `/workflow/<slug>` segment;
    Hatch generates a separate id for the manifest, Git repository, runs,
    webhook, and all technical APIs. Always pass that id to existing-Workflow
    tools, never the slug. Only then call `create_workflow`.

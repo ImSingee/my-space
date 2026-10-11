@@ -27,7 +27,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(origin = 'https://hatch.example.ts.net') {
+async function fixture(
+  origin = 'https://hatch.example.ts.net',
+  state: 'connected' | 'preparing-https' = 'connected',
+) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'hatch-tailscale-test-'));
   directories.push(dir);
   const binary = path.join(dir, 'helper');
@@ -39,7 +42,9 @@ require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)
 if (process.env.SECRET || process.env.TS_AUTHKEY || process.env.DATABASE_URL) process.exit(2);
 process.stdin.resume();
 process.stdin.on('end', () => process.exit());
-console.log(JSON.stringify({ state: 'connected', origin: ${JSON.stringify(origin)}, loginUrl: '', message: '' }));
+const connected = { state: 'connected', origin: ${JSON.stringify(origin)}, loginUrl: '', message: '' };
+console.log(JSON.stringify({ ...connected, state: ${JSON.stringify(state)} }));
+process.on('SIGUSR1', () => console.log(JSON.stringify(connected)));
 `,
     { mode: 0o700 },
   );
@@ -75,6 +80,27 @@ it('restores an enabled connection after restart without passing platform or amb
   const second = create();
   await second.initialize();
   await vi.waitFor(() => expect(second.snapshot().state).toBe('connected'));
+});
+
+it('accepts HTTPS preparation without trusting its address and recovers when the helper reports readiness', async () => {
+  const { create, pidFile } = await fixture(
+    'https://hatch.example.ts.net',
+    'preparing-https',
+  );
+  const manager = create();
+  await manager.configure({ enabled: true, hostname: 'hatch' });
+  await vi.waitFor(() =>
+    expect(manager.snapshot()).toMatchObject({
+      state: 'preparing-https',
+      origin: null,
+      message: null,
+    }),
+  );
+  expect(manager.trustedOrigin()).toBeNull();
+  process.kill(Number(await readFile(pidFile, 'utf8')), 'SIGUSR1');
+  await vi.waitFor(() =>
+    expect(manager.trustedOrigin()).toBe('https://hatch.example.ts.net'),
+  );
 });
 
 it('serializes competing mutations and persists disconnect so restart cannot reopen access', async () => {
