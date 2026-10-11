@@ -602,11 +602,6 @@ export const agentRuns = snakeCase.table(
      * directly to the Runner and are never stored in the platform database.
      */
     pendingEnvRequest: jsonb('pending_env_request').$type<JsonObject>(),
-    /**
-     * Cookie user who started this run. Only such runs can mint CLI Run keys;
-     * runs started without a user (historical or internal) never can.
-     */
-    startedByUserId: text('started_by_user_id'),
     /** Agent Runner executing this run (null before a runner accepted it). */
     runnerId: text('runner_id'),
     /**

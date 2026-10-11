@@ -151,7 +151,7 @@ export async function postAgentRun({
   const { startAgentRun } = await import('~server/agent-runs');
   const { errorResponse } = await import('~server/errors');
   try {
-    const result = await startAgentRun(parsed, { userId: session.user.id });
+    const result = await startAgentRun(parsed);
     return Response.json(result);
   } catch (error) {
     // AppError carries its own status (409 for an already-running turn,

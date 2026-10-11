@@ -1,4 +1,3 @@
-import { assertCliWrite } from '~server/cli-auth/operation';
 /** Server-only: scaffold a new workflow source tree from the template. */
 import path from 'node:path';
 import { ulid } from 'ulid';
@@ -55,7 +54,6 @@ export async function createWorkflow(
   }
 
   const id = ulid().toLowerCase();
-  await assertCliWrite();
   const repoPath = await ensureWorkflowRepo(id);
 
   const name = input.name.trim() || slug;
@@ -74,21 +72,18 @@ export async function createWorkflow(
   );
 
   // Like App drafts, the source manifest is recorded after deployment.
-  const [created] = await db.transaction(async (tx) => {
-    await assertCliWrite(tx);
-    return tx
-      .insert(schema.workflows)
-      .values({
-        id,
-        slug,
-        name,
-        description: description || null,
-        status: 'draft',
-        repoPath,
-        pinned: input.pin ?? true,
-      })
-      .returning({ id: schema.workflows.id });
-  });
+  const [created] = await db
+    .insert(schema.workflows)
+    .values({
+      id,
+      slug,
+      name,
+      description: description || null,
+      status: 'draft',
+      repoPath,
+      pinned: input.pin ?? true,
+    })
+    .returning({ id: schema.workflows.id });
   if (!created) throw new Error('Failed to create workflow.');
 
   return {

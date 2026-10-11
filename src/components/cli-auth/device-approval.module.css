@@ -123,16 +123,6 @@
   line-height: 1.5;
 }
 
-.countdown {
-  font-size: var(--mantine-font-size-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.countdown[data-urgent] {
-  color: light-dark(var(--mantine-color-red-6), var(--mantine-color-red-4));
-  font-weight: 600;
-}
-
 .access {
   font-size: var(--mantine-font-size-sm);
   line-height: 1.55;
@@ -141,64 +131,6 @@
 
 .access strong {
   font-weight: 600;
-}
-
-.disclosure {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 8px;
-  font-size: var(--mantine-font-size-sm);
-  font-weight: 500;
-  color: var(--mantine-color-dimmed);
-  border-radius: var(--mantine-radius-xs);
-}
-
-.disclosure:hover {
-  color: var(--mantine-color-text);
-}
-
-.disclosureIcon {
-  transition: transform var(--transition-base);
-}
-
-.disclosureIcon[data-opened] {
-  transform: rotate(180deg);
-}
-
-.details {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--mantine-color-default-border);
-}
-
-.details > div {
-  align-items: flex-start;
-}
-
-.details dd {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.mono {
-  font-family: var(--mantine-font-family-monospace);
-  font-size: var(--mantine-font-size-xs);
-  white-space: pre-wrap;
-}
-
-.resourceList {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 2px;
-}
-
-.resourceId {
-  font-family: var(--mantine-font-family-monospace);
-  font-size: var(--mantine-font-size-xs);
-  color: var(--mantine-color-dimmed);
 }
 
 .decision {
@@ -246,11 +178,6 @@
 
   .sheet {
     padding: 20px;
-  }
-
-  .details > div {
-    flex-direction: column;
-    gap: 2px;
   }
 }
 

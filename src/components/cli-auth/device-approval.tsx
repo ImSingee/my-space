@@ -23,17 +23,12 @@ type Stage =
   | { kind: 'entry'; problem: EntryProblem | null }
   | { kind: 'review'; request: DeviceRequest }
   | { kind: 'outcome'; outcome: DeviceOutcome; request: DeviceRequest }
-  | {
-      kind: 'problem';
-      problem: Problem;
-      userCode: string;
-      request: DeviceRequest | null;
-    };
+  | { kind: 'problem'; problem: Problem; userCode: string };
 
 export type DeviceApprovalProps = {
   /** Code from the verification link; it only prefills the form. */
   initialCode: string;
-  /** Signed-in account shown before review, if already known. */
+  /** The signed-in account, if already known. */
   account: string | null;
   /** Leave for the existing login page, returning to this code afterwards. */
   onSignIn: (userCode: string) => void;
@@ -44,7 +39,7 @@ export type DeviceApprovalProps = {
  * Browser half of the device authorization grant.
  *
  * Opening the page never calls the server. "Review request" claims the
- * request for this Cookie session; Approve or Deny records one decision.
+ * request for the signed-in account; Approve or Deny records one decision.
  * Each call is a single explicit action: it is never retried automatically,
  * a second action cannot start while one is in flight, and only an outcome
  * the server confirmed is ever shown as approved or denied.
@@ -104,13 +99,7 @@ function DeviceApprovalFlow({
         if ('entry' in result) {
           setCode(userCode);
           go({ kind: 'entry', problem: result.entry });
-        } else
-          go({
-            kind: 'problem',
-            problem: result.problem,
-            userCode,
-            request: null,
-          });
+        } else go({ kind: 'problem', problem: result.problem, userCode });
       },
       onSettled: () => {
         inFlight.current = false;
@@ -128,9 +117,8 @@ function DeviceApprovalFlow({
         onError: (error) =>
           go({
             kind: 'problem',
-            problem: classifyDecisionError(error, decision),
+            problem: classifyDecisionError(error),
             userCode: request.userCode,
-            request,
           }),
         onSettled: () => {
           inFlight.current = false;
@@ -138,17 +126,6 @@ function DeviceApprovalFlow({
       },
     );
   };
-
-  const reviewedRequest = stage.kind === 'review' ? stage.request : null;
-  const expire = useCallback(() => {
-    if (!reviewedRequest) return;
-    go({
-      kind: 'problem',
-      problem: 'expired',
-      userCode: reviewedRequest.userCode,
-      request: reviewedRequest,
-    });
-  }, [go, reviewedRequest]);
 
   const startOver = () => {
     claim.reset();
@@ -177,11 +154,11 @@ function DeviceApprovalFlow({
         ) : stage.kind === 'review' ? (
           <RequestReview
             request={stage.request}
+            account={account}
             pending={
               decide.isPending ? (decide.variables?.decision ?? null) : null
             }
             onDecide={(decision) => submitDecision(stage.request, decision)}
-            onExpire={expire}
           />
         ) : stage.kind === 'outcome' ? (
           <OutcomeView
@@ -196,14 +173,7 @@ function DeviceApprovalFlow({
               onNewCode: startOver,
               onSignIn: () => onSignIn(stage.userCode),
               onRecheck: () => review(stage.userCode),
-              onDeny: () => {
-                if (stage.request) submitDecision(stage.request, 'deny');
-              },
-              pending: claim.isPending
-                ? 'recheck'
-                : decide.isPending
-                  ? 'deny'
-                  : null,
+              pending: claim.isPending ? 'recheck' : null,
             }}
           />
         )}

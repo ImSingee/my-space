@@ -1,4 +1,3 @@
-import { assertCliWrite } from '~server/cli-auth/operation';
 /** Server-only: app lifecycle management — archive, rollback, delete. */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -337,7 +336,6 @@ async function rollbackAppInner(
   let previousDeploymentId = app.currentDeploymentId ?? null;
   await db.transaction(async (tx) => {
     await appDeployLock.acquire(tx, id);
-    await assertCliWrite(tx);
     const current = await tx.query.apps.findFirst({
       where: { id },
       columns: { currentDeploymentId: true },

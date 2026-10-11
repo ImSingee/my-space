@@ -1,6 +1,5 @@
 import { Button, Group, Text, ThemeIcon } from '@mantine/core';
 import {
-  IconAlertTriangle,
   IconBan,
   IconCircleCheck,
   IconClockX,
@@ -18,7 +17,7 @@ import { ViewHeader } from './layout';
 import type { Problem } from './problems';
 import classes from './device-approval.module.css';
 
-type Action = 'new-code' | 'sign-in' | 'recheck' | 'deny' | 'home';
+type Action = 'new-code' | 'sign-in' | 'recheck' | 'home';
 
 type StatusCopy = {
   icon: Icon;
@@ -46,8 +45,8 @@ const PROBLEMS: Record<Problem, StatusCopy> = {
   elsewhere: {
     icon: IconDevices,
     color: 'yellow',
-    title: 'Open in another session',
-    body: 'Another browser session or account is reviewing this request. Finish there, or start a new sign-in on your device.',
+    title: 'Claimed by another account',
+    body: 'Another Hatch account already opened this request. Finish there, or start a new sign-in on your device.',
     actions: ['new-code'],
   },
   'signed-out': {
@@ -57,26 +56,12 @@ const PROBLEMS: Record<Problem, StatusCopy> = {
     body: 'Your session has ended. You’ll come back to this code after signing in.',
     actions: ['sign-in'],
   },
-  'session-ended': {
-    icon: IconLogin2,
-    color: 'gray',
-    title: 'Your session ended',
-    body: 'Nothing was approved. Sign in again, then start a new sign-in on your device.',
-    actions: ['sign-in'],
-  },
   origin: {
     icon: IconWorldX,
     color: 'red',
     title: 'Wrong address',
     body: 'Nothing was approved. Open the link exactly as your device printed it.',
     actions: ['home'],
-  },
-  unapprovable: {
-    icon: IconAlertTriangle,
-    color: 'yellow',
-    title: 'This request can’t be approved',
-    body: 'An app or workflow it asks for no longer exists. Deny it, then start a new sign-in on your device.',
-    actions: ['deny', 'new-code'],
   },
   'rate-limited': {
     icon: IconHourglassHigh,
@@ -115,7 +100,6 @@ const ACTION_LABEL: Record<Action, string> = {
   'new-code': 'Enter a new code',
   'sign-in': 'Sign in again',
   recheck: 'Check again',
-  deny: 'Deny request',
   home: 'Go to Hatch',
 };
 
@@ -123,9 +107,8 @@ type Handlers = {
   onNewCode: () => void;
   onSignIn: () => void;
   onRecheck: () => void;
-  onDeny: () => void;
   /** The action currently in flight, shown as loading. */
-  pending: 'recheck' | 'deny' | null;
+  pending: 'recheck' | null;
 };
 
 export function ProblemView({
@@ -218,7 +201,6 @@ function ActionButton({
     'new-code': handlers.onNewCode,
     'sign-in': handlers.onSignIn,
     recheck: handlers.onRecheck,
-    deny: handlers.onDeny,
   }[action];
   const loading = handlers.pending === action;
   return (

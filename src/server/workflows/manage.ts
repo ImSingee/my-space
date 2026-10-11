@@ -1,4 +1,3 @@
-import { assertCliWrite } from '~server/cli-auth/operation';
 /** Server-only: workflow lifecycle management + run inspection views. */
 import { promises as fs } from 'node:fs';
 import { eq } from 'drizzle-orm';
@@ -241,7 +240,6 @@ async function rollbackWorkflowInner(
   // `currentDeploymentId` is what makes this version live.
   await db.transaction(async (tx) => {
     await workflowDeployLock.acquire(tx, id);
-    await assertCliWrite(tx);
     const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
 
     await tx

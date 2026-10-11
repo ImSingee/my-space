@@ -8,34 +8,27 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { DeviceApproval } from './device-approval';
 
-vi.mock('~queries/apps', () => ({
-  appsQueryOptions: { queryKey: ['apps'], queryFn: async () => [] },
-}));
-vi.mock('~queries/workflows', () => ({
-  workflowsQueryOptions: { queryKey: ['workflows'], queryFn: async () => [] },
-}));
-
 const CODE = 'WDJB4K7M';
-const review = {
-  userCode: CODE,
-  account: 'owner@example.com',
-  scopes: ['app.read', 'app.deploy'],
-  resources: { mode: 'all' },
-  credentialType: 'interactive_key',
-  expiresIn: 604800,
-  grantExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+// Better Auth's device endpoints, by the action they perform here.
+const ACTIONS: Record<string, string> = {
+  '/api/auth/device': 'claim',
+  '/api/auth/device/approve': 'approve',
+  '/api/auth/device/deny': 'deny',
+  '/api/auth/get-session': 'session',
 };
+const claimed = { user_code: CODE, status: 'pending', client_id: 'hatch-cli' };
 
 type Reply = Response | Promise<Response> | 'network-error';
 let replies: Record<string, Reply>;
-let calls: { action: string; init: RequestInit }[];
+let calls: { action: string; url: URL; init: RequestInit }[];
 
 beforeEach(() => {
   calls = [];
-  replies = { claim: Response.json(review) };
+  replies = { claim: Response.json(claimed) };
   vi.spyOn(window, 'fetch').mockImplementation(async (input, init) => {
-    const action = String(input).split('/').pop()!;
-    calls.push({ action, init: init ?? {} });
+    const url = new URL(String(input), window.location.origin);
+    const action = ACTIONS[url.pathname] ?? url.pathname;
+    calls.push({ action, url, init: init ?? {} });
     const reply = replies[action];
     if (reply === 'network-error') throw new TypeError('Failed to fetch');
     return (await reply).clone();
@@ -92,12 +85,11 @@ test('a prefilled link never contacts the server until the person asks to review
     .toBeVisible();
   expect(calls).toHaveLength(1);
   expect(calls[0].action).toBe('claim');
+  expect(calls[0].url.searchParams.get('user_code')).toBe(CODE);
   expect(calls[0].init).toMatchObject({
-    method: 'POST',
     credentials: 'same-origin',
     redirect: 'error',
     referrerPolicy: 'no-referrer',
-    body: JSON.stringify({ user_code: CODE }),
   });
 });
 
@@ -118,17 +110,20 @@ test('approval requires confirmation and sends exactly one decision', async () =
     .element(screen.getByRole('button', { name: 'Deny' }))
     .toBeDisabled();
   approve.element().dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  release(Response.json({ status: 'approved' }));
+  release(Response.json({ success: true }));
 
   await expect
     .element(screen.getByRole('heading', { name: 'Device approved' }))
     .toBeVisible();
   expect(calls.map((call) => call.action)).toEqual(['claim', 'approve']);
-  expect(calls[1].init.body).toBe(JSON.stringify({ user_code: CODE }));
+  expect(calls[1].init).toMatchObject({
+    method: 'POST',
+    body: JSON.stringify({ userCode: CODE }),
+  });
 });
 
 test('deny does not require confirmation', async () => {
-  replies.deny = Response.json({ status: 'denied' });
+  replies.deny = Response.json({ success: true });
   const screen = await openReview();
   await screen.getByRole('button', { name: 'Deny' }).click();
   await expect
@@ -149,7 +144,7 @@ test('a decision made offline fails now and is never sent on reconnect', async (
       screen.getByRole('heading', { name: 'Couldn’t confirm your choice' }),
     )
     .toBeVisible();
-  replies.approve = Response.json({ status: 'approved' });
+  replies.approve = Response.json({ success: true });
   onlineManager.setOnline(true);
   await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -168,10 +163,7 @@ test('each new step takes focus, even when one problem replaces another', async 
     )
     .toHaveFocus();
 
-  replies.claim = Response.json(
-    { error: 'grant_already_decided' },
-    { status: 409 },
-  );
+  replies.claim = Response.json({ ...claimed, status: 'denied' });
   await screen.getByRole('button', { name: 'Check again' }).click();
   await expect
     .element(
@@ -182,8 +174,8 @@ test('each new step takes focus, even when one problem replaces another', async 
 
 test('a decision the server rejects is reported, not shown as approved', async () => {
   replies.approve = Response.json(
-    { error: 'grant_already_decided' },
-    { status: 409 },
+    { error: 'invalid_request', error_description: 'Already processed' },
+    { status: 400 },
   );
   const screen = await openReview();
   await screen.getByRole('checkbox').click();
@@ -207,4 +199,17 @@ test('a different code in the URL starts a separate flow', async () => {
     .toHaveValue('XYZW-5678');
   expect(screen.container.querySelector('input[type="checkbox"]')).toBeNull();
   expect(calls.map((call) => call.action)).toEqual(['claim']);
+});
+
+test('a request claimed by another account cannot be reviewed here', async () => {
+  replies.claim = Response.json({ user_code: CODE, status: 'pending' });
+  replies.session = Response.json({ user: { id: 'owner' } });
+  const screen = await renderPage();
+  await screen.getByRole('button', { name: 'Review request' }).click();
+  await expect
+    .element(
+      screen.getByRole('heading', { name: 'Claimed by another account' }),
+    )
+    .toBeVisible();
+  expect(screen.container.querySelector('input[type="checkbox"]')).toBeNull();
 });

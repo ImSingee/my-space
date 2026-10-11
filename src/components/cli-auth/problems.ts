@@ -1,4 +1,4 @@
-import { DeviceAuthError, type DeviceDecision } from './device-api';
+import { DeviceAuthError } from './device-api';
 
 /** Failures shown inline on the code form; the person can fix and resubmit. */
 export type EntryProblem = 'invalid' | 'rate-limited' | 'network' | 'server';
@@ -9,43 +9,25 @@ export type Problem =
   | 'closed'
   | 'elsewhere'
   | 'signed-out'
-  | 'session-ended'
   | 'origin'
-  | 'unapprovable'
   | 'rate-limited'
   | 'unconfirmed';
 
 const codeOf = (error: unknown) =>
   error instanceof DeviceAuthError ? error.code : 'unexpected_response';
 
-/** Problems shared by review and decision calls. */
-function terminalProblem(code: string): Problem | null {
-  switch (code) {
-    case 'expired_token':
-      return 'expired';
-    case 'grant_already_decided':
-      return 'closed';
-    case 'grant_claimed_by_another_session':
-      return 'elsewhere';
-    case 'invalid_origin':
-    case 'instance_origin_mismatch':
-      return 'origin';
-    default:
-      return null;
-  }
-}
-
 export function classifyClaimError(
   error: unknown,
 ): { entry: EntryProblem } | { problem: Problem } {
-  const code = codeOf(error);
-  const problem = terminalProblem(code);
-  if (problem) return { problem };
-  switch (code) {
-    case 'cookie_required':
-    case 'invalid_credential':
+  switch (codeOf(error)) {
+    case 'expired_token':
+      return { problem: 'expired' };
+    case 'already_decided':
+      return { problem: 'closed' };
+    case 'claimed_by_another_account':
+      return { problem: 'elsewhere' };
+    case 'unauthorized':
       return { problem: 'signed-out' };
-    case 'invalid_grant':
     case 'invalid_request':
       return { entry: 'invalid' };
     case 'rate_limited':
@@ -57,24 +39,21 @@ export function classifyClaimError(
   }
 }
 
-export function classifyDecisionError(
-  error: unknown,
-  decision: DeviceDecision,
-): Problem {
-  const code = codeOf(error);
-  const problem = terminalProblem(code);
-  if (problem) return problem;
-  switch (code) {
-    // The claim is bound to the Cookie session that reviewed it, so a new
-    // sign-in cannot finish this request.
-    case 'cookie_required':
-    case 'invalid_credential':
-      return 'session-ended';
-    case 'invalid_grant':
+export function classifyDecisionError(error: unknown): Problem {
+  switch (codeOf(error)) {
+    case 'expired_token':
+      return 'expired';
+    // Already approved/denied, or no longer exists.
+    case 'invalid_request':
       return 'closed';
-    case 'resource_not_found':
-      return decision === 'approve' ? 'unapprovable' : 'unconfirmed';
-    // The budget is checked before the decision transaction starts.
+    case 'access_denied':
+      return 'elsewhere';
+    // The claim belongs to the account, so signing in again can continue.
+    case 'unauthorized':
+      return 'signed-out';
+    case 'invalid_origin':
+      return 'origin';
+    // Rejected before the decision was considered.
     case 'rate_limited':
       return 'rate-limited';
     // No answer, or an answer we cannot read: the decision may or may not

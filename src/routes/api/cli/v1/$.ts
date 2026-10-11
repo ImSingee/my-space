@@ -1,11 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { handleCliAuthRequest } from '~server/cli-auth/http';
+import { handleCliApiRequest } from '~server/cli/api';
 
 export const Route = createFileRoute('/api/cli/v1/$')({
   server: {
     handlers: {
-      GET: ({ request }) => handleCliAuthRequest(request),
-      POST: ({ request }) => handleCliAuthRequest(request),
+      GET: ({ request }) => handleCliApiRequest(request),
+      POST: ({ request }) => handleCliApiRequest(request),
     },
   },
 });

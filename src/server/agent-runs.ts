@@ -389,10 +389,7 @@ async function resolveRunModelConfig(
 
 /** ================== start / dispatch ================== */
 
-export async function startAgentRun(
-  input: AgentRunInput,
-  issuer?: { userId: string },
-): Promise<{
+export async function startAgentRun(input: AgentRunInput): Promise<{
   runId: string;
 }> {
   const sessionRow = await db.query.agentSessions.findFirst({
@@ -556,7 +553,6 @@ export async function startAgentRun(
           providerId: model.providerId,
           modelId: model.model.id,
           status: 'running',
-          startedByUserId: issuer?.userId ?? null,
           // Covers the dispatch window; the accepting runner renews from here.
           leaseExpiresAt: leaseDeadline(),
           // Diagnostics only (no reader reconstructs the run from this). Store

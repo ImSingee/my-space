@@ -1,4 +1,3 @@
-import { assertCliWrite } from '~server/cli-auth/operation';
 /** Server-only: build + record a deployment and flip the app live. */
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -472,7 +471,6 @@ async function deployAppInner(
   id: string,
   options: DeployAppOptions,
 ): Promise<DeployResult> {
-  await assertCliWrite();
   const message = options.message?.trim();
   if (!message) {
     throw new Error('A deployment message is required.');
@@ -645,21 +643,16 @@ async function deployAppInner(
     // so an archive/state change committed while the build was running is never
     // overwritten using the stale status read above.
     if (statusBeforeBuild !== 'archived') {
-      // A long build can outlive the caller's authority: recheck it in the
-      // transaction that writes the marker, so a lapsed principal leaves no state.
-      const marked = await db.transaction(async (tx) => {
-        await assertCliWrite(tx);
-        return tx
-          .update(schema.apps)
-          .set({ status: 'building' })
-          .where(
-            and(
-              eq(schema.apps.id, id),
-              eq(schema.apps.status, statusBeforeBuild),
-            ),
-          )
-          .returning({ id: schema.apps.id });
-      });
+      const marked = await db
+        .update(schema.apps)
+        .set({ status: 'building' })
+        .where(
+          and(
+            eq(schema.apps.id, id),
+            eq(schema.apps.status, statusBeforeBuild),
+          ),
+        )
+        .returning({ id: schema.apps.id });
       if (marked.length === 0) {
         throw new Error(
           `App "${id}" changed state while its deployment was building. ` +
@@ -671,7 +664,6 @@ async function deployAppInner(
 
     let dbName = app.dbName ?? null;
     if (build.source.capabilities.database) {
-      await assertCliWrite();
       await ensureAppDatabase(id);
       dbName = appDbName(id);
     }
@@ -792,7 +784,6 @@ async function deployAppInner(
       if (usesDataTable && targetDataSchema) {
         let migration;
         try {
-          await assertCliWrite();
           migration = await applyDataMigration({
             id,
             deploymentId,
@@ -845,7 +836,6 @@ async function deployAppInner(
       const releaseBuild = build;
       await db.transaction(async (tx) => {
         await appDeployLock.acquire(tx, id);
-        await assertCliWrite(tx);
         const last = await tx.query.deployments.findFirst({
           where: { appId: id },
           orderBy: { version: 'desc' },
