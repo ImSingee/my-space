@@ -5,10 +5,12 @@ import { once } from 'node:events';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { WebSocket, WebSocketServer } from 'ws';
+import { createLocalJWKSet, jwtVerify, SignJWT } from 'jose';
 
 const databaseUrl = process.env.HATCH_AUTH_TEST_DATABASE_URL;
 const origin = 'http://127.0.0.1:3799';
 const password = 'Hatch-integration-test-password-93';
+const authSecret = 'hatch-cli-integration-secret-longer-than-thirty-two';
 let database: typeof import('~/db');
 let auth: typeof import('~auth/server').auth;
 let api: typeof import('./api').handleCliApiRequest;
@@ -38,7 +40,13 @@ async function authCall<T = Record<string, unknown>>(
     }),
   );
   const text = await response.text();
-  return { response, data: (text ? JSON.parse(text) : null) as T };
+  return {
+    response,
+    data: (text &&
+    response.headers.get('content-type')?.includes('application/json')
+      ? JSON.parse(text)
+      : null) as T,
+  };
 }
 async function cli<T = Record<string, unknown>>(
   path: string,
@@ -56,8 +64,7 @@ async function cli<T = Record<string, unknown>>(
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
-async function signup() {
-  const email = `${randomUUID()}@hatch-cli.test`;
+async function signup(email = `${randomUUID()}@hatch-cli.test`) {
   const { response } = await authCall<{ user: { id: string } }>(
     'sign-up/email',
     { body: { name: 'Test owner', email, password } },
@@ -141,7 +148,8 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = databaseUrl;
     process.env.APP_URL = origin;
-    process.env.SECRET = 'hatch-cli-integration-secret-longer-than-thirty-two';
+    process.env.SECRET = authSecret;
+    process.env.BETTER_AUTH_SECRET = authSecret;
     process.env.HATCH_DATA_DIR = `/tmp/hatch-cli-integration-${randomUUID()}`;
     database = await import('~/db');
     const { migrate } = await import('drizzle-orm/postgres-js/migrator');
@@ -192,6 +200,46 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     websocketServer?.close();
     if (server)
       await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('keeps password login and ordinary credentials separate from Run and fleet identities', async () => {
+    const email = `${randomUUID()}@hatch-cli.test`;
+    const owner = await signup(email);
+    expect(
+      (await authCall('sign-out', { body: {}, headers: { cookie: owner } }))
+        .response.status,
+    ).toBe(200);
+    const login = await authCall<{ token: string }>('sign-in/email', {
+      body: { email, password },
+    });
+    expect(login.response.status).toBe(200);
+    expect(login.response.headers.get('set-auth-jwt')).toBeNull();
+    const session = await authCall<{ user: { email: string } }>('get-session', {
+      headers: bearer(login.data.token),
+    });
+    expect(session.data.user.email).toBe(email);
+    expect(session.response.headers.get('set-auth-jwt')).toBeNull();
+    expect((await cli('apps', bearer(login.data.token))).response.status).toBe(
+      200,
+    );
+    const run = await liveRun();
+    const ordinaryAsFleet = await mint(
+      run.runId,
+      { runnerId },
+      login.data.token,
+    );
+    expect(ordinaryAsFleet.response.status).toBe(401);
+    expect(ordinaryAsFleet.data).toEqual({ error: 'Unauthorized' });
+    const fleetAsSession = await authCall('get-session', {
+      headers: bearer('test-fleet-token'),
+    });
+    expect(fleetAsSession.data).toBeNull();
+    const fleetAsRun = await cli('apps', {
+      cookie,
+      ...bearer('test-fleet-token'),
+    });
+    expect(fleetAsRun.response.status).toBe(401);
+    expect(fleetAsRun.data).toEqual({ error: 'unauthorized' });
   });
 
   it('logs a device in as an ordinary bearer session that sign-out ends', async () => {
@@ -252,7 +300,9 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
 
   it('requires a session or Run token and resolves exact IDs before slugs', async () => {
     expect((await cli('apps', {})).response.status).toBe(401);
-    expect((await cli('apps', bearer('a.b.c'))).response.status).toBe(401);
+    const invalid = await cli('apps', { cookie, ...bearer('a.b.c') });
+    expect(invalid.response.status).toBe(401);
+    expect(invalid.data).toEqual({ error: 'invalid_token' });
     const legacyId = `legacy-${randomUUID()}`;
     // The slug holder is stored first, where an unordered match finds it.
     await database.db.insert(database.schema.apps).values([
@@ -271,9 +321,9 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
       (await mint(run.runId, { runnerId }, 'wrong-fleet-token')).response
         .status,
     ).toBe(401);
-    expect(
-      (await mint(run.runId, { runnerId: 'other-runner' })).response.status,
-    ).toBe(403);
+    const disconnected = await mint(run.runId, { runnerId: 'other-runner' });
+    expect(disconnected.response.status).toBe(403);
+    expect(disconnected.data).toEqual({ error: 'runner_not_connected' });
     for (const invalid of [{}, { runnerId, extra: true }])
       expect((await mint(run.runId, invalid)).response.status).toBe(400);
     const before = await database.db.$count(database.schema.session);
@@ -284,7 +334,7 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     const lifetime = Date.parse(minted.data.expiresAt) - Date.now();
     expect(lifetime).toBeGreaterThan(290_000);
     expect(lifetime).toBeLessThanOrEqual(300_000);
-    // Stateless: minting stores no session or key.
+    // Stateless per credential: minting stores no user session.
     expect(await database.db.$count(database.schema.session)).toBe(before);
     expect((await cli('apps', bearer(minted.data.token))).response.status).toBe(
       200,
@@ -316,7 +366,9 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     expect(
       (await cli('apps', bearer(renewed.data.token))).response.status,
     ).toBe(401);
-    expect((await mint(run.runId, { runnerId })).response.status).toBe(401);
+    const ended = await mint(run.runId, { runnerId });
+    expect(ended.response.status).toBe(401);
+    expect(ended.data).toEqual({ error: 'run_ended' });
 
     const lapsed = await liveRun();
     const lapsedToken = (await mint(lapsed.runId, { runnerId })).data.token;
@@ -325,6 +377,165 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
       .set({ leaseExpiresAt: new Date(Date.now() - 1000) })
       .where(eq(database.schema.agentRuns.id, lapsed.runId));
     expect((await cli('apps', bearer(lapsedToken))).response.status).toBe(401);
+  });
+
+  it('preserves JWT verification and rejects invalid credentials before session fallback', async () => {
+    const run = await liveRun();
+    const minted = await mint(run.runId, { runnerId });
+    const jwks = await auth.api.getJwks();
+    const { payload, protectedHeader } = await jwtVerify(
+      minted.data.token,
+      createLocalJWKSet(jwks),
+      { issuer: origin, audience: 'hatch-run' },
+    );
+    expect(protectedHeader.kid).toEqual(expect.any(String));
+    expect(protectedHeader.alg).toBe('EdDSA');
+    expect(payload).toMatchObject({
+      sub: run.runId,
+      sid: run.sessionId,
+      rnr: runnerId,
+      exp: Math.floor(Date.parse(minted.data.expiresAt) / 1000),
+      iat: expect.any(Number),
+      jti: expect.any(String),
+    });
+
+    const now = Math.floor(Date.now() / 1000);
+    for (const overrides of [
+      { exp: now - 1 },
+      { iss: 'https://another-platform.test' },
+      { aud: 'another-audience' },
+      { sid: '' },
+      { sid: undefined, rnr: undefined },
+      { iat: undefined },
+    ]) {
+      const { token } = await auth.api.signJWT({
+        body: { payload: { ...payload, ...overrides } },
+      });
+      const rejected = await cli('apps', { cookie, ...bearer(token) });
+      expect(rejected.response.status).toBe(401);
+      expect(rejected.data).toEqual({ error: 'invalid_token' });
+    }
+    const forged = await new SignJWT(payload)
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .sign(new Uint8Array(32));
+    const rejected = await cli('apps', { cookie, ...bearer(forged) });
+    expect(rejected.response.status).toBe(401);
+    expect(rejected.data).toEqual({ error: 'invalid_token' });
+  });
+
+  it('keeps Run JWT issuance server-only and out of ordinary sessions', async () => {
+    for (const path of ['token', 'jwks']) {
+      const { response } = await authCall(path, { headers: { cookie } });
+      expect(response.status).toBe(404);
+    }
+    for (const path of ['sign-jwt', 'verify-jwt']) {
+      const { response } = await authCall(path, {
+        headers: { cookie },
+        body: { payload: { sub: 'forged-run' } },
+      });
+      expect(response.status).toBe(404);
+    }
+    const session = await authCall('get-session', { headers: { cookie } });
+    expect(session.response.status).toBe(200);
+    expect(session.response.headers.get('set-auth-jwt')).toBeNull();
+    const run = await liveRun();
+    const token = (await mint(run.runId, { runnerId })).data.token;
+    expect(
+      (await authCall('get-session', { headers: bearer(token) })).data,
+    ).toBeNull();
+    // A Run token is not a fleet credential and cannot issue another token.
+    expect((await mint(run.runId, { runnerId }, token)).response.status).toBe(
+      401,
+    );
+  });
+
+  it('keeps credentials usable across Better Auth signing-key rotation without storing Run sessions', async () => {
+    const run = await liveRun();
+    const sessionsBefore = await database.db.$count(database.schema.session);
+    const first = (await mint(run.runId, { runnerId })).data.token;
+    const { protectedHeader: firstHeader } = await jwtVerify(
+      first,
+      createLocalJWKSet(await auth.api.getJwks()),
+    );
+    const signingKey = await database.db.query.jwks.findFirst({
+      where: { id: firstHeader.kid! },
+    });
+    expect(signingKey).toBeDefined();
+    // Better Auth stores an encrypted JSON string, not private JWK material.
+    expect(typeof JSON.parse(signingKey!.privateKey)).toBe('string');
+    await database.db
+      .update(database.schema.jwks)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(database.schema.jwks.id, signingKey!.id));
+    const second = (await mint(run.runId, { runnerId })).data.token;
+    const { protectedHeader: secondHeader } = await jwtVerify(
+      second,
+      createLocalJWKSet(await auth.api.getJwks()),
+    );
+    expect(secondHeader.kid).not.toBe(firstHeader.kid);
+    for (const token of [first, second])
+      expect((await cli('apps', bearer(token))).response.status).toBe(200);
+    expect(await database.db.$count(database.schema.session)).toBe(
+      sessionsBefore,
+    );
+  });
+
+  it('rechecks live session, Runner ownership and lease on every token use', async () => {
+    const run = await liveRun();
+    const other = await liveRun();
+    await database.db
+      .update(database.schema.agentRuns)
+      .set({ status: 'completed' })
+      .where(eq(database.schema.agentRuns.id, other.runId));
+    const token = (await mint(run.runId, { runnerId })).data.token;
+    await database.db
+      .update(database.schema.agentRuns)
+      .set({ status: 'blocked' })
+      .where(eq(database.schema.agentRuns.id, run.runId));
+    expect((await cli('apps', bearer(token))).response.status).toBe(200);
+
+    for (const changes of [
+      { sessionId: other.sessionId },
+      { runnerId: 'another-runner' },
+      { leaseExpiresAt: null },
+      { status: 'completed' as const },
+    ]) {
+      await database.db
+        .update(database.schema.agentRuns)
+        .set(changes)
+        .where(eq(database.schema.agentRuns.id, run.runId));
+      const rejected = await cli('apps', { cookie, ...bearer(token) });
+      expect(rejected.response.status).toBe(401);
+      expect(rejected.data).toEqual({ error: 'run_ended' });
+      const mintResult = await mint(run.runId, { runnerId });
+      // A new credential binds to the Run's current session.
+      expect(mintResult.response.status).toBe(
+        'sessionId' in changes ? 200 : 401,
+      );
+      expect(mintResult.data).toMatchObject(
+        'sessionId' in changes
+          ? { context: { sessionId: other.sessionId } }
+          : { error: 'run_ended' },
+      );
+      await database.db
+        .update(database.schema.agentRuns)
+        .set({
+          sessionId: run.sessionId,
+          runnerId,
+          leaseExpiresAt: new Date(Date.now() + 90000),
+          status: 'running',
+        })
+        .where(eq(database.schema.agentRuns.id, run.runId));
+    }
+    await database.db
+      .delete(database.schema.agentRuns)
+      .where(eq(database.schema.agentRuns.id, run.runId));
+    const missing = await mint(run.runId, { runnerId });
+    expect(missing.response.status).toBe(401);
+    expect(missing.data).toEqual({ error: 'run_ended' });
+    const rejected = await cli('apps', bearer(token));
+    expect(rejected.response.status).toBe(401);
+    expect(rejected.data).toEqual({ error: 'run_ended' });
   });
 });
 

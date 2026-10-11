@@ -1,18 +1,23 @@
 /**
- * Short-lived Run tokens: stateless JWTs that let a live Agent Run call the CLI
- * API. Nothing is stored per token. Every use rechecks the Run itself, so
- * cancelling or finishing the Run ends its tokens immediately; renewal is just
- * minting another token while the Run is live.
+ * Run authorization policy. Better Auth owns credential signing, verification
+ * and stored signing keys; this module owns only Run binding and live leases.
  */
-import { hkdfSync, randomUUID } from 'node:crypto';
-import { jwtVerify, SignJWT } from 'jose';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { db } from '~/db';
-import { getPlatformEnv } from '~env';
-import { CliError } from './error';
 
-const AUDIENCE = 'hatch-run';
 const LIFETIME_SECONDS = 300;
+
+export class RunTokenError extends Error {
+  constructor(
+    public readonly code:
+      | 'invalid_token'
+      | 'run_ended'
+      | 'runner_not_connected',
+  ) {
+    super(code);
+    this.name = 'RunTokenError';
+  }
+}
 
 export type RunTokenContext = {
   runId: string;
@@ -24,24 +29,12 @@ const claimsSchema = z.object({
   sub: z.string().min(1),
   sid: z.string().min(1),
   rnr: z.string().min(1),
+  exp: z.number().int(),
+  iat: z.number().int(),
 });
 
-let cachedKey: Uint8Array | undefined;
-/** A key dedicated to Run tokens, derived from the platform auth secret. */
-function signingKey(): Uint8Array {
-  cachedKey ??= new Uint8Array(
-    hkdfSync(
-      'sha256',
-      getPlatformEnv().betterAuthSecret,
-      '',
-      'hatch run token v1',
-      32,
-    ),
-  );
-  return cachedKey;
-}
-
 async function requireLiveRun(context: RunTokenContext) {
+  const { db } = await import('~/db');
   const run = await db.query.agentRuns.findFirst({
     where: { id: context.runId },
     columns: {
@@ -59,7 +52,7 @@ async function requireLiveRun(context: RunTokenContext) {
     !run.leaseExpiresAt ||
     run.leaseExpiresAt <= new Date()
   )
-    throw new CliError('run_ended', 401);
+    throw new RunTokenError('run_ended');
 }
 
 /**
@@ -70,24 +63,30 @@ async function requireLiveRun(context: RunTokenContext) {
 export async function mintRunToken(runId: string, runnerId: string) {
   const { listConnectedRunners } = await import('~server/agent-runner/hub');
   if (!listConnectedRunners().some((runner) => runner.runnerId === runnerId))
-    throw new CliError('runner_not_connected', 403);
+    throw new RunTokenError('runner_not_connected');
+  const { db } = await import('~/db');
   const run = await db.query.agentRuns.findFirst({
     where: { id: runId },
     columns: { sessionId: true },
   });
-  if (!run) throw new CliError('run_ended', 401);
+  if (!run) throw new RunTokenError('run_ended');
   const context = { runId, sessionId: run.sessionId, runnerId };
   await requireLiveRun(context);
-  const expiresAt = new Date(Date.now() + LIFETIME_SECONDS * 1000);
-  const token = await new SignJWT({ sid: context.sessionId, rnr: runnerId })
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-    .setIssuer(getPlatformEnv().appUrl)
-    .setAudience(AUDIENCE)
-    .setSubject(runId)
-    .setJti(randomUUID())
-    .setIssuedAt()
-    .setExpirationTime(Math.floor(expiresAt.getTime() / 1000))
-    .sign(signingKey());
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const expiresAt = new Date((issuedAt + LIFETIME_SECONDS) * 1000);
+  const { auth } = await import('~auth/server');
+  const { token } = await auth.api.signJWT({
+    body: {
+      payload: {
+        sub: runId,
+        sid: context.sessionId,
+        rnr: runnerId,
+        jti: randomUUID(),
+        iat: issuedAt,
+        exp: issuedAt + LIFETIME_SECONDS,
+      },
+    },
+  });
   return { token, expiresAt: expiresAt.toISOString(), context };
 }
 
@@ -95,14 +94,11 @@ export async function mintRunToken(runId: string, runnerId: string) {
 export async function verifyRunToken(token: string): Promise<RunTokenContext> {
   let claims: z.infer<typeof claimsSchema>;
   try {
-    const { payload } = await jwtVerify(token, signingKey(), {
-      algorithms: ['HS256'],
-      issuer: getPlatformEnv().appUrl,
-      audience: AUDIENCE,
-    });
+    const { auth } = await import('~auth/server');
+    const { payload } = await auth.api.verifyJWT({ body: { token } });
     claims = claimsSchema.parse(payload);
   } catch {
-    throw new CliError('invalid_token', 401);
+    throw new RunTokenError('invalid_token');
   }
   const context = {
     runId: claims.sub,

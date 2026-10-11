@@ -157,12 +157,39 @@ Runner fleet, not a distinct Runner identity. The Runner must be connected and
 own the Run, and the Run must be `running`/`blocked` with a live lease.
 
 The response is `{ token, expiresAt, context: { runId, sessionId, runnerId } }`.
-The token is an HS256 JWT (`src/server/cli/run-token.ts`) signed with a key
-derived from the platform auth secret, with audience `hatch-run` and a five-minute
-expiry. Nothing is stored per token. Every use verifies the signature and expiry
+Better Auth's JWT plugin in `src/auth/server.ts` owns signing, verification and
+encrypted signing-key storage. `src/server/agent-runner/run-auth.ts` owns only
+Run binding and lifecycle authorization, independently of the CLI adapter and
+the shared fleet `AGENT_RUNNER_TOKEN`. It calls `auth.api.signJWT` and
+`auth.api.verifyJWT`; there is no platform-owned signing key or verifier.
+Token failures carry transport-neutral error codes; the HTTP adapters preserve
+`invalid_token`/`run_ended` as 401 and `runner_not_connected` as 403.
+The token uses Better Auth's default asymmetric signing algorithm (EdDSA), with
+issuer `APP_URL`, audience `hatch-run` and a five-minute expiry. Signing keys
+live in Better Auth's `jwks` table and rotate after 30 days; private keys are
+encrypted by Better Auth. JWKS retain rotated public keys for a five-minute
+grace period; Run credentials expire within that period. Nothing is stored per
+token. Every use verifies the signature and expiry
 and then rechecks that the Run is still live and still matches its session and
 Runner, so cancelling or finishing the Run ends its tokens immediately. Renewal is
-the same call. Changing `BETTER_AUTH_SECRET` invalidates outstanding Run tokens.
+the same call. JWTs do not become Better Auth sessions. Public `/api/auth/token`
+and `/api/auth/jwks` are disabled, and session responses do not include JWTs;
+the fleet-authenticated internal endpoint is the only HTTP issuance path.
+
+Run and session records currently have no user owner. User/organization API keys
+cannot represent them without a separate identity-model change. Keep ordinary
+user API keys separate rather than inventing a user ID for a Run.
+
+For a fresh deployment, apply the migrations (`pnpm migrations:apply`) before
+starting the platform. The `jwks` migration creates Better Auth's signing-key
+table; keys are provisioned by the plugin on first issuance. Keep the database
+and `BETTER_AUTH_SECRET` persistent across restarts: stored private keys depend
+on the auth secret for decryption. To rotate that secret, follow Better Auth's
+secret-rotation procedure. Signing-key rotation is managed by the JWT plugin
+separately from secret rotation.
+
+The internal request/response fields and Bearer transport are unchanged, so
+the Runner protocol and App/Workflow compatibility versions do not change.
 
 Host consumption is an interface only: a trusted Host may later provide the token
 to its Agent environment. No environment injection is implemented here.
@@ -171,7 +198,8 @@ to its Agent environment. No environment injection is implemented here.
 
 `src/server/cli/api.ts`. Callers authenticate with a session (Cookie or Bearer),
 a Run token, or an API key (`x-api-key`); a Bearer value with three dot-separated
-parts is treated as a Run token. Responses are JSON with `Cache-Control: no-store` and
+parts is treated as a Run token. An invalid Run token is rejected without falling
+back to a Cookie session. Responses are JSON with `Cache-Control: no-store` and
 `Referrer-Policy: no-referrer`. POST bodies must be `application/json` (Git
 deployment bundles up to 256 MiB, others 16 KiB), which a cross-site form cannot
 send.
@@ -205,7 +233,7 @@ safe. No new environment variables, protocol fields or compatibility bump are
 required. Keep the new table if reverting the server; keys remain hashed and
 cannot authenticate an older server that has no key support.
 There is no feature flag. To sign every CLI out at once, delete the sessions you
-want to end; Run tokens end with their Runs or when the auth secret changes.
+want to end; Run tokens end with their Runs or their five-minute expiry.
 
 ## Verification
 
