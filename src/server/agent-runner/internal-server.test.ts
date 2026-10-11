@@ -1,6 +1,12 @@
 import http from 'node:http';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createInternalHttpHandler } from './internal-server';
+
+// Unauthorized requests are rejected before any database access.
+vi.mock('~/db', async () => ({
+  db: {},
+  schema: await import('~/db/schema'),
+}));
 
 let server: http.Server;
 let origin: string;
