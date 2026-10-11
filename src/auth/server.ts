@@ -13,10 +13,7 @@ import { db, schema } from '../db';
 import { getPlatformEnv } from '../env';
 import { assertSignupAllowed } from './signup-gate';
 import { getPasskeyOriginError, getPasskeyRpId } from './passkey-origin';
-import {
-  API_KEY_NAME_MAX_LENGTH,
-  API_KEY_MAX_LIFETIME_DAYS,
-} from './api-key-contract';
+import { apiKeyOptions } from './api-key-options';
 
 const { appUrl, betterAuthSecret } = getPlatformEnv();
 const relyingPartyId = getPasskeyRpId(appUrl);
@@ -92,20 +89,7 @@ export const auth = betterAuth({
     // },
   },
   plugins: [
-    apiKey({
-      requireName: true,
-      maximumNameLength: API_KEY_NAME_MAX_LENGTH,
-      startingCharactersConfig: { charactersLength: 12 },
-      storage: 'database',
-      enableSessionForAPIKeys: false,
-      deferUpdates: false,
-      rateLimit: { enabled: false },
-      keyExpiration: {
-        defaultExpiresIn: null,
-        minExpiresIn: 1 / 86400,
-        maxExpiresIn: API_KEY_MAX_LIFETIME_DAYS,
-      },
-    }),
+    apiKey(apiKeyOptions),
     // Keep management endpoints and schema available even when ceremonies
     // are disabled. The hook above rejects them before any challenge is stored.
     passkey({

@@ -82,9 +82,18 @@ credentials retain their ordinary management authority. Verify and expired-key
 cleanup methods remain server-only, without public HTTP routes.
 
 The auth route sends `Cache-Control: no-store`. Native list/get responses omit
-the `key` field; only create returns the raw key. The UI projects metadata for
-its list and holds the secret in transient component memory, outside
-query/mutation caches and browser persistence.
+the `key` field; only create returns the raw key. The UI uses the standard Better
+Auth client and inferred response types, and holds the secret in transient
+component memory, outside query/mutation caches and browser persistence.
+
+The locked 1.7.7 API key plugin has a local pnpm patch: its list implementation
+must collect every owner record before configuration filtering and public
+pagination. The Better Auth adapter otherwise defaults an omitted internal
+limit to 100, causing the native endpoint to truncate both the list and `total`.
+The patch uses the owner record count as an explicit internal fetch limit
+instead of relying on the adapter default. Native list parameters and credential
+management remain unchanged; the UI requests the complete list. Keep the patch
+until an upstream version passes `src/auth/api-key-pagination.test.ts` without it.
 
 ## Device login (CLI sessions)
 
@@ -217,18 +226,5 @@ log in, approve and deny real requests, and inspect screenshots and network
 outcomes; `src/components/cli-auth/device-approval.browser.test.tsx` covers the
 page's decision boundaries with a stubbed `fetch` and does not replace it.
 
-Use a **separate fresh disposable PostgreSQL database** for the API key suite:
-
-```sh
-HATCH_API_KEY_TEST_DATABASE_URL=postgres://... pnpm exec vitest run --project unit \
-  src/server/api-keys.integration.test.ts
-```
-
-It upgrades from the prior migrations with historical user/session fixtures,
-reapplies the migration journal, then exercises real login, one-time creation,
-hashed storage, CLI calls, metadata-only listing, immediate revoke, expiry,
-owner isolation, disabled/orphan keys, native input/origin and server-only
-identity boundaries, custom/no-prefix keys and owner updates. Without its database URL it is skipped, not acceptance. Use a
-fresh database for each run because the suite specifically proves the upgrade.
 Full browser acceptance additionally drives the real Security page and calls
 the CLI API with the very key it creates, before and after UI revocation.

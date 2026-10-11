@@ -1,0 +1,112 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index f0fe44f919d222a87492623a2042f98549835a19..46f8163989efa00e395e48b011f5bc039efbf6fb 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -373,25 +373,26 @@ async function listApiKeys$1(ctx, referenceId, opts, paginationOpts) {
+ 	const storage = getStorageInstance(ctx, opts);
+ 	const { limit, offset, sortBy, sortDirection } = paginationOpts || {};
+ 	if (opts.storage === "database") {
+-		const [apiKeys, total] = await Promise.all([ctx.context.adapter.findMany({
++		const total = await ctx.context.adapter.count({
++			model: "apikey",
++			where: [{
++				field: "referenceId",
++				value: referenceId
++			}]
++		});
++		const apiKeys = await ctx.context.adapter.findMany({
+ 			model: "apikey",
+ 			where: [{
+ 				field: "referenceId",
+ 				value: referenceId
+ 			}],
+-			limit,
++			limit: limit ?? total,
+ 			offset,
+ 			sortBy: sortBy ? {
+ 				field: sortBy,
+ 				direction: sortDirection || "asc"
+ 			} : void 0
+-		}), ctx.context.adapter.count({
+-			model: "apikey",
+-			where: [{
+-				field: "referenceId",
+-				value: referenceId
+-			}]
+-		})]);
++		});
+ 		return {
+ 			apiKeys,
+ 			total
+@@ -416,25 +417,26 @@ async function listApiKeys$1(ctx, referenceId, opts, paginationOpts) {
+ 				};
+ 			}
+ 		}
+-		const [dbKeys, total] = await Promise.all([ctx.context.adapter.findMany({
++		const total = await ctx.context.adapter.count({
++			model: "apikey",
++			where: [{
++				field: "referenceId",
++				value: referenceId
++			}]
++		});
++		const dbKeys = await ctx.context.adapter.findMany({
+ 			model: "apikey",
+ 			where: [{
+ 				field: "referenceId",
+ 				value: referenceId
+ 			}],
+-			limit,
++			limit: limit ?? total,
+ 			offset,
+ 			sortBy: sortBy ? {
+ 				field: sortBy,
+ 				direction: sortDirection || "asc"
+ 			} : void 0
+-		}), ctx.context.adapter.count({
+-			model: "apikey",
+-			where: [{
+-				field: "referenceId",
+-				value: referenceId
+-			}]
+-		})]);
++		});
+ 		if (storage && dbKeys.length > 0) {
+ 			await mapConcurrent(dbKeys, (apiKey) => setApiKeyInStorage(ctx, apiKey, storage, calculateTTL(apiKey), opts), { concurrency: STORAGE_CONCURRENCY });
+ 			const keyIds = dbKeys.map((apiKey) => apiKey.id);
+@@ -472,25 +474,26 @@ async function listApiKeys$1(ctx, referenceId, opts, paginationOpts) {
+ 			total: apiKeys.length
+ 		};
+ 	}
+-	const [apiKeys, total] = await Promise.all([ctx.context.adapter.findMany({
++	const total = await ctx.context.adapter.count({
++		model: "apikey",
++		where: [{
++			field: "referenceId",
++			value: referenceId
++		}]
++	});
++	const apiKeys = await ctx.context.adapter.findMany({
+ 		model: "apikey",
+ 		where: [{
+ 			field: "referenceId",
+ 			value: referenceId
+ 		}],
+-		limit,
++		limit: limit ?? total,
+ 		offset,
+ 		sortBy: sortBy ? {
+ 			field: sortBy,
+ 			direction: sortDirection || "asc"
+ 		} : void 0
+-	}), ctx.context.adapter.count({
+-		model: "apikey",
+-		where: [{
+-			field: "referenceId",
+-			value: referenceId
+-		}]
+-	})]);
++	});
+ 	return {
+ 		apiKeys,
+ 		total

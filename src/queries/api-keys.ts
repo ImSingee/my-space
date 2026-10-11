@@ -1,44 +1,27 @@
 import { queryOptions } from '@tanstack/react-query';
-import type {
-  ApiKeySummary,
-  CreatedApiKey,
-  CreateApiKeyInput,
-  ApiKeyMetadata,
-} from '~auth/api-key-contract';
+import { authClient } from '~auth/client';
 
-async function call<T>(
-  path: string,
-  body?: unknown,
-  signal?: AbortSignal,
-): Promise<T> {
-  const response = await fetch(`/api/auth/api-key/${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    signal,
-    headers:
-      body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok)
+export type ApiKey = NonNullable<
+  Awaited<ReturnType<typeof authClient.apiKey.list>>['data']
+>['apiKeys'][number];
+export type CreatedApiKey = NonNullable<
+  Awaited<ReturnType<typeof authClient.apiKey.create>>['data']
+>;
+export type CreateApiKeyInput = Parameters<typeof authClient.apiKey.create>[0];
+
+const fetchOptions = { cache: 'no-store', retry: 0 } as const;
+
+function requireData<T>(result: {
+  data: T | null;
+  error: { status: number } | null;
+}): T {
+  if (result.error || !result.data)
     throw new Error(
-      response.status === 401
+      result.error?.status === 401
         ? 'Your session expired. Sign in again.'
         : 'Unable to manage API keys. Please try again.',
     );
-  return response.json() as Promise<T>;
-}
-
-function summary(key: ApiKeyMetadata): ApiKeySummary {
-  return {
-    id: key.id,
-    name: key.name ?? '',
-    prefix: key.prefix ?? '',
-    start: key.start ?? '',
-    createdAt: key.createdAt,
-    expiresAt: key.expiresAt,
-    lastRequest: key.lastRequest,
-  };
+  return result.data;
 }
 
 export const apiKeysQueryOptions = queryOptions({
@@ -48,20 +31,25 @@ export const apiKeysQueryOptions = queryOptions({
   retry: false,
   networkMode: 'always',
   queryFn: async ({ signal }) =>
-    (
-      await call<{ apiKeys: ApiKeyMetadata[] }>('list', undefined, signal)
-    ).apiKeys.map(summary),
+    requireData(
+      await authClient.apiKey.list({
+        fetchOptions: { ...fetchOptions, signal },
+      }),
+    ).apiKeys,
 });
 
 /** Keep the returned secret in component memory only, never query cache. */
-export async function createApiKey(
-  input: CreateApiKeyInput,
-): Promise<CreatedApiKey> {
-  const created = await call<ApiKeyMetadata & { key: string }>('create', {
-    ...input,
-    prefix: 'hatch_',
-  });
-  return { apiKey: summary(created), key: created.key };
+export async function createApiKey(input: CreateApiKeyInput) {
+  return requireData(
+    await authClient.apiKey.create({
+      ...input,
+      prefix: 'hatch_',
+      fetchOptions,
+    }),
+  );
 }
-export const revokeApiKey = (id: string) =>
-  call<{ success: true }>('delete', { keyId: id });
+export async function revokeApiKey(id: string) {
+  return requireData(
+    await authClient.apiKey.delete({ keyId: id, fetchOptions }),
+  );
+}

@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
-import type { ApiKeySummary } from '~auth/api-key-contract';
+import type { ApiKey } from '~queries/api-keys';
 import { ApiKeysPanel } from './api-keys-panel';
 
 const SECRET = 'hatch_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
@@ -22,6 +22,21 @@ const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn<(message: string) => void>(),
 }));
 
+// Keep the real SDK's response parsing and native paths; forward transport to
+// the per-test fetch spy instead of the fetch captured at module initialization.
+vi.mock('~auth/client', async () => {
+  const { createAuthClient } = await import('better-auth/react');
+  const { apiKeyClient } = await import('@better-auth/api-key/client');
+  return {
+    authClient: createAuthClient({
+      plugins: [apiKeyClient()],
+      fetchOptions: {
+        customFetchImpl: (input, init) => window.fetch(input, init),
+      },
+    }),
+  };
+});
+
 vi.mock('copy-to-clipboard', () => ({ default: mocks.copy }));
 vi.mock('sonner', () => ({
   toast: { error: mocks.toastError, success: mocks.toastSuccess },
@@ -30,7 +45,7 @@ vi.mock('sonner', () => ({
 type Route = 'list' | 'create' | 'revoke';
 type Reply = (body: unknown) => Response | Promise<Response>;
 
-let serverKeys: ApiKeySummary[];
+let serverKeys: ApiKey[];
 let replies: Partial<Record<Route, Reply>>;
 let calls: { route: Route; body: unknown }[];
 
@@ -51,9 +66,7 @@ const defaultReplies: Record<Route, Reply> = {
       id: `key-${serverKeys.length + 1}`,
       name,
       expiresAt:
-        expiresIn === null
-          ? null
-          : new Date(Date.now() + expiresIn * 1000).toISOString(),
+        expiresIn === null ? null : new Date(Date.now() + expiresIn * 1000),
     });
     serverKeys = [...serverKeys, apiKey];
     return Response.json({ ...apiKey, key: SECRET });
@@ -65,15 +78,28 @@ const defaultReplies: Record<Route, Reply> = {
   },
 };
 
-function summary(overrides: Partial<ApiKeySummary> = {}): ApiKeySummary {
+function summary(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
     id: 'key-1',
     name: 'Laptop CLI',
     prefix: 'hatch_',
     start: SECRET.slice(0, 12),
-    createdAt: new Date(Date.now() - 3 * DAY * 1000).toISOString(),
-    expiresAt: new Date(Date.now() + 30 * DAY * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 3 * DAY * 1000),
+    expiresAt: new Date(Date.now() + 30 * DAY * 1000),
     lastRequest: null,
+    configId: 'default',
+    referenceId: 'fixture-owner',
+    enabled: true,
+    rateLimitEnabled: false,
+    refillInterval: null,
+    refillAmount: null,
+    lastRefillAt: null,
+    rateLimitTimeWindow: null,
+    rateLimitMax: null,
+    requestCount: 0,
+    remaining: null,
+    updatedAt: new Date(),
+    metadata: null,
     ...overrides,
   };
 }
@@ -251,13 +277,13 @@ test('sends one creation request at a time and keeps failures inline with the fo
 test('revokes a key only after confirmation and follows the server response', async () => {
   serverKeys = [
     summary({
-      lastRequest: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+      lastRequest: new Date(Date.now() - 2 * 3600 * 1000),
     }),
     summary({
       id: 'key-2',
       name: 'Old script',
       start: 'hatch_ZyXwVu',
-      expiresAt: new Date(Date.now() - DAY * 1000).toISOString(),
+      expiresAt: new Date(Date.now() - DAY * 1000),
     }),
   ];
   const screen = await renderPanel();
@@ -385,4 +411,22 @@ test('leaving Security cancels old account reads and discards metadata before an
     .element(second.getByText('Private automation'))
     .not.toBeInTheDocument();
   expect(first.client.getQueryData(['auth', 'api-keys'])).toEqual([]);
+});
+
+test('lists and revokes credentials beyond the first 100 using the native SDK', async () => {
+  serverKeys = Array.from({ length: 101 }, (_, index) =>
+    summary({ id: `key-${index}`, name: `Automation ${index}` }),
+  );
+  const screen = await renderPanel();
+  const last = screen.getByRole('button', {
+    name: 'Revoke Automation 100',
+    exact: true,
+  });
+  await expect.element(last).toBeVisible();
+  await last.click();
+  await screen.getByRole('button', { name: 'Revoke key', exact: true }).click();
+  await expect.element(last).not.toBeInTheDocument();
+  expect(callsTo('revoke').map((call) => call.body)).toEqual([
+    { keyId: 'key-100' },
+  ]);
 });

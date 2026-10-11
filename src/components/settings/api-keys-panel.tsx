@@ -36,15 +36,12 @@ import copy from 'copy-to-clipboard';
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
+import { apiKeyOptions } from '~auth/api-key-options';
 import type {
-  ApiKeySummary,
+  ApiKey,
   CreatedApiKey,
   CreateApiKeyInput,
-} from '~auth/api-key-contract';
-import {
-  API_KEY_NAME_MAX_LENGTH,
-  API_KEY_MAX_LIFETIME_DAYS,
-} from '~auth/api-key-contract';
+} from '~queries/api-keys';
 import { formatRelative } from '~lib/format';
 import {
   apiKeysQueryOptions,
@@ -123,7 +120,7 @@ export function ApiKeysPanel() {
     if (createPhase !== 'creating') setCreateOpened(false);
   };
 
-  const confirmRevoke = (key: ApiKeySummary) =>
+  const confirmRevoke = (key: ApiKey) =>
     modals.openConfirmModal({
       title: `Revoke ${key.name}?`,
       centered: true,
@@ -249,7 +246,7 @@ function ApiKeyRow({
   revoking,
   onRevoke,
 }: {
-  apiKey: ApiKeySummary;
+  apiKey: ApiKey;
   revoking: boolean;
   onRevoke: () => void;
 }) {
@@ -392,7 +389,7 @@ function CreateApiKeyFlow({
           description="Helps you recognize where this key is used."
           value={name}
           onChange={(event) => setName(event.currentTarget.value)}
-          maxLength={API_KEY_NAME_MAX_LENGTH}
+          maxLength={apiKeyOptions.maximumNameLength}
           error={showErrors ? nameError : null}
           readOnly={create.isPending}
           autoComplete="off"
@@ -417,7 +414,7 @@ function CreateApiKeyFlow({
               onChange={setCustomDate}
               minDate={today.add(1, 'day').format('YYYY-MM-DD')}
               maxDate={today
-                .add(API_KEY_MAX_LIFETIME_DAYS - 1, 'day')
+                .add(apiKeyOptions.keyExpiration.maxExpiresIn - 1, 'day')
                 .format('YYYY-MM-DD')}
               valueFormat={DATE_FORMAT}
               ariaLabels={CALENDAR_ARIA_LABELS}
@@ -527,7 +524,7 @@ function RevealedApiKey({
 
       <Stack gap={6}>
         <Textarea
-          label={`API key for ${created.apiKey.name}`}
+          label={`API key for ${created.name}`}
           value={created.key}
           readOnly
           autosize
@@ -539,8 +536,8 @@ function RevealedApiKey({
         />
         <Text size="xs" c="dimmed">
           Send it in the <Code>x-api-key</Code> header.{' '}
-          {created.apiKey.expiresAt
-            ? `Expires ${dayjs(created.apiKey.expiresAt).format(DATE_FORMAT)}.`
+          {created.expiresAt
+            ? `Expires ${dayjs(created.expiresAt).format(DATE_FORMAT)}.`
             : 'Never expires.'}
         </Text>
       </Stack>
@@ -586,14 +583,14 @@ function ApiKeysSkeleton() {
 }
 
 /** The stored leading characters only; the rest of the secret is unknown. */
-function maskedIdentifier(key: ApiKeySummary): string {
-  const start = key.start.startsWith(key.prefix)
-    ? key.start
-    : `${key.prefix}${key.start}`;
+function maskedIdentifier(key: ApiKey): string {
+  const prefix = key.prefix ?? '';
+  const leading = key.start ?? '';
+  const start = leading.startsWith(prefix) ? leading : `${prefix}${leading}`;
   return `${start}…`;
 }
 
-function expiryStatus(expiresAt: string | null): {
+function expiryStatus(expiresAt: ApiKey['expiresAt']): {
   label: string;
   badge: string | null;
   expired: boolean;
@@ -627,7 +624,7 @@ function lifetimeSeconds(
     const seconds = dayjs(customDate).endOf('day').diff(dayjs(), 'second');
     return Math.min(
       Math.max(seconds, 1),
-      API_KEY_MAX_LIFETIME_DAYS * DAY_SECONDS,
+      apiKeyOptions.keyExpiration.maxExpiresIn * DAY_SECONDS,
     );
   }
   return Number(expiration) * DAY_SECONDS;
