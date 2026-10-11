@@ -3,6 +3,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "scripts/**/*.ts",
+    "packages/hatch-cli/src/**/*.ts",
     "vite.config.ts",
     "vitest.config.ts",
     "vitest.browser.config.ts",

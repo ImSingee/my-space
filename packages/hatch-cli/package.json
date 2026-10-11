@@ -1,0 +1,18 @@
+{
+  "name": "@hatch/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hatch authentication and App/Workflow lifecycle CLI.",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "hatch": "dist/main.mjs"
+  },
+  "files": [
+    "dist/main.mjs",
+    "dist/licenses",
+    "README.md"
+  ]
+}

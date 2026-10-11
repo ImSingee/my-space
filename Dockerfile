@@ -35,7 +35,7 @@ COPY . .
 RUN pnpm build
 
 # --- Runtime image -----------------------------------------------------------
-FROM node:26-slim AS runner
+FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -79,6 +79,10 @@ COPY --from=tailscale /hatch-tailscale /app/bin/hatch-tailscale
 # agent skills, the built-in Hatch SDK, and SQL migrations applied on startup.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# Standalone CLI, available to both the Platform and Runner image entrypoints.
+# It needs only Node and never receives the Runner fleet token automatically.
+COPY --from=build --chmod=755 /app/packages/hatch-cli/dist/main.mjs /usr/local/bin/hatch
+COPY --from=build /app/packages/hatch-cli/dist/licenses /usr/local/share/hatch-cli/licenses
 # The Agent Runner service: same image, alternate entrypoint
 # (`node dist/runner/main.mjs`), no DB credentials.
 COPY package.json ./

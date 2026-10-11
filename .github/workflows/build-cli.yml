@@ -1,0 +1,32 @@
+name: Build CLI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-cli:
+    name: Build CLI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+      - uses: pnpm/action-setup@v6
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build standalone CLI
+        run: pnpm build:cli
+      - name: Verify standalone CLI entry point
+        run: |
+          node packages/hatch-cli/dist/main.mjs --version
+          node packages/hatch-cli/dist/main.mjs --help
+      - name: Verify CLI authentication, stdin and workspace lifecycles
+        run: pnpm exec vitest run --project unit packages/hatch-cli/src

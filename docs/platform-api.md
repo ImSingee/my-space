@@ -101,12 +101,22 @@ Unknown API URLs return JSON 404 rather than the global SPA shell.
 The internal minting operation remains on the dedicated fleet-authenticated
 Runner HTTP server and is absent from public contracts/specification. Its URL
 rename has never shipped; Platform/Runner protocol stays at 18. All real
-callers use the new path; no Agent environment token injection or CLI executable
-is added. App/Workflow compatibility constants and database schema stay unchanged.
+callers use the new path; no Agent environment token injection is added. The separately packaged CLI
+consumes injected credentials and never mints them. App/Workflow compatibility constants and database schema stay unchanged.
 
 IDs resolve exact immutable ID first, then slug. List/detail project only `id`,
 `slug`, `name`, nullable `description`, `status`, ISO `createdAt`/`updatedAt`.
 No raw rows, database credentials, webhook secrets or build logs are returned.
+
+`GET /auth/status` projects the authenticated context: credential type (`session`,
+`api-key`, `run`), full platform authority, verified expiry (nullable for keys),
+minimal user/key metadata or Run binding. No token/session secret is returned.
+`GET /sdk/{kind}` (`app`/`workflow`) returns compiled SDK/import-map files as
+path/base64 pairs from this platform build and App codegen tool versions. These
+small client-neutral additions share normal authentication/error policy and the
+generated OpenAPI contract; no DB migration or Runner wire change is needed.
+The [CLI](../packages/hatch-cli/README.md) uses OpenAPILink with request/response
+validation and bundles the pure contract.
 Create accepts `slug`, `name`, optional `description`/`pin`, and returns `id`,
 `slug`, `name`, rendered `files` (`path`, `contentBase64`). Source returns `id`,
 nullable `masterCommit` and `bundleBase64`. Decode the latter into a Git bundle

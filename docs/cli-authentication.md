@@ -1,5 +1,7 @@
 # CLI authentication
 
+The installable CLI implements device/headless login, local profiles, native API key authentication, online status and explicit logout semantics. See [CLI README](../packages/hatch-cli/README.md) for env/config source priority, commands, safety, packaging and SDK preparation. `GET /api/v1/auth/status` reuses public API credential validation and projects safe session/key/Run metadata; it never accepts a locally decoded JWT as proof. CLI environment mode never persists credentials or reads `AGENT_RUNNER_TOKEN`.
+
 How scripts, the future `hatch` CLI and Agent Runs authenticate to the platform.
 The platform provides device authorization, user-managed API keys and Run JWTs;
 it does not implement the CLI, profile storage, environment injection or changes
@@ -50,8 +52,8 @@ curl --fail --silent --show-error \
 
 `HATCH_API_KEY` is an example script variable, not a new platform configuration
 or implemented CLI option. Do not enable shell tracing or verbose HTTP logging
-for calls containing credentials. CLI environment/config-file storage remains
-future client work.
+for calls containing credentials. For CLI authentication, see `HATCH_CLI_API_KEY`
+and `hatch auth login --api-key-file` in the [CLI README](../packages/hatch-cli/README.md).
 
 The server uses the official `@better-auth/api-key` **1.7.7** plugin with its
 default hash storage ([plugin documentation](https://www.better-auth.com/docs/plugins/api-key)).

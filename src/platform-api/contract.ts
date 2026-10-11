@@ -1,4 +1,5 @@
 /** Public HTTP contract. Independent of the Platform/Runner wire protocol. */
+import { authStatusSchema } from './auth-schemas';
 import { oc } from '@orpc/contract';
 import { JSON_SCHEMA_INPUT_REGISTRY } from '@orpc/zod/zod4';
 import { z } from 'zod';
@@ -153,6 +154,35 @@ function lifecycleContract(collection: 'apps' | 'workflows') {
 }
 
 export const platformApiContract = {
+  auth: {
+    status: base
+      .route({ method: 'GET', path: '/auth/status' })
+      .input(empty)
+      .output(authStatusSchema),
+  },
+  sdk: {
+    get: base
+      .route({ method: 'GET', path: '/sdk/{kind}' })
+      .input(z.object({ kind: z.enum(['app', 'workflow']) }).strict())
+      .output(
+        z
+          .object({
+            tooling: z
+              .object({
+                bufVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+                protocGenEsVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+              })
+              .strict()
+              .optional(),
+            files: z.array(
+              z
+                .object({ path: z.string(), contentBase64: z.string() })
+                .strict(),
+            ),
+          })
+          .strict(),
+      ),
+  },
   apps: lifecycleContract('apps'),
   workflows: lifecycleContract('workflows'),
 };

@@ -90,7 +90,9 @@ export async function mintRunToken(runId: string, runnerId: string) {
 }
 
 /** Verify signature, audience and expiry, then require the Run to be live. */
-export async function verifyRunToken(token: string): Promise<RunTokenContext> {
+export async function verifyRunToken(
+  token: string,
+): Promise<RunTokenContext & { expiresAt: string }> {
   let claims: z.infer<typeof claimsSchema>;
   try {
     const { payload } = await auth.api.verifyJWT({ body: { token } });
@@ -104,5 +106,5 @@ export async function verifyRunToken(token: string): Promise<RunTokenContext> {
     runnerId: claims.rnr,
   };
   await requireLiveRun(context);
-  return context;
+  return { ...context, expiresAt: new Date(claims.exp * 1000).toISOString() };
 }

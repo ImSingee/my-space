@@ -1,3 +1,4 @@
+import { sdkPayload } from './sdk';
 import { implement, ORPCError } from '@orpc/server';
 import { db } from '~/db';
 import { deployApp } from '~server/apps/deploy';
@@ -81,6 +82,13 @@ async function source(kind: Kind, id: string) {
 }
 
 export const platformApiRouter = api.router({
+  auth: {
+    status: api.auth.status.handler(({ context }) => {
+      if (!context.status) throw new ORPCError('UNAUTHORIZED');
+      return context.status;
+    }),
+  },
+  sdk: { get: api.sdk.get.handler(({ input }) => sdkPayload(input.kind)) },
   apps: {
     list: api.apps.list.handler(() => list('apps')),
     create: api.apps.create.handler(async ({ input, context }) => {
