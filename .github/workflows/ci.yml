@@ -14,6 +14,20 @@ jobs:
       matrix:
         node-version: [22.x, 24.x, 26.x]
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: hatch_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hatch_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v7
 
@@ -25,6 +39,18 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
+      # The Dockerfile's Deno stage is the single source of the Deno version.
+      - name: Read Deno version from Dockerfile
+        id: deno
+        run: |
+          version="$(sed -nE 's#^FROM denoland/deno:bin-([^ ]+) AS deno$#\1#p' Dockerfile)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ steps.deno.outputs.version }}
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -34,8 +60,41 @@ jobs:
       - name: Run linter
         run: pnpm lint
 
+      # The passkey integration test drives a real browser.
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run unit tests
+        run: pnpm test:unit
+        env:
+          DATA_TABLE_TEST_DATABASE_URL: postgres://postgres@localhost:5432/hatch_test
+          HATCH_AUTH_TEST_DATABASE_URL: postgres://postgres@localhost:5432/hatch_test
+
       - name: Build
         run: pnpm build
+
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: pnpm hatch-sdk:build && pnpm test:browser
 
   tailscale:
     name: Tailscale connection helper

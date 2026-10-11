@@ -72,7 +72,9 @@ afterEach(async () => {
   );
 });
 
-describe('buildWorkflow dependencies', () => {
+// Each build runs real `deno install` / `deno check`, which is slow with a
+// cold Deno cache.
+describe('buildWorkflow dependencies', { timeout: 30_000 }, () => {
   it.each(['json', 'ts'])(
     'rejects entry and imported type errors before evaluation with a %s manifest, preserving the previous artifact',
     async (format) => {

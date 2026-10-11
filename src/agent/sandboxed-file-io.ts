@@ -106,7 +106,9 @@ function code(value) {
 }
 
 function mapCode(error) {
-  const value = error?.fileCode ?? error?.code;
+  // Codes raised by this helper are already FileErrorCodes.
+  if (error?.fileCode) return error.fileCode;
+  const value = error?.code;
   if (value === 'ABORT_ERR') return 'aborted';
   if (value === 'ENOENT') return 'not_found';
   if (value === 'EACCES' || value === 'EPERM' || value === 'ELOOP') {
@@ -114,9 +116,7 @@ function mapCode(error) {
   }
   if (value === 'ENOTDIR') return 'not_directory';
   if (value === 'EISDIR') return 'is_directory';
-  if (value === 'EINVAL' || value === 'invalid') return 'invalid';
-  if (value === 'permission_denied') return value;
-  if (value === 'not_supported') return value;
+  if (value === 'EINVAL') return 'invalid';
   return 'unknown';
 }
 
