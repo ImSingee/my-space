@@ -27,6 +27,30 @@ origin used by the Agent and external integrations; connecting Tailscale adds
 an access address without changing that deployment contract. App and Workflow
 links copied from the browser use the address you are currently visiting.
 
+## Passkeys
+
+Passkeys registered at the original address can also be used at the active
+Tailscale address, and passkeys registered through Tailscale work at the original
+address. Both use the hostname of `APP_URL` as their stable WebAuthn RP ID.
+Existing passkeys do not need to be registered again.
+
+Hatch publishes `/.well-known/webauthn` without requiring sign-in. Its related
+origins include `APP_URL` and the exact HTTPS origin of the connected Tailscale
+node. Disconnecting or replacing the node updates this declaration immediately;
+the response is not cached. Better Auth's shared trusted-origin checks remain
+enabled, and signed WebAuthn responses must match the requesting browser origin.
+Hatch does not require the browser origin to equal `APP_URL` for passkeys.
+
+Cross-domain use requires a browser supporting WebAuthn Related Origin Requests.
+The browser must be able to fetch `https://<APP_URL hostname>/.well-known/webauthn`
+with a valid HTTPS certificate, on the default HTTPS port, even while visiting
+the Tailscale address. If `APP_URL` uses another port, proxy this declaration on
+port 443 too. IP addresses and insecure HTTP domains cannot be used for passkeys;
+HTTP localhost remains available for development. A canonical IP address cannot
+provide the shared RP ID, even when the Tailscale entrance uses HTTPS.
+Browsers without Related Origin Requests support can still use passkeys at the
+original address and password sign-in at the Tailscale address.
+
 ## Installation
 
 The Docker image includes a small Go executable using the official

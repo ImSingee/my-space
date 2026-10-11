@@ -2,6 +2,11 @@ import { afterAll, afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({
   close: undefined as (() => Promise<void>) | undefined,
+  tailscaleOrigin: null as string | null,
+}));
+
+vi.mock('../server/tailscale-manager', () => ({
+  getTailscaleManager: () => ({ trustedOrigin: () => fixture.tailscaleOrigin }),
 }));
 
 vi.mock('~/db', async () => {
@@ -18,11 +23,81 @@ const credentials = {
 };
 
 beforeEach(async () => {
+  fixture.tailscaleOrigin = null;
   await db.delete(schema.user);
   await db.delete(schema.verification);
   vi.resetModules();
   vi.stubEnv('SECRET', 'passkey-origin-test-secret-at-least-32-chars');
   vi.stubEnv('AGENT_RUNNER_TOKEN', 'passkey-origin-test-runner');
+});
+
+test('shares the canonical RP ID and publishes only the active related origins', async () => {
+  const appOrigin = 'https://hatch.example.test';
+  const tailscaleOrigin = 'https://hatch.example.ts.net';
+  const { auth, cookie } = await setup(appOrigin);
+  const { passkeyRelatedOriginsResponse } =
+    await import('../server/passkey-related-origins');
+  fixture.tailscaleOrigin = tailscaleOrigin;
+  const declaration = passkeyRelatedOriginsResponse();
+  expect(declaration.headers.get('cache-control')).toBe('no-store');
+  expect(declaration.headers.get('content-type')).toContain('application/json');
+  await expect(declaration.json()).resolves.toEqual({
+    origins: [appOrigin, tailscaleOrigin],
+  });
+
+  const options = await auth.handler(
+    new Request(
+      `${tailscaleOrigin}/api/auth/passkey/generate-register-options`,
+      {
+        headers: { origin: tailscaleOrigin, cookie },
+      },
+    ),
+  );
+  expect(options.status).toBe(200);
+  await expect(options.json()).resolves.toMatchObject({
+    rp: { id: 'hatch.example.test' },
+  });
+
+  fixture.tailscaleOrigin = null;
+  await expect(passkeyRelatedOriginsResponse().json()).resolves.toEqual({
+    origins: [appOrigin],
+  });
+  fixture.tailscaleOrigin = 'https://replacement.example.ts.net';
+  await expect(passkeyRelatedOriginsResponse().json()).resolves.toEqual({
+    origins: [appOrigin, fixture.tailscaleOrigin],
+  });
+});
+
+test('does not enforce domain equality in the passkey gate but retains shared authentication protection', async () => {
+  const { auth, cookie } = await setup('https://hatch.example.test');
+  const browserOrigin = 'https://another.example.test';
+  const options = await auth.handler(
+    new Request(
+      `${browserOrigin}/api/auth/passkey/generate-authenticate-options`,
+      {
+        headers: { origin: browserOrigin },
+      },
+    ),
+  );
+  expect(options.status).toBe(200);
+  await expect(options.json()).resolves.toMatchObject({
+    rpId: 'hatch.example.test',
+  });
+  const verification = await auth.handler(
+    new Request(`${browserOrigin}/api/auth/passkey/verify-authentication`, {
+      method: 'POST',
+      headers: {
+        origin: browserOrigin,
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ response: {} }),
+    }),
+  );
+  expect(verification.status).toBe(403);
+  await expect(verification.json()).resolves.toMatchObject({
+    code: 'INVALID_ORIGIN',
+  });
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -31,6 +106,8 @@ afterAll(async () => fixture.close?.());
 async function setup(appOrigin: string) {
   vi.stubEnv('APP_URL', appOrigin);
   const { auth } = await import('./server');
+  // Better Auth disables its shared origin gate by default under Vitest.
+  (await auth.$context).skipOriginCheck = false;
   const call = (path: string, body?: unknown, cookie?: string) =>
     auth.handler(
       new Request(`${appOrigin}/api/auth${path}`, {
@@ -166,7 +243,6 @@ test('rejects browser IP origins even when APP_URL is a domain', async () => {
   for (const headers of [
     new Headers({ origin: 'http://127.1:3700' }),
     new Headers({ referer: 'http://[::1]:3700/login' }),
-    new Headers({ origin: 'https://another.example.test' }),
   ]) {
     const response = await auth.handler(
       new Request(`${origin}/api/auth/passkey/generate-authenticate-options`, {
