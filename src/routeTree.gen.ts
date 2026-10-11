@@ -17,6 +17,7 @@ import { Route as AppAgentRouteImport } from './routes/_app/agent'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiEventsRouteImport } from './routes/api/events'
 import { Route as CliAuthorizeRouteImport } from './routes/cli/authorize'
 import { Route as AppAgentIndexRouteImport } from './routes/_app/agent/index'
@@ -34,13 +35,14 @@ import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/use
 import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
 import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
+import { Route as ApiV1OpenapiDotjsonRouteImport } from './routes/api/v1/openapi[.]json'
 import { Route as AppAppAppSlugIndexRouteImport } from './routes/_app/app/$appSlug/index'
 import { Route as AppAppAppSlugManageRouteImport } from './routes/_app/app/$appSlug/manage'
 import { Route as AppWorkflowWorkflowSlugIndexRouteImport } from './routes/_app/workflow/$workflowSlug/index'
 import { Route as AppWorkflowWorkflowSlugManageRouteImport } from './routes/_app/workflow/$workflowSlug/manage'
 import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
 import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
-import { Route as ApiCliV1SplatRouteImport } from './routes/api/cli/v1/$'
 import { Route as ApiWorkflowWorkflowIdDownloadRouteImport } from './routes/api/workflow/$workflowId/download'
 import { Route as ApiWorkflowWorkflowIdRunRouteImport } from './routes/api/workflow/$workflowId/run'
 import { Route as AppAppSlugEmbedSplatRouteImport } from './routes/app/$appSlug/embed/$'
@@ -96,6 +98,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AppRoute,
+} as any)
+const ApiSplatRoute = ApiSplatRouteImport.update({
+  id: '/api/$',
+  path: '/api/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiEventsRoute = ApiEventsRouteImport.update({
   id: '/api/events',
@@ -182,6 +189,16 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1SplatRoute = ApiV1SplatRouteImport.update({
+  id: '/api/v1/$',
+  path: '/api/v1/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1OpenapiDotjsonRoute = ApiV1OpenapiDotjsonRouteImport.update({
+  id: '/api/v1/openapi.json',
+  path: '/api/v1/openapi.json',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppAppAppSlugIndexRoute = AppAppAppSlugIndexRouteImport.update({
   id: '/app/$appSlug/',
   path: '/app/$appSlug/',
@@ -213,11 +230,6 @@ const ApiAgentAttachmentsAttachmentIdRoute =
 const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
   id: '/api/app/$appId/download',
   path: '/api/app/$appId/download',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiCliV1SplatRoute = ApiCliV1SplatRouteImport.update({
-  id: '/api/cli/v1/$',
-  path: '/api/cli/v1/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiWorkflowWorkflowIdDownloadRoute =
@@ -315,6 +327,7 @@ export interface FileRoutesByFullPath {
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/settings': typeof AppSettingsRouteWithChildren
+  '/api/$': typeof ApiSplatRoute
   '/api/events': typeof ApiEventsRoute
   '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
@@ -327,6 +340,8 @@ export interface FileRoutesByFullPath {
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
   '/agent/': typeof AppAgentIndexRoute
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
@@ -336,7 +351,6 @@ export interface FileRoutesByFullPath {
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
-  '/api/cli/v1/$': typeof ApiCliV1SplatRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -362,6 +376,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
+  '/api/$': typeof ApiSplatRoute
   '/api/events': typeof ApiEventsRoute
   '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
@@ -374,6 +389,8 @@ export interface FileRoutesByTo {
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
   '/agent': typeof AppAgentIndexRoute
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
@@ -383,7 +400,6 @@ export interface FileRoutesByTo {
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
-  '/api/cli/v1/$': typeof ApiCliV1SplatRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -413,6 +429,7 @@ export interface FileRoutesById {
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/executions': typeof AppExecutionsRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
+  '/api/$': typeof ApiSplatRoute
   '/api/events': typeof ApiEventsRoute
   '/cli/authorize': typeof CliAuthorizeRoute
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
@@ -425,6 +442,8 @@ export interface FileRoutesById {
   '/_app/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
   '/_app/agent/': typeof AppAgentIndexRoute
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
@@ -434,7 +453,6 @@ export interface FileRoutesById {
   '/_app/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
-  '/api/cli/v1/$': typeof ApiCliV1SplatRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -464,6 +482,7 @@ export interface FileRouteTypes {
     | '/dashboards'
     | '/executions'
     | '/settings'
+    | '/api/$'
     | '/api/events'
     | '/cli/authorize'
     | '/agent/$threadId'
@@ -476,6 +495,8 @@ export interface FileRouteTypes {
     | '/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
+    | '/api/v1/$'
+    | '/api/v1/openapi.json'
     | '/agent/'
     | '/apps/'
     | '/dashboard/'
@@ -485,7 +506,6 @@ export interface FileRouteTypes {
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
-    | '/api/cli/v1/$'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -511,6 +531,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/dashboards'
     | '/executions'
+    | '/api/$'
     | '/api/events'
     | '/cli/authorize'
     | '/agent/$threadId'
@@ -523,6 +544,8 @@ export interface FileRouteTypes {
     | '/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
+    | '/api/v1/$'
+    | '/api/v1/openapi.json'
     | '/agent'
     | '/apps'
     | '/dashboard'
@@ -532,7 +555,6 @@ export interface FileRouteTypes {
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
-    | '/api/cli/v1/$'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -561,6 +583,7 @@ export interface FileRouteTypes {
     | '/_app/dashboards'
     | '/_app/executions'
     | '/_app/settings'
+    | '/api/$'
     | '/api/events'
     | '/cli/authorize'
     | '/_app/agent/$threadId'
@@ -573,6 +596,8 @@ export interface FileRouteTypes {
     | '/_app/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
+    | '/api/v1/$'
+    | '/api/v1/openapi.json'
     | '/_app/agent/'
     | '/_app/apps/'
     | '/_app/dashboard/'
@@ -582,7 +607,6 @@ export interface FileRouteTypes {
     | '/_app/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
-    | '/api/cli/v1/$'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -608,13 +632,15 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiSplatRoute: typeof ApiSplatRoute
   ApiEventsRoute: typeof ApiEventsRoute
   CliAuthorizeRoute: typeof CliAuthorizeRoute
   ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiV1SplatRoute: typeof ApiV1SplatRoute
+  ApiV1OpenapiDotjsonRoute: typeof ApiV1OpenapiDotjsonRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
-  ApiCliV1SplatRoute: typeof ApiCliV1SplatRoute
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
   ApiWorkflowWorkflowIdRunRoute: typeof ApiWorkflowWorkflowIdRunRoute
   AppAppSlugEmbedSplatRoute: typeof AppAppSlugEmbedSplatRoute
@@ -684,6 +710,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/api/$': {
+      id: '/api/$'
+      path: '/api/$'
+      fullPath: '/api/$'
+      preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/events': {
       id: '/api/events'
@@ -804,6 +837,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/$': {
+      id: '/api/v1/$'
+      path: '/api/v1/$'
+      fullPath: '/api/v1/$'
+      preLoaderRoute: typeof ApiV1SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/openapi.json': {
+      id: '/api/v1/openapi.json'
+      path: '/api/v1/openapi.json'
+      fullPath: '/api/v1/openapi.json'
+      preLoaderRoute: typeof ApiV1OpenapiDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/app/$appSlug/': {
       id: '/_app/app/$appSlug/'
       path: '/app/$appSlug'
@@ -844,13 +891,6 @@ declare module '@tanstack/react-router' {
       path: '/api/app/$appId/download'
       fullPath: '/api/app/$appId/download'
       preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/cli/v1/$': {
-      id: '/api/cli/v1/$'
-      path: '/api/cli/v1/$'
-      fullPath: '/api/cli/v1/$'
-      preLoaderRoute: typeof ApiCliV1SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/workflow/$workflowId/download': {
@@ -1067,13 +1107,15 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiSplatRoute: ApiSplatRoute,
   ApiEventsRoute: ApiEventsRoute,
   CliAuthorizeRoute: CliAuthorizeRoute,
   ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiV1SplatRoute: ApiV1SplatRoute,
+  ApiV1OpenapiDotjsonRoute: ApiV1OpenapiDotjsonRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
-  ApiCliV1SplatRoute: ApiCliV1SplatRoute,
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,
   ApiWorkflowWorkflowIdRunRoute: ApiWorkflowWorkflowIdRunRoute,
   AppAppSlugEmbedSplatRoute: AppAppSlugEmbedSplatRoute,

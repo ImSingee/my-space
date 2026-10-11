@@ -12,6 +12,7 @@ import {
   deploymentBuildDir,
 } from '~agent/paths';
 import { db, schema } from '~/db';
+import { AppError } from '~server/errors';
 import type { JsonObject } from '~/db/schema';
 import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
 import { publishPlatformEvent } from '~server/platform-events';
@@ -48,6 +49,8 @@ export type DeployResult = {
 };
 
 export type DeployAppOptions = {
+  /** Reject if the immutable ID belongs to a recreated resource. */
+  expectedGeneration?: string;
   sourceDir?: string;
   /** Required release note recorded on the deployment (e.g. what changed). */
   message: string;
@@ -489,6 +492,15 @@ async function deployAppInner(
   if (!app) {
     throw new Error(`App "${id}" not found.`);
   }
+  if (
+    options.expectedGeneration &&
+    app.createdAt.toISOString() !== options.expectedGeneration
+  ) {
+    throw new AppError(
+      'App was deleted or recreated while preparing the deploy.',
+      409,
+    );
+  }
   // `status` is temporarily changed for build visibility. Keep the status that
   // existed before this deploy so a later failure cannot unarchive the app.
   let statusBeforeBuild = app.status;
@@ -714,6 +726,15 @@ async function deployAppInner(
         where: { id },
       });
       if (!currentApp) throw new Error(`App "${id}" not found.`);
+      if (
+        options.expectedGeneration &&
+        currentApp.createdAt.toISOString() !== options.expectedGeneration
+      ) {
+        throw new AppError(
+          'App was deleted or recreated while preparing the deploy.',
+          409,
+        );
+      }
       // Capture a concurrent archive request, but never replace the original
       // state with the temporary `building` marker written by this deploy.
       if (currentApp.status !== 'building') {
@@ -835,6 +856,22 @@ async function deployAppInner(
       const releaseBuild = build;
       await db.transaction(async (tx) => {
         await appDeployLock.acquire(tx, id);
+        if (options.expectedGeneration) {
+          const [currentApp] = await tx
+            .select({ createdAt: schema.apps.createdAt })
+            .from(schema.apps)
+            .where(eq(schema.apps.id, id))
+            .for('update');
+          if (
+            !currentApp ||
+            currentApp.createdAt.toISOString() !== options.expectedGeneration
+          ) {
+            throw new AppError(
+              'App was deleted or recreated while preparing the deploy.',
+              409,
+            );
+          }
+        }
         const last = await tx.query.deployments.findFirst({
           where: { appId: id },
           orderBy: { version: 'desc' },
