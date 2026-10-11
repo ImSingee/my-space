@@ -50,8 +50,8 @@ loader with a freshly materialized platform SDK to establish the version before
 creating the destination resource. Reject ambiguous roots or two manifest files.
 Preserve the archive's selected manifest format. Importing an App does not by
 itself authorize converting `manifest.json` to `manifest.ts`; conversion needs
-an explicit user request or a user-requested upgrade to a released v3+ contract
-that requires TS. Such a contract does not exist yet. After copying reviewed
+an explicit user request or a user-requested upgrade to a released App v3+
+contract that requires TS. Such a contract does not exist yet. After copying reviewed
 source, remove the destination template's other manifest format, update the
 immutable id in the selected manifest, and follow `building-apps` Local
 validation, including its independent manifest check when TS is selected.

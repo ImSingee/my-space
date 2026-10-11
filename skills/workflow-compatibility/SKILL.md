@@ -21,8 +21,12 @@ Current source may use either `manifest.ts` or `manifest.json`; keep exactly one
 file. New templates use TS for TypeScript toolchain validation. Preserve the
 authored format during ordinary edits, imports, and redeployments. Do not
 migrate JSON to TS unless the user explicitly requests the conversion, or as
-part of a user-requested upgrade to a released compatibility v3 or later that
-requires TS. The latest Workflow contract is v1; v3+ is not available yet.
+part of a user-requested upgrade to a released compatibility v2 or later that
+requires TS. The latest Workflow contract is v1; v2+ is not available yet.
+
+In every compatibility version and in both formats, the manifest top level
+rejects undeclared fields. The retired top-level `version` field remains
+accepted and ignored until the proposal below removes it.
 
 TypeScript authoring does not introduce a new deployment compatibility version:
 the platform still stores parsed source JSON
@@ -41,7 +45,8 @@ Existing source, deployments, and application data need no automatic migration.
 
 Compatibility v1 is the initial Workflow contract. Source must declare
 `"compatibilityVersion": 1` at the top level of the source manifest (`manifest.ts` or `manifest.json`) before it can
-be deployed.
+be deployed. Under v1, `network` is optional: a Workflow that omits it runs with
+unrestricted network access.
 
 ## Next (proposal)
 
@@ -50,14 +55,22 @@ These proposals are not active platform policy and do not change the latest or
 minimum supported version until they are promoted into the version history
 above.
 
-- Compatibility v3 and later will require `manifest.ts`; `manifest.json` will
+- Compatibility v2 and later will require `manifest.ts`; `manifest.json` will
   no longer be accepted as source for those contracts. When that contract is
   released and the user requests an upgrade, convert the JSON object using
   `defineWorkflowManifest`, remove `manifest.json` in the same change, and run
   the independent manifest check in `building-workflows` before entry checks.
   Until then, preserve JSON unless the user explicitly requests conversion.
-  This proposal concerns authored source, not stored deployment JSON, and does
-  not introduce or skip any currently unavailable compatibility version.
+  This proposal concerns authored source, not stored deployment JSON.
+
+- Compatibility v2 and later will require `network`. To migrate a Workflow that omits it, declare
+  a hostname/IP allowlist, `[]`, or `"unrestricted"` covering every destination
+  the Workflow actually uses. An omitted field currently runs unrestricted, so
+  do not default to `[]` without checking the code. Workflows receive no
+  automatic platform destinations. A missing declaration will be rejected.
+
+- Compatibility v2 and later will no longer accept the retired top-level
+  `version` field. Remove it before targeting v2.
 
 ## Handling compatibility versions
 

@@ -22,7 +22,7 @@ Current source may use either `manifest.ts` or `manifest.json`; keep exactly one
 New templates use TS to let Agents validate configuration with the TypeScript
 toolchain. Preserve the selected format during ordinary edits and imports.
 Do not migrate JSON to TS unless the user explicitly requests that conversion,
-or as part of a user-requested upgrade to a released compatibility v3 or later
+or as part of a user-requested upgrade to a released compatibility v2 or later
 that requires TS. No such version exists yet; TS-only source is recorded under
 `Next (proposal)` in `workflow-compatibility`, not current policy.
 
@@ -224,8 +224,8 @@ A hostname without a port allows all ports for that hostname. Do not include a
 scheme, path, query, CIDR range, Unix socket, comma, or unbracketed IPv6
 address. Hostnames do not include their subdomains unless you use the wildcard
 form. Set `"network": "unrestricted"` only when arbitrary networking is
-required. Omitting the field is reserved for compatibility with older
-deployments and also runs unrestricted; never omit it from new source.
+required. Compatibility v1 still accepts an omitted field and runs it
+unrestricted; never omit it from new source.
 
 Deno uses one network permission for HTTP, HTTPS, raw TCP and UDP, DNS
 resolution, and TCP/UDP listeners. Workflow describe mode and real runs use the

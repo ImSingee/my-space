@@ -22,7 +22,7 @@ export function NetworkAccessDetails({
       : access.mode === 'restricted'
         ? 'Declared destinations only'
         : access.legacy
-          ? 'Unrestricted (legacy deployment)'
+          ? 'Unrestricted (not declared)'
           : 'Unrestricted';
 
   return (

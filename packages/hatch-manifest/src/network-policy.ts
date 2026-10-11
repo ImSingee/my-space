@@ -5,6 +5,10 @@ export type NetworkPolicy = 'unrestricted' | string[];
 export type NetworkAccessView = {
   mode: 'blocked' | 'restricted' | 'unrestricted';
   destinations: string[];
+  /**
+   * True when the deployment declared no policy and therefore runs
+   * unrestricted. The Platform/Runner read model keeps this field name.
+   */
   legacy: boolean;
 };
 

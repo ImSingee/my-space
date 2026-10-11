@@ -6,5 +6,5 @@ export function formatNetworkAccess(access: NetworkAccessView | null): string {
   if (access.mode === 'restricted') {
     return `declared destinations only (${access.destinations.join(', ')})`;
   }
-  return access.legacy ? 'unrestricted (legacy deployment)' : 'unrestricted';
+  return access.legacy ? 'unrestricted (not declared)' : 'unrestricted';
 }

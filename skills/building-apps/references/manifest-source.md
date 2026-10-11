@@ -7,10 +7,11 @@ so Agents can validate configuration with the TypeScript toolchain.
 
 Preserve the authored format during ordinary edits, imports, and redeployments.
 Do not migrate JSON to TS unless the user explicitly requests the conversion,
-or as part of a user-requested upgrade to a released compatibility v3 or later
-that requires TS. No v3+ contract exists yet: the current latest versions are
-App v2 and Workflow v1. The TS-only requirement is recorded under
-`Next (proposal)` in the respective compatibility Skills and is not active.
+or as part of a user-requested upgrade to a released compatibility version
+that requires TS: App v3+ or Workflow v2+. Neither exists yet: the current
+latest versions are App v2 and Workflow v1. The TS-only requirement is recorded
+under `Next (proposal)` in the respective compatibility Skills and is not
+active.
 
 ## Authoring
 
@@ -44,6 +45,11 @@ respective modules for `satisfies` declarations. Helpers do not fill defaults or
 perform platform operations. The platform validates values with the same Zod
 contracts used to derive the input types. App version omission retains the
 existing v2 default; Workflow `compatibilityVersion` remains mandatory.
+
+In both formats, the top level of the manifest is strict: undeclared fields,
+including misspellings, are rejected. Retired fields remain accepted and
+ignored until a newer compatibility version removes them: App `version` and
+`userscripts`, and Workflow `version`. Do not add them to new source.
 
 These SDK modules are materialized under `.hatch/` and resolved by its import
 map. Do not add `@hatch/*` packages to dependency files, edit generated SDK files,

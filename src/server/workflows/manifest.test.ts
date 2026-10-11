@@ -76,6 +76,12 @@ describe('Workflow manifest compatibility version', () => {
     expect(parsed.version).toEqual(retiredVersion);
     expect(normalizeWorkflowManifest(parsed)).not.toHaveProperty('version');
   });
+
+  it('rejects undeclared fields such as a misspelled network', () => {
+    expect(() =>
+      parseSourceWorkflowManifest({ ...manifest(), netwrok: [] }),
+    ).toThrow(/netwrok/);
+  });
 });
 
 describe('Workflow manifest URLs', () => {

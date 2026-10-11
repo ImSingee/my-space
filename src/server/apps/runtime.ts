@@ -57,7 +57,7 @@ export type BackendArtifact = {
   /** Absent on historical deployments, which use deno run. */
   runtime?: BackendRuntime;
   format?: 'bundle-v1';
-  /** Missing only for legacy deployments, which retain unrestricted access. */
+  /** Absent when no policy was declared, which runs unrestricted. */
   network?: NetworkPolicy;
 };
 
