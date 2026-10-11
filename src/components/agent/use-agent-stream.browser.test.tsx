@@ -93,14 +93,9 @@ const envSeed: StreamSeed = {
   pendingEnvRequest: envRequest,
 };
 
-function StreamHarness({
-  onTerminal,
-}: {
-  onTerminal: (errorMessage?: string) => boolean | Promise<boolean>;
-}) {
+function StreamHarness() {
   const { state, connect, answer, submitEnv, envAnnouncement } = useAgentStream(
-    () => {},
-    onTerminal,
+    { onSettled: () => {} },
   );
 
   useEffect(() => connect('run-1'), [connect]);
@@ -114,7 +109,7 @@ function StreamHarness({
       >
         {envAnnouncement}
       </span>
-      {state.active || state.terminalError ? (
+      {state.active || state.outcome ? (
         <StreamingBubble
           state={state}
           onAnswer={answer}
@@ -140,10 +135,7 @@ function SeededStreamHarness({
   const [reconnect, setReconnect] = useState(0);
   const [seed, setSeed] = useState<StreamSeed | undefined>(initialSeed);
   const { state, connect, syncSeed, answer, submitEnv, envAnnouncement } =
-    useAgentStream(
-      () => {},
-      async () => false,
-    );
+    useAgentStream({ onSettled: () => {} });
 
   useEffect(
     () => syncSeed(runId, runId === 'run-1' ? seed : undefined),
@@ -205,7 +197,7 @@ function SeededStreamHarness({
       >
         {envAnnouncement}
       </span>
-      {state.active || state.terminalError ? (
+      {state.active || state.outcome ? (
         <StreamingBubble
           state={state}
           onAnswer={answer}
@@ -229,51 +221,6 @@ beforeEach(() => {
       ]),
     ),
   );
-});
-
-test('keeps the live error until the persisted transcript is ready', async () => {
-  let resolveTerminal!: (persisted: boolean) => void;
-  const terminal = new Promise<boolean>((resolve) => {
-    resolveTerminal = resolve;
-  });
-  const onTerminal = vi.fn<(errorMessage?: string) => Promise<boolean>>(
-    () => terminal,
-  );
-  const screen = await render(<StreamHarness onTerminal={onTerminal} />);
-
-  await expect.element(screen.getByText('Partial reply')).toBeVisible();
-  await expect
-    .element(screen.getByRole('alert'))
-    .toMatchTextContent('OpenAI API error (402)');
-  expect(onTerminal).toHaveBeenCalledWith('OpenAI API error (402)');
-
-  resolveTerminal(true);
-
-  await expect.element(screen.getByText('Idle')).toBeVisible();
-  expect(toast.error).not.toHaveBeenCalled();
-});
-
-test('falls back to a toast when the refreshed transcript has no error', async () => {
-  const screen = await render(<StreamHarness onTerminal={async () => false} />);
-
-  await expect.element(screen.getByText('Idle')).toBeVisible();
-  expect(toast.error).toHaveBeenCalledWith('OpenAI API error (402)');
-});
-
-test('keeps the inline error when the transcript refetch fails', async () => {
-  const screen = await render(
-    <StreamHarness
-      onTerminal={async () => {
-        throw new Error('Session refetch failed');
-      }}
-    />,
-  );
-
-  await expect.element(screen.getByText('Partial reply')).toBeVisible();
-  await expect
-    .element(screen.getByRole('alert'))
-    .toMatchTextContent('OpenAI API error (402)');
-  expect(toast.error).not.toHaveBeenCalled();
 });
 
 test('submits env values only in the POST body and clears the form on success', async () => {
@@ -301,7 +248,7 @@ test('submits env values only in the POST body and clears the form on success', 
     return Response.json({ ok: true });
   });
   vi.stubGlobal('fetch', fetchMock);
-  const screen = await render(<StreamHarness onTerminal={async () => false} />);
+  const screen = await render(<StreamHarness />);
   const input = screen.getByLabelText(/^GITHUB_TOKEN(?: \*)?$/);
   await input.fill(sentinel);
   await screen
@@ -352,7 +299,7 @@ test('retains env values and shows a fixed error when submission fails', async (
     return new Response(`Rejected ${sentinel}`, { status: 503 });
   });
   vi.stubGlobal('fetch', fetchMock);
-  const screen = await render(<StreamHarness onTerminal={async () => false} />);
+  const screen = await render(<StreamHarness />);
   const input = screen.getByLabelText(/^GITHUB_TOKEN(?: \*)?$/);
   await input.fill(sentinel);
   await screen

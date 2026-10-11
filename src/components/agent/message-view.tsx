@@ -10,6 +10,7 @@ import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
 import type { WorkflowListItem } from '~server/workflows';
 import { AgentErrorNotice } from './agent-error-notice';
+import { finalTextIndex } from './chat-turns';
 import { useComposerMessageCopy } from './composer-message-copy';
 import {
   AppDeploymentActions,
@@ -27,6 +28,7 @@ import {
   successfullyDeployedWorkflowIds,
   toolDetail,
 } from './types';
+import { type WorkFrame, WorkProcess } from './work-process';
 import classes from './chat.module.css';
 
 type ToolResultMap = Map<string, ToolResultMessage>;
@@ -121,6 +123,21 @@ function AssistantBlocks({
   return <>{out}</>;
 }
 
+function assistantText(block: AssistantBlock): string | undefined {
+  return block.type === 'text' ? block.text : undefined;
+}
+
+/** Whether any block renders something (whitespace-only blocks render nothing). */
+function hasVisibleBlocks(blocks: AssistantBlock[]): boolean {
+  return blocks.some((block) =>
+    block.type === 'text'
+      ? Boolean(block.text.trim())
+      : block.type === 'thinking'
+        ? Boolean(block.thinking.trim())
+        : true,
+  );
+}
+
 export function MessageView({
   message,
   toolResults,
@@ -129,6 +146,7 @@ export function MessageView({
   retryDisabled = false,
   apps,
   workflows,
+  work,
 }: {
   message: ChatMessage;
   toolResults?: ToolResultMap;
@@ -137,6 +155,11 @@ export function MessageView({
   retryDisabled?: boolean;
   apps?: AppListItem[];
   workflows?: WorkflowListItem[];
+  /**
+   * Frames an assistant reply's process in the Working/Worked container and
+   * keeps its final answer outside. The chat always provides it.
+   */
+  work?: WorkFrame;
 }) {
   if (message.role === 'user') {
     const text = partsToText(
@@ -220,9 +243,31 @@ export function MessageView({
     );
   }
 
+  // A running reply has no final answer yet; everything is still process.
+  const finalIndex =
+    work && work.phase !== 'running'
+      ? finalTextIndex(message.content, assistantText)
+      : -1;
+  const processBlocks =
+    finalIndex === -1 ? message.content : message.content.slice(0, finalIndex);
+  const finalBlocks =
+    finalIndex === -1 ? [] : message.content.slice(finalIndex);
+
   return (
     <Box className={classes.assistantRow}>
-      <AssistantBlocks blocks={message.content} toolResults={toolResults} />
+      {work ? (
+        <>
+          <WorkProcess
+            frame={work}
+            hasProcess={hasVisibleBlocks(processBlocks)}
+          >
+            <AssistantBlocks blocks={processBlocks} toolResults={toolResults} />
+          </WorkProcess>
+          <AssistantBlocks blocks={finalBlocks} toolResults={toolResults} />
+        </>
+      ) : (
+        <AssistantBlocks blocks={message.content} toolResults={toolResults} />
+      )}
       <AppDeploymentActions
         ids={successfullyDeployedAppIds(message.content, toolResults)}
         apps={apps}

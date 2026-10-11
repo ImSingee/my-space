@@ -13,6 +13,7 @@ import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { hasComposerText } from '~agent/composer-content';
+import { nextUserTurn } from '~agent/user-turns';
 import { appsQueryOptions } from '~queries/apps';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
 import { workflowsQueryOptions } from '~queries/workflows';
@@ -26,7 +27,9 @@ import {
 import {
   getRetryableErrorInput,
   groupTurns,
-  hasPersistedAgentError,
+  isActiveRunStatus,
+  persistedWorkPhase,
+  replyMessage,
 } from './chat-turns';
 import { MessageView } from './message-view';
 import { useLastSelectedModel } from './model-preference';
@@ -35,8 +38,42 @@ import { ModelPicker } from './model-picker';
 import { resolveEffectiveModel, splitModelValue } from './model-value';
 import { StreamingBubble } from './streaming-bubble';
 import { type ChatMessage, pairToolResults } from './types';
-import { type StreamSeed, useAgentStream } from './use-agent-stream';
+import {
+  hasVisibleStreamOutput,
+  type StreamSeed,
+  useAgentStream,
+} from './use-agent-stream';
+import {
+  defaultWorkExpanded,
+  WorkClockOffset,
+  type WorkFrame,
+  type WorkPhase,
+  type WorkTiming,
+} from './work-process';
 import classes from './chat.module.css';
+
+/**
+ * Collapse choices are kept per run and phase: a reply reopened after it
+ * finished stays open across refetches, while one that was only toggled while
+ * running still folds away once when the run completes.
+ */
+function workStateKey(runKey: string, phase: WorkPhase): string {
+  return `${runKey}:${phase === 'running' ? 'live' : 'ended'}`;
+}
+
+/**
+ * A Runner may report a stopped or failed run's partial transcript after the
+ * terminal event, or never. A settled turn re-reads history on this schedule
+ * while it waits, then stays as it is.
+ */
+const SETTLED_REFRESH_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+
+function runTiming(startedAt: string, completedAt: string | null): WorkTiming {
+  return {
+    startedAt: Date.parse(startedAt),
+    ...(completedAt ? { endedAt: Date.parse(completedAt) } : {}),
+  };
+}
 
 export function Chat({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
@@ -52,6 +89,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const [consumedRetryIdentity, setConsumedRetryIdentity] = useState<
     string | null
   >(null);
+  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
+  const [workExpanded, setWorkExpanded] = useState<Record<string, boolean>>({});
   const viewportRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -103,47 +142,21 @@ export function Chat({ sessionId }: { sessionId: string }) {
     void qc.invalidateQueries({ queryKey: workflowsQueryOptions.queryKey });
   }, [qc]);
 
-  const clearActiveRun = async (errorMessage?: string): Promise<boolean> => {
-    clearReconnectTimer();
-    reconnectAttemptsRef.current = 0;
-    revalidateResources();
-    qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
-      old
-        ? {
-            ...old,
-            activeRun: null,
-          }
-        : old,
-    );
-    void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
-
-    // A model/provider failure is already part of the assistant transcript.
-    // Wait for that canonical snapshot before removing the live error so the UI
-    // never flashes blank. Failures before an assistant message exists (for
-    // example dispatch rejection) return false and keep their existing toast.
-    const refreshed = await qc.fetchQuery(sessionQueryOptions(sessionId));
-    if (!errorMessage) return true;
-    const refreshedMessages = (refreshed?.messages ?? []) as ChatMessage[];
-    return hasPersistedAgentError(refreshedMessages);
-  };
-
-  const stream = useAgentStream(
-    () => {
-      // `done` no longer ships the transcript; refetch the session to read the
-      // messages + title the server just persisted, and drop the active run.
+  const stream = useAgentStream({
+    // Terminal events no longer ship the transcript. The live turn stays
+    // settled on screen while the session refetch reads what the server just
+    // persisted (messages, title, run timing); the release effect below swaps
+    // it for history once history holds what it showed.
+    onSettled: () => {
       clearReconnectTimer();
       reconnectAttemptsRef.current = 0;
-      qc.setQueryData(sessionQueryOptions(sessionId).queryKey, (old) =>
-        old ? { ...old, activeRun: null } : old,
-      );
       revalidateResources();
       revalidateSession();
     },
-    clearActiveRun,
-    scheduleReconnect,
-    revalidateSession,
-    onStreamConnected,
-  );
+    onDisconnect: scheduleReconnect,
+    onSessionChanged: revalidateSession,
+    onConnected: onStreamConnected,
+  });
   const {
     state: streamState,
     send: sendRun,
@@ -151,6 +164,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     connect,
     syncSeed,
     reset: resetStream,
+    release: releaseStream,
     stop: stopRun,
     answer,
     submitEnv,
@@ -160,6 +174,61 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const session = sessionQuery.data;
   const activeRun = session?.activeRun;
   const activeRunId = activeRun?.id ?? null;
+  const clockOffsetMs = session?.clockOffsetMs ?? 0;
+  const sessionRuns = session?.runs;
+  const runsByTurn = useMemo(
+    () => new Map((sessionRuns ?? []).map((run) => [run.userTurn, run])),
+    [sessionRuns],
+  );
+  // What a snapshot said about its active run, kept after the run leaves
+  // `activeRun`. Runs that predate recorded user turns are bound by the server
+  // within that same snapshot. An optimistic Send placeholder never has a
+  // turn: its snapshot does not contain the new user message yet. An
+  // optimistic Retry does, because it replays a user turn that snapshot holds.
+  const [observedRun, setObservedRun] = useState<{
+    id: string;
+    userTurn: number;
+    startedAt: string;
+  } | null>(null);
+  if (
+    activeRun?.userTurn != null &&
+    (observedRun?.id !== activeRun.id ||
+      observedRun.userTurn !== activeRun.userTurn ||
+      observedRun.startedAt !== activeRun.startedAt)
+  ) {
+    setObservedRun({
+      id: activeRun.id,
+      userTurn: activeRun.userTurn,
+      startedAt: activeRun.startedAt,
+    });
+  }
+  // The run behind the live bubble, while it streams or stays settled.
+  const liveRunId =
+    streamState.active || streamState.outcome ? streamState.runId : undefined;
+  const liveRun = useMemo(
+    () =>
+      liveRunId ? sessionRuns?.find((run) => run.id === liveRunId) : undefined,
+    [liveRunId, sessionRuns],
+  );
+  const liveObserved =
+    liveRunId && observedRun?.id === liveRunId ? observedRun : undefined;
+  // The snapshot may already hold the live run's reply (persisted just before
+  // the run turned terminal); the live bubble renders it until release.
+  const liveUserTurn = liveRun?.userTurn ?? liveObserved?.userTurn ?? null;
+  const liveStartedAt =
+    liveRun?.startedAt ??
+    (liveRunId && activeRun?.id === liveRunId
+      ? activeRun.startedAt
+      : liveObserved?.startedAt);
+  // Once history knows the run's end, that canonical time wins over when the
+  // terminal event happened to reach this browser.
+  const liveCompletedAt = liveRun?.completedAt
+    ? Date.parse(liveRun.completedAt)
+    : undefined;
+  // A settled run has stopped streaming even if the snapshot still lists it.
+  const activeRunSettled = Boolean(
+    activeRunId && streamState.outcome && streamState.runId === activeRunId,
+  );
   const activeRunSeed = useMemo<StreamSeed | undefined>(
     () =>
       activeRun
@@ -201,6 +270,18 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // was pegging the browser's main thread and freezing the UI mid-run.)
   const toolResults = useMemo(() => pairToolResults(messages), [messages]);
   const turns = useMemo(() => groupTurns(messages), [messages]);
+  // User turns whose reply the transcript already holds.
+  const answeredTurns = useMemo(
+    () =>
+      new Set(
+        turns.flatMap((turn) =>
+          turn.kind === 'assistant' && turn.userTurn !== null
+            ? [turn.userTurn]
+            : [],
+        ),
+      ),
+    [turns],
+  );
   const retryInput = useMemo(
     () => getRetryableErrorInput(messages),
     [messages],
@@ -217,7 +298,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
     retryableTurnKey && retryRevision
       ? `${sessionId}:${retryableTurnKey}:${retryRevision}`
       : null;
-  const runBusy = streamState.active || Boolean(session?.activeRun);
+  const runBusy =
+    streamState.active ||
+    stoppingRunId !== null ||
+    (Boolean(activeRun) && !activeRunSettled);
   const busy = runBusy || retrying;
 
   const send = useCallback(
@@ -249,7 +333,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
         return false;
       }
 
-      const runId = await sendRun({
+      const started = await sendRun({
         sessionId,
         content,
         images,
@@ -257,7 +341,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
         providerId: parsed.providerId,
         modelId: parsed.modelId,
       });
-      if (!runId) return false;
+      if (!started) return false;
       // A successful start has consumed this exact failure revision even if the
       // new user message cannot be refetched yet (or the run ends before the
       // active state is observed). Any later failure has a new session revision;
@@ -274,8 +358,11 @@ export function Chat({ sessionId }: { sessionId: string }) {
               providerId: parsed.providerId,
               modelId: parsed.modelId,
               activeRun: {
-                id: runId,
+                id: started.runId,
                 status: 'running' as const,
+                startedAt: started.startedAt,
+                // Unknown until a fetched snapshot holds the new user message.
+                userTurn: null,
                 pendingAsk: null,
                 pendingEnvRequest: null,
               },
@@ -310,13 +397,13 @@ export function Chat({ sessionId }: { sessionId: string }) {
     retryingRef.current = true;
     setRetrying(true);
     try {
-      const runId = await retryRun({
+      const started = await retryRun({
         sessionId,
         expectedSessionUpdatedAt: retryRevision,
         providerId: effectiveModelParts.providerId,
         modelId: effectiveModelParts.modelId,
       });
-      if (!runId) {
+      if (!started) {
         // A concurrent tab/run may already have consumed this failed turn.
         // Refresh immediately so a server-side 409 cannot leave a stale Retry
         // action mounted against transcript state that no longer exists.
@@ -329,25 +416,44 @@ export function Chat({ sessionId }: { sessionId: string }) {
       // same message index, but it receives a new session revision and must be
       // independently retryable after the canonical transcript is refetched.
       await qc.cancelQueries({ queryKey: sessionOptions.queryKey });
-      qc.setQueryData(sessionOptions.queryKey, (old) =>
-        old
-          ? {
-              ...old,
-              // The server atomically removed this user message and everything
-              // after it before starting the run. Keep one local copy so the
-              // retried prompt remains visible without the failed reply.
-              messages: old.messages.slice(0, retryInput.userMessageIndex + 1),
-              providerId: effectiveModelParts.providerId,
-              modelId: effectiveModelParts.modelId,
-              activeRun: {
-                id: runId,
-                status: 'running' as const,
-                pendingAsk: null,
-                pendingEnvRequest: null,
-              },
-            }
-          : old,
-      );
+      qc.setQueryData(sessionOptions.queryKey, (old) => {
+        if (!old) return old;
+        // The replacement run answers the retried prompt's user turn (its
+        // position among user messages, not its message index). It supersedes
+        // that turn's failed run, so the failure is not rebuilt beside the new
+        // run while history is re-read; earlier turns keep their runs.
+        const userTurn = nextUserTurn(
+          old.messages.slice(0, retryInput.userMessageIndex),
+        );
+        return {
+          ...old,
+          // The server atomically removed this user message and everything
+          // after it before starting the run. Keep one local copy so the
+          // retried prompt remains visible without the failed reply.
+          messages: old.messages.slice(0, retryInput.userMessageIndex + 1),
+          providerId: effectiveModelParts.providerId,
+          modelId: effectiveModelParts.modelId,
+          activeRun: {
+            id: started.runId,
+            status: 'running' as const,
+            startedAt: started.startedAt,
+            userTurn,
+            pendingAsk: null,
+            pendingEnvRequest: null,
+          },
+          runs: [
+            ...old.runs.filter((run) => run.userTurn !== userTurn),
+            {
+              id: started.runId,
+              status: 'running' as const,
+              userTurn,
+              startedAt: started.startedAt,
+              completedAt: null,
+              error: null,
+            },
+          ],
+        };
+      });
       revalidateSession();
     } finally {
       retryingRef.current = false;
@@ -364,48 +470,117 @@ export function Chat({ sessionId }: { sessionId: string }) {
     sessionId,
   ]);
 
+  const toggleWork = useCallback((key: string, expanded: boolean) => {
+    setWorkExpanded((current) => ({ ...current, [key]: !expanded }));
+  }, []);
+  const workFrame = useCallback(
+    (runKey: string, phase: WorkPhase, timing: WorkTiming): WorkFrame => {
+      const key = workStateKey(runKey, phase);
+      const expanded = workExpanded[key] ?? defaultWorkExpanded(phase);
+      return {
+        phase,
+        timing,
+        expanded,
+        onToggle: () => toggleWork(key, expanded),
+      };
+    },
+    [toggleWork, workExpanded],
+  );
+
   const renderedTurns = useMemo(
     () =>
-      turns.map((turn) => {
-        const showRetry =
-          turn.kind === 'assistant' &&
-          turn.key === retryableTurnKey &&
-          canOfferRetry;
-        return (
+      turns.flatMap((turn) => {
+        if (turn.kind === 'user') {
+          const rows = [
+            <MessageView
+              key={turn.key}
+              message={turn.message}
+              toolResults={toolResults}
+            />,
+          ];
+          // A run that failed or was stopped without persisting any reply
+          // still owes its turn a notice; the live bubble shows its own.
+          const run = runsByTurn.get(turn.userTurn);
+          if (
+            run &&
+            !answeredTurns.has(turn.userTurn) &&
+            turn.userTurn !== liveUserTurn &&
+            !isActiveRunStatus(run.status) &&
+            run.status !== 'completed'
+          ) {
+            rows.push(
+              <MessageView
+                key={`${turn.key}:ended`}
+                message={replyMessage([], undefined, undefined, run)}
+                work={workFrame(
+                  run.id,
+                  persistedWorkPhase(run, undefined),
+                  runTiming(run.startedAt, run.completedAt),
+                )}
+              />,
+            );
+          }
+          return rows;
+        }
+        if (liveUserTurn !== null && turn.userTurn === liveUserTurn) return [];
+        const showRetry = turn.key === retryableTurnKey && canOfferRetry;
+        const run =
+          turn.userTurn === null ? undefined : runsByTurn.get(turn.userTurn);
+        return [
           <MessageView
             key={turn.key}
-            message={
-              turn.kind === 'user'
-                ? turn.message
-                : {
-                    role: 'assistant',
-                    content: turn.blocks,
-                    ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
-                    ...(turn.errorMessage
-                      ? { errorMessage: turn.errorMessage }
-                      : {}),
-                  }
-            }
+            message={replyMessage(
+              turn.blocks,
+              turn.stopReason,
+              turn.errorMessage,
+              run,
+            )}
             toolResults={toolResults}
             apps={appsQuery.data}
             workflows={workflowsQuery.data}
             onRetry={showRetry ? retry : undefined}
             retrying={showRetry && retrying}
             retryDisabled={showRetry && !effectiveModelParts}
-          />
-        );
+            work={workFrame(
+              run?.id ?? turn.key,
+              persistedWorkPhase(run, turn.stopReason),
+              run ? runTiming(run.startedAt, run.completedAt) : null,
+            )}
+          />,
+        ];
       }),
     [
+      answeredTurns,
       canOfferRetry,
       appsQuery.data,
       workflowsQuery.data,
       effectiveModelParts,
+      liveUserTurn,
       retry,
       retryableTurnKey,
       retrying,
+      runsByTurn,
       toolResults,
       turns,
+      workFrame,
     ],
+  );
+
+  const liveStarted = liveStartedAt ? Date.parse(liveStartedAt) : null;
+  const liveEnded =
+    liveCompletedAt ??
+    (streamState.endedAt === undefined
+      ? undefined
+      : streamState.endedAt + clockOffsetMs);
+  const liveWork = workFrame(
+    streamState.runId ?? 'pending',
+    streamState.outcome ?? 'running',
+    liveStarted === null
+      ? null
+      : {
+          startedAt: liveStarted,
+          ...(liveEnded === undefined ? {} : { endedAt: liveEnded }),
+        },
   );
 
   // Return acceptance so the composer keeps the draft if the run fails to start
@@ -429,8 +604,17 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   const stop = () => {
     clearReconnectTimer();
-    void stopRun(session?.activeRun?.id).finally(() => {
-      revalidateSession();
+    const runId = session?.activeRun?.id;
+    // Until the cancel response and the snapshot after it land, the stopped
+    // turn stays frozen on screen (its partial reply is persisted only once
+    // the runner acknowledges) and the composer stays busy.
+    if (runId) setStoppingRunId(runId);
+    void stopRun(runId).finally(async () => {
+      await qc.invalidateQueries({
+        queryKey: sessionQueryOptions(sessionId).queryKey,
+      });
+      void qc.invalidateQueries({ queryKey: sessionsQueryOptions.queryKey });
+      setStoppingRunId((current) => (current === runId ? null : current));
     });
   };
 
@@ -448,22 +632,84 @@ export function Chat({ sessionId }: { sessionId: string }) {
     syncSeed(activeRunId, activeRunSeed, activeRunSeedRevision);
   }, [activeRunId, activeRunSeed, activeRunSeedRevision, syncSeed]);
 
+  const streamSettled = Boolean(streamState.outcome);
   useEffect(() => {
     if (!activeRunId) {
-      // Keep a terminal error visible until its canonical transcript lands,
-      // but clear a non-terminal live state when the session says no run owns it.
-      if (!streamState.terminalError) resetStream();
+      // Keep a settled turn until its canonical transcript lands, but clear a
+      // non-terminal live state when the session says no run owns it.
+      if (!streamSettled) resetStream();
       return;
     }
+    // The run already ended on its stream; don't replay it while the snapshot
+    // that still lists it as active is being refreshed.
+    if (activeRunSettled) return;
     return connect(activeRunId);
   }, [
     activeRunId,
+    activeRunSettled,
     connect,
     reconnectToken,
     resetStream,
     sessionId,
-    streamState.terminalError,
+    streamSettled,
   ]);
+
+  // Swap a settled live turn for history only once history really holds what
+  // it showed; until then the live turn stays and any persisted copy of its
+  // reply stays hidden, so a failed or late refetch never blanks it.
+  const settledRunId = streamState.outcome ? streamState.runId : undefined;
+  const settledOutcome = streamState.outcome;
+  const settledShowsOutput = Boolean(
+    settledOutcome && hasVisibleStreamOutput(streamState.blocks),
+  );
+  const liveReplyPersisted =
+    liveUserTurn !== null && answeredTurns.has(liveUserTurn);
+  useEffect(() => {
+    if (!settledRunId || !session || stoppingRunId === settledRunId) return;
+    if (session.activeRun?.id === settledRunId) return;
+    const run = session.runs.find((entry) => entry.id === settledRunId);
+    if (run && isActiveRunStatus(run.status)) return;
+    // `done` follows the persisted transcript, so a snapshot that no longer
+    // runs a completed run holds its reply. A stop or interruption can end
+    // the run before (or without) its partial transcript: keep what was shown
+    // until the matching reply arrives. A run that showed nothing can go once
+    // history renders its notice from the run itself.
+    if (
+      settledOutcome !== 'completed' &&
+      !liveReplyPersisted &&
+      (settledShowsOutput || !run)
+    ) {
+      return;
+    }
+    releaseStream(settledRunId);
+  }, [
+    liveReplyPersisted,
+    releaseStream,
+    session,
+    settledOutcome,
+    settledRunId,
+    settledShowsOutput,
+    stoppingRunId,
+  ]);
+
+  useEffect(() => {
+    if (!settledRunId || stoppingRunId === settledRunId) return;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      const delay = SETTLED_REFRESH_DELAYS_MS[attempt];
+      if (delay === undefined) return;
+      timer = setTimeout(() => {
+        attempt += 1;
+        void qc.invalidateQueries({
+          queryKey: sessionQueryOptions(sessionId).queryKey,
+        });
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => clearTimeout(timer);
+  }, [qc, sessionId, settledRunId, stoppingRunId]);
 
   useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
 
@@ -499,85 +745,88 @@ export function Chat({ sessionId }: { sessionId: string }) {
   }, [streamState]);
 
   return (
-    <Box className={classes.chat}>
-      <Text
-        component="span"
-        className={classes.visuallyHidden}
-        aria-live="polite"
-        aria-atomic="true"
-        data-testid="env-announcement"
-      >
-        {envAnnouncement}
-      </Text>
-      <Box className={classes.chatHead}>
-        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          <ThemeIcon variant="light" color="ember" radius="md" size="md">
-            <IconSparkles size={16} stroke={1.7} />
-          </ThemeIcon>
-          <Text fw={600} truncate>
-            {session?.title ?? 'Chat'}
-          </Text>
-        </Group>
-      </Box>
+    <WorkClockOffset value={clockOffsetMs}>
+      <Box className={classes.chat}>
+        <Text
+          component="span"
+          className={classes.visuallyHidden}
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="env-announcement"
+        >
+          {envAnnouncement}
+        </Text>
+        <Box className={classes.chatHead}>
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+            <ThemeIcon variant="light" color="ember" radius="md" size="md">
+              <IconSparkles size={16} stroke={1.7} />
+            </ThemeIcon>
+            <Text fw={600} truncate>
+              {session?.title ?? 'Chat'}
+            </Text>
+          </Group>
+        </Box>
 
-      <ScrollArea className={classes.messages} viewportRef={viewportRef}>
-        <Box className={classes.messagesInner}>
-          {sessionQuery.isLoading ? (
-            <Center py="xl">
-              <Loader />
-            </Center>
-          ) : messages.length === 0 &&
-            !streamState.active &&
-            !streamState.terminalError ? (
-            <Stack align="center" gap={6} py={80}>
-              <ThemeIcon size={48} radius="xl" variant="light" color="ember">
-                <IconSparkles size={24} stroke={1.5} />
-              </ThemeIcon>
-              <Text fw={600}>Describe an app to build</Text>
-              <Text size="sm" c="dimmed" ta="center" maw={360}>
-                Ask the Agent to create a tracker, a notes app, a dashboard —
-                anything. It will scaffold, build, and deploy it for you.
-              </Text>
-            </Stack>
-          ) : (
-            <>
-              {renderedTurns}
-              {streamState.active || streamState.terminalError ? (
-                <StreamingBubble
-                  state={streamState}
-                  onAnswer={answer}
-                  onSubmitEnv={submitEnv}
+        <ScrollArea className={classes.messages} viewportRef={viewportRef}>
+          <Box className={classes.messagesInner}>
+            {sessionQuery.isLoading ? (
+              <Center py="xl">
+                <Loader />
+              </Center>
+            ) : messages.length === 0 &&
+              !streamState.active &&
+              !streamState.outcome ? (
+              <Stack align="center" gap={6} py={80}>
+                <ThemeIcon size={48} radius="xl" variant="light" color="ember">
+                  <IconSparkles size={24} stroke={1.5} />
+                </ThemeIcon>
+                <Text fw={600}>Describe an app to build</Text>
+                <Text size="sm" c="dimmed" ta="center" maw={360}>
+                  Ask the Agent to create a tracker, a notes app, a dashboard —
+                  anything. It will scaffold, build, and deploy it for you.
+                </Text>
+              </Stack>
+            ) : (
+              <>
+                {renderedTurns}
+                {streamState.active || streamState.outcome ? (
+                  <StreamingBubble
+                    state={streamState}
+                    onAnswer={answer}
+                    onSubmitEnv={submitEnv}
+                    work={liveWork}
+                  />
+                ) : null}
+              </>
+            )}
+          </Box>
+        </ScrollArea>
+
+        <Box className={classes.composer}>
+          <Box className={classes.composerInner}>
+            <Composer
+              onSubmit={onComposerSubmit}
+              apps={appsQuery.data}
+              appsLoading={appsQuery.isLoading}
+              appsError={appsQuery.isError}
+              workflows={workflowsQuery.data}
+              workflowsLoading={workflowsQuery.isLoading}
+              workflowsError={workflowsQuery.isError}
+              busy={busy}
+              onStop={stop}
+              disabled={!effectiveModel}
+              modelControl={
+                <ModelPicker
+                  groups={groups}
+                  value={effectiveModel}
+                  onChange={selectModel}
+                  disabled={busy}
                 />
-              ) : null}
-            </>
-          )}
-        </Box>
-      </ScrollArea>
-
-      <Box className={classes.composer}>
-        <Box className={classes.composerInner}>
-          <Composer
-            onSubmit={onComposerSubmit}
-            apps={appsQuery.data}
-            appsLoading={appsQuery.isLoading}
-            appsError={appsQuery.isError}
-            workflows={workflowsQuery.data}
-            workflowsLoading={workflowsQuery.isLoading}
-            workflowsError={workflowsQuery.isError}
-            busy={busy}
-            onStop={stop}
-            disabled={!effectiveModel}
-            modelControl={
-              <ModelPicker
-                groups={groups}
-                value={effectiveModel}
-                onChange={selectModel}
-                disabled={busy}
-              />
-            }
-          />
+              }
+            />
+          </Box>
         </Box>
       </Box>
-    </Box>
+    </WorkClockOffset>
   );
 }

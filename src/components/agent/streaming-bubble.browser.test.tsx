@@ -4,9 +4,14 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import type { AgentStreamEvent, AskAnswer } from '~agent/events';
 import { StreamingBubble } from './streaming-bubble';
-import { useAgentStream, type StreamState } from './use-agent-stream';
+import {
+  type StreamOutcome,
+  type StreamState,
+  useAgentStream,
+} from './use-agent-stream';
+import { defaultWorkExpanded } from './work-process';
 
-type TerminalCallback = (errorMessage?: string) => boolean | Promise<boolean>;
+type SettledCallback = (runId: string, outcome: StreamOutcome) => void;
 
 const noop = () => {};
 const noopEnv = async () => false;
@@ -70,9 +75,10 @@ function mockLiveStream() {
   };
 }
 
-function StreamHarness({ onTerminal }: { onTerminal: TerminalCallback }) {
+function StreamHarness({ onSettled = noop }: { onSettled?: SettledCallback }) {
   const [runId, setRunId] = useState('run-1');
-  const { state, connect } = useAgentStream(noop, onTerminal);
+  const { state, connect, release } = useAgentStream({ onSettled });
+  const phase = state.outcome ?? 'running';
 
   useEffect(() => connect(runId), [connect, runId]);
 
@@ -81,11 +87,25 @@ function StreamHarness({ onTerminal }: { onTerminal: TerminalCallback }) {
       <button type="button" onClick={() => setRunId('run-2')}>
         Start next run
       </button>
+      <button type="button" onClick={() => release('run-1')}>
+        Release first run
+      </button>
       <div data-testid="stream-state">
-        {state.runId ?? 'none'}:{state.active ? 'active' : 'idle'}
+        {state.runId ?? 'none'}:
+        {state.active ? 'active' : (state.outcome ?? 'idle')}
       </div>
-      {state.active || state.terminalError ? (
-        <StreamingBubble state={state} onAnswer={noop} onSubmitEnv={noopEnv} />
+      {state.active || state.outcome ? (
+        <StreamingBubble
+          state={state}
+          onAnswer={noop}
+          onSubmitEnv={noopEnv}
+          work={{
+            phase,
+            timing: null,
+            expanded: defaultWorkExpanded(phase),
+            onToggle: noop,
+          }}
+        />
       ) : null}
     </MantineProvider>
   );
@@ -97,7 +117,7 @@ afterEach(() => {
 
 test('restores the waiting indicator between tools after earlier prose', async () => {
   const emit = mockLiveStream();
-  const screen = await render(<StreamHarness onTerminal={() => false} />);
+  const screen = await render(<StreamHarness />);
   const thinking = screen.getByText('Thinking…', { exact: true });
   await expect.element(thinking).toBeVisible();
 
@@ -131,20 +151,24 @@ test('restores the waiting indicator between tools after earlier prose', async (
   await expect.element(thinking).toBeVisible();
   emit({ type: 'done' });
   await expect.element(thinking).not.toBeInTheDocument();
+  // The finished turn stays on screen until it is released: its process folds
+  // away and the final answer remains visible.
   await expect
     .element(screen.getByTestId('stream-state'))
-    .toHaveTextContent('none:idle');
+    .toHaveTextContent('run-1:completed');
+  await expect.element(screen.getByText('The files are ready.')).toBeVisible();
+  await expect
+    .element(screen.getByText('I will inspect the files.'))
+    .not.toBeVisible();
+  await screen.getByRole('button', { name: 'Release first run' }).click();
+  await expect
+    .element(screen.getByText('The files are ready.'))
+    .not.toBeInTheDocument();
 });
 
 test('waits for every concurrent tool and stops indicating work on failure', async () => {
   const emit = mockLiveStream();
-  const screen = await render(
-    <StreamHarness
-      onTerminal={async () => {
-        throw new Error('Keep the live error visible');
-      }}
-    />,
-  );
+  const screen = await render(<StreamHarness />);
   const thinking = screen.getByText('Thinking…', { exact: true });
   await expect.element(thinking).toBeVisible();
   emit({ type: 'text', delta: 'Checking both files.' });
@@ -179,7 +203,7 @@ test('waits for every concurrent tool and stops indicating work on failure', asy
 
 test('shows one reasoning indicator and pauses it for human input', async () => {
   const emit = mockLiveStream();
-  const screen = await render(<StreamHarness onTerminal={() => false} />);
+  const screen = await render(<StreamHarness />);
   const thinking = screen.getByText('Thinking…', { exact: true });
   await expect.element(thinking).toBeVisible();
   emit({ type: 'text', delta: 'Reviewing the request.' });
@@ -262,32 +286,28 @@ test('keeps partial output and announces a live terminal error', async () => {
     .toMatchTextContent('OpenAI API error (402)');
 });
 
-test('keeps the live error when transcript refresh fails', async () => {
+test('keeps a settled failure until the caller releases it', async () => {
   const fetchMock = vi.fn<typeof fetch>(async () =>
     errorResponse('Provider unavailable'),
   );
   vi.stubGlobal('fetch', fetchMock);
-  const onTerminal = vi.fn<TerminalCallback>(async () => {
-    throw new Error('Session refresh failed');
-  });
+  const onSettled = vi.fn<SettledCallback>();
 
-  const screen = await render(<StreamHarness onTerminal={onTerminal} />);
+  const screen = await render(<StreamHarness onSettled={onSettled} />);
 
   await expect
     .element(screen.getByRole('alert'))
     .toMatchTextContent('Provider unavailable');
   await expect
     .element(screen.getByTestId('stream-state'))
-    .toHaveTextContent('run-1:idle');
-  expect(onTerminal).toHaveBeenCalledWith('Provider unavailable');
+    .toHaveTextContent('run-1:failed');
+  expect(onSettled).toHaveBeenCalledExactlyOnceWith('run-1', 'failed');
+
+  await screen.getByRole('button', { name: 'Release first run' }).click();
+  await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
 });
 
-test('an old terminal refresh cannot clear a newly connected run', async () => {
-  let resolveRefresh: ((persisted: boolean) => void) | undefined;
-  const refresh = new Promise<boolean>((resolve) => {
-    resolveRefresh = resolve;
-  });
-  const onTerminal = vi.fn<TerminalCallback>(() => refresh);
+test('a late release for an old run cannot clear a newly connected run', async () => {
   const fetchMock = vi.fn<typeof fetch>(async (input, init) =>
     String(input).includes('run-1')
       ? errorResponse('Old run failed')
@@ -295,7 +315,7 @@ test('an old terminal refresh cannot clear a newly connected run', async () => {
   );
   vi.stubGlobal('fetch', fetchMock);
 
-  const screen = await render(<StreamHarness onTerminal={onTerminal} />);
+  const screen = await render(<StreamHarness />);
   await expect.element(screen.getByRole('alert')).toBeVisible();
 
   await screen.getByRole('button', { name: 'Start next run' }).click();
@@ -303,8 +323,7 @@ test('an old terminal refresh cannot clear a newly connected run', async () => {
     .element(screen.getByTestId('stream-state'))
     .toHaveTextContent('run-2:active');
 
-  resolveRefresh?.(false);
-  await vi.waitFor(() => expect(onTerminal).toHaveBeenCalledOnce());
+  await screen.getByRole('button', { name: 'Release first run' }).click();
   await expect
     .element(screen.getByTestId('stream-state'))
     .toHaveTextContent('run-2:active');

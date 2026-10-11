@@ -401,7 +401,7 @@ describe('startAgentRun retry', () => {
     // Even an internal caller that bypasses the strict HTTP schema cannot
     // override a retry's persisted prompt or images. The requested model is
     // intentional: the user switched from the session's A model to B.
-    const { runId } = await startAgentRun({
+    const { runId, startedAt } = await startAgentRun({
       sessionId: 'session-retry',
       retry: true,
       expectedSessionUpdatedAt,
@@ -456,8 +456,11 @@ describe('startAgentRun retry', () => {
       input: {
         userText: 'Failed request',
         images: [{ mimeType: 'image/png' }],
+        // The retry replays the failed second user turn, not a new one.
+        userTurn: 1,
       },
     });
+    expect(startedAt).toBe(run?.createdAt.toISOString());
 
     // The dispatch plan leases this run and claims this session's workspace
     // for whichever runner the hub selects.
@@ -659,6 +662,9 @@ describe('startAgentRun retry', () => {
       providerId: PROVIDER_B_ID,
       modelId: MODEL_B_ID,
     });
+    await expect(
+      db.query.agentRuns.findFirst({ where: { id: runId } }),
+    ).resolves.toMatchObject({ input: { userTurn: 1 } });
     expect(hub.dispatchRun).toHaveBeenCalledWith(
       expect.objectContaining({
         runId,

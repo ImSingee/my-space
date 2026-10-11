@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AskQuestion } from '~agent/events';
+import type { AgentStreamEvent, AskQuestion } from '~agent/events';
 import {
   reduceStreamState,
   sameStreamSeed,
@@ -25,6 +25,29 @@ function baseState(): StreamState {
 }
 
 describe('reduceStreamState', () => {
+  it('keeps each assistant message prose in its own block', () => {
+    const events: AgentStreamEvent[] = [
+      { type: 'assistant_start' },
+      { type: 'text', delta: 'Process ' },
+      { type: 'text', delta: 'commentary.' },
+      { type: 'assistant_start' },
+      { type: 'text', delta: 'Final answer.' },
+      { type: 'done' },
+    ];
+    const state = events.reduce(
+      (current, event) => reduceStreamState(current, event, 1),
+      baseState(),
+    );
+
+    // Matches the persisted transcript, so the final answer is the last text
+    // block live too and earlier commentary folds into the process.
+    expect(state.blocks).toEqual([
+      { kind: 'text', text: 'Process commentary.' },
+      { kind: 'text', text: 'Final answer.' },
+    ]);
+    expect(state.outcome).toBe('completed');
+  });
+
   it('shows an env request and replaces an existing ask', () => {
     const state = reduceStreamState(
       {

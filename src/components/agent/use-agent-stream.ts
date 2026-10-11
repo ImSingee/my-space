@@ -59,6 +59,9 @@ export type StreamBlock =
   | StreamTextBlock
   | StreamToolBlock;
 
+/** How a live run ended, as observed on its event stream (or a local Stop). */
+export type StreamOutcome = 'completed' | 'cancelled' | 'failed';
+
 export type StreamState = {
   active: boolean;
   runId?: string;
@@ -67,10 +70,24 @@ export type StreamState = {
   thinkingActive: boolean;
   /** True while the current assistant message is streaming answer text. */
   textActive: boolean;
+  /**
+   * Index of the first block of the current assistant message. Text deltas
+   * merge only within one message, so its prose stays a separate block from
+   * earlier messages' commentary, exactly as in the persisted transcript.
+   */
+  messageStart?: number;
   pendingAsk?: PendingAsk;
   pendingEnvRequest?: PendingEnvRequest;
   /** Terminal failure received from the run SSE stream. */
   terminalError?: string;
+  /**
+   * Set once the run ended. The settled turn stays mounted until the caller
+   * `release`s it after the canonical transcript has caught up, so finishing
+   * never flashes a blank or duplicated reply.
+   */
+  outcome?: StreamOutcome;
+  /** Browser clock (ms) when `outcome` was observed; freezes the work timer. */
+  endedAt?: number;
 };
 
 const IDLE: StreamState = {
@@ -257,6 +274,42 @@ function appendDelta(
   return [...blocks, { kind, text: delta } as StreamBlock];
 }
 
+/** Whether a live turn shows any reply content (whitespace renders nothing). */
+export function hasVisibleStreamOutput(blocks: StreamBlock[]): boolean {
+  return blocks.some((block) =>
+    block.kind === 'tool' ? true : Boolean(block.text.trim()),
+  );
+}
+
+/** Freeze a live turn at its terminal outcome, keeping everything it showed. */
+export function settleStreamState(
+  state: StreamState,
+  outcome: StreamOutcome,
+  endedAt: number,
+): StreamState {
+  return {
+    ...state,
+    active: false,
+    thinkingActive: false,
+    textActive: false,
+    pendingAsk: undefined,
+    pendingEnvRequest: undefined,
+    // A tool interrupted by the end of the run no longer runs; render it the
+    // way the persisted transcript does instead of spinning forever.
+    blocks: state.blocks.some(
+      (block) => block.kind === 'tool' && !block.tool.done,
+    )
+      ? state.blocks.map((block) =>
+          block.kind === 'tool' && !block.tool.done
+            ? { ...block, tool: { ...block.tool, done: true } }
+            : block,
+        )
+      : state.blocks,
+    outcome,
+    endedAt,
+  };
+}
+
 function updateTool(
   blocks: StreamBlock[],
   id: string,
@@ -272,16 +325,27 @@ function updateTool(
 export function reduceStreamState(
   state: StreamState,
   event: AgentStreamEvent,
+  now = Date.now(),
 ): StreamState {
   switch (event.type) {
     case 'assistant_start':
       // A fresh assistant message: close any open thinking phase so the next
-      // reasoning delta starts its own block.
-      return { ...state, thinkingActive: false, textActive: false };
+      // reasoning delta starts its own block, and fence off earlier prose.
+      return {
+        ...state,
+        thinkingActive: false,
+        textActive: false,
+        messageStart: state.blocks.length,
+      };
     case 'text':
       return {
         ...state,
-        blocks: appendDelta(state.blocks, 'text', event.delta ?? '', true),
+        blocks: appendDelta(
+          state.blocks,
+          'text',
+          event.delta ?? '',
+          state.blocks.length > (state.messageStart ?? 0),
+        ),
         thinkingActive: false,
         textActive: state.textActive || Boolean(event.delta),
       };
@@ -366,17 +430,16 @@ export function reduceStreamState(
           details: event.details ?? tool.details,
         })),
       };
+    case 'done':
+      return settleStreamState(state, 'completed', now);
+    case 'cancelled':
+      return settleStreamState(state, 'cancelled', now);
     case 'error':
       // Keep the partial turn visible. The session refetch may replace it with
       // the persisted transcript, but until then the inline failure belongs
       // beside the text/thinking/tools that preceded it.
       return {
-        ...state,
-        active: false,
-        thinkingActive: false,
-        textActive: false,
-        pendingAsk: undefined,
-        pendingEnvRequest: undefined,
+        ...settleStreamState(state, 'failed', now),
         terminalError: event.message,
       };
     default:
@@ -404,9 +467,11 @@ export type RetryParams = {
 
 type StartParams = SendParams | (RetryParams & { retry: true });
 
+export type StartedRun = { runId: string; startedAt: string };
+
 export async function startAgentRunRequest(
   params: StartParams,
-): Promise<{ runId: string }> {
+): Promise<StartedRun> {
   const res = await fetch('/api/agent/runs', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -415,7 +480,7 @@ export async function startAgentRunRequest(
   if (!res.ok) {
     throw new Error((await res.text()) || `Request failed (${res.status})`);
   }
-  return (await res.json()) as { runId: string };
+  return (await res.json()) as StartedRun;
 }
 
 async function cancelAgentRunRequest(runId: string): Promise<void> {
@@ -458,13 +523,24 @@ async function submitAgentEnvRequest(
   if (!res.ok) throw new Error(`Request failed (${res.status})`);
 }
 
-export function useAgentStream(
-  onDone: () => void,
-  onTerminal: (errorMessage?: string) => boolean | Promise<boolean>,
-  onDisconnect?: (runId: string) => void,
-  onSessionChanged?: () => void,
-  onConnected?: () => void,
-) {
+export type AgentStreamCallbacks = {
+  /**
+   * The run reached a terminal event and its live turn is now settled. Fetch
+   * the canonical transcript, then `release` the run once it has caught up.
+   */
+  onSettled: (runId: string, outcome: StreamOutcome) => void;
+  /** The stream dropped while the run may still be executing. */
+  onDisconnect?: (runId: string) => void;
+  onSessionChanged?: () => void;
+  onConnected?: () => void;
+};
+
+export function useAgentStream({
+  onSettled,
+  onDisconnect,
+  onSessionChanged,
+  onConnected,
+}: AgentStreamCallbacks) {
   const [state, setState] = useState<StreamState>(IDLE);
   const [envAnnouncement, setEnvAnnouncement] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -474,15 +550,13 @@ export function useAgentStream(
   const promptBarrierRef = useRef<PromptBarrier | null>(null);
   const seedSnapshotRef = useRef<SeedSnapshot | null>(null);
   const startRequestIdRef = useRef(0);
-  const terminalSourceRef = useRef<StreamSource | null>(null);
   const confirmedEnvTombstoneRef = useRef<ConfirmedEnvRequest | null>(null);
   const envSubmissionRef = useRef<EnvSubmission | null>(null);
   const pendingStartRef = useRef<{
     requestId: number;
     stopRequested: boolean;
   } | null>(null);
-  const handleDone = useEventCallback(onDone);
-  const handleTerminal = useEventCallback(onTerminal);
+  const handleSettled = useEventCallback(onSettled);
   const handleDisconnect = useEventCallback((runId: string) => {
     onDisconnect?.(runId);
   });
@@ -670,59 +744,34 @@ export function useAgentStream(
           break;
         }
         case 'done':
-          abortEnvSubmission();
-          terminalSourceRef.current = null;
-          runIdRef.current = null;
-          promptBarrierRef.current = null;
-          setState(IDLE);
-          handleDone();
-          break;
         case 'cancelled':
-          abortEnvSubmission();
-          terminalSourceRef.current = null;
-          runIdRef.current = null;
-          promptBarrierRef.current = null;
-          setState(IDLE);
-          void Promise.resolve(handleTerminal()).catch(() => {});
-          break;
         case 'error': {
           abortEnvSubmission();
-          terminalSourceRef.current = source;
+          // Detach from the source so nothing else from it is applied, but
+          // keep the settled turn on screen until the caller releases it.
           runIdRef.current = null;
           promptBarrierRef.current = null;
+          const endedAt = Date.now();
           setState((current) =>
             current.runId === source.runId
-              ? reduceStreamState(current, event)
+              ? reduceStreamState(current, event, endedAt)
               : current,
           );
-          void (async () => {
-            try {
-              const persisted = await handleTerminal(event.message);
-              // A later connection generation owns the UI now, including when
-              // a retry reuses the same run id.
-              const terminalSource = terminalSourceRef.current;
-              if (
-                terminalSource?.runId !== source.runId ||
-                terminalSource.generation !== source.generation
-              )
-                return;
-              if (!persisted) toast.error(event.message);
-              terminalSourceRef.current = null;
-              setState((current) =>
-                current.runId === source.runId ? IDLE : current,
-              );
-            } catch {
-              // Refetch failed: keep the live partial turn + inline error so the
-              // failure does not disappear merely because recovery is offline.
-            }
-          })();
+          handleSettled(
+            source.runId,
+            event.type === 'done'
+              ? 'completed'
+              : event.type === 'cancelled'
+                ? 'cancelled'
+                : 'failed',
+          );
           break;
         }
         default:
           break;
       }
     },
-    [abortEnvSubmission, handleDone, handleTerminal, isCurrentSource],
+    [abortEnvSubmission, handleSettled, isCurrentSource],
   );
 
   /**
@@ -738,7 +787,6 @@ export function useAgentStream(
     (runId: string) => {
       const sameRun = runIdRef.current === runId;
       abortRef.current?.abort();
-      terminalSourceRef.current = null;
       const ac = new AbortController();
       abortRef.current = ac;
       const generation = connectionGenerationRef.current + 1;
@@ -849,19 +897,34 @@ export function useAgentStream(
     ],
   );
 
-  const reset = useCallback(() => {
+  /** Stop applying anything from the current connection. */
+  const detach = useCallback(() => {
     connectionGenerationRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
     abortEnvSubmission();
     runIdRef.current = null;
-    lastSeqRef.current = 0;
     promptBarrierRef.current = null;
+  }, [abortEnvSubmission]);
+
+  const reset = useCallback(() => {
+    detach();
+    lastSeqRef.current = 0;
     seedSnapshotRef.current = null;
-    terminalSourceRef.current = null;
     confirmedEnvTombstoneRef.current = null;
     setState(IDLE);
-  }, [abortEnvSubmission]);
+  }, [detach]);
+
+  /**
+   * Drop a settled turn once the canonical transcript has replaced it. A newer
+   * run (or a later reconnect of the same run) owns the state by then, which
+   * makes a late release for the old one a no-op.
+   */
+  const release = useCallback((runId: string) => {
+    setState((current) =>
+      current.runId === runId && current.outcome ? IDLE : current,
+    );
+  }, []);
 
   useEffect(
     () => () => {
@@ -873,8 +936,7 @@ export function useAgentStream(
   );
 
   const start = useCallback(
-    async (params: StartParams) => {
-      terminalSourceRef.current = null;
+    async (params: StartParams): Promise<StartedRun | null> => {
       setEnvAnnouncement('');
       const requestId = startRequestIdRef.current + 1;
       startRequestIdRef.current = requestId;
@@ -882,7 +944,8 @@ export function useAgentStream(
 
       try {
         setState({ ...IDLE, active: true });
-        const { runId } = await startAgentRunRequest(params);
+        const started = await startAgentRunRequest(params);
+        const { runId } = started;
         const pending = pendingStartRef.current;
         const shouldCancel =
           !pending || pending.requestId !== requestId || pending.stopRequested;
@@ -907,7 +970,7 @@ export function useAgentStream(
         // The run is live; the caller surfaces it via `activeRun` and the
         // connection effect subscribes. We deliberately do not connect here so
         // a single effect owns the stream's lifecycle.
-        return runId;
+        return started;
       } catch (error) {
         const pending = pendingStartRef.current;
         const stopRequested =
@@ -1060,15 +1123,27 @@ export function useAgentStream(
         pendingStartRef.current.stopRequested = true;
       }
       const runId = runIdOverride ?? runIdRef.current;
-      reset();
+      const endedAt = Date.now();
+      detach();
+      // Keep what the run already showed until the caller releases it; the
+      // cancel response arrives once the partial transcript is persisted.
+      setState((current) => {
+        if (!runId || current.runId !== runId) return IDLE;
+        return current.outcome
+          ? current
+          : settleStreamState(current, 'cancelled', endedAt);
+      });
       if (!runId) return;
       try {
         await cancelAgentRunRequest(runId);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Could not stop.');
+        // The run may still be executing. Releasing the frozen turn lets the
+        // caller reconnect while the session still reports the run active.
+        release(runId);
       }
     },
-    [reset],
+    [detach, release],
   );
 
   return {
@@ -1078,6 +1153,7 @@ export function useAgentStream(
     connect,
     syncSeed,
     reset,
+    release,
     stop,
     answer,
     submitEnv,
