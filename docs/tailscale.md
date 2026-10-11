@@ -88,8 +88,14 @@ address. Per-App domains and Tailscale Services are not configured.
 ## Troubleshooting
 
 The panel distinguishes waiting for sign-in, waiting for device approval,
-connection errors, and a ready HTTPS listener. Missing DNS or certificate
-settings are retried automatically. If the helper exits, select **Reconnect**.
+preparing HTTPS, connection errors, and a ready HTTPS listener. After enrollment,
+first-time certificate preparation can take a few minutes. Hatch shows a waiting
+message and keeps retrying even if you leave Settings. After five minutes of
+unsuccessful certificate preparation, it shows troubleshooting guidance while
+continuing to retry. Missing DNS settings, certificate rate limits, and HTTPS
+listener failures show an actionable warning instead of the waiting message.
+Missing DNS or certificate settings are retried automatically. If the helper
+exits, select **Reconnect**.
 A missing executable shows installation guidance and disables connection.
 
 If you disconnect while visiting the private address, the panel asks you to

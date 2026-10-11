@@ -37,6 +37,10 @@ const connected: TailscaleStatus = {
   state: 'connected',
   origin: 'https://hatch.example.ts.net',
 };
+const preparingHTTPS: TailscaleStatus = {
+  ...starting,
+  state: 'preparing-https',
+};
 
 function popupFixture() {
   const popup = {
@@ -124,6 +128,50 @@ test('an already authorized device closes the waiting window without navigating 
   expect(popup.location.replace).not.toHaveBeenCalled();
 });
 
+test('certificate preparation closes authorization, offers cancellation, and automatically reveals the ready address', async () => {
+  const { popup } = popupFixture();
+  const configure = vi.fn<Configure>().mockResolvedValue(preparingHTTPS);
+  const screen = await render(view(disconnected, configure));
+  await screen.getByRole('button', { name: 'Connect Tailscale' }).click();
+  await screen.rerender(view(preparingHTTPS, configure));
+  await expect.poll(() => popup.closed).toBe(true);
+  await expect.element(screen.getByRole('note')).toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Cancel connection' }))
+    .toBeEnabled();
+  await expect
+    .element(screen.getByRole('button', { name: 'Reconnect' }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('link', { name: 'Open Tailscale DNS settings' }))
+    .not.toBeInTheDocument();
+  await screen.rerender(
+    view(
+      {
+        ...preparingHTTPS,
+        state: 'error',
+        message:
+          'HTTPS certificate preparation is taking longer than expected. Check Tailscale DNS settings. Retrying automatically.',
+      },
+      configure,
+    ),
+  );
+  await expect.element(screen.getByRole('note')).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('alert')).toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Reconnect' }))
+    .toBeEnabled();
+  await expect
+    .element(screen.getByRole('link', { name: 'Open Tailscale DNS settings' }))
+    .toBeVisible();
+  await screen.rerender(view(connected, configure));
+  await expect.element(screen.getByRole('note')).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('link', { name: 'Open Hatch' }))
+    .toHaveAttribute('href', connected.origin);
+});
+
 test('a failed connection request closes its waiting window', async () => {
   const { popup } = popupFixture();
   const configure = vi
@@ -135,24 +183,27 @@ test('a failed connection request closes its waiting window', async () => {
   expect(popup.location.replace).not.toHaveBeenCalled();
 });
 
-test('canceling a pending connection closes its window and ignores late authorization updates', async () => {
-  const { popup } = popupFixture();
-  const configure = vi
-    .fn<Configure>()
-    .mockResolvedValueOnce(starting)
-    .mockResolvedValueOnce(disconnected);
-  const screen = await render(view(disconnected, configure));
-  await screen.getByRole('button', { name: 'Connect Tailscale' }).click();
-  await screen.rerender(view(starting, configure));
-  await screen.getByRole('button', { name: 'Cancel connection' }).click();
-  expect(configure).toHaveBeenLastCalledWith({
-    enabled: false,
-    hostname: 'hatch',
-  });
-  expect(popup.closed).toBe(true);
-  await screen.rerender(view(needsLogin, configure));
-  expect(popup.location.replace).not.toHaveBeenCalled();
-});
+test.each([starting, preparingHTTPS])(
+  'canceling a $state connection closes its window and ignores late authorization updates',
+  async (status) => {
+    const { popup } = popupFixture();
+    const configure = vi
+      .fn<Configure>()
+      .mockResolvedValueOnce(status)
+      .mockResolvedValueOnce(disconnected);
+    const screen = await render(view(disconnected, configure));
+    await screen.getByRole('button', { name: 'Connect Tailscale' }).click();
+    await screen.rerender(view(status, configure));
+    await screen.getByRole('button', { name: 'Cancel connection' }).click();
+    expect(configure).toHaveBeenLastCalledWith({
+      enabled: false,
+      hostname: 'hatch',
+    });
+    expect(popup.closed).toBe(true);
+    await screen.rerender(view(needsLogin, configure));
+    expect(popup.location.replace).not.toHaveBeenCalled();
+  },
+);
 
 test('opening Settings during pending enrollment never opens an unsolicited window', async () => {
   const { open } = popupFixture();

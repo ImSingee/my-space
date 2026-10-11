@@ -63,8 +63,22 @@ func main() {
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", *port))
 	httpServer := &http.Server{Handler: proxy(target), ReadHeaderTimeout: 15 * time.Second}
 	defer httpServer.Close()
-	var listening bool
 	serveErrors := make(chan error, 1)
+	https := httpsPreparation{
+		certificate: func(ctx context.Context, domain string) error {
+			_, _, err := lc.CertPair(ctx, domain)
+			return err
+		},
+		listen: func() error {
+			ln, err := s.ListenTLS("tcp", ":443")
+			if err == nil {
+				go func() { serveErrors <- httpServer.Serve(ln) }()
+			}
+			return err
+		},
+		emit: emit,
+		now:  time.Now,
+	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -76,30 +90,17 @@ func main() {
 		} else {
 			switch st.BackendState {
 			case "NeedsLogin":
+				https.startedAt = time.Time{}
 				v.State, v.LoginURL = "needs-login", st.AuthURL
 			case "NeedsMachineAuth":
+				https.startedAt = time.Time{}
 				v.State = "needs-approval"
 			case "Running":
 				if st.CurrentTailnet == nil || !st.CurrentTailnet.MagicDNSEnabled || len(st.CertDomains) == 0 {
+					https.startedAt = time.Time{}
 					v = snapshot{State: "error", Message: "Enable MagicDNS and HTTPS certificates in your Tailscale DNS settings. This page will retry automatically."}
 				} else {
-					domain := st.CertDomains[0]
-					if !listening {
-						_, _, err = lc.CertPair(pollCtx, domain)
-						if err == nil {
-							ln, listenErr := s.ListenTLS("tcp", ":443")
-							err = listenErr
-							if err == nil {
-								listening = true
-								go func() { serveErrors <- httpServer.Serve(ln) }()
-							}
-						}
-					}
-					if err != nil {
-						v = snapshot{State: "error", Message: "HTTPS is not ready. Check Tailscale certificate settings and network connectivity. Retrying automatically."}
-					} else {
-						v = snapshot{State: "connected", Origin: "https://" + domain}
-					}
+					v = https.prepare(pollCtx, st.CertDomains[0])
 				}
 			}
 		}

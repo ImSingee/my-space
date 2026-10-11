@@ -30,6 +30,7 @@ import { openTailscaleAuthorization } from './tailscale-authorization';
 const STATE_LABELS = {
   disconnected: 'Disconnected',
   starting: 'Connecting',
+  'preparing-https': 'Preparing HTTPS',
   'needs-login': 'Authorizing',
   'needs-approval': 'Waiting for device approval',
   connected: 'Connected',
@@ -223,10 +224,25 @@ export function TailscalePanel({
           {error}
         </Alert>
       )}
-      {status.message && (
+      {status.state === 'preparing-https' && (
+        <Alert
+          title="Preparing your secure address"
+          color="blue"
+          role="note"
+          aria-live="polite"
+        >
+          <Text size="sm">
+            Your device is connected to Tailscale. We’re preparing its HTTPS
+            certificate so you can open Hatch securely. First-time setup can
+            take a few minutes. You can leave this page; Hatch will keep trying
+            and show your private address when it’s ready.
+          </Text>
+        </Alert>
+      )}
+      {status.message && status.state !== 'preparing-https' && (
         <Alert title="Connection needs attention" color="yellow">
           <Text size="sm">{status.message}</Text>
-          {/dns|certificate/i.test(status.message) && (
+          {/dns/i.test(status.message) && (
             <Anchor
               href="https://login.tailscale.com/admin/dns"
               target="_blank"
@@ -387,7 +403,9 @@ export function TailscalePanel({
             loading={pending}
             onClick={disconnect}
           >
-            {status.state === 'starting' || status.state === 'needs-login'
+            {status.state === 'starting' ||
+            status.state === 'needs-login' ||
+            status.state === 'preparing-https'
               ? 'Cancel connection'
               : 'Disconnect'}
           </Button>

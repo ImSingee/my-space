@@ -18,6 +18,7 @@ import { getPlatformConfig, setPlatformConfig } from './platform-config';
 const helperStatusSchema = z.object({
   state: z.enum([
     'starting',
+    'preparing-https',
     'needs-login',
     'needs-approval',
     'connected',
