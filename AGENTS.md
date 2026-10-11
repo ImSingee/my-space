@@ -43,6 +43,17 @@ Source lives in `src/`. Global routing is defined in `src/router.tsx`, with rout
   Agent Runner; the production deployment is not static-only.
 - Generated files like `routeTree.gen.ts` are auto-created; do not edit.
 
+## Skill directories
+
+- `.agents/skills/` contains development and review guidance for agents working
+  on this repository. It is for our own engineering work.
+- `skills/` contains skills preloaded by the platform Agent to perform tasks
+  inside the product, such as building Apps and Workflows.
+
+Place implementation and review contracts in `.agents/skills/`; place platform
+feature usage guidance in `skills/`. Do not expose repository development
+instructions as preloaded platform Agent skills.
+
 ## Build & Development Commands
 
 Use pnpm for everything. `pnpm dev` starts the Vite dev server on port 3000 with hot reload. `pnpm build` emits the optimized bundle into `.output/`, while `pnpm preview` runs the Nitro server from `.output/` to sanity-check the production SPA shell and server endpoints. `pnpm check:types` runs `tsc --noEmit`. `pnpm lint` runs Oxlint, and `pnpm format` runs Oxfmt then auto-fixes lint errors with Oxlint.
@@ -173,6 +184,8 @@ Validate original nonempty types and enum membership before provider coercion;
 an invalid string such as `"0"` must not become an empty numeric `0` default.
 Verify calls that populate optional fields with every empty spelling, not only
 calls that omit them.
+Read [`.agents/skills/tool-call-contracts/SKILL.md`](.agents/skills/tool-call-contracts/SKILL.md)
+when implementing or reviewing Agent tools.
 
 Write TypeScript React function components. Oxfmt enforces semicolons, single quotes, trailing commas, and an 80-column print width.
 
