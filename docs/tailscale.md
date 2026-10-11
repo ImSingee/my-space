@@ -34,7 +34,7 @@ The Docker image includes a small Go executable using the official
 service, Tailscale client on the host, TUN device, elevated container capability,
 or inbound port forwarding is required. The feature starts disconnected.
 
-For a source installation, use Go 1.26.6 or newer and run:
+For a source installation, use Go 1.27.1 or newer and run:
 
 ```bash
 pnpm tailscale:build

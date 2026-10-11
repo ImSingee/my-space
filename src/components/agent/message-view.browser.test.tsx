@@ -670,7 +670,7 @@ test('collapses a live command after completion and preserves its details', asyn
   expect(commandRegion.element().lastElementChild?.textContent).toBe(
     longCommand,
   );
-  await expect.element(outputRegion).toHaveTextContent('partial output');
+  await expect.element(outputRegion).toMatchTextContent('partial output');
 
   await screen.rerender(
     <MantineProvider>
@@ -704,7 +704,7 @@ test('collapses a live command after completion and preserves its details', asyn
   const completedCommand = screen.getByRole('region', { name: 'Command' });
   const completedOutput = screen.getByRole('region', { name: 'Output' });
   await expect.element(completedCommand).toBeVisible();
-  await expect.element(completedOutput).toHaveTextContent('final output');
+  await expect.element(completedOutput).toMatchTextContent('final output');
   expect(completedCommand.element().lastElementChild?.textContent).toBe(
     longCommand,
   );
@@ -758,7 +758,7 @@ test('reveals a persisted read path without overflowing a narrow message', async
   expect(path.scrollWidth).toBeLessThanOrEqual(path.clientWidth);
   await expect
     .element(screen.getByRole('region', { name: 'File contents' }))
-    .toHaveTextContent('export const value = true;');
+    .toMatchTextContent('export const value = true;');
 
   const shell = screen.getByTestId('message-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
@@ -790,7 +790,7 @@ test('preserves a live read path through completion', async () => {
   );
   await expect
     .element(screen.getByRole('region', { name: 'File contents' }))
-    .toHaveTextContent('partial contents');
+    .toMatchTextContent('partial contents');
 
   await screen.rerender(
     <MantineProvider>
@@ -822,7 +822,7 @@ test('preserves a live read path through completion', async () => {
   );
   await expect
     .element(screen.getByRole('region', { name: 'File contents' }))
-    .toHaveTextContent('final contents');
+    .toMatchTextContent('final contents');
 });
 
 test('expands a listed directory with stable path and contents labels', async () => {
@@ -864,8 +864,8 @@ test('expands a listed directory with stable path and contents labels', async ()
   expect(pathRegion.element().lastElementChild?.textContent).toBe(
     absoluteListPath,
   );
-  await expect.element(contentsRegion).toHaveTextContent('- main.ts');
-  await expect.element(contentsRegion).toHaveTextContent('d components');
+  await expect.element(contentsRegion).toMatchTextContent('- main.ts');
+  await expect.element(contentsRegion).toMatchTextContent('d components');
   const shell = screen.getByTestId('message-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
 });
@@ -935,7 +935,7 @@ test('does not show the workspace root for an invalid persisted list path', asyn
   expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
   await expect
     .element(screen.getByRole('region', { name: 'Error' }))
-    .toHaveTextContent(error);
+    .toMatchTextContent(error);
 });
 
 test('labels an empty read result as empty file contents', async () => {
@@ -965,7 +965,7 @@ test('labels an empty read result as empty file contents', async () => {
   await screen.getByRole('button', { name: /Read file/ }).click();
   await expect
     .element(screen.getByRole('region', { name: 'File contents' }))
-    .toHaveTextContent('(empty file)');
+    .toMatchTextContent('(empty file)');
 });
 
 test('distinguishes an empty read page from an empty file', async () => {
@@ -1005,7 +1005,7 @@ test('distinguishes an empty read page from an empty file', async () => {
   const contents = screen.getByRole('region', { name: 'File contents' });
   await expect
     .element(contents)
-    .toHaveTextContent('(no content at offset 128)');
+    .toMatchTextContent('(no content at offset 128)');
   expect(contents.element().textContent).not.toContain('(empty file)');
 });
 
@@ -1181,7 +1181,7 @@ test('keeps attempted write inputs and the output when a write fails', async () 
     attemptedWritePath,
   );
   expect(contentsRegion.element().lastElementChild?.textContent).toBe(content);
-  await expect.element(outputRegion).toHaveTextContent(error);
+  await expect.element(outputRegion).toMatchTextContent(error);
 });
 
 test('renders a persisted edit result as a colored diff', async () => {

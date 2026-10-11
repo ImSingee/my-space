@@ -244,7 +244,7 @@ test('keeps the live error until the persisted transcript is ready', async () =>
   await expect.element(screen.getByText('Partial reply')).toBeVisible();
   await expect
     .element(screen.getByRole('alert'))
-    .toHaveTextContent('OpenAI API error (402)');
+    .toMatchTextContent('OpenAI API error (402)');
   expect(onTerminal).toHaveBeenCalledWith('OpenAI API error (402)');
 
   resolveTerminal(true);
@@ -272,7 +272,7 @@ test('keeps the inline error when the transcript refetch fails', async () => {
   await expect.element(screen.getByText('Partial reply')).toBeVisible();
   await expect
     .element(screen.getByRole('alert'))
-    .toHaveTextContent('OpenAI API error (402)');
+    .toMatchTextContent('OpenAI API error (402)');
   expect(toast.error).not.toHaveBeenCalled();
 });
 
@@ -323,7 +323,7 @@ test('submits env values only in the POST body and clears the form on success', 
     .toHaveTextContent('Environment variables saved.');
   await expect
     .element(screen.getByTestId('env-announcement'))
-    .not.toHaveTextContent(sentinel);
+    .not.toMatchTextContent(sentinel);
   expect(toast.error).not.toHaveBeenCalled();
 });
 
@@ -371,7 +371,7 @@ test('retains env values and shows a fixed error when submission fails', async (
   );
   await expect
     .element(screen.getByTestId('env-announcement'))
-    .not.toHaveTextContent(sentinel);
+    .not.toMatchTextContent(sentinel);
 });
 
 test('hydrates a pending env request and preserves its input on same-run reconnect', async () => {
@@ -831,7 +831,7 @@ test('times out and aborts a stalled env POST without exposing its value', async
     );
     await expect
       .element(screen.getByTestId('env-announcement'))
-      .not.toHaveTextContent(sentinel);
+      .not.toMatchTextContent(sentinel);
   } finally {
     vi.useRealTimers();
   }

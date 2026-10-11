@@ -70,7 +70,7 @@ beforeEach(async () => {
   await fs.rm(path.join(root, 'manifest.json'), { force: true });
 });
 
-describe.sequential('source manifest contract', () => {
+describe('source manifest contract', { concurrent: false }, () => {
   it('resolves the shipped SDK types and produces the same JSON contract from TS and JSON', async () => {
     await write(defined(app));
     const ts = await loadApp();
