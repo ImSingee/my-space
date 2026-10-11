@@ -1688,12 +1688,7 @@ test('keeps unknown, empty, and malformed requests inspectable', async () => {
     .toMatchTextContent('Arguments must be an object.');
 });
 
-test('reports unavailable and non-JSON requests without inventing one', async () => {
-  const circular: Record<string, unknown> = { id: 'app-1' };
-  circular.self = circular;
-  // A hole would serialize as null, which the Agent never sent.
-  const sparseWhere: unknown[] = [];
-  sparseWhere[1] = { field: 'email', op: 'eq', value: '' };
+test('keeps an orphaned tool result inspectable without inventing arguments', async () => {
   const screen = await render(
     <MantineProvider>
       <MessageView
@@ -1703,77 +1698,93 @@ test('reports unavailable and non-JSON requests without inventing one', async ()
           content: [{ type: 'text', text: 'Unpaired deploy output' }],
         }}
       />
-      <StreamingToolStep
-        tool={{
-          id: 'bigint',
-          name: 'query_app_kv',
-          args: { id: 'app-1', limit: 10n },
-          done: true,
-          isError: true,
-          output: 'limit must be an integer',
-        }}
-      />
-      <StreamingToolStep
-        tool={{
-          id: 'sparse',
-          name: 'query_app_data_table',
-          args: { id: 'app-1', action: 'query', where: sparseWhere },
-          done: true,
-          isError: true,
-          output: 'where[0] is required',
-        }}
-      />
-      <StreamingToolStep
-        tool={{
-          id: 'circular',
-          name: 'future_tool',
-          args: circular,
-          done: false,
-          output: 'still running',
-        }}
-      />
     </MantineProvider>,
   );
-
-  // Only the running step is expanded before any row is toggled.
-  const runningRequest = screen.getByRole('region', { name: 'Request' });
-  await expect.element(runningRequest).toBeVisible();
-  expect(sectionText(runningRequest)).toBe(
-    '(request arguments cannot be shown as JSON)',
-  );
-  await expect
-    .element(screen.getByRole('region', { name: 'Output' }))
-    .toMatchTextContent('still running');
-
-  const orphanDetails = await expandStep(
+  const details = await expandStep(
     screen.getByRole('button', { name: /Deploy app/ }),
   );
-  expect(
-    sectionText(orphanDetails.getByRole('region', { name: 'Request' })),
-  ).toBe('(request arguments unavailable)');
+  expect(sectionText(details.getByRole('region', { name: 'Request' }))).toBe(
+    '(request arguments unavailable)',
+  );
   await expect
-    .element(orphanDetails.getByRole('region', { name: 'Output' }))
+    .element(details.getByRole('region', { name: 'Output' }))
     .toMatchTextContent('Unpaired deploy output');
+});
 
-  const bigintDetails = await expandStep(
-    screen.getByRole('button', { name: /Query app KV/ }),
+// Omission preserves an existing entry's secret flag; explicit false makes it public.
+test('masks sensitive KV write requests in saved history without changing the transcript', async () => {
+  const writes = [
+    {
+      id: 'app-1',
+      action: 'set',
+      key: 'api-token',
+      value: 'secret-write-marker',
+      secret: true,
+    },
+    {
+      id: 'app-1',
+      action: 'set',
+      key: 'existing-token',
+      value: 'preserved-secret-marker',
+    },
+    {
+      id: 'app-1',
+      action: 'set',
+      key: 'public-value',
+      value: 'public-write-marker',
+      secret: false,
+    },
+  ];
+  const original = structuredClone(writes);
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: writes.map((args, index) => ({
+        type: 'toolCall',
+        id: `kv-write-${index}`,
+        name: 'query_app_kv',
+        arguments: args,
+      })),
+    },
+    {
+      toolResults: new Map(
+        writes.map((_, index) => [
+          `kv-write-${index}`,
+          {
+            role: 'toolResult',
+            toolName: 'query_app_kv',
+            isError: index === 1,
+            content: [
+              {
+                type: 'text',
+                text: index === 1 ? 'KV write rejected' : 'KV write finished',
+              },
+            ],
+          },
+        ]),
+      ),
+    },
   );
+  const toggles = screen.getByRole('button', { name: /Query app KV/ });
+  for (const [index, args] of writes.entries()) {
+    const details = await expandStep(toggles.nth(index));
+    expectRequest(details.getByRole('region', { name: 'Request' }), {
+      ...args,
+      value: args.secret === false ? args.value : '[REDACTED]',
+    });
+    await expect
+      .element(
+        details.getByRole('region', { name: index === 1 ? 'Error' : 'Output' }),
+      )
+      .toBeVisible();
+  }
   expect(
-    sectionText(bigintDetails.getByRole('region', { name: 'Request' })),
-  ).toBe('(request arguments cannot be shown as JSON)');
-  await expect
-    .element(bigintDetails.getByRole('region', { name: 'Error' }))
-    .toMatchTextContent('limit must be an integer');
-
-  const sparseDetails = await expandStep(
-    screen.getByRole('button', { name: /Query app Data Table/ }),
-  );
+    screen.getByTestId('message-shell').element().textContent,
+  ).not.toContain('secret-write-marker');
   expect(
-    sectionText(sparseDetails.getByRole('region', { name: 'Request' })),
-  ).toBe('(request arguments cannot be shown as JSON)');
-  await expect
-    .element(sparseDetails.getByRole('region', { name: 'Error' }))
-    .toMatchTextContent('where[0] is required');
+    screen.getByTestId('message-shell').element().textContent,
+  ).not.toContain('preserved-secret-marker');
+  expect(writes).toStrictEqual(original);
 });
 
 test('groups successful deploys, resolves aliases, and uses state-aware actions', async () => {

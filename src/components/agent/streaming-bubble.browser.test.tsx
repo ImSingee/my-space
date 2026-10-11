@@ -242,6 +242,44 @@ test('keeps a live tool request inspectable from running through failure', async
     .toBeVisible();
 });
 
+test('masks a secret KV write throughout the live stream', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(<StreamHarness onTerminal={() => false} />);
+  const args = {
+    id: 'app-1',
+    action: 'set',
+    key: 'api-token',
+    value: 'live-secret-marker',
+    secret: true,
+  };
+  const expected = { ...args, value: '[REDACTED]' };
+  emit({ type: 'tool_start', id: 'secret-kv', name: 'query_app_kv', args });
+  const request = screen.getByRole('region', { name: 'Request' });
+  await expect.element(request).toBeVisible();
+  expect(
+    JSON.parse(request.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(expected);
+  expect(document.body.textContent).not.toContain(args.value);
+  emit({
+    type: 'tool_end',
+    id: 'secret-kv',
+    name: 'query_app_kv',
+    isError: false,
+    output: 'KV write finished',
+  });
+  const toggle = screen.getByRole('button', { name: /Query app KV/ });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect.element(request).toBeVisible();
+  expect(
+    JSON.parse(request.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(expected);
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toMatchTextContent('KV write finished');
+  expect(document.body.textContent).not.toContain(args.value);
+});
+
 test('shows one reasoning indicator and pauses it for human input', async () => {
   const emit = mockLiveStream();
   const screen = await render(<StreamHarness onTerminal={() => false} />);

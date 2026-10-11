@@ -240,13 +240,13 @@ function ToolBodySection({
 }
 
 /**
- * The exact arguments the Agent supplied, independent of any tool-specific
+ * The arguments the Agent supplied, independent of any tool-specific
  * summary above it. Reading them from the model call (never from resolved
  * results or stored environment values) keeps failed and malformed requests
- * diagnosable without revealing anything the transcript does not hold.
+ * diagnosable. Secret KV write values remain masked in both render paths.
  */
-function ToolRequestSection({ args }: { args: unknown }) {
-  const json = useMemo(() => toolRequestJson(args), [args]);
+function ToolRequestSection({ name, args }: { name: string; args: unknown }) {
+  const json = useMemo(() => toolRequestJson(name, args), [name, args]);
   return (
     <ToolBodySection label="Request">
       <Box className={classes.stepInputCode}>
@@ -260,6 +260,7 @@ function ToolRequestSection({ args }: { args: unknown }) {
 }
 
 function ToolStepBody({
+  name,
   args,
   inputs,
   output,
@@ -268,6 +269,7 @@ function ToolStepBody({
   outputLabel,
   outputEmptyText,
 }: {
+  name: string;
   args: unknown;
   inputs?: ToolInputDetail[];
   output?: string;
@@ -287,7 +289,7 @@ function ToolStepBody({
           </Box>
         </ToolBodySection>
       ))}
-      <ToolRequestSection args={args} />
+      <ToolRequestSection name={name} args={args} />
       {editDiff ? (
         <Box className={classes.stepBodySection}>
           <EditDiff diff={editDiff} />
@@ -352,6 +354,7 @@ export function ToolStep({
       error={isError}
     >
       <ToolStepBody
+        name={name}
         args={args}
         inputs={inputs}
         output={hideSuccessfulWriteOutput ? undefined : result?.text}
@@ -524,6 +527,7 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       )}
       <Collapse id={bodyId} expanded={showBody}>
         <ToolStepBody
+          name={tool.name}
           args={tool.args}
           inputs={inputs}
           output={output}

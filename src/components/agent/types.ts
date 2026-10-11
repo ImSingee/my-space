@@ -256,16 +256,28 @@ function isLosslessJson(value: unknown, ancestors: Set<object>): boolean {
 }
 
 /**
- * The complete model-supplied tool arguments as indented JSON. Returns
- * `undefined` for values that `JSON.stringify` would drop, coerce, or reject
- * (e.g. `undefined`, non-finite numbers, class instances, or cycles) so the UI
- * never presents a different request than the one the Agent made.
+ * Model-supplied arguments as indented JSON, with KV write values masked unless
+ * the request explicitly makes the entry public. An omitted secret flag keeps
+ * an existing entry's flag, so its value must also be treated as sensitive.
+ * Returns undefined rather than displaying a lossy serialization.
  */
-export function toolRequestJson(value: unknown): string | undefined {
+export function toolRequestJson(
+  name: string,
+  value: unknown,
+): string | undefined {
   try {
-    return isLosslessJson(value, new Set())
-      ? JSON.stringify(value, null, 2)
-      : undefined;
+    if (!isLosslessJson(value, new Set())) return undefined;
+    const args = toolArgumentsRecord(value);
+    const redactValue =
+      name === 'query_app_kv' &&
+      args?.action === 'set' &&
+      args.secret !== false &&
+      Object.hasOwn(args, 'value');
+    return JSON.stringify(
+      redactValue ? { ...args, value: '[REDACTED]' } : value,
+      null,
+      2,
+    );
   } catch {
     // Throwing getters or proxies cannot be shown faithfully either.
     return undefined;
