@@ -35,7 +35,13 @@ export const getRouter = () => {
     context: { queryClient },
     parseSearch,
     stringifySearch,
-    scrollRestoration: true,
+    // Chat owns its viewport: every entry starts at the bottom, then streaming
+    // follows only while pinned. Router restoration can overwrite that position
+    // with a previous conversation's offset and incorrectly disable follow.
+    scrollRestoration: ({ location }) => {
+      const pathname = location.pathname.toLowerCase();
+      return pathname !== '/agent' && !pathname.startsWith('/agent/');
+    },
     defaultPreloadStaleTime: 0,
     defaultPreload: 'intent',
     defaultPendingComponent: AppLoading,

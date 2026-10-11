@@ -53,6 +53,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     string | null
   >(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const messagesInnerRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const retryingRef = useRef(false);
@@ -471,32 +472,76 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // only auto-follow when it is, so a user who scrolls up to read earlier
   // output isn't yanked back down on every token.
   const stickToBottomRef = useRef(true);
+  const previousTopRef = useRef(0);
+  const scrollToBottom = useCallback((force = false) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    // A second follow attempt can run before the user's scroll event, too.
+    // Observe that pending upward movement before overwriting its position.
+    if (
+      !force &&
+      viewport.scrollTop < previousTopRef.current &&
+      top - viewport.scrollTop >= 80
+    ) {
+      stickToBottomRef.current = false;
+      return;
+    }
+    // Record the destination synchronously. The resulting scroll event can be
+    // coalesced with a user's upward movement before it is delivered.
+    previousTopRef.current = top;
+    viewport.scrollTo({ top });
+  }, []);
+
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+    previousTopRef.current = el.scrollTop;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottomRef.current = distance < 80;
+      if (distance < 80) {
+        stickToBottomRef.current = true;
+      } else if (el.scrollTop < previousTopRef.current) {
+        // Content/viewport growth can leave a gap without user input. Only
+        // upward scrolling should release follow in that case.
+        stickToBottomRef.current = false;
+      }
+      previousTopRef.current = el.scrollTop;
     };
+    // Follow depends on transcript movement, not bubbled gestures from nested
+    // outputs. scrollToBottom also detects upward movement before this event.
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Initial layout, image decoding and composer resizing can change the bottom
+  // after the message-count effect has run. Follow those changes while pinned.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = messagesInnerRef.current;
+    if (!viewport || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        scrollToBottom();
+      }
+    });
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
   // A new message (user send / finished turn) always scrolls to the bottom and
   // re-pins follow; this also covers the initial load.
   useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
     stickToBottomRef.current = true;
-    el.scrollTo({ top: el.scrollHeight });
-  }, [messages.length]);
+    scrollToBottom(true);
+  }, [messages.length, scrollToBottom]);
 
   // Streaming tokens follow only when pinned to the bottom.
   useEffect(() => {
     if (!stickToBottomRef.current) return;
-    const el = viewportRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [streamState]);
+    scrollToBottom();
+  }, [streamState, scrollToBottom]);
 
   return (
     <Box className={classes.chat}>
@@ -521,7 +566,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       </Box>
 
       <ScrollArea className={classes.messages} viewportRef={viewportRef}>
-        <Box className={classes.messagesInner}>
+        <Box className={classes.messagesInner} ref={messagesInnerRef}>
           {sessionQuery.isLoading ? (
             <Center py="xl">
               <Loader />
