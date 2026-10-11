@@ -30,7 +30,10 @@ only the name, a partial masked identifier, creation/expiration and last-use
 timestamps. Revoke ends the key immediately and removes it from the list.
 Expired keys are rejected and may be removed by the plugin's expiration cleanup.
 
-Keys have a fixed `hatch_` prefix. Send them only in **`x-api-key`**, never in
+The Security UI passes `hatch_` as its creation prefix. Native API callers may
+choose another prefix or omit it; CLI authentication delegates validity to the
+plugin without checking a prefix, length or character pattern. Send keys only
+in **`x-api-key`**, never in
 a URL or `Authorization: Bearer`. Bearer retains its existing device session
 and Run JWT meaning. When `x-api-key` is present it takes precedence; an invalid,
 expired, disabled, orphaned or revoked key fails with 401 even if another valid
@@ -58,18 +61,30 @@ awaited. Revocation deletes the owner-scoped row, so requests begun after the
 revoke response cannot authenticate it; a request authorized before revocation
 may finish. API keys deliberately have no extra quota/rate limit or scopes.
 
-Management uses session-only `GET/POST /api/settings/api-keys` and
-`POST /api/settings/api-keys/revoke`. Create accepts only
-`{ "name": "Automation", "expiresIn": 2592000 }` (seconds, 1–315360000,
-or `null` for no expiry); revoke accepts `{ "id": "…" }`. An API key cannot
-list, create or revoke keys, including when accompanied by a Cookie. The owner
-comes from a live ordinary session, never request input. Another user's ID
-cannot be enumerated or revoked. Native `/api/auth/api-key/*` management routes
-are disabled; server-only plugin verification is not publicly exposed. All
-management responses use `Cache-Control: no-store`, and only the create response
-contains the raw key. The UI holds it in transient component memory, outside
-query/mutation caches and browser persistence. Existing session Bearer tokens
-still have ordinary session authority, including credential management.
+Management uses Better Auth's native `/api/auth/api-key/*` endpoints:
+
+- `GET /list` returns `{ apiKeys, total, limit, offset }`.
+- `POST /create` accepts, for example,
+  `{ "name": "Automation", "expiresIn": 2592000, "prefix": "hatch_" }`.
+  Lifetime is in seconds (1–315360000), or `null` for no expiry. The response
+  contains metadata and the one-time raw `key` at the top level.
+- `GET /get?id=…`, `POST /update` and `POST /delete` use the plugin's native
+  contracts. Delete accepts `{ "keyId": "…" }`. The UI uses list/create/delete;
+  native update remains available to the owner, including changing expiry or
+  enabled status.
+
+The plugin requires an ordinary session and checks user ownership. API keys do
+not become sessions and cannot manage keys on their own. If a Cookie/session
+accompanies an API key, that session supplies the management identity; another
+user's key is still inaccessible. Client requests cannot supply a different
+`userId` or server-only permissions/quota settings. Existing session Bearer
+credentials retain their ordinary management authority. Verify and expired-key
+cleanup methods remain server-only, without public HTTP routes.
+
+The auth route sends `Cache-Control: no-store`. Native list/get responses omit
+the `key` field; only create returns the raw key. The UI projects metadata for
+its list and holds the secret in transient component memory, outside
+query/mutation caches and browser persistence.
 
 ## Device login (CLI sessions)
 
@@ -212,8 +227,8 @@ HATCH_API_KEY_TEST_DATABASE_URL=postgres://... pnpm exec vitest run --project un
 It upgrades from the prior migrations with historical user/session fixtures,
 reapplies the migration journal, then exercises real login, one-time creation,
 hashed storage, CLI calls, metadata-only listing, immediate revoke, expiry,
-owner isolation, disabled/orphan keys, input/origin boundaries and native-plugin
-bypass denial. Without its database URL it is skipped, not acceptance. Use a
+owner isolation, disabled/orphan keys, native input/origin and server-only
+identity boundaries, custom/no-prefix keys and owner updates. Without its database URL it is skipped, not acceptance. Use a
 fresh database for each run because the suite specifically proves the upgrade.
 Full browser acceptance additionally drives the real Security page and calls
 the CLI API with the very key it creates, before and after UI revocation.

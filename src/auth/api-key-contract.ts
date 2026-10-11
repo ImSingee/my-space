@@ -1,7 +1,18 @@
-/** Public API key metadata. Secret material is returned only on creation. */
+import type { ApiKey } from '@better-auth/api-key';
+
+/** UI metadata. The native API returns the full record without secret material. */
 export const API_KEY_NAME_MAX_LENGTH = 100;
 export const API_KEY_MAX_LIFETIME_DAYS = 3650;
-export const API_KEY_MAX_LIFETIME_SECONDS = API_KEY_MAX_LIFETIME_DAYS * 86400;
+
+/** Fields consumed from the native plugin's JSON responses. */
+export type ApiKeyMetadata = Pick<
+  ApiKey,
+  'id' | 'name' | 'prefix' | 'start'
+> & {
+  createdAt: string;
+  expiresAt: string | null;
+  lastRequest: string | null;
+};
 
 export type ApiKeySummary = {
   id: string;

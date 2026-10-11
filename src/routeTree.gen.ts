@@ -41,8 +41,6 @@ import { Route as AppWorkflowWorkflowSlugManageRouteImport } from './routes/_app
 import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
 import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
 import { Route as ApiCliV1SplatRouteImport } from './routes/api/cli/v1/$'
-import { Route as ApiSettingsApiKeysIndexRouteImport } from './routes/api/settings/api-keys/index'
-import { Route as ApiSettingsApiKeysRevokeRouteImport } from './routes/api/settings/api-keys/revoke'
 import { Route as ApiWorkflowWorkflowIdDownloadRouteImport } from './routes/api/workflow/$workflowId/download'
 import { Route as ApiWorkflowWorkflowIdRunRouteImport } from './routes/api/workflow/$workflowId/run'
 import { Route as AppAppSlugEmbedSplatRouteImport } from './routes/app/$appSlug/embed/$'
@@ -222,17 +220,6 @@ const ApiCliV1SplatRoute = ApiCliV1SplatRouteImport.update({
   path: '/api/cli/v1/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSettingsApiKeysIndexRoute = ApiSettingsApiKeysIndexRouteImport.update({
-  id: '/api/settings/api-keys/',
-  path: '/api/settings/api-keys/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiSettingsApiKeysRevokeRoute =
-  ApiSettingsApiKeysRevokeRouteImport.update({
-    id: '/api/settings/api-keys/revoke',
-    path: '/api/settings/api-keys/revoke',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ApiWorkflowWorkflowIdDownloadRoute =
   ApiWorkflowWorkflowIdDownloadRouteImport.update({
     id: '/api/workflow/$workflowId/download',
@@ -350,13 +337,11 @@ export interface FileRoutesByFullPath {
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
   '/api/cli/v1/$': typeof ApiCliV1SplatRoute
-  '/api/settings/api-keys/revoke': typeof ApiSettingsApiKeysRevokeRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
   '/app/$appSlug/': typeof AppAppAppSlugIndexRoute
   '/workflow/$workflowSlug/': typeof AppWorkflowWorkflowSlugIndexRoute
-  '/api/settings/api-keys/': typeof ApiSettingsApiKeysIndexRoute
   '/workflow/$workflowSlug/execution/$runId': typeof AppWorkflowWorkflowSlugExecutionRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
@@ -399,13 +384,11 @@ export interface FileRoutesByTo {
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
   '/api/cli/v1/$': typeof ApiCliV1SplatRoute
-  '/api/settings/api-keys/revoke': typeof ApiSettingsApiKeysRevokeRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
   '/app/$appSlug': typeof AppAppAppSlugIndexRoute
   '/workflow/$workflowSlug': typeof AppWorkflowWorkflowSlugIndexRoute
-  '/api/settings/api-keys': typeof ApiSettingsApiKeysIndexRoute
   '/workflow/$workflowSlug/execution/$runId': typeof AppWorkflowWorkflowSlugExecutionRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
@@ -452,13 +435,11 @@ export interface FileRoutesById {
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
   '/api/cli/v1/$': typeof ApiCliV1SplatRoute
-  '/api/settings/api-keys/revoke': typeof ApiSettingsApiKeysRevokeRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
   '/_app/app/$appSlug/': typeof AppAppAppSlugIndexRoute
   '/_app/workflow/$workflowSlug/': typeof AppWorkflowWorkflowSlugIndexRoute
-  '/api/settings/api-keys/': typeof ApiSettingsApiKeysIndexRoute
   '/_app/workflow/$workflowSlug/execution/$runId': typeof AppWorkflowWorkflowSlugExecutionRunIdRoute
   '/api/agent/runs/$runId/answer': typeof ApiAgentRunsRunIdAnswerRoute
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
@@ -505,13 +486,11 @@ export interface FileRouteTypes {
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
     | '/api/cli/v1/$'
-    | '/api/settings/api-keys/revoke'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
     | '/app/$appSlug/'
     | '/workflow/$workflowSlug/'
-    | '/api/settings/api-keys/'
     | '/workflow/$workflowSlug/execution/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
@@ -554,13 +533,11 @@ export interface FileRouteTypes {
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
     | '/api/cli/v1/$'
-    | '/api/settings/api-keys/revoke'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
     | '/app/$appSlug'
     | '/workflow/$workflowSlug'
-    | '/api/settings/api-keys'
     | '/workflow/$workflowSlug/execution/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
@@ -606,13 +583,11 @@ export interface FileRouteTypes {
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
     | '/api/cli/v1/$'
-    | '/api/settings/api-keys/revoke'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
     | '/_app/app/$appSlug/'
     | '/_app/workflow/$workflowSlug/'
-    | '/api/settings/api-keys/'
     | '/_app/workflow/$workflowSlug/execution/$runId'
     | '/api/agent/runs/$runId/answer'
     | '/api/agent/runs/$runId/cancel'
@@ -640,11 +615,9 @@ export interface RootRouteChildren {
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
   ApiCliV1SplatRoute: typeof ApiCliV1SplatRoute
-  ApiSettingsApiKeysRevokeRoute: typeof ApiSettingsApiKeysRevokeRoute
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
   ApiWorkflowWorkflowIdRunRoute: typeof ApiWorkflowWorkflowIdRunRoute
   AppAppSlugEmbedSplatRoute: typeof AppAppSlugEmbedSplatRoute
-  ApiSettingsApiKeysIndexRoute: typeof ApiSettingsApiKeysIndexRoute
   ApiAppAppIdAppSplatRoute: typeof ApiAppAppIdAppSplatRoute
   ApiAppAppIdDataSplatRoute: typeof ApiAppAppIdDataSplatRoute
   ApiAppAppIdHookSplatRoute: typeof ApiAppAppIdHookSplatRoute
@@ -880,20 +853,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCliV1SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/settings/api-keys/': {
-      id: '/api/settings/api-keys/'
-      path: '/api/settings/api-keys'
-      fullPath: '/api/settings/api-keys/'
-      preLoaderRoute: typeof ApiSettingsApiKeysIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/settings/api-keys/revoke': {
-      id: '/api/settings/api-keys/revoke'
-      path: '/api/settings/api-keys/revoke'
-      fullPath: '/api/settings/api-keys/revoke'
-      preLoaderRoute: typeof ApiSettingsApiKeysRevokeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/workflow/$workflowId/download': {
       id: '/api/workflow/$workflowId/download'
       path: '/api/workflow/$workflowId/download'
@@ -1115,11 +1074,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
   ApiCliV1SplatRoute: ApiCliV1SplatRoute,
-  ApiSettingsApiKeysRevokeRoute: ApiSettingsApiKeysRevokeRoute,
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,
   ApiWorkflowWorkflowIdRunRoute: ApiWorkflowWorkflowIdRunRoute,
   AppAppSlugEmbedSplatRoute: AppAppSlugEmbedSplatRoute,
-  ApiSettingsApiKeysIndexRoute: ApiSettingsApiKeysIndexRoute,
   ApiAppAppIdAppSplatRoute: ApiAppAppIdAppSplatRoute,
   ApiAppAppIdDataSplatRoute: ApiAppAppIdDataSplatRoute,
   ApiAppAppIdHookSplatRoute: ApiAppAppIdHookSplatRoute,

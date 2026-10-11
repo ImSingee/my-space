@@ -39,16 +39,6 @@ const passkeyCeremonyPaths = new Set([
 export const auth = betterAuth({
   baseURL: appUrl,
   secret: betterAuthSecret,
-  // Expose only the session-only, projected Settings API. Native endpoints
-  // accept more options and are unnecessary public credential surfaces.
-  disabledPaths: [
-    '/api-key/create',
-    '/api-key/list',
-    '/api-key/get',
-    '/api-key/update',
-    '/api-key/delete',
-    '/api-key/delete-all-expired-api-keys',
-  ],
   trustedOrigins: async () => {
     const { getTailscaleManager } = await import('../server/tailscale-manager');
     const origin = getTailscaleManager().trustedOrigin();
@@ -103,7 +93,6 @@ export const auth = betterAuth({
   },
   plugins: [
     apiKey({
-      defaultPrefix: 'hatch_',
       requireName: true,
       maximumNameLength: API_KEY_NAME_MAX_LENGTH,
       startingCharactersConfig: { charactersLength: 12 },

@@ -3,14 +3,15 @@ import type {
   ApiKeySummary,
   CreatedApiKey,
   CreateApiKeyInput,
+  ApiKeyMetadata,
 } from '~auth/api-key-contract';
 
 async function call<T>(
-  path = '',
+  path: string,
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(`/api/settings/api-keys${path}`, {
+  const response = await fetch(`/api/auth/api-key/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     credentials: 'same-origin',
     cache: 'no-store',
@@ -28,6 +29,18 @@ async function call<T>(
   return response.json() as Promise<T>;
 }
 
+function summary(key: ApiKeyMetadata): ApiKeySummary {
+  return {
+    id: key.id,
+    name: key.name ?? '',
+    prefix: key.prefix ?? '',
+    start: key.start ?? '',
+    createdAt: key.createdAt,
+    expiresAt: key.expiresAt,
+    lastRequest: key.lastRequest,
+  };
+}
+
 export const apiKeysQueryOptions = queryOptions({
   queryKey: ['auth', 'api-keys'],
   // Account-specific metadata must not survive leaving Security/signing out.
@@ -35,11 +48,20 @@ export const apiKeysQueryOptions = queryOptions({
   retry: false,
   networkMode: 'always',
   queryFn: async ({ signal }) =>
-    (await call<{ keys: ApiKeySummary[] }>('', undefined, signal)).keys,
+    (
+      await call<{ apiKeys: ApiKeyMetadata[] }>('list', undefined, signal)
+    ).apiKeys.map(summary),
 });
 
 /** Keep the returned secret in component memory only, never query cache. */
-export const createApiKey = (input: CreateApiKeyInput) =>
-  call<CreatedApiKey>('', input);
+export async function createApiKey(
+  input: CreateApiKeyInput,
+): Promise<CreatedApiKey> {
+  const created = await call<ApiKeyMetadata & { key: string }>('create', {
+    ...input,
+    prefix: 'hatch_',
+  });
+  return { apiKey: summary(created), key: created.key };
+}
 export const revokeApiKey = (id: string) =>
-  call<{ success: true }>('/revoke', { id });
+  call<{ success: true }>('delete', { keyId: id });

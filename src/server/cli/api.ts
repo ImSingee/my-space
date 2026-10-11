@@ -62,7 +62,6 @@ async function readJson(request: Request, limit = 16384) {
 async function authenticate(request: Request): Promise<RunTokenContext | null> {
   if (request.headers.has('x-api-key')) {
     const key = request.headers.get('x-api-key') ?? '';
-    if (!/^hatch_[A-Za-z0-9_-]{64}$/.test(key)) throw fail('unauthorized', 401);
     const result = await auth.api.verifyApiKey({
       body: { key, configId: 'default' },
     });

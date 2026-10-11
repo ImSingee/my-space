@@ -291,15 +291,9 @@ describe.runIf(Boolean(databaseUrl))('Hatch CLI on real PostgreSQL', () => {
     );
     // Run JWTs cannot manage credentials; user API keys cannot impersonate
     // the trusted Runner fleet on its separate internal authentication entry.
-    const { handleApiKeysRequest } = await import('~server/api-keys');
     expect(
-      (
-        await handleApiKeysRequest(
-          new Request(`${origin}/api/settings/api-keys`, {
-            headers: bearer(minted.data.token),
-          }),
-        )
-      ).status,
+      (await authCall('api-key/list', { headers: bearer(minted.data.token) }))
+        .response.status,
     ).toBe(401);
     const owner = await auth.api.getSession({
       headers: new Headers({ cookie }),

@@ -35,13 +35,13 @@ let replies: Partial<Record<Route, Reply>>;
 let calls: { route: Route; body: unknown }[];
 
 const ROUTES: Record<string, Route> = {
-  'GET /api/settings/api-keys': 'list',
-  'POST /api/settings/api-keys': 'create',
-  'POST /api/settings/api-keys/revoke': 'revoke',
+  'GET /api/auth/api-key/list': 'list',
+  'POST /api/auth/api-key/create': 'create',
+  'POST /api/auth/api-key/delete': 'revoke',
 };
 
 const defaultReplies: Record<Route, Reply> = {
-  list: () => Response.json({ keys: serverKeys }),
+  list: () => Response.json({ apiKeys: serverKeys }),
   create: (body) => {
     const { name, expiresIn } = body as {
       name: string;
@@ -56,11 +56,11 @@ const defaultReplies: Record<Route, Reply> = {
           : new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
     serverKeys = [...serverKeys, apiKey];
-    return Response.json({ apiKey, key: SECRET });
+    return Response.json({ ...apiKey, key: SECRET });
   },
   revoke: (body) => {
-    const { id } = body as { id: string };
-    serverKeys = serverKeys.filter((key) => key.id !== id);
+    const { keyId } = body as { keyId: string };
+    serverKeys = serverKeys.filter((key) => key.id !== keyId);
     return Response.json({ success: true });
   },
 };
@@ -153,7 +153,7 @@ test('reveals a new key once and keeps the secret out of caches, storage, and th
   });
   await expect.element(secretField).toHaveValue(SECRET);
   expect(callsTo('create').map((call) => call.body)).toEqual([
-    { name: 'Laptop CLI', expiresIn: 90 * DAY },
+    { name: 'Laptop CLI', expiresIn: 90 * DAY, prefix: 'hatch_' },
   ]);
 
   // Only deliberate actions may dismiss the one-time reveal.
@@ -243,8 +243,8 @@ test('sends one creation request at a time and keeps failures inline with the fo
     .element(screen.getByRole('textbox', { name: 'API key for Deploy script' }))
     .toHaveValue(SECRET);
   expect(callsTo('create').map((call) => call.body)).toEqual([
-    { name: 'Deploy script', expiresIn: 30 * DAY },
-    { name: 'Deploy script', expiresIn: null },
+    { name: 'Deploy script', expiresIn: 30 * DAY, prefix: 'hatch_' },
+    { name: 'Deploy script', expiresIn: null, prefix: 'hatch_' },
   ]);
 });
 
@@ -274,7 +274,9 @@ test('revokes a key only after confirmation and follows the server response', as
   await screen.getByRole('button', { name: 'Revoke Laptop CLI' }).click();
   await screen.getByRole('button', { name: 'Revoke key' }).click();
   await expect.element(list.getByText('Laptop CLI')).not.toBeInTheDocument();
-  expect(callsTo('revoke').map((call) => call.body)).toEqual([{ id: 'key-1' }]);
+  expect(callsTo('revoke').map((call) => call.body)).toEqual([
+    { keyId: 'key-1' },
+  ]);
   expect(mocks.toastSuccess).toHaveBeenCalledWith('API key revoked');
 
   // A failed revoke keeps the key listed, reports the error, and refetches.
@@ -373,10 +375,12 @@ test('leaving Security cancels old account reads and discards metadata before an
   await expect
     .poll(() => first.client.getQueryCache().getAll())
     .toHaveLength(0);
-  replies.list = () => Response.json({ keys: [] });
+  replies.list = () => Response.json({ apiKeys: [] });
   const second = await renderPanel(first.client);
   await expect.element(second.getByText('No API keys yet')).toBeVisible();
-  respond(Response.json({ keys: [summary({ name: 'Private automation' })] }));
+  respond(
+    Response.json({ apiKeys: [summary({ name: 'Private automation' })] }),
+  );
   await expect
     .element(second.getByText('Private automation'))
     .not.toBeInTheDocument();
