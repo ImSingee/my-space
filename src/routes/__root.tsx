@@ -18,6 +18,16 @@ import type { QueryClient } from '@tanstack/react-query';
 import appCss from '~styles.css?url';
 import { appCssVariablesResolver, appTheme } from '~ui/theme';
 
+/**
+ * One SPA document serves every page, so a per-route policy cannot cover
+ * in-app navigation. Send only the origin as Referer: URLs such as
+ * /cli/authorize?user_code=… never reach logs, while same-origin Origin
+ * headers (checked by the App data API) stay intact. `no-referrer` would send
+ * `Origin: null` on same-origin form posts (and, per the Fetch standard, other
+ * non-CORS posts), including from srcdoc widgets that inherit this policy.
+ */
+const REFERRER_POLICY = 'strict-origin';
+
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
@@ -25,6 +35,10 @@ export const Route = createRootRouteWithContext<{
   // beforeLoad/loader hooks) must execute in the browser in global SPA mode.
   // Setting this on the root also applies the boundary to all descendants.
   ssr: false,
+  // Sent with every shell response, whatever path or casing loaded it, so the
+  // policy applies before the first asset request. Server routes (APIs, App
+  // runtime) return their own responses and keep their own policies.
+  headers: () => ({ 'Referrer-Policy': REFERRER_POLICY }),
   head: () => ({
     meta: [
       {
@@ -33,6 +47,11 @@ export const Route = createRootRouteWithContext<{
       {
         name: 'viewport',
         content: 'width=device-width, initial-scale=1',
+      },
+      // Same policy for a shell served without the response header.
+      {
+        name: 'referrer',
+        content: REFERRER_POLICY,
       },
       {
         title: 'Hatch',

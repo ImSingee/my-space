@@ -6,6 +6,7 @@ import {
   boolean,
   integer,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('user', {
@@ -103,8 +104,28 @@ export const passkey = pgTable(
   ],
 );
 
+export const deviceCode = pgTable(
+  'device_code',
+  {
+    id: text('id').primaryKey(),
+    deviceCode: text('device_code').notNull(),
+    userCode: text('user_code').notNull(),
+    userId: text('user_id'),
+    expiresAt: timestamp('expires_at').notNull(),
+    status: text('status').notNull(),
+    lastPolledAt: timestamp('last_polled_at'),
+    pollingInterval: integer('polling_interval'),
+    clientId: text('client_id'),
+    scope: text('scope'),
+  },
+  (table) => [
+    uniqueIndex('deviceCode_deviceCode_uidx').on(table.deviceCode),
+    uniqueIndex('deviceCode_userCode_uidx').on(table.userCode),
+  ],
+);
+
 export const authRelations = defineRelationsPart(
-  { user, session, account, verification, passkey },
+  { user, session, account, verification, passkey, deviceCode },
   (r) => ({
     user: {
       sessions: r.many.session({

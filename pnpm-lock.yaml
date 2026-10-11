@@ -294,6 +294,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.12
       katex:
         specifier: ^0.19.0
         version: 0.19.0

@@ -165,6 +165,31 @@ export async function handleInternalApiRequest(
     const [, , resource, ...rest] = segments;
     const method = req.method ?? 'GET';
 
+    // POST /internal/api/cli/runs/:runId/token {runnerId}: a fresh five-minute
+    // Run token for the CLI API. Renewal is the same call.
+    if (
+      resource === 'cli' &&
+      rest.length === 3 &&
+      rest[0] === 'runs' &&
+      rest[2] === 'token' &&
+      method === 'POST'
+    ) {
+      const { z } = await import('zod');
+      const body = z
+        .object({ runnerId: z.string().min(1).max(191) })
+        .strict()
+        .safeParse(await readJsonBody(req));
+      if (!body.success)
+        throw new AppError('Expected a body of exactly { runnerId }.', 400);
+      const { mintRunToken } = await import('~server/cli/run-token');
+      res.setHeader('cache-control', 'no-store');
+      json(
+        res,
+        200,
+        await mintRunToken(decodeURIComponent(rest[1]), body.data.runnerId),
+      );
+      return;
+    }
     if (resource === 'apps') {
       await handleApps(req, res, method, rest);
       return;
