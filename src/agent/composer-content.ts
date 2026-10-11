@@ -120,6 +120,39 @@ export function composerModelText(parts: AgentComposerContentPart[]): string {
     .join('');
 }
 
+/** Restore resource snapshots from the exact inline format used by the model. */
+export function parseComposerText(text: string): ComposerInputPart[] {
+  // JSON strings may contain escaped quotes and braces. Match their complete
+  // quoted representation before parsing or validating any field.
+  const quoted = String.raw`("(?:\\.|[^"\\])*")`;
+  const reference = new RegExp(
+    String.raw`@(APP|WORKFLOW)\{name=${quoted} id=${quoted}(?: slug=${quoted})?\}`,
+    'g',
+  );
+  const parts: ComposerInputPart[] = [];
+  let offset = 0;
+  for (const match of text.matchAll(reference)) {
+    let part: ComposerInputPart;
+    try {
+      const candidate = {
+        type: match[1] === 'APP' ? 'app' : 'workflow',
+        name: JSON.parse(match[2]!),
+        id: JSON.parse(match[3]!),
+        ...(match[4] === undefined ? {} : { slug: JSON.parse(match[4]) }),
+      };
+      const parsed = composerInputPartSchema.safeParse(candidate);
+      if (!parsed.success) continue;
+      part = parsed.data;
+    } catch {
+      continue;
+    }
+    parts.push({ type: 'text', text: text.slice(offset, match.index) }, part);
+    offset = match.index + match[0].length;
+  }
+  parts.push({ type: 'text', text: text.slice(offset) });
+  return compactComposerInput(parts);
+}
+
 export function hasComposerReference(
   parts: AgentComposerContentPart[],
 ): boolean {
