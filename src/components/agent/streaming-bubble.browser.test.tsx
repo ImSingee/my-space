@@ -173,7 +173,7 @@ test('waits for every concurrent tool and stops indicating work on failure', asy
   emit({ type: 'error', message: 'Provider unavailable' });
   await expect
     .element(screen.getByRole('alert'))
-    .toHaveTextContent('Provider unavailable');
+    .toMatchTextContent('Provider unavailable');
   await expect.element(thinking).not.toBeInTheDocument();
 });
 
