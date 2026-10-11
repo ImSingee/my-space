@@ -4,7 +4,7 @@ export type CliCommandDefinition = {
   description: string;
 };
 
-/** Public command descriptions; unsupported surfaces are explicitly reserved. */
+/** Public command descriptions; unsupported operation/auth surfaces are explicitly reserved. */
 export const globalOptions = [
   '--json',
   '--profile <name>',
@@ -79,7 +79,7 @@ const definitions: readonly CliCommandDefinition[] = [
     },
     {
       path: [resource, 'clone'],
-      usage: `${resource} clone <id> [--directory <path>]`,
+      usage: `${resource} clone <id> [--directory <path>] [--force]`,
       description: `Clone ${resource} source into a local checkout.`,
     },
     {
@@ -98,19 +98,33 @@ const definitions: readonly CliCommandDefinition[] = [
       description: `Activate a previous ${resource} deployment.`,
     },
   ]),
+  ...(['app', 'workflow'] as const).map((resource) => ({
+    path: [resource, 'adopt'],
+    usage: `${resource} adopt <id> --directory <path>`,
+    description:
+      'Attach a verified Agent checkout without discarding source or history.',
+  })),
+  {
+    path: ['app', 'associate'],
+    usage: 'app associate <id>',
+    description:
+      'Associate with the verified current Run session, or report not-applicable.',
+  },
   {
     path: ['app', 'kv', 'list'],
-    usage: 'app kv list <app-id> [--prefix <prefix>]',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    usage:
+      'app kv list <app-id> [--cursor <key>] [--limit <count>] [--reveal-secrets]',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['app', 'kv', 'get'],
-    usage: 'app kv get <app-id> <key>',
+    usage: 'app kv get <app-id> <key> [--reveal-secrets]',
     description: 'Read an App KV entry.',
   },
   {
     path: ['app', 'kv', 'set'],
-    usage: 'app kv set <app-id> <key> --file <path|->',
+    usage: 'app kv set <app-id> <key> --file <path|-> [--secret | --no-secret]',
     description: 'Write an App KV entry.',
   },
   {
@@ -126,37 +140,45 @@ const definitions: readonly CliCommandDefinition[] = [
   {
     path: ['app', 'data-table', 'query'],
     usage: 'app data-table query <app-id> --file <path|->',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['app', 'data-table', 'mutate'],
     usage: 'app data-table mutate <app-id> --file <path|->',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['app', 'data-table', 'sql'],
-    usage: 'app data-table sql <app-id> --file <path|->',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    usage:
+      'app data-table sql <app-id> --file <path|-> [--statement-timeout-ms <ms>]',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['app', 'db', 'query'],
     usage: 'app db query <app-id> --file <path|->',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['operation', 'get'],
     usage: 'operation get <operation-id>',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['operation', 'wait'],
     usage: 'operation wait <operation-id>',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
   {
     path: ['operation', 'cancel'],
     usage: 'operation cancel <operation-id>',
-    description: 'Unsupported; no CLI API contract for this operation.',
+    description:
+      'Execute the App data operation with domain limits and complete results.',
   },
 ];
 

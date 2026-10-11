@@ -1,6 +1,8 @@
 /** Domain-oriented fixture calls over real Connect JSON or binary transport. */
 import { createConnectTransport } from '@connectrpc/connect-web';
 import { cliClient, publicError } from '../../../packages/hatch-cli/src/client';
+import { errorFromJson } from '@connectrpc/connect/protocol-connect';
+import { ConnectError } from '@connectrpc/connect';
 
 export async function rpcCall<T = any>(
   origin: string,
@@ -29,6 +31,56 @@ export async function rpcCall<T = any>(
     }),
   );
   const [collection, id, operation] = endpoint.split('/');
+  if (
+    collection === 'apps' &&
+    ['kv', 'data-table', 'db', 'associate-session'].includes(operation)
+  ) {
+    const method = {
+      kv: 'QueryAppKv',
+      'data-table': 'QueryAppDataTable',
+      db: 'QueryAppDb',
+      'associate-session': 'AssociateAppSession',
+    }[operation];
+    const response = await fetcher(
+      `${origin}/api/rpc/hatch.platform.v1.AppService/${method}`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'content-type': 'application/json',
+          'connect-protocol-version': '1',
+        },
+        body: JSON.stringify({
+          id,
+          ...(operation === 'db'
+            ? body
+            : operation === 'associate-session'
+              ? body
+              : { input: body }),
+        }),
+      },
+    );
+    const json = await response.json();
+    if (!response.ok) {
+      const error = publicError(
+        errorFromJson(json, undefined, new ConnectError('RPC request failed.')),
+      );
+      return {
+        response,
+        data: {
+          code: error.code,
+          status: error.httpStatus,
+          message: error.message,
+        } as T,
+      };
+    }
+    return {
+      response,
+      data: (operation === 'kv' || operation === 'data-table'
+        ? json.result
+        : json) as T,
+    };
+  }
   try {
     let data: unknown;
     if (collection === 'auth' && id === 'status')

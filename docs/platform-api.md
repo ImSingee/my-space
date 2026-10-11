@@ -1,5 +1,30 @@
 # Public platform Connect API
 
+CLI parity adds complete safe list/detail views, normalized releases and four
+App RPCs: `QueryAppKv`, `QueryAppDataTable`, `QueryAppDb`, and
+`AssociateAppSession`. Resource `view` and deployment `normalized` use Protobuf
+Value to preserve the allowlisted neutral JSON DTOs, including explicit null,
+false, zero and empty values. Basic resource fields remain available to native
+clients. The CLI validates and exposes the complete view rather than dropping
+inspection metadata. See [the fifteen-tool matrix](cli-tool-parity.md).
+
+Data calls have the same 256 MiB bounded message ceiling as deployment; ordinary
+calls retain 16 KiB. Connect counts streamed/decompressed bytes. Query KV and
+Data Table `input` Values use the authoritative shared strict domain validation
+in `src/platform-api/data-schemas.ts`; outer request IDs and required messages
+use Protovalidate. Actions, pagination and domain size bounds are unchanged.
+Arbitrary JSON data is never model-normalized. Data failures hide values and
+credentials; migration approvals expose only their fingerprint and guidance.
+SQL receives Connect's cancellation signal before awaited lookups/preflight and
+cancels database execution before connection cleanup, with no automatic retry.
+
+Association derives only from verified Run context and is idempotent. Other
+credentials report `not-applicable`, with no invented session. App create,
+clone/update, deploy and rollback associate automatically; Workflow does not.
+App DB queries follow the current domain lifecycle: only already registered
+databases are queried, under the lifecycle lock. Querying never provisions or
+recreates a database.
+
 CLI and native/mobile clients use the Connect API under `/api/rpc`.
 The platform Web UI continues using TanStack Server Functions. User-deployed Apps
 keep their existing, separate Connect services. Better Auth login, device grants,

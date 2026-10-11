@@ -4,6 +4,8 @@
 
 import type { GenFile, GenMessage } from '@bufbuild/protobuf/codegenv2';
 import { fileDesc, messageDesc } from '@bufbuild/protobuf/codegenv2';
+import type { Value } from '@bufbuild/protobuf/wkt';
+import { file_google_protobuf_struct } from '@bufbuild/protobuf/wkt';
 import type { Message } from '@bufbuild/protobuf';
 
 /**
@@ -12,7 +14,8 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_hatch_platform_v1_lifecycle: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'CiFoYXRjaC9wbGF0Zm9ybS92MS9saWZlY3ljbGUucHJvdG8SEWhhdGNoLnBsYXRmb3JtLnYxIpQBCghSZXNvdXJjZRIKCgJpZBgBIAEoCRIMCgRzbHVnGAIgASgJEgwKBG5hbWUYAyABKAkSGAoLZGVzY3JpcHRpb24YBCABKAlIAIgBARIOCgZzdGF0dXMYBSABKAkSEgoKY3JlYXRlZF9hdBgGIAEoCRISCgp1cGRhdGVkX2F0GAcgASgJQg4KDF9kZXNjcmlwdGlvbiJiCgZTb3VyY2USCgoCaWQYASABKAkSGgoNbWFzdGVyX2NvbW1pdBgCIAEoCUgAiAEBEhMKBmJ1bmRsZRgDIAEoDEgBiAEBQhAKDl9tYXN0ZXJfY29tbWl0QgkKB19idW5kbGUiUwoKRGVwbG95bWVudBIVCg1kZXBsb3ltZW50X2lkGAEgASgJEg8KB3ZlcnNpb24YAiABKA0SHQoVY29tcGF0aWJpbGl0eV92ZXJzaW9uGAMgASgNIoQBCg1Db21wYXRpYmlsaXR5Eg8KB3ZlcnNpb24YASABKA0SFgoObGF0ZXN0X3ZlcnNpb24YAiABKA0SIQoZbWluaW11bV9zdXBwb3J0ZWRfdmVyc2lvbhgDIAEoDRIUCgxpc19zdXBwb3J0ZWQYBCABKAgSEQoJaXNfbGF0ZXN0GAUgASgIIpcBCg9SZXN0b3JlZFZlcnNpb24SDwoHdmVyc2lvbhgBIAEoDRI3Cg1jb21wYXRpYmlsaXR5GAIgASgLMiAuaGF0Y2gucGxhdGZvcm0udjEuQ29tcGF0aWJpbGl0eRIhChRkYXRhX3NjaGVtYV9taXNtYXRjaBgDIAEoCEgAiAEBQhcKFV9kYXRhX3NjaGVtYV9taXNtYXRjaGIGcHJvdG8z',
+    'CiFoYXRjaC9wbGF0Zm9ybS92MS9saWZlY3ljbGUucHJvdG8SEWhhdGNoLnBsYXRmb3JtLnYxIroBCghSZXNvdXJjZRIKCgJpZBgBIAEoCRIMCgRzbHVnGAIgASgJEgwKBG5hbWUYAyABKAkSGAoLZGVzY3JpcHRpb24YBCABKAlIAIgBARIOCgZzdGF0dXMYBSABKAkSEgoKY3JlYXRlZF9hdBgGIAEoCRISCgp1cGRhdGVkX2F0GAcgASgJEiQKBHZpZXcYCCABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWVCDgoMX2Rlc2NyaXB0aW9uImIKBlNvdXJjZRIKCgJpZBgBIAEoCRIaCg1tYXN0ZXJfY29tbWl0GAIgASgJSACIAQESEwoGYnVuZGxlGAMgASgMSAGIAQFCEAoOX21hc3Rlcl9jb21taXRCCQoHX2J1bmRsZSKbAQoKRGVwbG95bWVudBIVCg1kZXBsb3ltZW50X2lkGAEgASgJEg8KB3ZlcnNpb24YAiABKA0SHQoVY29tcGF0aWJpbGl0eV92ZXJzaW9uGAMgASgNEhEKBHNsdWcYBCABKAlIAIgBARIqCgpub3JtYWxpemVkGAUgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlQgcKBV9zbHVnIoQBCg1Db21wYXRpYmlsaXR5Eg8KB3ZlcnNpb24YASABKA0SFgoObGF0ZXN0X3ZlcnNpb24YAiABKA0SIQoZbWluaW11bV9zdXBwb3J0ZWRfdmVyc2lvbhgDIAEoDRIUCgxpc19zdXBwb3J0ZWQYBCABKAgSEQoJaXNfbGF0ZXN0GAUgASgIIpcBCg9SZXN0b3JlZFZlcnNpb24SDwoHdmVyc2lvbhgBIAEoDRI3Cg1jb21wYXRpYmlsaXR5GAIgASgLMiAuaGF0Y2gucGxhdGZvcm0udjEuQ29tcGF0aWJpbGl0eRIhChRkYXRhX3NjaGVtYV9taXNtYXRjaBgDIAEoCEgAiAEBQhcKFV9kYXRhX3NjaGVtYV9taXNtYXRjaGIGcHJvdG8z',
+    [file_google_protobuf_struct],
   );
 
 /**
@@ -55,6 +58,13 @@ export type Resource = Message<'hatch.platform.v1.Resource'> & {
    * @generated from field: string updated_at = 7;
    */
   updatedAt: string;
+
+  /**
+   * Complete allowlisted JSON inspection/summary, including nullable values.
+   *
+   * @generated from field: google.protobuf.Value view = 8;
+   */
+  view?: Value | undefined;
 };
 
 /**
@@ -111,6 +121,16 @@ export type Deployment = Message<'hatch.platform.v1.Deployment'> & {
    * @generated from field: uint32 compatibility_version = 3;
    */
   compatibilityVersion: number;
+
+  /**
+   * @generated from field: optional string slug = 4;
+   */
+  slug?: string | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Value normalized = 5;
+   */
+  normalized?: Value | undefined;
 };
 
 /**

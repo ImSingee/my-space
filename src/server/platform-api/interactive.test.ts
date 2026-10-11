@@ -2,7 +2,7 @@
 import { createClient, ConnectError, Code } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-web';
 import { errorFromJson } from '@connectrpc/connect/protocol-connect';
-import { toJson } from '@bufbuild/protobuf';
+import { fromJson, toJson } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
@@ -203,6 +203,101 @@ afterAll(async () => {
 });
 
 describe('interactive Platform API contracts and authority', () => {
+  it.each([false, true])(
+    'preserves data/inspection JSON through Connect binary=%s with native session authority',
+    async (useBinaryFormat) => {
+      await db
+        .update(schema.apps)
+        .set({
+          capabilities: {
+            frontend: true,
+            widgets: false,
+            backend: false,
+            database: false,
+            storage: false,
+            cron: false,
+            webhook: false,
+            dataTable: false,
+            kv: true,
+          },
+        })
+        .where(eq(schema.apps.id, 'app-one'));
+      const api = client(useBinaryFormat).apps;
+      const request = (
+        input: Parameters<typeof fromJson<typeof ValueSchema>>[1],
+      ) => ({ id: 'app-one', input: fromJson(ValueSchema, input) });
+      const first = await api.queryAppKv(
+        request({
+          action: 'set',
+          key: 'entry',
+          value: '😀'.repeat(16384),
+          secret: true,
+        }),
+      );
+      expect(toJson(ValueSchema, first.result!)).toMatchObject({
+        action: 'set',
+        record: { value: null, secret: true },
+      });
+      await api.queryAppKv(request({ action: 'set', key: 'entry', value: '' }));
+      const empty = await api.queryAppKv(
+        request({ action: 'get', key: 'entry', revealSecrets: true }),
+      );
+      expect(toJson(ValueSchema, empty.result!)).toMatchObject({
+        record: { value: '', secret: true },
+      });
+      const cleared = await api.queryAppKv(
+        request({
+          action: 'set',
+          key: 'entry',
+          value: ' \n😀\n',
+          secret: false,
+        }),
+      );
+      expect(toJson(ValueSchema, cleared.result!)).toMatchObject({
+        record: { value: ' \n😀\n', secret: false },
+      });
+      const detail = await api.getApp({ id: 'app-one' });
+      expect(toJson(ValueSchema, detail.resource!.view!)).toMatchObject({
+        id: 'app-one',
+        currentVersion: 1,
+        ops: { kv: { enabled: true, entryCount: 1 } },
+      });
+      expect(await api.associateAppSession({ id: 'app-one' })).toMatchObject({
+        appId: 'app-one',
+        association: 'not-applicable',
+      });
+      expect(
+        await db.query.agentSessionApps.findMany({
+          where: { appId: 'app-one' },
+        }),
+      ).toHaveLength(0);
+      const sql = await api
+        .queryAppDb({ id: 'app-one', sql: 'select private_fixture_value' })
+        .catch((error) => error as ConnectError);
+      expect(sql).toBeInstanceOf(ConnectError);
+      expect(String(sql)).not.toContain('private_fixture_value');
+      const spoofed = await call('AppService/AssociateAppSession', {
+        body: { id: 'app-one', sessionId: 'spoofed-session' },
+      });
+      expect(spoofed.status).toBe(400);
+      await expect(
+        api.queryAppDataTable(
+          request({
+            action: 'mutate',
+            operations: [
+              {
+                type: 'increment',
+                table: 'records',
+                id: 'row',
+                field: 'value',
+                amount: false,
+              },
+            ],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    },
+  );
   it('keeps API-key and live Run authority out of user-session resources', async () => {
     const keyResponse = await authCall(
       'api-key/create',

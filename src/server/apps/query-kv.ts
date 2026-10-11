@@ -8,7 +8,7 @@ import type {
   ParsedQueryAppKvRequest,
   QueryAppKvRecord,
   QueryAppKvResponse,
-} from '~agent/protocol';
+} from '~/platform-api/data-schemas';
 import { AppError } from '~server/errors';
 import { deleteKv, getKv, listKvPage, setKv, type KvRecord } from './kv';
 

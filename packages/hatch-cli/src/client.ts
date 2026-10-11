@@ -1,8 +1,26 @@
 import {
   fromJson,
+  toJson,
   type DescMessage,
   type JsonObject,
 } from '@bufbuild/protobuf';
+import { ValueSchema } from '@bufbuild/protobuf/wkt';
+import {
+  appSummarySchema,
+  workflowSummarySchema,
+  appDetailSchema,
+  workflowDetailSchema,
+  appManifestViewSchema,
+  workflowManifestViewSchema,
+} from '../../../src/platform-api/views';
+import {
+  queryAppKvRequestSchema,
+  queryAppKvResponseSchema,
+  queryAppDataTableRequestSchema,
+  queryAppDataTableResponseSchema,
+  type QueryAppKvRequest,
+  type QueryAppDataTableRequest,
+} from '../../../src/platform-api/data-schemas';
 /** Connect transport with CLI-specific projection and recovery semantics. */
 import {
   createClient,
@@ -47,7 +65,7 @@ function required<T>(value: T | undefined): T {
     );
   return value;
 }
-const resource = (value: Resource) => ({
+const basicResource = (value: Resource) => ({
   id: value.id,
   slug: value.slug,
   name: value.name,
@@ -69,10 +87,15 @@ const source = (value: Source) => ({
       ? null
       : Buffer.from(value.bundle).toString('base64'),
 });
-const deployment = (value: Deployment) => ({
+const deployment = (value: Deployment, kind: 'app' | 'workflow') => ({
   deploymentId: value.deploymentId,
   version: value.version,
   compatibilityVersion: value.compatibilityVersion,
+  ...(value.slug === undefined ? {} : { slug: value.slug }),
+  normalized: (kind === 'app'
+    ? appManifestViewSchema
+    : workflowManifestViewSchema
+  ).parse(toJson(ValueSchema, required(value.normalized))),
 });
 const restored = (value: RestoredVersion) => ({
   version: value.version,
@@ -104,6 +127,20 @@ type DeployInput = {
     dataMigrationApprovalToken?: string;
   };
 };
+function parseData<T>(
+  schema: { parse: (value: unknown) => T },
+  value: unknown,
+): T {
+  try {
+    return schema.parse(value);
+  } catch {
+    throw new CliError(
+      'invalid_input',
+      'Input does not match the data operation contract.',
+      2,
+    );
+  }
+}
 
 /** Keep the CLI's persisted/output DTOs separate from generated wire messages. */
 function parseCreate<D extends DescMessage>(schema: D, input: CreateInput) {
@@ -121,31 +158,51 @@ function parseCreate<D extends DescMessage>(schema: D, input: CreateInput) {
 export function cliClient(transport: Transport) {
   const apps = createClient(AppService, transport);
   const workflows = createClient(WorkflowService, transport);
-  function lifecycle(client: {
-    list: (
-      request: Record<string, never>,
-    ) => Promise<{ resources: Resource[] }>;
-    create: (
-      request: CreateInput,
-    ) => Promise<{ id: string; slug: string; name: string; files: File[] }>;
-    get: (request: { id: string }) => Promise<{ resource?: Resource }>;
-    source: (request: { id: string }) => Promise<{ source?: Source }>;
-    deploy: (request: {
-      id: string;
-      message: string;
-      generation: string;
-      bundle: Uint8Array;
-      allowDestructiveDataMigration?: boolean;
-      dataMigrationApprovalToken?: string;
-    }) => Promise<{ deployment?: Deployment }>;
-    rollback: (request: {
-      id: string;
-      version: number;
-    }) => Promise<{ restored?: RestoredVersion }>;
-  }) {
+  function lifecycle(
+    client: {
+      list: (
+        request: Record<string, never>,
+      ) => Promise<{ resources: Resource[] }>;
+      create: (
+        request: CreateInput,
+      ) => Promise<{ id: string; slug: string; name: string; files: File[] }>;
+      get: (request: { id: string }) => Promise<{ resource?: Resource }>;
+      source: (request: { id: string }) => Promise<{ source?: Source }>;
+      deploy: (request: {
+        id: string;
+        message: string;
+        generation: string;
+        bundle: Uint8Array;
+        allowDestructiveDataMigration?: boolean;
+        dataMigrationApprovalToken?: string;
+      }) => Promise<{ deployment?: Deployment }>;
+      rollback: (request: {
+        id: string;
+        version: number;
+      }) => Promise<{ restored?: RestoredVersion }>;
+    },
+    kind: 'app' | 'workflow',
+  ) {
+    const resource = (value: Resource, detailed = false) => {
+      const schema =
+        kind === 'app'
+          ? detailed
+            ? appDetailSchema
+            : appSummarySchema
+          : detailed
+            ? workflowDetailSchema
+            : workflowSummarySchema;
+      return schema.parse({
+        ...basicResource(value),
+        ...(toJson(ValueSchema, required(value.view)) as Record<
+          string,
+          unknown
+        >),
+      });
+    };
     return {
       list: async (_input: Record<string, never>) =>
-        (await client.list({})).resources.map(resource),
+        (await client.list({})).resources.map((value) => resource(value)),
       create: async (input: CreateInput) => {
         const result = await client.create(input);
         return {
@@ -156,7 +213,7 @@ export function cliClient(transport: Transport) {
         };
       },
       get: async (input: { id: string }) =>
-        resource(required((await client.get(input)).resource)),
+        resource(required((await client.get(input)).resource), true),
       source: async (input: { id: string }) =>
         source(required((await client.source(input)).source)),
       deploy: async (input: DeployInput) =>
@@ -170,6 +227,7 @@ export function cliClient(transport: Transport) {
               })
             ).deployment,
           ),
+          kind,
         ),
       rollback: async (input: {
         params: { id: string };
@@ -190,26 +248,77 @@ export function cliClient(transport: Transport) {
   const auth = createClient(AuthService, transport);
   const sdk = createClient(SdkService, transport);
   return {
-    apps: lifecycle({
-      list: apps.listApps,
-      create: (input) =>
-        apps.createApp(parseCreate(CreateAppRequestSchema, input)),
-      get: apps.getApp,
-      source: apps.getAppSource,
-      deploy: apps.deployApp,
-      rollback: apps.rollbackApp,
-    }),
-    workflows: lifecycle({
-      list: workflows.listWorkflows,
-      create: (input) =>
-        workflows.createWorkflow(
-          parseCreate(CreateWorkflowRequestSchema, input),
-        ),
-      get: workflows.getWorkflow,
-      source: workflows.getWorkflowSource,
-      deploy: workflows.deployWorkflow,
-      rollback: workflows.rollbackWorkflow,
-    }),
+    apps: {
+      ...lifecycle(
+        {
+          list: apps.listApps,
+          create: (input) =>
+            apps.createApp(parseCreate(CreateAppRequestSchema, input)),
+          get: apps.getApp,
+          source: apps.getAppSource,
+          deploy: apps.deployApp,
+          rollback: apps.rollbackApp,
+        },
+        'app',
+      ),
+      kv: async (input: {
+        params: { id: string };
+        body: QueryAppKvRequest;
+      }) => {
+        const body = parseData(queryAppKvRequestSchema, input.body);
+        const result = await apps.queryAppKv({
+          id: input.params.id,
+          input: fromJson(ValueSchema, body),
+        });
+        return queryAppKvResponseSchema.parse(
+          toJson(ValueSchema, required(result.result)),
+        );
+      },
+      dataTable: async (input: {
+        params: { id: string };
+        body: QueryAppDataTableRequest;
+      }) => {
+        const body = parseData(queryAppDataTableRequestSchema, input.body);
+        const result = await apps.queryAppDataTable({
+          id: input.params.id,
+          input: fromJson(ValueSchema, body),
+        });
+        return queryAppDataTableResponseSchema.parse(
+          toJson(ValueSchema, required(result.result)),
+        );
+      },
+      dbQuery: async (input: {
+        params: { id: string };
+        body: { sql: string };
+      }) => {
+        const result = await apps.queryAppDb({
+          id: input.params.id,
+          sql: input.body.sql,
+        });
+        return { text: result.text, rowCount: result.rowCount };
+      },
+      associate: async (input: {
+        params: { id: string };
+        body: Record<string, never>;
+      }) => {
+        const result = await apps.associateAppSession({ id: input.params.id });
+        return { appId: result.appId, association: result.association };
+      },
+    },
+    workflows: lifecycle(
+      {
+        list: workflows.listWorkflows,
+        create: (input) =>
+          workflows.createWorkflow(
+            parseCreate(CreateWorkflowRequestSchema, input),
+          ),
+        get: workflows.getWorkflow,
+        source: workflows.getWorkflowSource,
+        deploy: workflows.deployWorkflow,
+        rollback: workflows.rollbackWorkflow,
+      },
+      'workflow',
+    ),
     auth: {
       status: async (_input: Record<string, never>): Promise<AuthStatus> => {
         const result = await auth.getStatus({});
@@ -279,6 +388,7 @@ export function cliClient(transport: Transport) {
     },
   };
 }
+export type PlatformClient = ReturnType<typeof cliClient>;
 
 export function platformClient(
   credential: Profile,

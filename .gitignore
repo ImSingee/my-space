@@ -31,6 +31,7 @@ todos.json
 auth.json
 .pi
 .vitest-attachments
+/.acceptances/
 
 # Temporary SDK build transactions.
 /sdk-internal/.build-*/

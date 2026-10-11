@@ -40,7 +40,9 @@ a URL or `Authorization: Bearer`. Bearer retains its existing device session
 and Run JWT meaning. When `x-api-key` is present it takes precedence; an invalid,
 expired, disabled, orphaned or revoked key fails with 401 even if another valid
 credential accompanies it. API keys are accepted by `/api/rpc` and do
-not authenticate Settings, Better Auth, data queries or internal Runner APIs.
+not authenticate Settings, Better Auth or internal Runner APIs. Public App data
+RPCs accept the same native credentials as lifecycle RPCs; secret KV values
+require explicit reveal. App association derives from verified Run context only.
 
 For example, with an API key already provided in the process environment:
 

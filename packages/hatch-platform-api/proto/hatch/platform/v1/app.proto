@@ -3,6 +3,7 @@ syntax = "proto3";
 package hatch.platform.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/struct.proto";
 import "hatch/platform/v1/file.proto";
 import "hatch/platform/v1/lifecycle.proto";
 
@@ -16,6 +17,10 @@ service AppService {
   rpc GetAppSource(GetAppSourceRequest) returns (GetAppSourceResponse);
   rpc DeployApp(DeployAppRequest) returns (DeployAppResponse);
   rpc RollbackApp(RollbackAppRequest) returns (RollbackAppResponse);
+  rpc QueryAppKv(QueryAppKvRequest) returns (QueryAppKvResponse);
+  rpc QueryAppDataTable(QueryAppDataTableRequest) returns (QueryAppDataTableResponse);
+  rpc QueryAppDb(QueryAppDbRequest) returns (QueryAppDbResponse);
+  rpc AssociateAppSession(AssociateAppSessionRequest) returns (AssociateAppSessionResponse);
 }
 
 message ListAppsRequest {}
@@ -107,4 +112,48 @@ message CreateAppHandoffResponse {
   string ticket = 2;
   string expires_at = 3;
   string target_path = 4;
+}
+
+// Action-specific JSON data is validated by the shared domain contracts.
+// Value retains explicit null/false/zero/empty values without coercion.
+message QueryAppKvRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  google.protobuf.Value input = 2 [(buf.validate.field).required = true];
+}
+message QueryAppKvResponse {
+  google.protobuf.Value result = 1;
+}
+message QueryAppDataTableRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  google.protobuf.Value input = 2 [(buf.validate.field).required = true];
+}
+message QueryAppDataTableResponse {
+  google.protobuf.Value result = 1;
+}
+message QueryAppDbRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  string sql = 2 [(buf.validate.field).string.min_len = 1];
+}
+message QueryAppDbResponse {
+  string text = 1;
+  uint32 row_count = 2;
+}
+message AssociateAppSessionRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+message AssociateAppSessionResponse {
+  string app_id = 1;
+  string association = 2;
 }

@@ -3,6 +3,7 @@ import { buildInfo } from '../../../src/build-info';
 import { commandDefinitions, globalOptions } from './commands';
 import { runAuth } from './auth';
 import { runLifecycle } from './lifecycle';
+import { runData } from './data';
 import { publicError } from './client';
 import { CliError } from './error';
 
@@ -53,7 +54,7 @@ try {
       throw new CliError('unknown_command', 'Unknown command. Use hatch help.');
     output(
       { name: 'hatch', version: manifest.version, commands, globalOptions },
-      `Hatch CLI ${manifest.version}\n\n${commands.map((definition) => `${definition.usage}\n  ${definition.description}`).join('\n')}\n\nGlobals: ${globalOptions.join(', ')}\nKV/Data Table/DB, operation and API key management are unsupported.`,
+      `Hatch CLI ${manifest.version}\n\n${commands.map((definition) => `${definition.usage}\n  ${definition.description}`).join('\n')}\n\nGlobals: ${globalOptions.join(', ')}\nOperation and API key management are unsupported.`,
     );
   } else if (name === 'version' || name === '--version') {
     if (args.some((arg) => !['version', '--version', '--json'].includes(arg)))
@@ -76,6 +77,8 @@ try {
       'Operation commands have no public API contract.',
       8,
     );
+  else if (name === 'app' && ['kv', 'data-table', 'db'].includes(operation))
+    await runData(args, offset, controller.signal);
   else if (['app', 'workflow'].includes(name))
     await runLifecycle(args, offset, controller.signal);
   else

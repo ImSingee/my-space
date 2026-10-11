@@ -9,6 +9,7 @@ import {
 } from '~server/agent-runner/run-auth';
 
 export type PublicApiContext = {
+  request?: Request;
   run: RunTokenContext | null;
   status?: AuthStatus;
   session?: { id: string; expiresAt: Date };
