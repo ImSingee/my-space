@@ -91,6 +91,56 @@ beforeEach(() => {
   vi.mocked(writeEnvFile).mockResolvedValue(undefined);
 });
 
+describe('RunnerExecutor ask cancellation attribution', () => {
+  it.each([
+    { cause: 'user', expected: 'The user canceled this question.' },
+    { cause: 'legacy', expected: 'Question cancelled.' },
+    { cause: 'disconnect', expected: 'Question cancelled.' },
+  ])(
+    'identifies $cause cancellation without misattributing interruptions',
+    async ({ cause, expected }) => {
+      let cancellationMessage: string | undefined;
+      vi.mocked(runAgentTurn).mockImplementationOnce(async (options) => {
+        try {
+          await options.ask?.(
+            [
+              {
+                id: 'q1',
+                prompt: 'Which release?',
+                options: [
+                  { id: 'o1', label: 'Stable' },
+                  { id: 'o2', label: 'Preview' },
+                ],
+                allowMultiple: false,
+              },
+            ],
+            options.signal,
+          );
+        } catch (error) {
+          cancellationMessage =
+            error instanceof Error ? error.message : String(error);
+        }
+        return { messages: [{ role: 'assistant', content: [] }] };
+      });
+      const { executor, sent, finished } = setupExecutor();
+      executor.start(payload);
+      await vi.waitFor(() =>
+        expect(
+          sent.some(
+            (message) =>
+              message.type === 'run.event' && message.event.type === 'ask',
+          ),
+        ).toBe(true),
+      );
+      if (cause === 'disconnect') executor.abortAll();
+      else executor.cancel(payload.runId, cause === 'user');
+      await vi.waitFor(() => expect(finished()).toBeDefined());
+      expect(cancellationMessage).toBe(expected);
+      executor.ackFinish(payload.runId);
+    },
+  );
+});
+
 describe('RunnerExecutor environment delivery', () => {
   it('writes every value but reveals only final non-secret entries', async () => {
     const canary = 'runner-canary-never-crosses-outbound';
