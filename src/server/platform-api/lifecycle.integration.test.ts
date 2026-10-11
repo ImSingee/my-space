@@ -1,0 +1,1004 @@
+/** Durable public/security contract against the actual production build and DB. */
+import { randomUUID } from 'node:crypto';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  rm,
+  readdir,
+  realpath,
+} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import { once } from 'node:events';
+import { WebSocket } from 'ws';
+import { eq, sql } from 'drizzle-orm';
+import { createORPCClient } from '@orpc/client';
+import type { ContractRouterClient } from '@orpc/contract';
+import { OpenAPILink } from '@orpc/openapi-client/fetch';
+import { platformApiContract } from '~/platform-api/contract';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PROTOCOL_VERSION, RUNNER_WS_PATH } from '~agent/protocol';
+
+const databaseUrl = process.env.HATCH_PLATFORM_TEST_DATABASE_URL;
+const secret = 'disposable-platform-api-test-secret-32-characters';
+const fleet = 'disposable-platform-api-fleet';
+const runnerId = `public-test-${randomUUID()}`;
+let root: string;
+let origin: string;
+let internal: string;
+let runtime: ChildProcess;
+let socket: WebSocket;
+let database: typeof import('~/db');
+let auth: typeof import('~auth/server').auth;
+let cookie: string;
+let credentials: Record<string, string>[];
+let runId: string;
+let sessionId: string;
+let runToken: string;
+let runtimeLog = '';
+const resources: {
+  collection: string;
+  id: string;
+  dir: string;
+  generation: string;
+}[] = [];
+
+async function freePort() {
+  const server = net.createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = (server.address() as net.AddressInfo).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+async function call(
+  url: string,
+  headers: Record<string, string> = {},
+  body?: unknown,
+) {
+  const response = await fetch(url, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const data = response.headers
+    .get('content-type')
+    ?.includes('application/json')
+    ? JSON.parse(text)
+    : text;
+  return { response, data };
+}
+const api = (
+  endpoint: string,
+  headers: Record<string, string>,
+  body?: unknown,
+) => call(`${origin}/api/v1/${endpoint}`, headers, body);
+const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+function git(dir: string, ...args: string[]) {
+  return execFileSync('git', args, {
+    cwd: dir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+async function bundle(dir: string) {
+  git(dir, 'add', '.');
+  git(
+    dir,
+    '-c',
+    'user.name=Public API Test',
+    '-c',
+    'user.email=fixture@example.test',
+    'commit',
+    '-m',
+    randomUUID(),
+  );
+  const file = path.join(root, `${randomUUID()}.bundle`);
+  git(dir, 'bundle', 'create', file, 'HEAD');
+  return (await readFile(file)).toString('base64');
+}
+async function mint(token = fleet, old = false) {
+  return call(
+    `${internal}/internal/api/${old ? 'cli/' : ''}runs/${runId}/token`,
+    bearer(token),
+    { runnerId },
+  );
+}
+
+// Explicit opt-in; the caller must provision a disposable PostgreSQL server.
+describe.runIf(Boolean(databaseUrl))(
+  'Public API on the production build',
+  () => {
+    beforeAll(async () => {
+      root = await realpath(
+        await mkdtemp(path.join(os.tmpdir(), 'hatch-public-api-')),
+      );
+      await mkdir(path.join(root, 'staging'));
+      const port = await freePort();
+      const internalPort = await freePort();
+      origin = `http://127.0.0.1:${port}`;
+      internal = `http://127.0.0.1:${internalPort}`;
+      Object.assign(process.env, {
+        DATABASE_URL: databaseUrl,
+        APP_DATABASE_URL: databaseUrl,
+        APP_URL: origin,
+        SECRET: secret,
+        BETTER_AUTH_SECRET: secret,
+        HATCH_DATA_DIR: path.join(root, 'runtime'),
+      });
+      database = await import('~/db');
+      const { migrate } = await import('drizzle-orm/postgres-js/migrator');
+      await migrate(database.db, { migrationsFolder: 'migrations' });
+      auth = (await import('~auth/server')).auth;
+      runtime = spawn(process.execPath, ['dist/platform/server/index.mjs'], {
+        env: {
+          ...process.env,
+          NODE_ENV: 'production',
+          HOST: '127.0.0.1',
+          PORT: String(port),
+          AGENT_INTERNAL_PORT: String(internalPort),
+          AGENT_INTERNAL_HOST: '127.0.0.1',
+          AGENT_RUNNER_TOKEN: fleet,
+          TMPDIR: path.join(root, 'staging'),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let log = '';
+      runtimeLog = '';
+      runtime.stdout?.on('data', (value) => {
+        log += value.toString();
+        runtimeLog += value.toString();
+      });
+      runtime.stderr?.on('data', (value) => {
+        log += value.toString();
+        runtimeLog += value.toString();
+      });
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (runtime.exitCode !== null)
+          throw new Error(`Production server exited: ${log}`);
+        try {
+          if ((await fetch(`${origin}/api/v1/openapi.json`)).ok) break;
+        } catch {
+          /* wait for boot */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!(await fetch(`${origin}/api/v1/openapi.json`)).ok)
+        throw new Error('Production server failed to start.');
+      const signup = await call(
+        `${origin}/api/auth/sign-up/email`,
+        { origin },
+        {
+          email: `${randomUUID()}@platform-api.test`,
+          name: 'Disposable owner',
+          password: 'disposable-platform-api-password',
+        },
+      );
+      if (signup.response.status !== 200)
+        throw new Error('Fixture signup failed.');
+      cookie = signup.response.headers
+        .getSetCookie()
+        .map((value) => value.split(';')[0])
+        .join('; ');
+      const key = await auth.api.createApiKey({
+        body: {
+          userId: signup.data.user.id,
+          name: 'Public integration fixture',
+        },
+      });
+      socket = new WebSocket(
+        internal.replace('http:', 'ws:') + RUNNER_WS_PATH,
+        { headers: bearer(fleet) },
+      );
+      await once(socket, 'open');
+      const ready = new Promise<void>((resolve) =>
+        socket.on('message', (raw) => {
+          const message = JSON.parse(raw.toString());
+          if (message.type === 'hub.hello_ack')
+            socket.send(JSON.stringify({ type: 'runner.ready' }));
+          if (message.type === 'hub.ready_ack') resolve();
+        }),
+      );
+      socket.send(
+        JSON.stringify({
+          type: 'runner.hello',
+          runnerId,
+          protocolVersion: PROTOCOL_VERSION,
+          activeRunIds: [],
+          workspaceSessionIds: [],
+        }),
+      );
+      await ready;
+      sessionId = randomUUID();
+      runId = randomUUID();
+      await database.db.insert(database.schema.agentSessions).values({
+        id: sessionId,
+        workspaceRunnerId: runnerId,
+        workspaceAffinityState: 'claimed',
+      });
+      await database.db.insert(database.schema.agentRuns).values({
+        id: runId,
+        sessionId,
+        providerId: 'fixture',
+        modelId: 'fixture',
+        input: { text: 'Public API integration' },
+        runnerId,
+        leaseExpiresAt: new Date(Date.now() + 600000),
+      });
+      const minted = await mint();
+      if (!minted.response.ok)
+        throw new Error(
+          `Internal token issuance failed: ${JSON.stringify(minted.data)}`,
+        );
+      runToken = minted.data.token;
+      credentials = [
+        { cookie },
+        { 'x-api-key': key.key },
+        bearer(runToken),
+        bearer(signup.data.token),
+      ];
+    }, 30000);
+    afterAll(async () => {
+      socket?.terminate();
+      if (runtime && runtime.exitCode === null) {
+        runtime.kill('SIGTERM');
+        await once(runtime, 'exit');
+      }
+      if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
+        await writeFile(
+          path.join(
+            process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR,
+            'runtime.log',
+          ),
+          runtimeLog,
+        );
+      if (root) await rm(root, { recursive: true, force: true });
+    });
+
+    it('executes all twelve operations with full authority for Cookie, Bearer session, API key and Run JWT', async () => {
+      for (const [credentialIndex, headers] of credentials.entries()) {
+        for (const collection of ['apps', 'workflows']) {
+          const created = await api(collection, headers, {
+            slug: `fixture-${randomUUID()}`,
+            name: 'Public lifecycle',
+            pin: false,
+          });
+          expect(created.response.status).toBe(201);
+          const id = created.data.id as string;
+          expect(Object.keys(created.data).sort()).toEqual([
+            'files',
+            'id',
+            'name',
+            'slug',
+          ]);
+          const detail = await api(`${collection}/${id}`, headers);
+          expect(detail.response.status).toBe(200);
+          expect(detail.data.id).toBe(id);
+          expect(Object.keys(detail.data).sort()).toEqual([
+            'createdAt',
+            'description',
+            'id',
+            'name',
+            'slug',
+            'status',
+            'updatedAt',
+          ]);
+          expect(
+            (await api(collection, headers)).data.some(
+              (row: { id: string }) => row.id === id,
+            ),
+          ).toBe(true);
+          const emptySource = await api(`${collection}/${id}/source`, headers);
+          expect(emptySource.data).toEqual({
+            id,
+            masterCommit: null,
+            bundleBase64: null,
+          });
+          if (collection === 'apps' && credentialIndex === 2) {
+            // oxlint-disable-next-line vitest/no-conditional-expect -- Run association is an App-only business contract.
+            expect(
+              await database.db.query.agentSessionApps.findFirst({
+                where: { sessionId, appId: id },
+              }),
+            ).toBeDefined();
+          }
+          const dir = path.join(root, id);
+          await mkdir(dir);
+          git(dir, 'init', '-b', 'master');
+          for (const file of created.data.files) {
+            if (['package.json', 'deno.json', 'deno.lock'].includes(file.path))
+              await writeFile(
+                path.join(dir, file.path),
+                Buffer.from(file.contentBase64, 'base64'),
+              );
+          }
+          // Small real deploy artifacts avoid dependency on an unrelated app UI.
+          await writeFile(
+            path.join(dir, 'manifest.ts'),
+            collection === 'apps'
+              ? `export default { id: '${id}', name: 'API deploy', compatibilityVersion: 2, capabilities: { frontend: true }, app: { entry: 'main.ts', html: 'index.html', routes: [] } };`
+              : `export default { id: '${id}', name: 'API deploy', compatibilityVersion: 1, entry: 'workflow.ts', network: [], triggers: { cron: [], webhook: false } };`,
+          );
+          if (collection === 'apps') {
+            await writeFile(
+              path.join(dir, 'main.ts'),
+              "document.body.dataset.release = 'one';",
+            );
+            await writeFile(
+              path.join(dir, 'index.html'),
+              '<!doctype html><html><body>API release one</body></html>',
+            );
+          } else {
+            await writeFile(
+              path.join(dir, 'workflow.ts'),
+              "import { defineWorkflow } from '@hatch/workflow'; import { z } from 'zod'; export default defineWorkflow({ input: z.object({}), async run() { return { release: 'one' }; } });",
+            );
+          }
+          let upload = await bundle(dir);
+          const deployBody = {
+            message: 'First public release',
+            generation: detail.data.createdAt,
+            bundleBase64: upload,
+          };
+          const conflict = await api(`${collection}/${id}/deploy`, headers, {
+            ...deployBody,
+            generation: 'wrong-generation',
+          });
+          expect(conflict.response.status).toBe(409);
+          expect(conflict.data.code).toBe('RESOURCE_GENERATION_CONFLICT');
+          const first = await api(
+            `${collection}/${id}/deploy`,
+            headers,
+            deployBody,
+          );
+          expect(first.response.status).toBe(200);
+          expect(first.data.version).toBe(1);
+          expect(Object.keys(first.data).sort()).toEqual([
+            'compatibilityVersion',
+            'deploymentId',
+            'version',
+          ]);
+          const downloaded = await api(`${collection}/${id}/source`, headers);
+          expect(downloaded.data.masterCommit).toBe(
+            git(dir, 'rev-parse', 'HEAD'),
+          );
+          const sourceFile = path.join(root, `${id}.bundle`);
+          await writeFile(
+            sourceFile,
+            Buffer.from(downloaded.data.bundleBase64, 'base64'),
+          );
+          const clone = path.join(root, `${id}-roundtrip`);
+          execFileSync('git', ['clone', sourceFile, clone], { stdio: 'pipe' });
+          expect(await readFile(path.join(clone, 'manifest.ts'), 'utf8')).toBe(
+            await readFile(path.join(dir, 'manifest.ts'), 'utf8'),
+          );
+          if (collection === 'apps') {
+            const served = await fetch(`${origin}/api/app/${id}/app/`, {
+              headers: { cookie },
+            });
+            // oxlint-disable-next-line vitest/no-conditional-expect -- Only Apps have an HTTP frontend artifact.
+            expect(served.status).toBe(200);
+            // oxlint-disable-next-line vitest/no-conditional-expect -- Only Apps have an HTTP frontend artifact.
+            expect(await served.text()).toContain('API release one');
+          }
+          await writeFile(path.join(dir, 'release.txt'), 'second release');
+          upload = await bundle(dir);
+          const second = await api(`${collection}/${id}/deploy`, headers, {
+            ...deployBody,
+            message: 'Second public release',
+            bundleBase64: upload,
+          });
+          expect(second.response.status).toBe(200);
+          expect(second.data.version).toBe(2);
+          const rollback = await api(`${collection}/${id}/rollback`, headers, {
+            version: 1,
+          });
+          expect(rollback.response.status).toBe(200);
+          expect(rollback.data.version).toBe(1);
+          expect(rollback.data.compatibility.isSupported).toBe(true);
+          expect(
+            (await api(`${collection}/${id}/source`, headers)).data
+              .masterCommit,
+          ).toBe(downloaded.data.masterCommit);
+          const row =
+            collection === 'apps'
+              ? await database.db.query.apps.findFirst({ where: { id } })
+              : await database.db.query.workflows.findFirst({ where: { id } });
+          expect(row?.currentDeploymentId).toBe(first.data.deploymentId);
+          resources.push({
+            collection,
+            id,
+            dir,
+            generation: detail.data.createdAt,
+          });
+          // A missing artifact must fail without changing the current release.
+          const artifact = path.join(
+            root,
+            'runtime',
+            collection === 'apps' ? 'artifacts' : 'workflow-artifacts',
+            id,
+            second.data.deploymentId,
+          );
+          await rm(artifact, { recursive: true, force: true });
+          expect(
+            (await api(`${collection}/${id}/rollback`, headers, { version: 2 }))
+              .response.status,
+          ).toBe(500);
+          expect(
+            (await api(`${collection}/${id}/source`, headers)).data
+              .masterCommit,
+          ).toBe(downloaded.data.masterCommit);
+        }
+      }
+    }, 180000);
+
+    it('preserves serialized versions, fast-forward denial and source recovery', async () => {
+      for (const collection of ['apps', 'workflows']) {
+        const resource = resources.find(
+          (row) => row.collection === collection,
+        )!;
+        const { id, dir, generation } = resource;
+        const bundleFile = path.join(root, `${randomUUID()}.bundle`);
+        git(dir, 'bundle', 'create', bundleFile, 'HEAD');
+        const body = {
+          message: 'Concurrent release',
+          generation,
+          bundleBase64: (await readFile(bundleFile)).toString('base64'),
+        };
+        const releases = await Promise.all([
+          api(`${collection}/${id}/deploy`, credentials[0], body),
+          api(`${collection}/${id}/deploy`, credentials[1], body),
+        ]);
+        expect(releases.map((result) => result.response.status)).toEqual([
+          200, 200,
+        ]);
+        expect(releases.map((result) => result.data.version).sort()).toEqual([
+          3, 4,
+        ]);
+        const stable = await api(`${collection}/${id}/source`, credentials[2]);
+        git(dir, 'checkout', '--orphan', 'divergent');
+        await writeFile(path.join(dir, 'release.txt'), 'unrelated history');
+        const divergent = await bundle(dir);
+        const denied = await api(`${collection}/${id}/deploy`, credentials[2], {
+          ...body,
+          bundleBase64: divergent,
+        });
+        expect(denied.response.status).toBe(500);
+        expect(denied.data.code).toBe('INTERNAL_SERVER_ERROR');
+        expect(denied.data.message).not.toContain('git');
+        expect(
+          (await api(`${collection}/${id}/source`, credentials[0])).data
+            .masterCommit,
+        ).toBe(stable.data.masterCommit);
+        const deployments =
+          collection === 'apps'
+            ? await database.db.query.deployments.findMany({
+                where: { appId: id },
+              })
+            : await database.db.query.workflowDeployments.findMany({
+                where: { workflowId: id },
+              });
+        expect(deployments).toHaveLength(4);
+      }
+    }, 60000);
+
+    it('rechecks App generation after waiting for the live cutover lock', async () => {
+      const { id, generation } = resources.find(
+        (row) => row.collection === 'apps',
+      )!;
+      const source = await api(`apps/${id}/source`, credentials[0]);
+      const { withAppDataCutoverLock } =
+        await import('~server/apps/data-table/provision');
+      let pending: ReturnType<typeof api> | undefined;
+      let waiting = false;
+      await withAppDataCutoverLock(id, async () => {
+        pending = api(`apps/${id}/deploy`, credentials[0], {
+          message: 'Queued generation fixture',
+          generation,
+          bundleBase64: source.data.bundleBase64,
+        });
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const rows = await database.db.execute(
+            sql`select count(*)::integer as count from pg_locks where locktype = 'advisory' and classid = ${0x48445443}::oid and objid = hashtext(${id})::oid and not granted`,
+          );
+          if (Number(rows[0].count) > 0) {
+            waiting = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        if (!waiting)
+          throw new Error(
+            'The real HTTP deploy never waited on the held cutover lock.',
+          );
+        await database.db
+          .update(database.schema.apps)
+          .set({ createdAt: new Date(Date.parse(generation) + 1000) })
+          .where(eq(database.schema.apps.id, id));
+      });
+      const denied = await pending!;
+      expect(denied.response.status).toBe(409);
+      expect(denied.data.code).toBe('CONFLICT');
+      expect(
+        (await api(`apps/${id}/source`, credentials[0])).data.masterCommit,
+      ).toBe(source.data.masterCommit);
+      expect(
+        await database.db.query.deployments.findMany({ where: { appId: id } }),
+      ).toHaveLength(4);
+      await database.db
+        .update(database.schema.apps)
+        .set({ createdAt: new Date(generation) })
+        .where(eq(database.schema.apps.id, id));
+    });
+
+    it('resolves exact IDs before colliding slugs and projects safe metadata on production', async () => {
+      for (const collection of ['apps', 'workflows']) {
+        const id = `legacy-${randomUUID()}`;
+        const values = [
+          {
+            id: randomUUID(),
+            slug: id,
+            name: 'Slug holder',
+            webhookSecret: 'fixture-webhook-secret',
+          },
+          {
+            id,
+            slug: `renamed-${randomUUID()}`,
+            name: 'Exact ID owner',
+            webhookSecret: 'fixture-webhook-secret',
+          },
+        ];
+        if (collection === 'apps')
+          await database.db.insert(database.schema.apps).values(values);
+        else await database.db.insert(database.schema.workflows).values(values);
+        const detail = await api(`${collection}/${id}`, credentials[1]);
+        expect(detail.data.id).toBe(id);
+        expect(detail.data.name).toBe('Exact ID owner');
+        expect(detail.data.webhookSecret).toBeUndefined();
+        expect(
+          (await api(`${collection}/${id}/source`, credentials[2])).data.id,
+        ).toBe(id);
+        const list = await api(collection, credentials[0]);
+        expect(JSON.stringify(list.data)).not.toContain(
+          'fixture-webhook-secret',
+        );
+        expect(JSON.stringify(detail.data)).not.toContain(
+          'fixture-webhook-secret',
+        );
+      }
+    });
+
+    it('requires exact destructive migration approval and retains newer data on rollback', async () => {
+      const { id, generation } = resources.find(
+        (row) => row.collection === 'apps',
+      )!;
+      const source = await api(`apps/${id}/source`, credentials[0]);
+      const file = path.join(root, `${randomUUID()}.bundle`);
+      await writeFile(file, Buffer.from(source.data.bundleBase64, 'base64'));
+      const dir = path.join(root, `${id}-data`);
+      execFileSync('git', ['clone', file, dir], { stdio: 'pipe' });
+      const manifest = await readFile(path.join(dir, 'manifest.ts'), 'utf8');
+      await writeFile(
+        path.join(dir, 'manifest.ts'),
+        manifest.replace('frontend: true', 'frontend: true, dataTable: true'),
+      );
+      await mkdir(path.join(dir, 'data'));
+      await writeFile(
+        path.join(dir, 'data/schema.ts'),
+        "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ label: t.string(), value: t.integer().default(0) }) });",
+      );
+      const first = await api(`apps/${id}/deploy`, credentials[2], {
+        generation,
+        message: 'Enable managed data',
+        bundleBase64: await bundle(dir),
+      });
+      expect(first.response.status).toBe(200);
+      expect(first.data.version).toBe(5);
+      await writeFile(
+        path.join(dir, 'data/schema.ts'),
+        "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ value: t.integer().default(0) }) });",
+      );
+      const body = {
+        generation,
+        message: 'Drop a managed field',
+        bundleBase64: await bundle(dir),
+      };
+      const denied = await api(`apps/${id}/deploy`, credentials[1], body);
+      expect(denied.response.status).toBe(409);
+      expect(denied.data.code).toBe('CONFLICT');
+      const approval = /Approval token: ([a-f0-9]+)/.exec(
+        denied.data.message,
+      )?.[1];
+      expect(approval).toBeDefined();
+      const wrong = await api(`apps/${id}/deploy`, credentials[2], {
+        ...body,
+        allowDestructiveDataMigration: true,
+        dataMigrationApprovalToken: 'wrong-token',
+      });
+      expect(wrong.response.status).toBe(409);
+      expect(
+        await database.db.query.deployments.findMany({ where: { appId: id } }),
+      ).toHaveLength(5);
+      const approved = await api(`apps/${id}/deploy`, credentials[0], {
+        ...body,
+        allowDestructiveDataMigration: true,
+        dataMigrationApprovalToken: approval,
+      });
+      expect(approved.response.status).toBe(200);
+      expect(approved.data.version).toBe(6);
+      const deployment = await database.db.query.deployments.findFirst({
+        where: { id: approved.data.deploymentId },
+      });
+      expect(deployment?.dataMigrationSummary).toMatchObject({
+        destructive: true,
+      });
+      const before = await database.db.query.apps.findFirst({ where: { id } });
+      const restored = await api(`apps/${id}/rollback`, credentials[2], {
+        version: 5,
+      });
+      expect(restored.response.status).toBe(200);
+      expect(restored.data.dataSchemaMismatch).toBe(true);
+      const after = await database.db.query.apps.findFirst({ where: { id } });
+      expect(after?.dataSchemaHash).toBe(before?.dataSchemaHash);
+    }, 60000);
+
+    it('uses the same HTTP surface with an oRPC OpenAPILink typed client', async () => {
+      const client: ContractRouterClient<typeof platformApiContract> =
+        createORPCClient(
+          new OpenAPILink(platformApiContract, {
+            url: `${origin}/api/v1`,
+            headers: credentials[1],
+          }),
+        );
+      const result = await client.workflows.create({
+        slug: `typed-${randomUUID()}`,
+        name: 'Typed client fixture',
+        pin: false,
+      });
+      expect((await client.workflows.get({ id: result.id })).id).toBe(
+        result.id,
+      );
+      expect(
+        (await client.workflows.source({ id: result.id })).bundleBase64,
+      ).toBeNull();
+      await expect(client.apps.get({ id: 'missing' })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+        status: 404,
+      });
+    });
+
+    it('bounds actual streamed JSON bytes at 16 KiB and 256 MiB', async () => {
+      async function streamed(endpoint: string, size: number, json = '{}') {
+        const tail = Buffer.from(json);
+        const padding = new Uint8Array(1024 * 1024).fill(32);
+        let remaining = size - tail.length;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (remaining > 0) {
+              const length = Math.min(remaining, padding.length);
+              remaining -= length;
+              controller.enqueue(padding.subarray(0, length));
+            } else {
+              controller.enqueue(tail);
+              controller.close();
+            }
+          },
+        });
+        const response = await fetch(`${origin}/api/v1/${endpoint}`, {
+          method: 'POST',
+          headers: { cookie, 'content-type': 'application/json' },
+          body,
+          duplex: 'half',
+        } as RequestInit);
+        return { response, data: await response.json() };
+      }
+      const ordinary = await streamed(
+        'apps',
+        16 * 1024,
+        JSON.stringify({
+          slug: `limit-${randomUUID()}`,
+          name: 'Boundary',
+          pin: false,
+        }),
+      );
+      expect(ordinary.response.status).toBe(201);
+      expect((await streamed('apps', 16 * 1024 + 1)).response.status).toBe(413);
+      const below = await streamed(
+        'apps/absent/deploy',
+        20 * 1024,
+        JSON.stringify({
+          message: 'Boundary',
+          generation: 'absent',
+          bundleBase64: 'a',
+        }),
+      );
+      expect(below.response.status).toBe(404);
+      const exact = await streamed('apps/absent/deploy', 256 * 1024 * 1024);
+      expect(exact.response.status).toBe(400); // Accepted size, invalid DTO.
+      const excessive = await streamed(
+        'apps/absent/deploy',
+        256 * 1024 * 1024 + 1,
+      );
+      expect(excessive.response.status).toBe(413);
+      expect(excessive.data.code).toBe('PAYLOAD_TOO_LARGE');
+    }, 60000);
+
+    it('publishes exactly the twelve contracts and removes old/public-internal surfaces', async () => {
+      const spec = (await call(`${origin}/api/v1/openapi.json`)).data;
+      if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
+        await writeFile(
+          path.join(
+            process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR,
+            'openapi.json',
+          ),
+          JSON.stringify(spec, null, 2),
+        );
+      expect(spec.servers).toEqual([{ url: '/api/v1' }]);
+      expect(spec.security).toEqual([
+        { sessionCookie: [] },
+        { bearer: [] },
+        { apiKey: [] },
+      ]);
+      expect(spec.components.securitySchemes.apiKey).toMatchObject({
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-api-key',
+      });
+      expect(
+        spec.paths['/apps'].post.requestBody.content['application/json'].schema
+          .properties.name.maxLength,
+      ).toBe(64);
+      expect(
+        Object.values(spec.paths).flatMap((item) =>
+          Object.keys(item as object),
+        ),
+      ).toHaveLength(12);
+      for (const collection of ['apps', 'workflows']) {
+        expect(Object.keys(spec.paths[`/${collection}`])).toEqual([
+          'get',
+          'post',
+        ]);
+        expect(
+          spec.paths[`/${collection}`].post.responses['201'],
+        ).toBeDefined();
+        expect(
+          spec.paths[`/${collection}/{id}/deploy`].post.requestBody.content[
+            'application/json'
+          ].schema.required,
+        ).toEqual(['message', 'generation', 'bundleBase64']);
+        expect(
+          spec.paths[`/${collection}/{id}/source`].get.responses['200'].content[
+            'application/json'
+          ].schema.required,
+        ).toEqual(['id', 'masterCommit', 'bundleBase64']);
+        for (const [method, suffix] of [
+          ['GET', ''],
+          ['POST', ''],
+          ['GET', '/absent'],
+          ['GET', '/absent/source'],
+          ['POST', '/absent/deploy'],
+          ['POST', '/absent/rollback'],
+        ]) {
+          const response = await fetch(
+            `${origin}/api/cli/v1/${collection}${suffix}`,
+            {
+              method,
+              headers: { cookie, 'content-type': 'application/json' },
+              body: method === 'POST' ? '{}' : undefined,
+            },
+          );
+          expect(response.status).toBe(404);
+          expect((await response.json()).code).toBe('NOT_FOUND');
+        }
+      }
+      expect((await mint(fleet, true)).response.status).toBe(404);
+      expect(
+        (await api(`runs/${runId}/token`, credentials[0], { runnerId }))
+          .response.status,
+      ).toBe(404);
+      for (const headers of credentials) {
+        const token =
+          headers['x-api-key'] ?? headers.authorization?.slice(7) ?? cookie;
+        expect((await mint(token)).response.status).toBe(401);
+      }
+      expect((await api('apps', bearer(fleet))).response.status).toBe(401);
+      expect(
+        (await call(`${origin}/api/auth/get-session`, bearer(runToken))).data,
+      ).toBeNull();
+      expect(
+        (await call(`${origin}/api/auth/api-key/list`, bearer(runToken)))
+          .response.status,
+      ).toBe(401);
+    });
+
+    it('rejects invalid explicit credentials even beside a valid Cookie and rechecks key lifecycle', async () => {
+      for (const explicit of [
+        { 'x-api-key': '' },
+        { 'x-api-key': 'invalid' },
+        { authorization: '' },
+        { authorization: 'Basic invalid' },
+        bearer('invalid-session'),
+        bearer('a.b.c'),
+      ]) {
+        expect(
+          (await api('apps', { cookie, ...explicit })).response.status,
+        ).toBe(401);
+      }
+      const owner = await auth.api.getSession({
+        headers: new Headers({ cookie }),
+      });
+      const key = await auth.api.createApiKey({
+        body: { userId: owner!.user.id, name: 'Expiry fixture' },
+      });
+      expect(
+        (await api('apps', { 'x-api-key': key.key })).response.status,
+      ).toBe(200);
+      await database.db
+        .update(database.schema.apikey)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eq(database.schema.apikey.id, key.id));
+      expect(
+        (await api('apps', { cookie, 'x-api-key': key.key })).response.status,
+      ).toBe(401);
+      const revoked = await auth.api.createApiKey({
+        body: { userId: owner!.user.id, name: 'Revocation fixture' },
+      });
+      await auth.api.deleteApiKey({
+        headers: new Headers({ cookie }),
+        body: { keyId: revoked.id },
+      });
+      expect(
+        (await api('workflows', { cookie, 'x-api-key': revoked.key })).response
+          .status,
+      ).toBe(401);
+      const signup = await call(
+        `${origin}/api/auth/sign-up/email`,
+        { origin },
+        {
+          email: `${randomUUID()}@platform-api.test`,
+          name: 'Deleted fixture',
+          password: 'disposable-platform-api-password',
+        },
+      );
+      const orphan = await auth.api.createApiKey({
+        body: { userId: signup.data.user.id, name: 'Orphan fixture' },
+      });
+      await database.db
+        .delete(database.schema.user)
+        .where(eq(database.schema.user.id, signup.data.user.id));
+      expect(
+        (await api('apps', { cookie, 'x-api-key': orphan.key })).response
+          .status,
+      ).toBe(401);
+    });
+
+    it('rechecks Run status, exact bindings, lease and JWT expiry on production requests', async () => {
+      const row = await database.db.query.agentRuns.findFirst({
+        where: { id: runId },
+      });
+      for (const change of [
+        { status: 'blocked' as const },
+        { status: 'completed' as const },
+        { runnerId: 'reassigned' },
+        { leaseExpiresAt: new Date(Date.now() - 1000) },
+      ]) {
+        await database.db
+          .update(database.schema.agentRuns)
+          .set(change)
+          .where(eq(database.schema.agentRuns.id, runId));
+        expect(
+          (await api('apps', { cookie, ...bearer(runToken) })).response.status,
+        ).toBe('status' in change && change.status === 'blocked' ? 200 : 401);
+        await database.db
+          .update(database.schema.agentRuns)
+          .set({
+            status: row!.status,
+            runnerId: row!.runnerId,
+            leaseExpiresAt: new Date(Date.now() + 600000),
+          })
+          .where(eq(database.schema.agentRuns.id, runId));
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const expired = await auth.api.signJWT({
+        body: {
+          payload: {
+            sub: runId,
+            sid: sessionId,
+            rnr: runnerId,
+            iat: now - 600,
+            exp: now - 300,
+          },
+        },
+      });
+      expect(
+        (await api('apps', { cookie, ...bearer(expired.token) })).response
+          .status,
+      ).toBe(401);
+    });
+
+    it('enforces strict JSON, body caps, same-origin Cookie policy and safe error transport', async () => {
+      for (const contentType of [
+        'text/plain',
+        'application/x-www-form-urlencoded',
+        'multipart/form-data',
+      ]) {
+        const response = await fetch(`${origin}/api/v1/apps`, {
+          method: 'POST',
+          headers: { cookie, 'content-type': contentType },
+          body: '{"slug":"unwanted","name":"unwanted"}',
+        });
+        expect(response.status).toBe(415);
+        expect((await response.json()).code).toBe('UNSUPPORTED_MEDIA_TYPE');
+      }
+      const malformed = await fetch(`${origin}/api/v1/apps`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/json' },
+        body: '{"secret":"fixture-secret-value",',
+      });
+      expect(malformed.status).toBe(400);
+      expect(await malformed.text()).not.toContain('fixture-secret-value');
+      const invalid = await api(
+        'apps',
+        { cookie },
+        { slug: 'bad-slug', name: 'Invalid', extra: 'fixture-secret-value' },
+      );
+      expect(invalid.response.status).toBe(400);
+      expect(invalid.data).toMatchObject({ code: 'BAD_REQUEST', status: 400 });
+      expect(invalid.data.data).toBeUndefined();
+      expect(
+        (
+          await api(
+            'apps',
+            { cookie, origin: 'https://cross-origin.test' },
+            { slug: 'unwanted', name: 'Unwanted' },
+          )
+        ).response.status,
+      ).toBe(403);
+      expect(
+        (
+          await api(
+            'apps',
+            { cookie, 'sec-fetch-site': 'cross-site' },
+            { slug: 'unwanted', name: 'Unwanted' },
+          )
+        ).response.status,
+      ).toBe(403);
+      const preflight = await fetch(`${origin}/api/v1/apps`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'https://cross-origin.test',
+          'access-control-request-method': 'POST',
+        },
+      });
+      expect(preflight.headers.get('access-control-allow-origin')).toBeNull();
+      const big = await api(
+        'apps',
+        { cookie },
+        { slug: 'too-big', name: 'Too big', description: 'a'.repeat(16384) },
+      );
+      expect(big.response.status).toBe(413);
+      expect(big.data.code).toBe('PAYLOAD_TOO_LARGE');
+      const notFound = await api('apps/absent', { cookie });
+      expect(notFound.response.status).toBe(404);
+      for (const response of [
+        big.response,
+        invalid.response,
+        notFound.response,
+      ]) {
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      }
+      // Non-JSON forms must never have produced rows.
+      expect(
+        await database.db.query.apps.findFirst({ where: { slug: 'unwanted' } }),
+      ).toBeUndefined();
+      // Successful and failed stages remove their private staging checkouts.
+      expect(await readdir(path.join(root, 'staging'))).toEqual([]);
+    });
+  },
+);

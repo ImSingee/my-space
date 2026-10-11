@@ -9,15 +9,15 @@ constants and source/deployment/data contracts are unchanged.
 
 ## Model
 
-| Credential         | How it is obtained                                  | Lifetime                                     | Authority                             |
-| ------------------ | --------------------------------------------------- | -------------------------------------------- | ------------------------------------- |
-| CLI session        | Device login, approved by a signed-in browser user  | Better Auth session (7 days, renewed on use) | Same as a browser session             |
-| API key            | Settings → Security, created by its signed-in owner | User-selected expiry or no expiry; revocable | Existing CLI App/Workflow routes only |
-| Run token (JWT)    | Trusted Runner, for a live Agent Run                | 5 minutes, only while the Run is live        | All CLI API routes                    |
-| Runner fleet token | Deployment operator                                 | Existing configuration                       | Trusted internal REST/WS only         |
+| Credential         | How it is obtained                                  | Lifetime                                     | Authority                          |
+| ------------------ | --------------------------------------------------- | -------------------------------------------- | ---------------------------------- |
+| CLI session        | Device login, approved by a signed-in browser user  | Better Auth session (7 days, renewed on use) | Same as a browser session          |
+| API key            | Settings → Security, created by its signed-in owner | User-selected expiry or no expiry; revocable | All public platform API procedures |
+| Run token (JWT)    | Trusted Runner, for a live Agent Run                | 5 minutes, only while the Run is live        | All public platform API procedures |
+| Runner fleet token | Deployment operator                                 | Existing configuration                       | Trusted internal REST/WS only      |
 
-There is no scope or resource configuration yet: a CLI session is a full
-Better Auth session, and a Run token or API key can call every CLI API route.
+There are no scopes or resource permissions: a CLI session is a full
+Better Auth session, and a Run token or API key can call every public platform API procedure.
 The platform remains single-tenant: authenticated callers can manage all Apps
 and Workflows. Key ownership controls credential management, not resource access.
 
@@ -37,7 +37,7 @@ in **`x-api-key`**, never in
 a URL or `Authorization: Bearer`. Bearer retains its existing device session
 and Run JWT meaning. When `x-api-key` is present it takes precedence; an invalid,
 expired, disabled, orphaned or revoked key fails with 401 even if another valid
-credential accompanies it. API keys are accepted only by `/api/cli/v1` and do
+credential accompanies it. API keys are accepted by `/api/v1` and do
 not authenticate Settings, Better Auth, data queries or internal Runner APIs.
 
 For example, with an API key already provided in the process environment:
@@ -45,7 +45,7 @@ For example, with an API key already provided in the process environment:
 ```sh
 curl --fail --silent --show-error \
   --header "x-api-key: ${HATCH_API_KEY}" \
-  https://hatch.example.com/api/cli/v1/apps
+  https://hatch.example.com/api/v1/apps
 ```
 
 `HATCH_API_KEY` is an example script variable, not a new platform configuration
@@ -109,7 +109,7 @@ The CLI uses Better Auth's device authorization plugin unchanged
 3. The CLI polls `POST /api/auth/device/token` (RFC 8628 body). On approval it
    receives an ordinary session token as `access_token`.
 4. The CLI sends `Authorization: Bearer <token>`. The `bearer` plugin turns it
-   into the session, so the CLI API and every other session-protected endpoint
+   into the session, so the public platform API and every other session-protected endpoint
    accept it. `POST /api/auth/sign-out` with the same header ends it.
 
 Better Auth owns the grant table (`device_code`) and its lifecycle: polling
@@ -151,7 +151,7 @@ device list can show both from one table.
 ## Run tokens
 
 The existing internal HTTP server accepts
-`POST /internal/api/cli/runs/:runId/token` with `{"runnerId":"..."}`, authorized
+`POST /internal/api/runs/:runId/token` with `{"runnerId":"..."}`, authorized
 by the fleet `AGENT_RUNNER_TOKEN`. That token proves membership in the trusted
 Runner fleet, not a distinct Runner identity. The Runner must be connected and
 own the Run, and the Run must be `running`/`blocked` with a live lease.
@@ -188,15 +188,16 @@ on the auth secret for decryption. To rotate that secret, follow Better Auth's
 secret-rotation procedure. Signing-key rotation is managed by the JWT plugin
 separately from secret rotation.
 
-The internal request/response fields and Bearer transport are unchanged, so
-the Runner protocol and App/Workflow compatibility versions do not change.
+The internal request/response fields and Bearer transport are unchanged.
+Platform/Runner protocol stays at 18; the renamed issuance URL has never shipped.
+App/Workflow compatibility versions do not change.
 
 Host consumption is an interface only: a trusted Host may later provide the token
 to its Agent environment. No environment injection is implemented here.
 
-## CLI API (`/api/cli/v1`)
+## Public platform API (`/api/v1`)
 
-`src/server/cli/api.ts`. Callers authenticate with a session (Cookie or Bearer),
+`src/server/platform-api/http.ts`. Callers authenticate with a session (Cookie or Bearer),
 a Run token, or an API key (`x-api-key`); a Bearer value with three dot-separated
 parts is treated as a Run token. An invalid Run token is rejected without falling
 back to a Cookie session. Responses are JSON with `Cache-Control: no-store` and
@@ -217,10 +218,10 @@ send.
 equal to another object's legacy ID cannot redirect a request. Create uses the
 existing scaffold input (`slug`, `name`, optional `description`/`pin`). Deploy uses
 `message`, `generation` (the observed metadata `createdAt`), `bundleBase64` and the
-optional data-migration approval fields. Rollback uses `{"version":1}`. Errors are
-`{ "error": code }` with 400, 401, 404, 409, 413 or 415; service failures add a
-client-facing `message`; unknown failures return 500 without exception text. Data
-queries, KV, secrets, providers, users and Runner controls have no route here.
+optional data-migration approval fields. Rollback uses `{"version":1}`.
+The generated contract, strict request/output DTOs, status codes, error envelope,
+and authentication examples are documented in [platform-api.md](platform-api.md).
+No data queries, KV, secrets, providers, users or Runner controls are public.
 
 ## Rollout
 
@@ -229,8 +230,9 @@ Apply the additive migration (`pnpm migrations:apply`); it creates Better Auth's
 The API key migration `20261011102409_giant_colossus` adds `apikey` and its
 lookup indexes without modifying existing tables. Apply migrations before
 deploying the updated server; the migration journal makes repeated applies
-safe. No new environment variables, protocol fields or compatibility bump are
-required. Keep the new table if reverting the server; keys remain hashed and
+safe. This API migration requires no new environment variables, database migration,
+or App/Workflow compatibility bump. Platform/Runner protocol stays at 18.
+Keep the new table if reverting the server; keys remain hashed and
 cannot authenticate an older server that has no key support.
 There is no feature flag. To sign every CLI out at once, delete the sessions you
 want to end; Run tokens end with their Runs or their five-minute expiry.
@@ -242,11 +244,11 @@ plus the real-Postgres suite against a disposable database:
 
 ```sh
 HATCH_AUTH_TEST_DATABASE_URL=postgres://... pnpm exec vitest run --project unit \
-  src/server/cli/cli.integration.test.ts
+  src/server/platform-api/auth.integration.test.ts
 ```
 
 It drives real Better Auth device login, bearer sessions and sign-out, denial and
-another account's claim, the CLI API's authentication and ID-before-slug
+another account's claim, the public API's authentication and ID-before-slug
 resolution, and Run tokens through an actual protocol-18 WebSocket Runner and the
 internal HTTP server. Without the variable it is skipped, never reported as
 acceptance. Browser acceptance must additionally load the built approval page,
@@ -255,4 +257,4 @@ outcomes; `src/components/cli-auth/device-approval.browser.test.tsx` covers the
 page's decision boundaries with a stubbed `fetch` and does not replace it.
 
 Full browser acceptance additionally drives the real Security page and calls
-the CLI API with the very key it creates, before and after UI revocation.
+the public API with the very key it creates, before and after UI revocation.

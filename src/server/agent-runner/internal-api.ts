@@ -193,13 +193,12 @@ export async function handleInternalApiRequest(
     const [, , resource, ...rest] = segments;
     const method = req.method ?? 'GET';
 
-    // POST /internal/api/cli/runs/:runId/token {runnerId}: a fresh five-minute
-    // Agent Run credential, currently used by the CLI API. Renewal uses this call.
+    // POST /internal/api/runs/:runId/token {runnerId}: a fresh five-minute
+    // Agent Run credential, used by the public platform API. Renewal uses this call.
     if (
-      resource === 'cli' &&
-      rest.length === 3 &&
-      rest[0] === 'runs' &&
-      rest[2] === 'token' &&
+      resource === 'runs' &&
+      rest.length === 2 &&
+      rest[1] === 'token' &&
       method === 'POST'
     ) {
       const body = z
@@ -212,7 +211,7 @@ export async function handleInternalApiRequest(
       json(
         res,
         200,
-        await mintRunToken(decodeURIComponent(rest[1]), body.data.runnerId),
+        await mintRunToken(decodeURIComponent(rest[0]), body.data.runnerId),
       );
       return;
     }
