@@ -6,7 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import { userEvent } from 'vitest/browser';
+import { type Locator, page, userEvent } from 'vitest/browser';
 import { expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { MessageView } from './message-view';
@@ -15,6 +15,7 @@ import type { AppListItem } from '~server/apps';
 import type { EditFileDetails } from '~agent/edit-file-details';
 import type { WorkflowListItem } from '~server/workflows';
 import type { ChatMessage, ToolResultMessage, ToolCallBlock } from './types';
+import { pairToolResults } from './types';
 
 type RenderOptions = {
   width?: number;
@@ -79,6 +80,183 @@ function renderMessage(message: ChatMessage, options: RenderOptions = {}) {
   });
   return render(<RouterProvider router={router as never} />);
 }
+
+test.each(['Question cancelled.', 'The user canceled this question.'])(
+  'keeps cancelled questions and choices inspectable in a reloaded transcript (%s)',
+  async (cancellationText) => {
+    const prompt = `Which release should we use? ${'release-details-'.repeat(30)}`;
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'cancelled-ask',
+            name: 'ask',
+            arguments: {
+              questions: [
+                {
+                  prompt,
+                  options: [
+                    { label: 'Stable release' },
+                    { label: 'Preview release' },
+                  ],
+                },
+                {
+                  prompt: 'Which platforms should be included?',
+                  options: [{ label: 'Web' }, { label: 'Desktop' }],
+                  allowMultiple: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolName: 'ask',
+        content: [{ type: 'text', text: cancellationText }],
+        isError: true,
+      },
+    ];
+    // Reload from the stored JSON rather than retaining the live ask form.
+    const reloaded: ChatMessage[] = JSON.parse(JSON.stringify(messages));
+    const screen = await renderMessage(reloaded[0], {
+      width: 320,
+      toolResults: pairToolResults(reloaded),
+    });
+    const header = screen.getByRole('button', { name: 'Ask the user' });
+    await expect.element(header).toHaveAttribute('aria-expanded', 'false');
+    await header.click();
+    const questions = screen.getByRole('region', { name: 'Questions' });
+    await expect.element(questions).toBeVisible();
+    expect(questions.element().textContent).toContain(
+      `${prompt}\n- Stable release\n- Preview release`,
+    );
+    expect(questions.element().textContent).toContain(
+      'Which platforms should be included?\nSelect multiple options.\n- Web\n- Desktop',
+    );
+    await expect
+      .element(screen.getByRole('region', { name: 'Canceled' }))
+      .toMatchTextContent(
+        cancellationText === 'Question cancelled.'
+          ? 'This question was canceled.'
+          : cancellationText,
+      );
+    await expect
+      .element(screen.getByRole('region', { name: 'Error' }))
+      .not.toBeInTheDocument();
+    expect(
+      screen.getByTestId('message-shell').element().scrollWidth,
+    ).toBeLessThanOrEqual(320);
+    await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('checkbox')).not.toBeInTheDocument();
+    await header.click();
+    await expect.element(header).toHaveAttribute('aria-expanded', 'false');
+    await header.click();
+    await expect.element(questions).toBeVisible();
+  },
+);
+
+test.each([false, true])(
+  'shows ask input with a missing or successful result (answered: %s)',
+  async (answered) => {
+    const screen = await renderMessage(
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'ask-1',
+            name: 'ask',
+            arguments: {
+              questions: [
+                {
+                  prompt: 'Which release?',
+                  options: [{ label: 'Stable' }, { label: 'Preview' }],
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        toolResults: answered
+          ? new Map([
+              [
+                'ask-1',
+                {
+                  role: 'toolResult',
+                  toolName: 'ask',
+                  content: [
+                    { type: 'text', text: 'Q: Which release?\nA: Stable' },
+                  ],
+                  isError: false,
+                },
+              ],
+            ])
+          : undefined,
+      },
+    );
+    await screen.getByRole('button', { name: 'Ask the user' }).click();
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .toMatchTextContent('Which release?');
+    expect(screen.getByTestId('message-shell').element().textContent).toContain(
+      answered ? 'A: Stable' : 'Which release?',
+    );
+  },
+);
+
+test.each([
+  {
+    questions: [
+      null,
+      { prompt: 5 },
+      {
+        prompt: 'Valid question',
+        options: [null, { label: 8 }, { label: 'Valid choice' }],
+      },
+    ],
+  },
+  { questions: 'invalid' },
+  undefined,
+])('renders malformed ask arguments without hiding the error', async (args) => {
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'bad-ask', name: 'ask', arguments: args },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'bad-ask',
+          {
+            role: 'toolResult',
+            toolName: 'ask',
+            isError: true,
+            content: [{ type: 'text', text: 'Invalid question input.' }],
+          },
+        ],
+      ]),
+    },
+  );
+  await screen.getByRole('button', { name: 'Ask the user' }).click();
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toMatchTextContent('Invalid question input.');
+  const questionText = screen
+    .getByTestId('message-shell')
+    .element()
+    .querySelector('section[aria-label="Questions"]')?.textContent;
+  expect(questionText).toBe(
+    Array.isArray(args?.questions)
+      ? 'Questions3. Valid question\n- Valid choice'
+      : undefined,
+  );
+});
 
 const capabilities = (frontend: boolean) => ({
   database: false,
@@ -289,6 +467,39 @@ function expectLeadingEllipsisDetail(header: Element, value: string) {
   expect(detail.scrollWidth).toBeGreaterThan(detail.clientWidth);
 }
 
+function sectionText(region: Locator): string {
+  const contents = region.element().lastElementChild;
+  if (!(contents instanceof HTMLElement)) {
+    throw new TypeError('Expected labeled section contents');
+  }
+  return contents.textContent ?? '';
+}
+
+function expectRequest(region: Locator, args: unknown) {
+  expect(JSON.parse(sectionText(region))).toStrictEqual(args);
+}
+
+function expectInDocumentOrder(...elements: Element[]) {
+  for (let index = 1; index < elements.length; index += 1) {
+    expect(
+      elements[index - 1].compareDocumentPosition(elements[index]) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  }
+}
+
+/** Expand a collapsed step and scope queries to its details. */
+async function expandStep(toggle: Locator): Promise<Locator> {
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  expect(toggle.element()).toHaveAttribute('aria-expanded', 'true');
+  const body = document.getElementById(
+    toggle.element().getAttribute('aria-controls') ?? '',
+  );
+  if (!body) throw new TypeError('Expected the expanded step details');
+  return page.elementLocator(body);
+}
+
 test('shows a persisted model error even when the reply has no content', async () => {
   const screen = await renderMessage({
     role: 'assistant',
@@ -456,6 +667,183 @@ test('renders resource snapshots as @ mentions instead of internal model text', 
   );
   expect(document.body.textContent).not.toContain(internal);
 });
+// Lines narrower than the toggle target, like a short pasted config.
+const configLines = (count: number) =>
+  Array.from({ length: count }, (_, index) => `x${index}=1`).join('\n');
+
+const longPrompt =
+  'Build a tracker that groups expenses by month and flags unusual spending. '.repeat(
+    12,
+  );
+
+function userText(text: string): ChatMessage {
+  return { role: 'user', content: [{ type: 'text', text }] };
+}
+
+/** The text region an expand / collapse toggle controls. */
+function controlledRegion(toggle: Element): HTMLElement {
+  const region = document.getElementById(
+    toggle.getAttribute('aria-controls') ?? '',
+  );
+  if (!region) throw new TypeError('Expected the toggle to control a region');
+  return region;
+}
+
+function isClipped(region: HTMLElement): boolean {
+  return region.scrollHeight > region.clientHeight + 1;
+}
+
+test('shows short user messages in full and collapses text taller than eight lines', async () => {
+  const messages = {
+    short: userText('Short request'),
+    eight: userText(configLines(8)),
+    nine: userText(configLines(9)),
+    paragraph: userText(longPrompt),
+  };
+  const screen = await render(
+    <MantineProvider>
+      <Box w={760}>
+        {Object.entries(messages).map(([id, message]) => (
+          <Box key={id} data-testid={id}>
+            <MessageView message={message} />
+          </Box>
+        ))}
+      </Box>
+    </MantineProvider>,
+  );
+
+  const nine = screen
+    .getByTestId('nine')
+    .getByRole('button', { name: 'Expand message' });
+  const paragraph = screen
+    .getByTestId('paragraph')
+    .getByRole('button', { name: 'Expand message' });
+  await expect.element(nine).toBeVisible();
+  await expect.element(paragraph).toBeVisible();
+  for (const id of ['short', 'eight']) {
+    expect(screen.getByTestId(id).getByRole('button').elements()).toHaveLength(
+      0,
+    );
+    const region = screen
+      .getByTestId(id)
+      .element()
+      .querySelector<HTMLElement>('[role="region"]')!;
+    expect(isClipped(region)).toBe(false);
+  }
+  for (const toggle of [nine, paragraph]) {
+    const region = controlledRegion(toggle.element());
+    expect(region.clientHeight).toBeLessThanOrEqual(180);
+    expect(isClipped(region)).toBe(true);
+    // An icon-only control still needs a comfortable target below the text.
+    const toggleRect = toggle.element().getBoundingClientRect();
+    expect(toggleRect.height).toBeGreaterThanOrEqual(32);
+    expect(toggleRect.top).toBeGreaterThanOrEqual(
+      region.getBoundingClientRect().bottom,
+    );
+  }
+
+  // Short config lines make a narrow bubble; it must contain the toggle
+  // without overflowing.
+  const bubble = nine.element().closest('.mantine-Paper-root')!;
+  const bubbleRect = bubble.getBoundingClientRect();
+  const toggleRect = nine.element().getBoundingClientRect();
+  expect(toggleRect.left).toBeGreaterThanOrEqual(bubbleRect.left);
+  expect(toggleRect.right).toBeLessThanOrEqual(bubbleRect.right);
+  expect(toggleRect.bottom).toBeLessThanOrEqual(bubbleRect.bottom);
+  expect(bubble.scrollWidth).toBeLessThanOrEqual(bubble.clientWidth);
+});
+
+test('toggles a long user message from the keyboard and pointer', async () => {
+  const screen = await renderMessage(userText(longPrompt), { width: 760 });
+  const expand = screen.getByRole('button', { name: 'Expand message' });
+  const collapse = screen.getByRole('button', { name: 'Collapse message' });
+  await expect.element(expand).toHaveAttribute('aria-expanded', 'false');
+  const region = controlledRegion(expand.element());
+  const text = screen.getByText(/Build a tracker/).element();
+  expect(isClipped(region)).toBe(true);
+  // The clipped tail fades out instead of ending on a hard cut.
+  expect(getComputedStyle(region).maskImage).toContain('linear-gradient');
+
+  await userEvent.tab();
+  expect(document.activeElement).toBe(expand.element());
+  await userEvent.keyboard('{Enter}');
+  await expect.element(collapse).toHaveAttribute('aria-expanded', 'true');
+  expect(isClipped(region)).toBe(false);
+  expect(region.clientHeight).toBeGreaterThan(180);
+  expect(getComputedStyle(region).maskImage).toBe('none');
+  // The full text ends above the collapse control, leaving its last line clear.
+  expect(text.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+    collapse.element().getBoundingClientRect().top,
+  );
+
+  await userEvent.keyboard(' ');
+  await expect.element(expand).toHaveAttribute('aria-expanded', 'false');
+  expect(isClipped(region)).toBe(true);
+
+  await expand.click();
+  await expect.element(collapse).toHaveAttribute('aria-expanded', 'true');
+  expect(isClipped(region)).toBe(false);
+});
+
+test('re-evaluates a user message collapse when the bubble rewraps', async () => {
+  const prompt =
+    'Plan a weekly meal tracker with shopping lists and reminders. '.repeat(5);
+  const screen = await renderMessage(userText(prompt), { width: 760 });
+  const shell = screen.getByTestId('message-shell').element() as HTMLElement;
+  const region = shell.querySelector<HTMLElement>('[role="region"]')!;
+  await expect.element(screen.getByText(/Plan a weekly meal/)).toBeVisible();
+  expect(isClipped(region)).toBe(false);
+
+  shell.style.width = '320px';
+  const toggle = screen.getByRole('button', { name: 'Expand message' });
+  await expect.element(toggle).toBeVisible();
+  expect(isClipped(region)).toBe(true);
+
+  shell.style.width = '760px';
+  await expect.element(toggle).not.toBeInTheDocument();
+  expect(isClipped(region)).toBe(false);
+});
+
+test('keeps image and file attachments visible outside a collapsed message', async () => {
+  const screen = await renderMessage(
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: longPrompt },
+        {
+          type: 'image',
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          mimeType: 'image/png',
+        },
+      ],
+      attachments: [
+        {
+          id: 'attachment-a',
+          name: 'report.pdf',
+          mimeType: 'application/pdf',
+          size: 2048,
+        },
+      ],
+    },
+    { width: 760 },
+  );
+
+  const toggle = screen.getByRole('button', { name: 'Expand message' });
+  await expect.element(toggle).toBeVisible();
+  const region = controlledRegion(toggle.element());
+  const image = screen.getByRole('img', { name: 'Attached image' });
+  const file = screen.getByTitle('report.pdf (2.0 KB)');
+  await expect.element(image).toBeVisible();
+  await expect.element(file).toBeVisible();
+  expect(region.contains(image.element())).toBe(false);
+  expect(region.contains(file.element())).toBe(false);
+  for (const attachment of [image, file]) {
+    expect(
+      attachment.element().getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(region.getBoundingClientRect().top);
+  }
+});
+
 test('keeps the tail of a persisted read path visible in a narrow header', async () => {
   const screen = await renderMessage(
     {
@@ -573,6 +961,14 @@ test('reveals a complete persisted command without overflowing a narrow message'
   await expect
     .element(outputRegion.getByText('Command finished.'))
     .toBeVisible();
+  const requestRegion = screen.getByRole('region', { name: 'Request' });
+  await expect.element(requestRegion).toBeVisible();
+  expectRequest(requestRegion, { command: longCommand, purpose });
+  expectInDocumentOrder(
+    commandRegion.element(),
+    requestRegion.element(),
+    outputRegion.element(),
+  );
 
   const shell = screen.getByTestId('message-shell').element();
   expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
@@ -756,6 +1152,9 @@ test('reveals a persisted read path without overflowing a narrow message', async
   expect(path.textContent).toBe(absoluteReadPath);
   expect(getComputedStyle(path).overflowWrap).toBe('anywhere');
   expect(path.scrollWidth).toBeLessThanOrEqual(path.clientWidth);
+  expectRequest(screen.getByRole('region', { name: 'Request' }), {
+    path: longReadPath,
+  });
   await expect
     .element(screen.getByRole('region', { name: 'File contents' }))
     .toMatchTextContent('export const value = true;');
@@ -898,6 +1297,9 @@ test('normalizes a legacy root listing path to the workspace root', async () => 
   await expect.element(pathRegion).toBeVisible();
   expect(pathRegion.element().lastElementChild?.textContent).toBe('.');
   expect(pathRegion.element().textContent).not.toContain('(empty file path)');
+  expect(sectionText(screen.getByRole('region', { name: 'Request' }))).toBe(
+    '{}',
+  );
 });
 
 test('does not show the workspace root for an invalid persisted list path', async () => {
@@ -933,6 +1335,9 @@ test('does not show the workspace root for an invalid persisted list path', asyn
   expect(toggle.element().querySelector('bdi')).toBeNull();
   await toggle.click();
   expect(screen.getByRole('region', { name: 'File path' }).query()).toBeNull();
+  expectRequest(screen.getByRole('region', { name: 'Request' }), {
+    path: null,
+  });
   await expect
     .element(screen.getByRole('region', { name: 'Error' }))
     .toMatchTextContent(error);
@@ -1099,6 +1504,10 @@ test('preserves a live write from its attempted inputs to canonical completion',
     attemptedWritePath,
   );
   expect(runningContents.element().lastElementChild?.textContent).toBe(content);
+  expectRequest(screen.getByRole('region', { name: 'Request' }), {
+    path: attemptedWritePath,
+    content,
+  });
   expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
 
   await screen.rerender(
@@ -1137,6 +1546,10 @@ test('preserves a live write from its attempted inputs to canonical completion',
   expect(completedContents.element().lastElementChild?.textContent).toBe(
     content,
   );
+  expectRequest(screen.getByRole('region', { name: 'Request' }), {
+    path: attemptedWritePath,
+    content,
+  });
   expect(screen.getByRole('region', { name: 'Output' }).query()).toBeNull();
   expect(document.body.textContent).not.toContain(summary);
 });
@@ -1227,9 +1640,11 @@ test('renders a persisted edit result as a colored diff', async () => {
   expect(filePath.textContent).toBe(attemptedEditPath);
   expect(getComputedStyle(filePath).overflowWrap).toBe('anywhere');
   expect(filePath.scrollWidth).toBeLessThanOrEqual(filePath.clientWidth);
-  await expect
-    .element(screen.getByRole('region', { name: 'File changes' }))
-    .toBeVisible();
+  const changes = screen.getByRole('region', { name: 'File changes' });
+  await expect.element(changes).toBeVisible();
+  const requestRegion = screen.getByRole('region', { name: 'Request' });
+  expectRequest(requestRegion, { path: attemptedEditPath });
+  expectInDocumentOrder(requestRegion.element(), changes.element());
   const removed = screen.getByText('-2 const oldName = 1;');
   const added = screen.getByText('+2 const newName = 1;');
   await expect.element(removed).toBeVisible();
@@ -1301,7 +1716,13 @@ test('preserves a live edit path from execution through its completed diff', asy
   await expect.element(screen.getByText('+2 const newName = 1;')).toBeVisible();
 });
 
-test('keeps the attempted path and error for a failed paired edit', async () => {
+test('keeps the attempted edit request and error for a failed paired edit', async () => {
+  const args = {
+    path: attemptedEditPath,
+    old_string: '  const oldName = 1;\n\treturn oldName;\n',
+    new_string: '',
+    replace_all: false,
+  };
   const screen = await renderMessage(
     {
       role: 'assistant',
@@ -1310,7 +1731,7 @@ test('keeps the attempted path and error for a failed paired edit', async () => 
           type: 'toolCall',
           id: 'edit-failed',
           name: 'edit_file',
-          arguments: { path: attemptedEditPath },
+          arguments: args,
         },
       ],
     },
@@ -1340,9 +1761,385 @@ test('keeps the attempted path and error for a failed paired edit', async () => 
   await expect
     .element(outputRegion.getByText('old_string was not found.'))
     .toBeVisible();
+  const requestRegion = screen.getByRole('region', { name: 'Request' });
+  await expect.element(requestRegion).toBeVisible();
+  expectRequest(requestRegion, args);
+  expectInDocumentOrder(
+    fileRegion.element(),
+    requestRegion.element(),
+    outputRegion.element(),
+  );
   expect(
     screen.getByRole('region', { name: 'File changes' }).query(),
   ).toBeNull();
+});
+
+test('shows the complete request beside a failed KV error', async () => {
+  const args = {
+    id: 'app-kv',
+    action: 'list',
+    key: '',
+    cursor: '',
+    limit: 0,
+    secret: false,
+    reveal_secrets: false,
+    value: null,
+    unexpected: { nested: [1, 'two', { deep: true }], empty: [] },
+  };
+  const error =
+    'Invalid arguments for tool query_app_kv: cursor must not be empty';
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'kv-failed',
+          name: 'query_app_kv',
+          arguments: args,
+        },
+      ],
+    },
+    {
+      toolResults: new Map([
+        [
+          'kv-failed',
+          {
+            role: 'toolResult',
+            toolName: 'query_app_kv',
+            content: [{ type: 'text', text: error }],
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  const toggle = screen.getByRole('button', { name: /Query app KV/ });
+  expect(toggle.element().textContent).not.toContain('"cursor"');
+  expect(screen.getByRole('region', { name: 'Request' }).query()).toBeNull();
+  const details = await expandStep(toggle);
+  const requestRegion = details.getByRole('region', { name: 'Request' });
+  const errorRegion = details.getByRole('region', { name: 'Error' });
+  await expect.element(requestRegion).toBeVisible();
+  await expect.element(errorRegion).toMatchTextContent(error);
+  expectRequest(requestRegion, args);
+  expect(sectionText(requestRegion)).toContain('\n  "cursor": "",\n');
+  expect(sectionText(errorRegion)).not.toContain('"cursor"');
+  expectInDocumentOrder(requestRegion.element(), errorRegion.element());
+});
+
+test('shows structured Data Table and SQL requests within a narrow message', async () => {
+  const longToken = `tok_${'x'.repeat(480)}`;
+  const dataTableArgs = {
+    id: 'app-crm',
+    action: 'mutate',
+    table: 'contacts',
+    where: [
+      { field: 'email', op: 'eq', value: longToken },
+      { field: 'archived', op: 'eq', value: false },
+      { field: 'score', op: 'gte', value: 0 },
+      { field: 'tags', op: 'in', value: ['vip', ''] },
+    ],
+    order_by: { field: 'created_at', direction: 'desc' },
+    cursor: '',
+    limit: 25,
+    operations: [
+      {
+        type: 'insert',
+        table: 'contacts',
+        value: { name: 'Ada', meta: { source: null, notes: '' } },
+      },
+      {
+        type: 'update',
+        table: 'contacts',
+        id: 'row-1',
+        value: { name: 'Grace' },
+        unset: ['nickname'],
+      },
+      {
+        type: 'increment',
+        table: 'counters',
+        id: 'row-2',
+        field: 'visits',
+        amount: -1,
+      },
+    ],
+    timeout_ms: 1500,
+  };
+  const sql = [
+    'SELECT id, email',
+    'FROM contacts',
+    `WHERE email = '${longToken}'`,
+    ...Array.from({ length: 24 }, (_, index) => `  AND tag_${index} > 0`),
+    'ORDER BY created_at DESC;',
+  ].join('\n');
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'data-table',
+          name: 'query_app_data_table',
+          arguments: dataTableArgs,
+        },
+        {
+          type: 'toolCall',
+          id: 'sql',
+          name: 'query_app_db',
+          arguments: { id: 'app-crm', sql },
+        },
+      ],
+    },
+    {
+      width: 320,
+      toolResults: new Map<string, ToolResultMessage>([
+        [
+          'data-table',
+          {
+            role: 'toolResult',
+            toolName: 'query_app_data_table',
+            content: [{ type: 'text', text: 'Applied 3 operations.' }],
+          },
+        ],
+        [
+          'sql',
+          {
+            role: 'toolResult',
+            toolName: 'query_app_db',
+            content: [{ type: 'text', text: 'column "tag_0" does not exist' }],
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  const tableDetails = await expandStep(
+    screen.getByRole('button', { name: /Query app Data Table/ }),
+  );
+  const tableRequest = tableDetails.getByRole('region', { name: 'Request' });
+  await expect.element(tableRequest).toBeVisible();
+  expectRequest(tableRequest, dataTableArgs);
+  await expect
+    .element(tableDetails.getByRole('region', { name: 'Output' }))
+    .toMatchTextContent('Applied 3 operations.');
+
+  const sqlDetails = await expandStep(
+    screen.getByRole('button', { name: /Query app DB/ }),
+  );
+  const sqlRequest = sqlDetails.getByRole('region', { name: 'Request' });
+  await expect.element(sqlRequest).toBeVisible();
+  expectRequest(sqlRequest, { id: 'app-crm', sql });
+  await expect
+    .element(sqlDetails.getByRole('region', { name: 'Error' }))
+    .toMatchTextContent('column "tag_0" does not exist');
+
+  for (const region of [tableRequest, sqlRequest]) {
+    const code = region.element().lastElementChild as HTMLElement;
+    const style = getComputedStyle(code);
+    expect(style.whiteSpace).toBe('pre-wrap');
+    expect(style.overflowWrap).toBe('anywhere');
+    expect(code.scrollWidth).toBeLessThanOrEqual(code.clientWidth);
+    expect(code.scrollHeight).toBeGreaterThan(code.clientHeight);
+    expect(code.clientHeight).toBeLessThanOrEqual(260);
+  }
+  const shell = screen.getByTestId('message-shell').element();
+  expect(shell.scrollWidth).toBeLessThanOrEqual(shell.clientWidth);
+});
+
+test('keeps unknown, empty, and malformed requests inspectable', async () => {
+  const futureArgs = {
+    mode: '',
+    dry_run: false,
+    retries: 0,
+    previous: null,
+    nested: { list: [[], {}], text: 'line 1\nline 2' },
+  };
+  const arrayRoot = ['wf-1', { force: true }];
+  const stringRoot = '{"id":"app-1"';
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'future',
+          name: 'future_tool',
+          arguments: futureArgs,
+        },
+        { type: 'toolCall', id: 'apps', name: 'list_apps', arguments: {} },
+        { type: 'toolCall', id: 'null-root', name: 'get_app', arguments: null },
+        {
+          type: 'toolCall',
+          id: 'array-root',
+          name: 'get_workflow',
+          arguments: arrayRoot,
+        },
+        {
+          type: 'toolCall',
+          id: 'string-root',
+          name: 'rollback_app',
+          arguments: stringRoot,
+        },
+        {
+          type: 'toolCall',
+          id: 'legacy',
+          name: 'deploy_workflow',
+          arguments: undefined,
+        },
+      ],
+    },
+    {
+      toolResults: new Map<string, ToolResultMessage>([
+        [
+          'future',
+          {
+            role: 'toolResult',
+            toolName: 'future_tool',
+            content: [{ type: 'text', text: 'Future tool finished.' }],
+          },
+        ],
+        [
+          'null-root',
+          {
+            role: 'toolResult',
+            toolName: 'get_app',
+            content: [{ type: 'text', text: 'Arguments must be an object.' }],
+            isError: true,
+          },
+        ],
+      ]),
+    },
+  );
+
+  const futureDetails = await expandStep(
+    screen.getByRole('button', { name: /future_tool/ }),
+  );
+  expectRequest(
+    futureDetails.getByRole('region', { name: 'Request' }),
+    futureArgs,
+  );
+  await expect
+    .element(futureDetails.getByRole('region', { name: 'Output' }))
+    .toMatchTextContent('Future tool finished.');
+
+  const expected = [
+    [/List apps/, '{}'],
+    [/Get app/, 'null'],
+    [/Get workflow/, JSON.stringify(arrayRoot, null, 2)],
+    [/Rollback app/, JSON.stringify(stringRoot)],
+    [/Deploy workflow/, '(request arguments unavailable)'],
+  ] as const;
+  for (const [name, request] of expected) {
+    const details = await expandStep(screen.getByRole('button', { name }));
+    const region = details.getByRole('region', { name: 'Request' });
+    await expect.element(region).toBeVisible();
+    expect(sectionText(region)).toBe(request);
+  }
+  await expect
+    .element(screen.getByRole('region', { name: 'Error' }))
+    .toMatchTextContent('Arguments must be an object.');
+});
+
+test('keeps an orphaned tool result inspectable without inventing arguments', async () => {
+  const screen = await render(
+    <MantineProvider>
+      <MessageView
+        message={{
+          role: 'toolResult',
+          toolName: 'deploy_app',
+          content: [{ type: 'text', text: 'Unpaired deploy output' }],
+        }}
+      />
+    </MantineProvider>,
+  );
+  const details = await expandStep(
+    screen.getByRole('button', { name: /Deploy app/ }),
+  );
+  expect(sectionText(details.getByRole('region', { name: 'Request' }))).toBe(
+    '(request arguments unavailable)',
+  );
+  await expect
+    .element(details.getByRole('region', { name: 'Output' }))
+    .toMatchTextContent('Unpaired deploy output');
+});
+
+// Omission preserves an existing entry's secret flag; explicit false makes it public.
+test('masks sensitive KV write requests in saved history without changing the transcript', async () => {
+  const writes = [
+    {
+      id: 'app-1',
+      action: 'set',
+      key: 'api-token',
+      value: 'secret-write-marker',
+      secret: true,
+    },
+    {
+      id: 'app-1',
+      action: 'set',
+      key: 'existing-token',
+      value: 'preserved-secret-marker',
+    },
+    {
+      id: 'app-1',
+      action: 'set',
+      key: 'public-value',
+      value: 'public-write-marker',
+      secret: false,
+    },
+  ];
+  const original = structuredClone(writes);
+  const screen = await renderMessage(
+    {
+      role: 'assistant',
+      content: writes.map((args, index) => ({
+        type: 'toolCall',
+        id: `kv-write-${index}`,
+        name: 'query_app_kv',
+        arguments: args,
+      })),
+    },
+    {
+      toolResults: new Map(
+        writes.map((_, index) => [
+          `kv-write-${index}`,
+          {
+            role: 'toolResult',
+            toolName: 'query_app_kv',
+            isError: index === 1,
+            content: [
+              {
+                type: 'text',
+                text: index === 1 ? 'KV write rejected' : 'KV write finished',
+              },
+            ],
+          },
+        ]),
+      ),
+    },
+  );
+  const toggles = screen.getByRole('button', { name: /Query app KV/ });
+  for (const [index, args] of writes.entries()) {
+    const details = await expandStep(toggles.nth(index));
+    expectRequest(details.getByRole('region', { name: 'Request' }), {
+      ...args,
+      value: args.secret === false ? args.value : '[REDACTED]',
+    });
+    await expect
+      .element(
+        details.getByRole('region', { name: index === 1 ? 'Error' : 'Output' }),
+      )
+      .toBeVisible();
+  }
+  expect(
+    screen.getByTestId('message-shell').element().textContent,
+  ).not.toContain('secret-write-marker');
+  expect(
+    screen.getByTestId('message-shell').element().textContent,
+  ).not.toContain('preserved-secret-marker');
+  expect(writes).toStrictEqual(original);
 });
 
 test('groups successful deploys, resolves aliases, and uses state-aware actions', async () => {

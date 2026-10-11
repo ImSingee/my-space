@@ -26,7 +26,7 @@ function requireData<T>(result: {
 
 export const apiKeysQueryOptions = queryOptions({
   queryKey: ['auth', 'api-keys'],
-  // Account-specific metadata must not survive leaving Security/signing out.
+  // Account-specific metadata must not survive leaving Account/signing out.
   gcTime: 0,
   retry: false,
   networkMode: 'always',

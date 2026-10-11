@@ -92,9 +92,17 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
   const [workExpanded, setWorkExpanded] = useState<Record<string, boolean>>({});
   const viewportRef = useRef<HTMLDivElement>(null);
+  const messagesInnerRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const retryingRef = useRef(false);
+  // Whether the viewport is pinned near the bottom. While streaming we only
+  // auto-follow when it is, so a user who scrolls up to read earlier output
+  // isn't yanked back down on every token.
+  const stickToBottomRef = useRef(true);
+  // Set when the reader toggles a long prompt. Follow then stays paused,
+  // wherever the viewport ends up, until a real new message lands.
+  const readPausedRef = useRef(false);
   const RECONNECT_TOAST_ID = 'agent-reconnect';
 
   const clearReconnectTimer = useCallback(() => {
@@ -470,7 +478,30 @@ export function Chat({ sessionId }: { sessionId: string }) {
     sessionId,
   ]);
 
+  // A reader toggling a long prompt is reading history, so streamed output
+  // must not pull them away before the next message. Collapsing can leave the
+  // viewport below the shortened bubble; bring its top back into view so the
+  // reader keeps their place.
+  const onUserMessageToggle = useCallback(
+    (bubble: HTMLElement, expanded: boolean) => {
+      readPausedRef.current = true;
+      stickToBottomRef.current = false;
+      const viewport = viewportRef.current;
+      if (expanded || !viewport) return;
+      const offset =
+        bubble.getBoundingClientRect().top -
+        viewport.getBoundingClientRect().top;
+      if (offset < 0) viewport.scrollTop += offset;
+    },
+    [],
+  );
+
+  // Opening or folding a work process is reading too: its height change must
+  // not pull the reader to the bottom before the next message lands. Folding
+  // on completion is not a reader toggle and keeps following.
   const toggleWork = useCallback((key: string, expanded: boolean) => {
+    readPausedRef.current = true;
+    stickToBottomRef.current = false;
     setWorkExpanded((current) => ({ ...current, [key]: !expanded }));
   }, []);
   const workFrame = useCallback(
@@ -496,6 +527,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
               key={turn.key}
               message={turn.message}
               toolResults={toolResults}
+              onUserMessageToggle={onUserMessageToggle}
             />,
           ];
           // A run that failed or was stopped without persisting any reply
@@ -556,6 +588,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       workflowsQuery.data,
       effectiveModelParts,
       liveUserTurn,
+      onUserMessageToggle,
       retry,
       retryableTurnKey,
       retrying,
@@ -713,36 +746,83 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   useEffect(() => clearReconnectTimer, [clearReconnectTimer]);
 
-  // Track whether the viewport is pinned near the bottom. While streaming we
-  // only auto-follow when it is, so a user who scrolls up to read earlier
-  // output isn't yanked back down on every token.
-  const stickToBottomRef = useRef(true);
+  const previousTopRef = useRef(0);
+  const scrollToBottom = useCallback((force = false) => {
+    const viewport = viewportRef.current;
+    if (!viewport || (!force && readPausedRef.current)) return;
+    const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    // A second follow attempt can run before the user's scroll event, too.
+    // Observe that pending upward movement before overwriting its position.
+    if (
+      !force &&
+      viewport.scrollTop < previousTopRef.current &&
+      top - viewport.scrollTop >= 80
+    ) {
+      stickToBottomRef.current = false;
+      return;
+    }
+    // Record the destination synchronously. The resulting scroll event can be
+    // coalesced with a user's upward movement before it is delivered.
+    previousTopRef.current = top;
+    viewport.scrollTo({ top });
+  }, []);
+
+  // Re-evaluate the bottom pin whenever the viewport scrolls. During a reading
+  // pause, scroll events (collapse alignment, clamping when content shrinks,
+  // scroll anchoring) must not re-pin, even at the bottom.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+    previousTopRef.current = el.scrollTop;
     const onScroll = () => {
+      if (readPausedRef.current) return;
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottomRef.current = distance < 80;
+      if (distance < 80) {
+        stickToBottomRef.current = true;
+      } else if (el.scrollTop < previousTopRef.current) {
+        // Content/viewport growth can leave a gap without user input. Only
+        // upward scrolling should release follow in that case.
+        stickToBottomRef.current = false;
+      }
+      previousTopRef.current = el.scrollTop;
     };
+    // Follow depends on transcript movement, not bubbled gestures from nested
+    // outputs. scrollToBottom also detects upward movement before this event.
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
-  // A new message (user send / finished turn) always scrolls to the bottom and
-  // re-pins follow; this also covers the initial load.
+  // Initial layout, image decoding and composer resizing can change the bottom
+  // after the message-count effect has run. Follow those changes while pinned.
   useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    stickToBottomRef.current = true;
-    el.scrollTo({ top: el.scrollHeight });
-  }, [messages.length]);
+    const viewport = viewportRef.current;
+    const content = messagesInnerRef.current;
+    if (!viewport || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        scrollToBottom();
+      }
+    });
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
 
-  // Streaming tokens follow only when pinned to the bottom.
+  // A new message (user send / finished turn) always scrolls to the bottom and
+  // re-pins follow, ending any reading pause; this also covers the initial
+  // load. Stream state changes are not messages and never end the pause.
+  useEffect(() => {
+    readPausedRef.current = false;
+    stickToBottomRef.current = true;
+    scrollToBottom(true);
+  }, [messages.length, scrollToBottom]);
+
+  // Stream state changes follow only while pinned and never end a reading
+  // pause. The observer above also follows late layout changes.
   useEffect(() => {
     if (!stickToBottomRef.current) return;
-    const el = viewportRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [streamState]);
+    scrollToBottom();
+  }, [streamState, scrollToBottom]);
 
   return (
     <WorkClockOffset value={clockOffsetMs}>
@@ -768,7 +848,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
         </Box>
 
         <ScrollArea className={classes.messages} viewportRef={viewportRef}>
-          <Box className={classes.messagesInner}>
+          <Box className={classes.messagesInner} ref={messagesInnerRef}>
             {sessionQuery.isLoading ? (
               <Center py="xl">
                 <Loader />

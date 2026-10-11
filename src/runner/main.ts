@@ -182,7 +182,7 @@ function handleHubMessage(message: HubMessage): void {
       return;
     }
     case 'run.cancel': {
-      executor.cancel(message.runId);
+      executor.cancel(message.runId, message.userInitiated);
       return;
     }
     case 'run.answer': {

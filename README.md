@@ -94,7 +94,7 @@ hostname stable after users register passkeys, and use HTTPS in production
 remains available if a passkey cannot be used.
 IP-literal origins (including `127.0.0.1` and `[::1]`) do not support passkey
 registration or sign-in. Use a domain or `localhost` instead; existing
-passkeys can still be renamed or deleted from Security on an IP deployment.
+passkeys can still be renamed or deleted from Account on an IP deployment.
 The browser must use the same public origin configured in `APP_URL`.
 Session freshness checks are disabled globally: any valid signed-in session
 can manage passkeys without reauthentication. Session expiration and required

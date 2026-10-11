@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DotwellKnownWebauthnRouteImport } from './routes/[.]well-known/webauthn'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
 import { Route as AppDashboardsRouteImport } from './routes/_app/dashboards'
 import { Route as AppExecutionsRouteImport } from './routes/_app/executions'
@@ -26,10 +27,10 @@ import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
 import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppSettingsAgentRunnerRouteImport } from './routes/_app/settings/agent-runner'
 import { Route as AppSettingsBackendsRouteImport } from './routes/_app/settings/backends'
 import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings/providers'
-import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
 import { Route as AppSettingsTailscaleRouteImport } from './routes/_app/settings/tailscale'
 import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
 import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
@@ -77,6 +78,11 @@ const AppRoute = AppRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownWebauthnRoute = DotwellKnownWebauthnRouteImport.update({
+  id: '/.well-known/webauthn',
+  path: '/.well-known/webauthn',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAgentRoute = AppAgentRouteImport.update({
@@ -144,6 +150,11 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsAgentRunnerRoute = AppSettingsAgentRunnerRouteImport.update({
   id: '/agent-runner',
   path: '/agent-runner',
@@ -157,11 +168,6 @@ const AppSettingsBackendsRoute = AppSettingsBackendsRouteImport.update({
 const AppSettingsProvidersRoute = AppSettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsTailscaleRoute = AppSettingsTailscaleRouteImport.update({
@@ -323,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
+  '/.well-known/webauthn': typeof DotwellKnownWebauthnRoute
   '/agent': typeof AppAgentRouteWithChildren
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
@@ -332,10 +339,10 @@ export interface FileRoutesByFullPath {
   '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/settings/account': typeof AppSettingsAccountRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
-  '/settings/security': typeof AppSettingsSecurityRoute
   '/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
@@ -374,6 +381,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
+  '/.well-known/webauthn': typeof DotwellKnownWebauthnRoute
   '/dashboards': typeof AppDashboardsRoute
   '/executions': typeof AppExecutionsRoute
   '/api/$': typeof ApiSplatRoute
@@ -381,10 +389,10 @@ export interface FileRoutesByTo {
   '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/settings/account': typeof AppSettingsAccountRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
-  '/settings/security': typeof AppSettingsSecurityRoute
   '/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
@@ -425,6 +433,7 @@ export interface FileRoutesById {
   '/404': typeof R404Route
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/.well-known/webauthn': typeof DotwellKnownWebauthnRoute
   '/_app/agent': typeof AppAgentRouteWithChildren
   '/_app/dashboards': typeof AppDashboardsRoute
   '/_app/executions': typeof AppExecutionsRoute
@@ -434,10 +443,10 @@ export interface FileRoutesById {
   '/cli/authorize': typeof CliAuthorizeRoute
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/_app/settings/backends': typeof AppSettingsBackendsRoute
   '/_app/settings/providers': typeof AppSettingsProvidersRoute
-  '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/_app/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
@@ -478,6 +487,7 @@ export interface FileRouteTypes {
     | '/'
     | '/404'
     | '/login'
+    | '/.well-known/webauthn'
     | '/agent'
     | '/dashboards'
     | '/executions'
@@ -487,10 +497,10 @@ export interface FileRouteTypes {
     | '/cli/authorize'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
+    | '/settings/account'
     | '/settings/agent-runner'
     | '/settings/backends'
     | '/settings/providers'
-    | '/settings/security'
     | '/settings/tailscale'
     | '/settings/users'
     | '/api/agent/runs'
@@ -529,6 +539,7 @@ export interface FileRouteTypes {
     | '/'
     | '/404'
     | '/login'
+    | '/.well-known/webauthn'
     | '/dashboards'
     | '/executions'
     | '/api/$'
@@ -536,10 +547,10 @@ export interface FileRouteTypes {
     | '/cli/authorize'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
+    | '/settings/account'
     | '/settings/agent-runner'
     | '/settings/backends'
     | '/settings/providers'
-    | '/settings/security'
     | '/settings/tailscale'
     | '/settings/users'
     | '/api/agent/runs'
@@ -579,6 +590,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/_app'
     | '/login'
+    | '/.well-known/webauthn'
     | '/_app/agent'
     | '/_app/dashboards'
     | '/_app/executions'
@@ -588,10 +600,10 @@ export interface FileRouteTypes {
     | '/cli/authorize'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
+    | '/_app/settings/account'
     | '/_app/settings/agent-runner'
     | '/_app/settings/backends'
     | '/_app/settings/providers'
-    | '/_app/settings/security'
     | '/_app/settings/tailscale'
     | '/_app/settings/users'
     | '/api/agent/runs'
@@ -632,6 +644,7 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  DotwellKnownWebauthnRoute: typeof DotwellKnownWebauthnRoute
   ApiSplatRoute: typeof ApiSplatRoute
   ApiEventsRoute: typeof ApiEventsRoute
   CliAuthorizeRoute: typeof CliAuthorizeRoute
@@ -681,6 +694,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/webauthn': {
+      id: '/.well-known/webauthn'
+      path: '/.well-known/webauthn'
+      fullPath: '/.well-known/webauthn'
+      preLoaderRoute: typeof DotwellKnownWebauthnRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/agent': {
@@ -774,6 +794,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/account': {
+      id: '/_app/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof AppSettingsAccountRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/agent-runner': {
       id: '/_app/settings/agent-runner'
       path: '/agent-runner'
@@ -793,13 +820,6 @@ declare module '@tanstack/react-router' {
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof AppSettingsProvidersRouteImport
-      parentRoute: typeof AppSettingsRoute
-    }
-    '/_app/settings/security': {
-      id: '/_app/settings/security'
-      path: '/security'
-      fullPath: '/settings/security'
-      preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/tailscale': {
@@ -1023,20 +1043,20 @@ const AppAgentRouteWithChildren = AppAgentRoute._addFileChildren(
 )
 
 interface AppSettingsRouteChildren {
+  AppSettingsAccountRoute: typeof AppSettingsAccountRoute
   AppSettingsAgentRunnerRoute: typeof AppSettingsAgentRunnerRoute
   AppSettingsBackendsRoute: typeof AppSettingsBackendsRoute
   AppSettingsProvidersRoute: typeof AppSettingsProvidersRoute
-  AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
   AppSettingsTailscaleRoute: typeof AppSettingsTailscaleRoute
   AppSettingsUsersRoute: typeof AppSettingsUsersRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAccountRoute: AppSettingsAccountRoute,
   AppSettingsAgentRunnerRoute: AppSettingsAgentRunnerRoute,
   AppSettingsBackendsRoute: AppSettingsBackendsRoute,
   AppSettingsProvidersRoute: AppSettingsProvidersRoute,
-  AppSettingsSecurityRoute: AppSettingsSecurityRoute,
   AppSettingsTailscaleRoute: AppSettingsTailscaleRoute,
   AppSettingsUsersRoute: AppSettingsUsersRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
@@ -1107,6 +1127,7 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  DotwellKnownWebauthnRoute: DotwellKnownWebauthnRoute,
   ApiSplatRoute: ApiSplatRoute,
   ApiEventsRoute: ApiEventsRoute,
   CliAuthorizeRoute: CliAuthorizeRoute,

@@ -5,10 +5,19 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconChevronRight,
+  IconCircleMinus,
   IconSparkles,
 } from '@tabler/icons-react';
-import { type ReactNode, type Ref, useEffect, useId, useRef } from 'react';
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+} from 'react';
 import { isEditFileDetails } from '~agent/edit-file-details';
+import { askCancellationMessage } from '~agent/ask-cancellation';
 import { isFilePathDetails, isFilePathTool } from '~agent/file-path-details';
 import { EditDiff } from './edit-diff';
 import type { StreamTool } from './use-agent-stream';
@@ -20,6 +29,7 @@ import {
   toolDetail,
   toolDisplayLabel,
   toolInputDetails,
+  toolRequestJson,
 } from './types';
 import classes from './chat.module.css';
 
@@ -106,7 +116,19 @@ function outputPresentation(
   isError: boolean,
   args: unknown,
   result?: ToolResult,
-): { label: string; emptyText: string } {
+): { label: string; emptyText: string; cancelled?: boolean; text?: string } {
+  const cancelledMessage =
+    name === 'ask' && isError
+      ? askCancellationMessage(result?.text ?? '')
+      : undefined;
+  if (cancelledMessage) {
+    return {
+      label: 'Canceled',
+      emptyText: '',
+      cancelled: true,
+      text: cancelledMessage,
+    };
+  }
   if (isError) return { label: 'Error', emptyText: '(no error details)' };
   if (name === 'read_file') {
     const resultDetails = detailsRecord(result?.details);
@@ -156,7 +178,7 @@ function StepDetailText({ detail }: { detail?: ToolDetail }) {
  * One quiet line in the agent's activity timeline. Used for thinking and tool
  * calls/results alike so the whole "process" reads with a single visual
  * language instead of mixed chips and boxes. Expands in place when it has a
- * body (result or thinking text).
+ * body (tool request and result, or thinking text).
  */
 function StepRow({
   icon,
@@ -231,7 +253,29 @@ function ToolBodySection({
   );
 }
 
+/**
+ * The arguments the Agent supplied, independent of any tool-specific
+ * summary above it. Reading them from the model call (never from resolved
+ * results or stored environment values) keeps failed and malformed requests
+ * diagnosable. Secret KV write values remain masked in both render paths.
+ */
+function ToolRequestSection({ name, args }: { name: string; args: unknown }) {
+  const json = useMemo(() => toolRequestJson(name, args), [name, args]);
+  return (
+    <ToolBodySection label="Request">
+      <Box className={classes.stepInputCode}>
+        {json ??
+          (args === undefined
+            ? '(request arguments unavailable)'
+            : '(request arguments cannot be shown as JSON)')}
+      </Box>
+    </ToolBodySection>
+  );
+}
+
 function ToolStepBody({
+  name,
+  args,
   inputs,
   output,
   outputRef,
@@ -239,6 +283,8 @@ function ToolStepBody({
   outputLabel,
   outputEmptyText,
 }: {
+  name: string;
+  args: unknown;
   inputs?: ToolInputDetail[];
   output?: string;
   outputRef?: Ref<HTMLDivElement>;
@@ -246,15 +292,6 @@ function ToolStepBody({
   outputLabel: string;
   outputEmptyText: string;
 }) {
-  const hasInputs = (inputs?.length ?? 0) > 0;
-  const hasOutput = output !== undefined || editDiff !== undefined;
-  const showOutputSection = hasInputs || outputLabel !== 'Output';
-  const outputNode = (
-    <Box ref={outputRef} className={classes.stepBodyCode}>
-      {output === '' ? outputEmptyText : output}
-    </Box>
-  );
-
   return (
     <Box className={classes.stepBody}>
       {inputs?.map((input) => (
@@ -266,21 +303,18 @@ function ToolStepBody({
           </Box>
         </ToolBodySection>
       ))}
+      <ToolRequestSection name={name} args={args} />
       {editDiff ? (
-        hasInputs ? (
-          <Box className={classes.stepBodySection}>
-            <EditDiff diff={editDiff} />
-          </Box>
-        ) : (
+        <Box className={classes.stepBodySection}>
           <EditDiff diff={editDiff} />
-        )
-      ) : hasOutput ? (
-        showOutputSection ? (
-          <ToolBodySection label={outputLabel}>{outputNode}</ToolBodySection>
-        ) : (
-          outputNode
-        )
-      ) : null}
+        </Box>
+      ) : output === undefined ? null : (
+        <ToolBodySection label={outputLabel}>
+          <Box ref={outputRef} className={classes.stepBodyCode}>
+            {output === '' ? outputEmptyText : output}
+          </Box>
+        </ToolBodySection>
+      )}
     </Box>
   );
 }
@@ -321,6 +355,8 @@ export function ToolStep({
   const icon =
     status === 'running' ? (
       <Loader size={11} color="gray" />
+    ) : output.cancelled ? (
+      <IconCircleMinus size={14} stroke={1.7} />
     ) : isError ? (
       <IconAlertTriangle size={14} stroke={1.7} />
     ) : (
@@ -331,17 +367,19 @@ export function ToolStep({
       icon={icon}
       label={toolDisplayLabel(name, args)}
       detail={resolvedToolDetail(name, args, result?.details, isError, detail)}
-      error={isError}
+      error={isError && !output.cancelled}
     >
-      {inputs !== undefined || result ? (
-        <ToolStepBody
-          inputs={inputs}
-          output={hideSuccessfulWriteOutput ? undefined : result?.text}
-          editDiff={editDetails?.diff}
-          outputLabel={output.label}
-          outputEmptyText={output.emptyText}
-        />
-      ) : null}
+      <ToolStepBody
+        name={name}
+        args={args}
+        inputs={inputs}
+        output={
+          hideSuccessfulWriteOutput ? undefined : (output.text ?? result?.text)
+        }
+        editDiff={editDetails?.diff}
+        outputLabel={output.label}
+        outputEmptyText={output.emptyText}
+      />
     </StepRow>
   );
 }
@@ -434,7 +472,11 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     isError: tool.isError,
   };
   const editDetails = successfulEditDetails(tool.name, result);
-  const inputs = resolvedToolInputs(tool.name, tool.args, result);
+  // The answer form owns the questions while an ask is running.
+  const inputs =
+    running && tool.name === 'ask'
+      ? undefined
+      : resolvedToolInputs(tool.name, tool.args, result);
   const outputPresentationDetails = outputPresentation(
     tool.name,
     isError,
@@ -445,15 +487,16 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     tool.done && !isError && hasCompleteWriteInput(tool.name, tool.args);
   const output = hideSuccessfulWriteOutput
     ? undefined
-    : tool.output !== undefined
-      ? tool.output
-      : tool.done && tool.name === 'run_command' && inputs !== undefined
-        ? ''
-        : undefined;
-  const hasBody =
-    inputs !== undefined || output !== undefined || editDetails !== undefined;
-  const showBody = running ? hasBody : open && hasBody;
-  const expandable = !running && hasBody;
+    : (outputPresentationDetails.text ??
+      (tool.output !== undefined
+        ? tool.output
+        : tool.done && tool.name === 'run_command' && inputs !== undefined
+          ? ''
+          : undefined));
+  // Every call has at least its request to inspect, so a running step shows
+  // its body and a finished one collapses to a re-expandable row.
+  const showBody = running || open;
+  const expandable = !running;
 
   useEffect(() => {
     if (running && bodyRef.current) {
@@ -463,6 +506,8 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
 
   const icon = running ? (
     <Loader size={11} color="gray" />
+  ) : outputPresentationDetails.cancelled ? (
+    <IconCircleMinus size={14} stroke={1.7} />
   ) : isError ? (
     <IconAlertTriangle size={14} stroke={1.7} />
   ) : (
@@ -477,7 +522,13 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   const label = toolDisplayLabel(tool.name, tool.args, tool.label);
   const header = (
     <>
-      <span className={isError ? classes.stepIconError : classes.stepIcon}>
+      <span
+        className={
+          isError && !outputPresentationDetails.cancelled
+            ? classes.stepIconError
+            : classes.stepIcon
+        }
+      >
         {icon}
       </span>
       <span className={classes.stepLabel}>{label}</span>
@@ -505,18 +556,18 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       ) : (
         <Box className={classes.stepHeader}>{header}</Box>
       )}
-      {hasBody ? (
-        <Collapse id={bodyId} expanded={showBody}>
-          <ToolStepBody
-            inputs={inputs}
-            output={output}
-            outputRef={bodyRef}
-            editDiff={editDetails?.diff}
-            outputLabel={outputPresentationDetails.label}
-            outputEmptyText={outputPresentationDetails.emptyText}
-          />
-        </Collapse>
-      ) : null}
+      <Collapse id={bodyId} expanded={showBody}>
+        <ToolStepBody
+          name={tool.name}
+          args={tool.args}
+          inputs={inputs}
+          output={output}
+          outputRef={bodyRef}
+          editDiff={editDetails?.diff}
+          outputLabel={outputPresentationDetails.label}
+          outputEmptyText={outputPresentationDetails.emptyText}
+        />
+      </Collapse>
     </Box>
   );
 }

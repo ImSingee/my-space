@@ -45,6 +45,65 @@
   box-shadow: none;
 }
 
+/* Mantine overlays the Spoiler control below the content with absolute
+   positioning, which lets it overflow a narrow bubble (short config lines).
+   Lay it out in flow instead so the bubble always contains it; the control
+   comes first in DOM order, hence `order`. */
+.userMessageSpoiler {
+  display: flex;
+  flex-direction: column;
+}
+
+.userMessageSpoiler[data-has-spoiler] {
+  margin-bottom: 0;
+}
+
+/* Fade the clipped tail of a collapsed message. Masking the text itself
+   (rather than painting a gradient over it) lets the bubble background show
+   through, so the fade blends with any bubble or color scheme. */
+.userMessageSpoiler[data-has-spoiler]:not([data-expanded]) .userMessageContent {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 48px),
+    transparent
+  );
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+}
+
+/* An icon-only strip below the text, spanning the bubble: 32px tall to stay
+   easy to hit, and never narrower than its own target in a narrow bubble. It
+   never overlaps the text, so the last line stays clear in either state. */
+.userMessageSpoiler .userMessageToggle {
+  position: static;
+  order: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 32px;
+  height: 32px;
+  /* Extend into the bubble's 6px bottom padding so the arrow sits centered
+     between the text and the bubble edge. */
+  margin-bottom: -6px;
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-dimmed);
+  transition: color var(--transition-fast);
+  /* Keep the control out of copied transcript text. */
+  user-select: none;
+  -webkit-user-select: none;
+  /* The toggle moves when the text resizes; never anchor scrolling to it. */
+  overflow-anchor: none;
+}
+
+.userMessageSpoiler .userMessageToggle:hover {
+  color: var(--mantine-color-text);
+}
+
+.userMessageSpoiler .userMessageToggle:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
 .messageImage {
   max-width: 240px;
   border: 1px solid var(--mantine-color-default-border);

@@ -1188,6 +1188,71 @@ test('retries a failed turn without resurrecting its superseded failure', async 
     .toHaveAttribute('aria-expanded', 'false');
 });
 
+test('keeps a reopened work process in place instead of following to the bottom', async () => {
+  const base = Date.now() - 600_000;
+  const calls = Array.from({ length: 30 }, (_, index) => ({
+    type: 'toolCall' as const,
+    id: `inspect-${index}`,
+    name: 'get_app',
+    arguments: { id: `app-${index}` },
+  }));
+  fixtures.session = snapshot({
+    messages: [
+      { role: 'user', content: 'Audit every app' },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Starting the audit.' }, ...calls],
+        stopReason: 'toolUse',
+      },
+      ...calls.map((call) => ({
+        role: 'toolResult' as const,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'Healthy.' }],
+      })),
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'All apps are healthy.' }],
+        stopReason: 'stop',
+      },
+    ] as SessionSnapshot['messages'],
+    runs: [
+      {
+        id: 'run-0',
+        status: 'completed',
+        userTurn: 0,
+        startedAt: iso(base),
+        completedAt: iso(base + 80_000),
+        error: null,
+      },
+    ],
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (input) => {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    }),
+  );
+  const { screen } = await renderChat();
+  const header = screen.getByRole('button', { name: 'Worked 1m 20s' });
+  await expect.element(header).toBeInViewport();
+
+  // Opening a finished reply is reading: the taller transcript must not pull
+  // the reader to the bottom, away from the process they just opened.
+  await header.click();
+  await expect.element(header).toHaveAttribute('aria-expanded', 'true');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await expect.element(header).toBeInViewport();
+  await expect
+    .element(screen.getByText('Starting the audit.'))
+    .toBeInViewport();
+
+  await header.click();
+  await expect.element(header).toHaveAttribute('aria-expanded', 'false');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await expect.element(header).toBeInViewport();
+  await expect.element(screen.getByText('All apps are healthy.')).toBeVisible();
+});
+
 test('keeps the final answer in view when a long process folds on completion', async () => {
   const startedAt = Date.now() - 2_000;
   const prompt: ChatMessage = { role: 'user', content: 'Audit every app' };

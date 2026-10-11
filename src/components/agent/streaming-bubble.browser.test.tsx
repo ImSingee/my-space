@@ -1,10 +1,12 @@
 import { MantineProvider } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import type { AgentStreamEvent, AskAnswer } from '~agent/events';
 import { StreamingBubble } from './streaming-bubble';
 import {
+  reduceStreamState,
   type StreamOutcome,
   type StreamState,
   useAgentStream,
@@ -115,6 +117,117 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test.each(['cancelled', 'answered'] as const)(
+  'shows only the pending form and retains the question after it is %s',
+  async (outcome) => {
+    const question = {
+      id: 'q1',
+      prompt: 'Which release should we use?',
+      options: [
+        { id: 'o1', label: 'Stable' },
+        { id: 'o2', label: 'Preview' },
+      ],
+      allowMultiple: false,
+    };
+    let state: StreamState = {
+      active: true,
+      runId: 'run-1',
+      blocks: [],
+      thinkingActive: false,
+      textActive: false,
+    };
+    state = reduceStreamState(state, {
+      type: 'tool_start',
+      id: 'ask-tool-1',
+      name: 'ask',
+      args: { questions: [question] },
+    });
+    state = reduceStreamState(state, {
+      type: 'ask',
+      askId: 'ask-1',
+      questions: [question],
+    });
+    const onAnswer = vi.fn<(askId: string, answers: AskAnswer[]) => void>();
+    const bubble = () => (
+      <MantineProvider>
+        <StreamingBubble
+          state={state}
+          onAnswer={onAnswer}
+          onSubmitEnv={noopEnv}
+        />
+      </MantineProvider>
+    );
+    const screen = await render(bubble());
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByText(question.prompt, { exact: true }))
+      .toBeVisible();
+    await screen.getByRole('radio', { name: 'Preview', exact: true }).click();
+    const cancelled = outcome === 'cancelled';
+    if (!cancelled) {
+      await screen.getByRole('button', { name: 'Send answer' }).click();
+      state = reduceStreamState(state, {
+        type: 'ask_answered',
+        askId: 'ask-1',
+      });
+    }
+    state = reduceStreamState(state, {
+      type: 'tool_end',
+      id: 'ask-tool-1',
+      name: 'ask',
+      isError: cancelled,
+      output: cancelled
+        ? 'The user canceled this question.'
+        : 'Q: Which release should we use?\nA: Preview',
+    });
+    if (cancelled) {
+      state = reduceStreamState(state, {
+        type: 'error',
+        message: 'Agent run was cancelled.',
+      });
+    }
+    await screen.rerender(bubble());
+    await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
+    await screen.getByRole('button', { name: 'Ask the user' }).click();
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .toMatchTextContent('Which release should we use?');
+    await expect
+      .element(screen.getByRole('region', { name: 'Questions' }))
+      .toMatchTextContent(/- Stable\s+- Preview/);
+    await expect
+      .element(
+        screen.getByRole('region', {
+          name: cancelled ? 'Canceled' : 'Output',
+        }),
+      )
+      .toMatchTextContent(
+        cancelled ? 'The user canceled this question.' : 'A: Preview',
+      );
+    await expect
+      .element(screen.getByRole('region', { name: 'Error' }))
+      .not.toBeInTheDocument();
+    expect(onAnswer.mock.calls).toEqual(
+      cancelled
+        ? []
+        : [
+            [
+              'ask-1',
+              [
+                {
+                  questionId: 'q1',
+                  selectedOptionIds: ['o2'],
+                  customText: undefined,
+                },
+              ],
+            ],
+          ],
+    );
+  },
+);
+
 test('restores the waiting indicator between tools after earlier prose', async () => {
   const emit = mockLiveStream();
   const screen = await render(<StreamHarness />);
@@ -199,6 +312,108 @@ test('waits for every concurrent tool and stops indicating work on failure', asy
     .element(screen.getByRole('alert'))
     .toMatchTextContent('Provider unavailable');
   await expect.element(thinking).not.toBeInTheDocument();
+});
+
+test('keeps a live tool request inspectable from running through failure', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(<StreamHarness />);
+  const args = {
+    id: 'app-kv',
+    action: 'list',
+    cursor: '',
+    reveal_secrets: false,
+    extra: { values: [null, 0, ''] },
+  };
+  const error = 'cursor must not be empty';
+  emit({
+    type: 'tool_start',
+    id: 'kv-1',
+    name: 'query_app_kv',
+    label: 'Query app KV',
+    args,
+  });
+
+  const runningRequest = screen.getByRole('region', { name: 'Request' });
+  await expect.element(runningRequest).toBeVisible();
+  expect(
+    JSON.parse(runningRequest.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(args);
+  expect(
+    screen.getByRole('button', { name: /Query app KV/ }).query(),
+  ).toBeNull();
+
+  emit({
+    type: 'tool_end',
+    id: 'kv-1',
+    name: 'query_app_kv',
+    isError: true,
+    output: error,
+  });
+  const toggle = screen.getByRole('button', { name: /Query app KV/ });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect
+    .poll(() => screen.getByRole('region', { name: 'Request' }).query())
+    .toBeNull();
+
+  toggle.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+  const request = screen.getByRole('region', { name: 'Request' });
+  const errorRegion = screen.getByRole('region', { name: 'Error' });
+  await expect.element(request).toBeVisible();
+  await expect.element(errorRegion).toMatchTextContent(error);
+  expect(
+    JSON.parse(request.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(args);
+  expect(
+    request.element().compareDocumentPosition(errorRegion.element()) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  await userEvent.keyboard('{Space}');
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect
+    .element(screen.getByRole('region', { name: 'Request' }))
+    .toBeVisible();
+});
+
+test('masks a secret KV write throughout the live stream', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(<StreamHarness />);
+  const args = {
+    id: 'app-1',
+    action: 'set',
+    key: 'api-token',
+    value: 'live-secret-marker',
+    secret: true,
+  };
+  const expected = { ...args, value: '[REDACTED]' };
+  emit({ type: 'tool_start', id: 'secret-kv', name: 'query_app_kv', args });
+  const request = screen.getByRole('region', { name: 'Request' });
+  await expect.element(request).toBeVisible();
+  expect(
+    JSON.parse(request.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(expected);
+  expect(document.body.textContent).not.toContain(args.value);
+  emit({
+    type: 'tool_end',
+    id: 'secret-kv',
+    name: 'query_app_kv',
+    isError: false,
+    output: 'KV write finished',
+  });
+  const toggle = screen.getByRole('button', { name: /Query app KV/ });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect.element(request).toBeVisible();
+  expect(
+    JSON.parse(request.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(expected);
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toMatchTextContent('KV write finished');
+  expect(document.body.textContent).not.toContain(args.value);
 });
 
 test('shows one reasoning indicator and pauses it for human input', async () => {

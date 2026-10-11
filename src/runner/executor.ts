@@ -5,6 +5,7 @@
  */
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { submitAnswer, waitForAnswer } from '~agent/ask-registry';
+import { USER_CANCELLED_ASK_MESSAGE } from '~agent/ask-cancellation';
 import type {
   AgentStreamEvent,
   AskAnswer,
@@ -36,6 +37,7 @@ type ActiveRun = {
   queue: RunEventQueue;
   controller: AbortController;
   cancelled: boolean;
+  cancelledByUser?: boolean;
   /** Stale runs are aborted and dropped without reporting run.finished. */
   discarded: boolean;
   /** Set once the turn ended; cleared from `runs` when the platform acks. */
@@ -131,7 +133,12 @@ export class RunnerExecutor {
           run.runId,
           askId,
           askSignal ?? run.controller.signal,
-        );
+        ).catch((error: unknown) => {
+          if (run.cancelledByUser) {
+            throw new Error(USER_CANCELLED_ASK_MESSAGE);
+          }
+          throw error;
+        });
         if (run.cancelled) throw new Error('Agent run was cancelled.');
         emit({ type: 'ask_answered', askId });
         return answers;
@@ -248,14 +255,15 @@ export class RunnerExecutor {
   }
 
   /** Abort a run; its partial transcript is still reported via run.finished. */
-  cancel(runId: string): void {
+  cancel(runId: string, userInitiated = false): void {
     const run = this.runs.get(runId);
     if (!run) return;
-    if (run.finished) {
+    if (run.finished || run.controller.signal.aborted) {
       // Terminal already; the platform (or a stale notice) raced our report.
       return;
     }
     run.cancelled = true;
+    run.cancelledByUser = userInitiated;
     run.controller.abort();
   }
 

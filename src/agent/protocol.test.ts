@@ -16,6 +16,22 @@ import {
   scaffoldFileSchema,
 } from './protocol';
 
+describe('Run cancellation attribution', () => {
+  it('preserves an explicit user origin while accepting legacy cancellation messages', () => {
+    expect(
+      parseHubMessage({
+        type: 'run.cancel',
+        runId: 'run-1',
+        userInitiated: true,
+      }),
+    ).toEqual({ type: 'run.cancel', runId: 'run-1', userInitiated: true });
+    expect(parseHubMessage({ type: 'run.cancel', runId: 'run-1' })).toEqual({
+      type: 'run.cancel',
+      runId: 'run-1',
+    });
+  });
+});
+
 describe('App creation payload', () => {
   it('accepts Unicode names and slugs at the 64-character boundary', () => {
     const name = '😀'.repeat(APP_NAME_MAX_LENGTH);
