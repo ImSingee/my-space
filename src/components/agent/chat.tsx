@@ -53,6 +53,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     string | null
   >(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const messagesInnerRef = useRef<HTMLDivElement>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const retryingRef = useRef(false);
@@ -474,12 +475,36 @@ export function Chat({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+    let previousTop = el.scrollTop;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottomRef.current = distance < 80;
+      if (distance < 80) {
+        stickToBottomRef.current = true;
+      } else if (el.scrollTop < previousTop) {
+        // Content/viewport growth can leave a gap without user input. Only
+        // upward scrolling should release follow in that case.
+        stickToBottomRef.current = false;
+      }
+      previousTop = el.scrollTop;
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Initial layout, image decoding and composer resizing can change the bottom
+  // after the message-count effect has run. Follow those changes while pinned.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = messagesInnerRef.current;
+    if (!viewport || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        viewport.scrollTo({ top: viewport.scrollHeight });
+      }
+    });
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
   }, []);
 
   // A new message (user send / finished turn) always scrolls to the bottom and
@@ -521,7 +546,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       </Box>
 
       <ScrollArea className={classes.messages} viewportRef={viewportRef}>
-        <Box className={classes.messagesInner}>
+        <Box className={classes.messagesInner} ref={messagesInnerRef}>
           {sessionQuery.isLoading ? (
             <Center py="xl">
               <Loader />
