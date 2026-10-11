@@ -17,7 +17,11 @@ import {
   deploySourceRequestSchema,
   rollbackRequestSchema,
 } from '~agent/protocol';
-import { verifyRunToken, type RunTokenContext } from './run-token';
+import {
+  verifyRunToken,
+  type RunTokenContext,
+  RunTokenError,
+} from '~server/agent-runner/run-auth';
 
 const fail = (code: string, status: number) => new CliError(code, status);
 
@@ -229,6 +233,11 @@ export async function handleCliApiRequest(request: Request): Promise<Response> {
       .split('/');
     return json(await route(request, path));
   } catch (error) {
+    if (error instanceof RunTokenError)
+      return json(
+        { error: error.code },
+        error.code === 'runner_not_connected' ? 403 : 401,
+      );
     if (error instanceof CliError)
       return json({ error: error.code }, error.status);
     if (error instanceof z.ZodError)

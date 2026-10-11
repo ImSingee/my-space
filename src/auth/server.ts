@@ -4,6 +4,7 @@ import { passkey } from '@better-auth/passkey';
 import { apiKey } from '@better-auth/api-key';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
 import { bearer } from 'better-auth/plugins/bearer';
+import { jwt } from 'better-auth/plugins/jwt';
 import { deviceAuthorization } from 'better-auth/plugins/device-authorization';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 
@@ -36,6 +37,9 @@ const passkeyCeremonyPaths = new Set([
 export const auth = betterAuth({
   baseURL: appUrl,
   secret: betterAuthSecret,
+  // Run credentials are minted only by the fleet-authenticated internal API.
+  // Do not expose session-to-JWT issuance or an unused public JWKS endpoint.
+  disabledPaths: ['/token', '/jwks'],
   trustedOrigins: async () => {
     const { getTailscaleManager } = await import('../server/tailscale-manager');
     const origin = getTailscaleManager().trustedOrigin();
@@ -90,6 +94,11 @@ export const auth = betterAuth({
   },
   plugins: [
     apiKey(apiKeyOptions),
+    jwt({
+      disableSettingJwtHeader: true,
+      jwt: { issuer: appUrl, audience: 'hatch-run', expirationTime: '5m' },
+      jwks: { rotationInterval: 30 * 86400, gracePeriod: 300 },
+    }),
     // Keep management endpoints and schema available even when ceremonies
     // are disabled. The hook above rejects them before any challenge is stored.
     passkey({

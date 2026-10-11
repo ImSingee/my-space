@@ -114,6 +114,16 @@ export const apikey = pgTable(
   ],
 );
 
+export const jwks = pgTable('jwks', {
+  id: text('id').primaryKey(),
+  publicKey: text('public_key').notNull(),
+  privateKey: text('private_key').notNull(),
+  createdAt: timestamp('created_at').notNull(),
+  expiresAt: timestamp('expires_at'),
+  alg: text('alg'),
+  crv: text('crv'),
+});
+
 export const passkey = pgTable(
   'passkey',
   {
@@ -158,7 +168,7 @@ export const deviceCode = pgTable(
 );
 
 export const authRelations = defineRelationsPart(
-  { user, session, account, verification, apikey, passkey, deviceCode },
+  { user, session, account, verification, apikey, jwks, passkey, deviceCode },
   (r) => ({
     user: {
       sessions: r.many.session({

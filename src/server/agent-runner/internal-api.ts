@@ -37,6 +37,7 @@ import {
   type SourceBundleResponse,
 } from '~agent/protocol';
 import { AppError } from '~server/errors';
+import { mintRunToken, RunTokenError } from './run-auth';
 
 /**
  * JSON body cap. Deploy bundles ride in as base64 (~4/3 of the packfile), so
@@ -166,7 +167,7 @@ export async function handleInternalApiRequest(
     const method = req.method ?? 'GET';
 
     // POST /internal/api/cli/runs/:runId/token {runnerId}: a fresh five-minute
-    // Run token for the CLI API. Renewal is the same call.
+    // Agent Run credential, currently used by the CLI API. Renewal uses this call.
     if (
       resource === 'cli' &&
       rest.length === 3 &&
@@ -181,7 +182,6 @@ export async function handleInternalApiRequest(
         .safeParse(await readJsonBody(req));
       if (!body.success)
         throw new AppError('Expected a body of exactly { runnerId }.', 400);
-      const { mintRunToken } = await import('~server/cli/run-token');
       res.setHeader('cache-control', 'no-store');
       json(
         res,
@@ -204,6 +204,12 @@ export async function handleInternalApiRequest(
     }
     throw new AppError('Not found.', 404);
   } catch (error) {
+    if (error instanceof RunTokenError) {
+      json(res, error.code === 'runner_not_connected' ? 403 : 401, {
+        error: error.code,
+      });
+      return;
+    }
     const status = error instanceof AppError ? error.status : 500;
     if (status >= 500) console.error('[agent-internal] request failed:', error);
     json(res, status, {
