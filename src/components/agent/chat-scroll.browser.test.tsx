@@ -242,7 +242,7 @@ test('stays at the bottom when loaded content changes height without a new messa
   await expect.poll(bottomGap).toBeLessThanOrEqual(2);
 });
 
-test('follows streaming at the bottom and preserves manual history reading', async () => {
+async function mountStreamingChat() {
   fixtures.streaming = true;
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   vi.stubGlobal(
@@ -270,6 +270,11 @@ test('follows streaming at the bottom and preserves manual history reading', asy
         `data: ${JSON.stringify({ seq: ++seq, event: { type: 'text', delta } })}\n\n`,
       ),
     );
+  return { router, emit };
+}
+
+test('follows streaming at the bottom and preserves manual history reading', async () => {
+  const { router, emit } = await mountStreamingChat();
   emit('First streaming reply.\n\n'.repeat(20));
   await expect
     .poll(() => chatViewport().textContent)
@@ -290,3 +295,120 @@ test('follows streaming at the bottom and preserves manual history reading', asy
   await settleScroll();
   expect(chatViewport().scrollTop).toBe(200);
 });
+
+test('preserves upward scrolling before the programmatic scroll event arrives', async () => {
+  const { emit } = await mountStreamingChat();
+  emit('First streaming reply.\n\n'.repeat(20));
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('First streaming reply.');
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  await settleScroll();
+  const viewport = chatViewport();
+  const nativeScrollTo = viewport.scrollTo.bind(viewport);
+  let readingTop: number | undefined;
+  const spy = vi
+    .spyOn(viewport, 'scrollTo')
+    .mockImplementationOnce((options: ScrollToOptions | number, y?: number) => {
+      if (typeof options === 'number') nativeScrollTo(options, y ?? 0);
+      else nativeScrollTo(options);
+      // Coalesce programmatic follow and an upward move before the scroll event.
+      queueMicrotask(() => {
+        viewport.scrollTop -= 200;
+        readingTop = viewport.scrollTop;
+      });
+    });
+  try {
+    emit('Second streaming reply.\n\n'.repeat(20));
+    await expect.poll(() => readingTop).toBeDefined();
+    await settleScroll();
+    expect(viewport.scrollTop).toBe(readingTop);
+    expect(bottomGap()).toBe(200);
+    const originalHeight = viewport.scrollHeight;
+    emit('Third streaming reply.\n\n'.repeat(20));
+    await expect
+      .poll(() => viewport.scrollHeight)
+      .toBeGreaterThan(originalHeight + 500);
+    await settleScroll();
+    expect(viewport.scrollTop).toBe(readingTop);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('keeps mixed-case session URLs under the Chat scroll policy', async () => {
+  const { router } = await mountChat();
+  await router.navigate({ to: '/Agent/long' as never });
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('long reply 11');
+  await settleScroll();
+  const policy = router.options.scrollRestoration;
+  expect(typeof policy).toBe('function');
+  expect(
+    typeof policy === 'function'
+      ? policy({ location: router.state.location })
+      : policy,
+  ).toBe(false);
+  expect(bottomGap()).toBeLessThanOrEqual(2);
+  chatViewport().scrollTop = 200;
+  await settleScroll();
+  await router.navigate({
+    to: '/agent/$threadId',
+    params: { threadId: 'short' },
+  });
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('short reply 11');
+  router.history.back();
+  await expect.poll(() => router.state.location.pathname).toBe('/Agent/long');
+  await expect
+    .poll(() => chatViewport().textContent)
+    .toContain('long reply 11');
+  await settleScroll();
+  expect(bottomGap()).toBeLessThanOrEqual(2);
+});
+
+test.each(['wheel', 'touch', 'keyboard'])(
+  'pauses streaming on upward %s input before its scroll event',
+  async (input) => {
+    const { emit } = await mountStreamingChat();
+    emit('First streaming reply.\n\n'.repeat(20));
+    await expect
+      .poll(() => chatViewport().textContent)
+      .toContain('First streaming reply.');
+    await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+    await settleScroll();
+    const viewport = chatViewport();
+    if (input === 'wheel') {
+      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }));
+    } else if (input === 'touch') {
+      const touch = (clientY: number) =>
+        new Touch({ identifier: 1, target: viewport, clientY });
+      viewport.dispatchEvent(
+        new TouchEvent('touchstart', { touches: [touch(100)] }),
+      );
+      viewport.dispatchEvent(
+        new TouchEvent('touchmove', { touches: [touch(300)] }),
+      );
+    } else {
+      viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }));
+    }
+    const readingTop = viewport.scrollTop;
+    emit('More streaming output.\n\n'.repeat(20));
+    await expect
+      .poll(() => chatViewport().textContent)
+      .toContain('More streaming output.');
+    await settleScroll();
+    expect(viewport.scrollTop).toBe(readingTop);
+    expect(bottomGap()).toBeGreaterThan(500);
+    // Explicitly returning to the bottom resumes streaming follow.
+    viewport.scrollTop = viewport.scrollHeight;
+    await settleScroll();
+    emit('Follow resumed.\n\n'.repeat(20));
+    await expect
+      .poll(() => chatViewport().textContent)
+      .toContain('Follow resumed.');
+    await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  },
+);

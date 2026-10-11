@@ -472,23 +472,103 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // only auto-follow when it is, so a user who scrolls up to read earlier
   // output isn't yanked back down on every token.
   const stickToBottomRef = useRef(true);
+  const previousTopRef = useRef(0);
+  const scrollToBottom = useCallback((force = false) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    // A second follow attempt can run before the user's scroll event, too.
+    // Observe that pending upward movement before overwriting its position.
+    if (
+      !force &&
+      viewport.scrollTop < previousTopRef.current &&
+      top - viewport.scrollTop >= 80
+    ) {
+      stickToBottomRef.current = false;
+      return;
+    }
+    // Record the destination synchronously. The resulting scroll event can be
+    // coalesced with a user's upward movement before it is delivered.
+    previousTopRef.current = top;
+    viewport.scrollTo({ top });
+  }, []);
+
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
-    let previousTop = el.scrollTop;
+    previousTopRef.current = el.scrollTop;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (distance < 80) {
         stickToBottomRef.current = true;
-      } else if (el.scrollTop < previousTop) {
+      } else if (el.scrollTop < previousTopRef.current) {
         // Content/viewport growth can leave a gap without user input. Only
         // upward scrolling should release follow in that case.
         stickToBottomRef.current = false;
       }
-      previousTop = el.scrollTop;
+      previousTopRef.current = el.scrollTop;
+    };
+    // User intent must pause follow before the asynchronous scroll event, so
+    // a token or resize arriving in the same frame cannot override it.
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && event.deltaY < 0) stickToBottomRef.current = false;
+    };
+    let touchY: number | undefined;
+    const onTouchStart = (event: TouchEvent) => {
+      touchY =
+        event.touches.length === 1 ? event.touches[0].clientY : undefined;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY =
+        event.touches.length === 1 ? event.touches[0].clientY : undefined;
+      if (touchY !== undefined && nextY !== undefined && nextY > touchY) {
+        stickToBottomRef.current = false;
+      }
+      touchY = nextY;
+    };
+    const onTouchEnd = () => {
+      touchY = undefined;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey
+      )
+        return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.closest('input, textarea, select, button, a'))
+      )
+        return;
+      if (
+        event.key === 'ArrowUp' ||
+        event.key === 'PageUp' ||
+        event.key === 'Home' ||
+        (event.key === ' ' && event.shiftKey)
+      ) {
+        stickToBottomRef.current = false;
+      }
     };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    el.addEventListener('keydown', onKeyDown);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   // Initial layout, image decoding and composer resizing can change the bottom
@@ -499,29 +579,26 @@ export function Chat({ sessionId }: { sessionId: string }) {
     if (!viewport || !content) return;
     const observer = new ResizeObserver(() => {
       if (stickToBottomRef.current) {
-        viewport.scrollTo({ top: viewport.scrollHeight });
+        scrollToBottom();
       }
     });
     observer.observe(viewport);
     observer.observe(content);
     return () => observer.disconnect();
-  }, []);
+  }, [scrollToBottom]);
 
   // A new message (user send / finished turn) always scrolls to the bottom and
   // re-pins follow; this also covers the initial load.
   useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
     stickToBottomRef.current = true;
-    el.scrollTo({ top: el.scrollHeight });
-  }, [messages.length]);
+    scrollToBottom(true);
+  }, [messages.length, scrollToBottom]);
 
   // Streaming tokens follow only when pinned to the bottom.
   useEffect(() => {
     if (!stickToBottomRef.current) return;
-    const el = viewportRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [streamState]);
+    scrollToBottom();
+  }, [streamState, scrollToBottom]);
 
   return (
     <Box className={classes.chat}>
