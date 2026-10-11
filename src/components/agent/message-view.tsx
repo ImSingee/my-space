@@ -1,12 +1,16 @@
 /** Persisted chat messages: user bubbles, assistant blocks, tool timelines. */
 import { Box, Group, Image, Paper, Stack, Text } from '@mantine/core';
 import { IconDownload, IconFile } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
-import type { AgentComposerContentPart } from '~agent/composer-content';
+import { useId, type ReactNode } from 'react';
+import {
+  composerModelText,
+  type AgentComposerContentPart,
+} from '~agent/composer-content';
 import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
 import type { WorkflowListItem } from '~server/workflows';
 import { AgentErrorNotice } from './agent-error-notice';
+import { useComposerMessageCopy } from './composer-message-copy';
 import {
   AppDeploymentActions,
   WorkflowDeploymentActions,
@@ -34,15 +38,29 @@ function UserComposerText({
   content: AgentComposerContentPart[] | undefined;
   fallback: string;
 }) {
-  if (!content || content.length === 0) return fallback;
-  return content.map((part, index) =>
-    part.type === 'text' ? (
-      part.text
-    ) : (
-      <span key={`${part.id}-${index}`} className={classes.messageAppMention}>
-        @{part.name}
-      </span>
-    ),
+  const ref = useComposerMessageCopy(
+    content?.some((part) => part.type !== 'text') ?? false,
+  );
+  const id = useId();
+  return (
+    <span ref={ref}>
+      {!content || content.length === 0
+        ? fallback
+        : content.map((part, index) =>
+            part.type === 'text' ? (
+              part.text
+            ) : (
+              <span
+                key={`${part.id}-${index}`}
+                className={classes.messageAppMention}
+                data-composer-reference={composerModelText([part])}
+                data-composer-reference-key={`${id}-${index}`}
+              >
+                @{part.name}
+              </span>
+            ),
+          )}
+    </span>
   );
 }
 

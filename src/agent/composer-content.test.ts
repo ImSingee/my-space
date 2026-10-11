@@ -6,9 +6,48 @@ import {
   composerModelText,
   hasComposerReference,
   hasComposerText,
+  parseComposerText,
 } from './composer-content';
 
 describe('Agent Composer content', () => {
+  it('round-trips the public inline snapshot format without losing escaped fields or text', () => {
+    const parts = [
+      { type: 'text' as const, text: 'Compare\n' },
+      {
+        type: 'app' as const,
+        id: 'app-1',
+        name: 'Notes "{draft}" \\ path\nnext',
+        slug: 'notes',
+      },
+      { type: 'text' as const, text: ' and ' },
+      { type: 'workflow' as const, id: 'workflow-1', name: 'Digest }' },
+      { type: 'workflow' as const, id: 'workflow-1', name: 'Digest }' },
+      { type: 'text' as const, text: '\n\nDone\n' },
+    ];
+    expect(parseComposerText(composerModelText(parts))).toEqual(parts);
+  });
+
+  it('preserves invalid references verbatim while restoring valid neighboring references', () => {
+    const invalid = [
+      '@Notes',
+      '@UNKNOWN{name="Notes" id="app-1"}',
+      '@APP{name="Notes" id="app-1"}',
+      '@APP{name="Notes" id="" slug="notes"}',
+      '@WORKFLOW{name="Digest" id="workflow-1" slug="digest"}',
+      '@WORKFLOW{name="Bad\\q" id="workflow-1"}',
+      '@APP{name="Notes" id="app-1" slug="notes"',
+      `@WORKFLOW{name=${JSON.stringify('x'.repeat(501))} id="workflow-1"}`,
+    ].join('\n');
+    const valid = {
+      type: 'workflow' as const,
+      id: 'workflow-1',
+      name: 'Digest',
+    };
+    expect(
+      parseComposerText(invalid + '\n' + composerModelText([valid])),
+    ).toEqual([{ type: 'text', text: invalid + '\n' }, valid]);
+  });
+
   it('serializes resource references differently for the UI and model', () => {
     const content = [
       { type: 'text' as const, text: 'Match ' },
