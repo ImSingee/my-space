@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,9 +56,13 @@ func TestHTTPSPreparationWaitsAcrossRetriesAndRecoversAfterWarning(t *testing.T)
 	}
 }
 
-func TestCertificateRateLimitIsImmediatelyActionable(t *testing.T) {
+func TestCertificateRateLimitWaitsForRetryAfterAndRecovers(t *testing.T) {
+	var requests atomic.Int32
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "3600")
+		if requests.Add(1) == 2 {
+			w.Header().Set("Retry-After", "1800")
+		}
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 	}))
 	defer api.Close()
@@ -66,18 +71,50 @@ func TestCertificateRateLimitIsImmediatelyActionable(t *testing.T) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", api.Listener.Addr().String())
 		},
 	}
+	start := time.Now()
+	now := start
+	attempts, listened := 0, 0
+	certificateReady := false
 	p := httpsPreparation{
 		certificate: func(ctx context.Context, domain string) error {
+			attempts++
+			if certificateReady {
+				return nil
+			}
 			_, _, err := lc.CertPair(ctx, domain)
 			return err
 		},
-		listen: func() error { t.Fatal("listener started without a certificate"); return nil },
+		listen: func() error { listened++; return nil },
 		emit:   func(snapshot) {},
-		now:    time.Now,
+		now:    func() time.Time { return now },
 	}
 	status := p.prepare(context.Background(), "hatch.example.ts.net")
 	if status.State != "error" || status.Message == "" || status.Origin != "" {
 		t.Fatalf("certificate rate limit was hidden as normal preparation: %+v", status)
+	}
+	for _, elapsed := range []time.Duration{2 * time.Second, time.Minute, time.Hour - time.Nanosecond} {
+		now = start.Add(elapsed)
+		if got := p.prepare(context.Background(), "hatch.example.ts.net"); got != status || attempts != 1 || listened != 0 {
+			t.Fatalf("rate-limit pause did not preserve warning without a certificate request: status=%+v attempts=%d listened=%d", got, attempts, listened)
+		}
+	}
+	now = start.Add(time.Hour)
+	if got := p.prepare(context.Background(), "hatch.example.ts.net"); got != status || attempts != 2 || listened != 0 {
+		t.Fatalf("certificate request did not resume at the retry deadline: status=%+v attempts=%d listened=%d", got, attempts, listened)
+	}
+	certificateReady = true
+	now = start.Add(90*time.Minute - time.Nanosecond)
+	if got := p.prepare(context.Background(), "hatch.example.ts.net"); got != status || attempts != 2 {
+		t.Fatalf("renewed rate limit was not respected: status=%+v attempts=%d", got, attempts)
+	}
+	now = start.Add(90 * time.Minute)
+	status = p.prepare(context.Background(), "hatch.example.ts.net")
+	if status.State != "connected" || status.Origin != "https://hatch.example.ts.net" || status.Message != "" || attempts != 3 || listened != 1 {
+		t.Fatalf("certificate request did not recover after rate limiting: status=%+v attempts=%d listened=%d", status, attempts, listened)
+	}
+	p.prepare(context.Background(), "hatch.example.ts.net")
+	if attempts != 3 || listened != 1 || requests.Load() != 2 {
+		t.Fatal("ready HTTPS connection repeated certificate requests or listener setup")
 	}
 }
 
