@@ -61,7 +61,10 @@ export default defineConfig({
             // available (e.g. Linux without root), which requires APP_URL.
             APP_URL: 'http://localhost:3700',
           },
-          include: ['src/**/*.{test,spec}.{ts,tsx}'],
+          include: [
+            'src/**/*.{test,spec}.{ts,tsx}',
+            'packages/hatch-cli/src/**/*.{test,spec}.ts',
+          ],
           exclude: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
         },
       },

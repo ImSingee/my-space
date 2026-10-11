@@ -1,4 +1,6 @@
 /** Durable public/security contract against the actual production build and DB. */
+import assert from 'node:assert/strict';
+import postgres from 'postgres';
 import { randomUUID } from 'node:crypto';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import {
@@ -23,6 +25,10 @@ import { platformApiContract } from '~/platform-api/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION, RUNNER_WS_PATH } from '~agent/protocol';
 
+const cliExecutable = new URL(
+  '../../../packages/hatch-cli/dist/main.mjs',
+  import.meta.url,
+).pathname;
 const databaseUrl = process.env.HATCH_PLATFORM_TEST_DATABASE_URL;
 const secret = 'disposable-platform-api-test-secret-32-characters';
 const fleet = 'disposable-platform-api-fleet';
@@ -108,6 +114,39 @@ async function mint(token = fleet, old = false) {
     bearer(token),
     { runnerId },
   );
+}
+
+async function cliInvoke(
+  args: string[],
+  headers: Record<string, string>,
+  extra: NodeJS.ProcessEnv = {},
+) {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HATCH_CLI_URL: origin,
+    HATCH_CLI_TOKEN: headers.authorization?.slice(7),
+    HATCH_CLI_API_KEY: headers['x-api-key'],
+    FORCE_COLOR: undefined,
+    ...extra,
+  };
+  const child = spawn(process.execPath, [cliExecutable, ...args, '--json'], {
+    cwd: root,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  return { code, data: stdout ? JSON.parse(stdout) : null, stderr };
 }
 
 // Explicit opt-in; the caller must provision a disposable PostgreSQL server.
@@ -246,8 +285,18 @@ describe.runIf(Boolean(databaseUrl))(
     afterAll(async () => {
       socket?.terminate();
       if (runtime && runtime.exitCode === null) {
+        const stopped = once(runtime, 'exit');
         runtime.kill('SIGTERM');
-        await once(runtime, 'exit');
+        const graceful = await Promise.race([
+          stopped.then(() => true),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 5000),
+          ),
+        ]);
+        if (!graceful && runtime.exitCode === null) {
+          runtime.kill('SIGKILL');
+          await stopped;
+        }
       }
       if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
         await writeFile(
@@ -258,7 +307,7 @@ describe.runIf(Boolean(databaseUrl))(
           runtimeLog,
         );
       if (root) await rm(root, { recursive: true, force: true });
-    });
+    }, 60000);
 
     it('executes all twelve operations with full authority for Cookie, Bearer session, API key and Run JWT', async () => {
       for (const [credentialIndex, headers] of credentials.entries()) {
@@ -599,6 +648,11 @@ describe.runIf(Boolean(databaseUrl))(
       });
       expect(first.response.status).toBe(200);
       expect(first.data.version).toBe(5);
+      const { resolveAppDataDatabaseUrl } =
+        await import('~server/apps/data-table/provision');
+      const dataDb = postgres(await resolveAppDataDatabaseUrl(id));
+      await dataDb`insert into data.records (id, label, value) values ('durable-row', 'keep-until-approved', 41)`;
+
       await writeFile(
         path.join(dir, 'data/schema.ts'),
         "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ value: t.integer().default(0) }) });",
@@ -608,28 +662,69 @@ describe.runIf(Boolean(databaseUrl))(
         message: 'Drop a managed field',
         bundleBase64: await bundle(dir),
       };
-      const denied = await api(`apps/${id}/deploy`, credentials[1], body);
-      expect(denied.response.status).toBe(409);
-      expect(denied.data.code).toBe('CONFLICT');
+      await writeFile(
+        path.join(dir, '.git', 'hatch-cli.json'),
+        JSON.stringify({
+          version: 1,
+          kind: 'app',
+          url: origin,
+          id,
+          generation,
+          masterCommit: source.data.masterCommit,
+        }),
+      );
+      const denied = await cliInvoke(
+        ['app', 'deploy', '--directory', dir, '--message', body.message],
+        credentials[1],
+      );
+      expect(denied.code).toBe(6);
+      expect(denied.data.error.code).toBe('CONFLICT');
       const approval = /Approval token: ([a-f0-9]+)/.exec(
-        denied.data.message,
+        denied.data.error.message,
       )?.[1];
       expect(approval).toBeDefined();
-      const wrong = await api(`apps/${id}/deploy`, credentials[2], {
-        ...body,
-        allowDestructiveDataMigration: true,
-        dataMigrationApprovalToken: 'wrong-token',
-      });
-      expect(wrong.response.status).toBe(409);
+      expect(
+        JSON.parse(
+          await readFile(path.join(dir, '.git', 'hatch-cli.json'), 'utf8'),
+        ).pending,
+      ).toBeUndefined();
+      const wrong = await cliInvoke(
+        [
+          'app',
+          'deploy',
+          '--directory',
+          dir,
+          '--allow-destructive-data-migration',
+          '--data-migration-approval-token',
+          'wrong-token',
+        ],
+        credentials[2],
+      );
+      expect(wrong.code).toBe(6);
+      expect(
+        (await api(`apps/${id}/source`, credentials[0])).data.masterCommit,
+      ).not.toBe(git(dir, 'rev-parse', 'HEAD'));
       expect(
         await database.db.query.deployments.findMany({ where: { appId: id } }),
       ).toHaveLength(5);
-      const approved = await api(`apps/${id}/deploy`, credentials[0], {
-        ...body,
-        allowDestructiveDataMigration: true,
-        dataMigrationApprovalToken: approval,
-      });
-      expect(approved.response.status).toBe(200);
+      expect(
+        (
+          await dataDb`select label, value from data.records where id = 'durable-row'`
+        )[0],
+      ).toMatchObject({ label: 'keep-until-approved', value: 41 });
+      const approved = await cliInvoke(
+        [
+          'app',
+          'deploy',
+          '--directory',
+          dir,
+          '--allow-destructive-data-migration',
+          '--data-migration-approval-token',
+          approval!,
+        ],
+        credentials[3],
+      );
+      assert.equal(approved.code, 0, JSON.stringify(approved));
       expect(approved.data.version).toBe(6);
       const deployment = await database.db.query.deployments.findFirst({
         where: { id: approved.data.deploymentId },
@@ -638,14 +733,336 @@ describe.runIf(Boolean(databaseUrl))(
         destructive: true,
       });
       const before = await database.db.query.apps.findFirst({ where: { id } });
-      const restored = await api(`apps/${id}/rollback`, credentials[2], {
-        version: 5,
-      });
-      expect(restored.response.status).toBe(200);
+      const restored = await cliInvoke(
+        ['app', 'rollback', id, '--version', '5'],
+        credentials[2],
+      );
+      expect(restored.code).toBe(0);
       expect(restored.data.dataSchemaMismatch).toBe(true);
       const after = await database.db.query.apps.findFirst({ where: { id } });
       expect(after?.dataSchemaHash).toBe(before?.dataSchemaHash);
+      expect(
+        (
+          await dataDb`select value from data.records where id = 'durable-row'`
+        )[0].value,
+      ).toBe(41);
+      await dataDb.end();
     }, 60000);
+
+    it('logs in with a real device session, stores/uses API keys and distinguishes logout from revocation', async () => {
+      const config = path.join(root, 'device-config.json');
+      const running = spawn(
+        process.execPath,
+        [
+          cliExecutable,
+          'auth',
+          'login',
+          '--url',
+          origin,
+          '--no-browser',
+          '--config',
+          config,
+          '--json',
+        ],
+        {
+          cwd: root,
+          env: {
+            ...process.env,
+            HATCH_CLI_URL: undefined,
+            HATCH_CLI_TOKEN: undefined,
+            HATCH_CLI_API_KEY: undefined,
+            FORCE_COLOR: undefined,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let stdout = '';
+      let stderr = '';
+      running.stdout.on('data', (chunk) => {
+        stdout += chunk;
+      });
+      const finished = new Promise<number | null>((resolve, reject) => {
+        running.once('error', reject);
+        running.once('close', resolve);
+      });
+      const code = await new Promise<string>((resolve, reject) => {
+        running.stderr.on('data', (chunk) => {
+          stderr += chunk;
+          const match = /Code: ([A-Za-z0-9-]+)/.exec(stderr);
+          if (match) resolve(match[1]);
+        });
+        running.once('close', () =>
+          reject(new Error('Device CLI stopped before printing its code.')),
+        );
+      });
+      expect(
+        (await call(`${origin}/api/auth/device?user_code=${code}`, { cookie }))
+          .response.status,
+      ).toBe(200);
+      expect(
+        (
+          await call(
+            `${origin}/api/auth/device/approve`,
+            { cookie, origin },
+            { userCode: code },
+          )
+        ).response.status,
+      ).toBe(200);
+      expect(await finished).toBe(0);
+      const saved = JSON.parse(await readFile(config, 'utf8'));
+      const token = saved.profiles.default.token;
+      expect(stdout + stderr).not.toContain(token);
+      const local = {
+        HATCH_CLI_URL: undefined,
+        HATCH_CLI_TOKEN: undefined,
+        HATCH_CLI_API_KEY: undefined,
+      };
+      expect(
+        (await cliInvoke(['auth', 'status', '--config', config], {}, local))
+          .data.credentialType,
+      ).toBe('session');
+      const keyResult = await call(
+        `${origin}/api/auth/api-key/create`,
+        { ...bearer(token), origin },
+        { name: 'CLI native lifecycle' },
+      );
+      expect(keyResult.response.status).toBe(200);
+      const keyFile = path.join(root, 'private-api-key');
+      await writeFile(keyFile, keyResult.data.key, { mode: 0o600 });
+      const keyLogin = await cliInvoke(
+        [
+          'auth',
+          'login',
+          '--url',
+          origin,
+          '--api-key-file',
+          keyFile,
+          '--profile',
+          'key',
+          '--config',
+          config,
+        ],
+        {},
+        local,
+      );
+      expect(keyLogin.code).toBe(0);
+      expect(keyLogin.data.credentialType).toBe('api-key');
+      expect(
+        (
+          await cliInvoke(
+            ['auth', 'logout', '--profile', 'key', '--config', config],
+            {},
+            local,
+          )
+        ).code,
+      ).toBe(2);
+      expect(
+        (
+          await cliInvoke(
+            [
+              'auth',
+              'logout',
+              '--local-only',
+              '--profile',
+              'key',
+              '--config',
+              config,
+            ],
+            {},
+            local,
+          )
+        ).data.revoked,
+      ).toBe(false);
+      expect(
+        (
+          await cliInvoke(['auth', 'status'], {
+            'x-api-key': keyResult.data.key,
+          })
+        ).code,
+      ).toBe(0);
+      expect(
+        (
+          await cliInvoke(
+            ['auth', 'logout', '--profile', 'default', '--config', config],
+            {},
+            local,
+          )
+        ).data.revoked,
+      ).toBe(true);
+      expect((await cliInvoke(['auth', 'status'], bearer(token))).code).toBe(3);
+      expect(
+        (
+          await cliInvoke(['auth', 'status'], {
+            'x-api-key': keyResult.data.key,
+          })
+        ).code,
+      ).toBe(0);
+      await auth.api.deleteApiKey({
+        headers: new Headers({ cookie }),
+        body: { keyId: keyResult.data.id },
+      });
+      expect(
+        (
+          await cliInvoke(['auth', 'status'], {
+            'x-api-key': keyResult.data.key,
+          })
+        ).code,
+      ).toBe(3);
+    }, 30000);
+
+    it('runs installed-style CLI lifecycles and SDK preparation for session, API key and Run credentials', async () => {
+      for (const headers of [credentials[3], credentials[1], credentials[2]]) {
+        const verified = await cliInvoke(['auth', 'status'], headers, {
+          HOME: path.join(root, 'no-cli-config'),
+        });
+        expect(verified.code).toBe(0);
+        expect(verified.data.authority).toBe('platform');
+        for (const kind of ['app', 'workflow']) {
+          const directory = path.join(root, `cli-${randomUUID()}`);
+          const clone = `${directory}-clone`;
+          const file = `${directory}.json`;
+          await writeFile(
+            file,
+            JSON.stringify({
+              slug: `cli-${randomUUID()}`,
+              name: 'Real CLI lifecycle',
+              pin: false,
+            }),
+          );
+          const created = await cliInvoke(
+            [kind, 'create', '--file', file, '--directory', directory],
+            headers,
+          );
+          assert.equal(created.code, 0, JSON.stringify(created));
+          const id = created.data.id;
+          expect((await cliInvoke([kind, 'get', id], headers)).code).toBe(0);
+          expect(
+            (await cliInvoke([kind, 'list'], headers)).data.some(
+              (row: { id: string }) => row.id === id,
+            ),
+          ).toBe(true);
+          const check = execFileSync(
+            'deno',
+            [
+              'check',
+              '--import-map',
+              '.hatch/import-map.json',
+              'manifest.ts',
+              ...(kind === 'workflow'
+                ? ['workflow.ts']
+                : ['app/main.tsx', 'backend/main.ts']),
+            ],
+            {
+              cwd: directory,
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'pipe'],
+            },
+          );
+          expect(typeof check).toBe('string');
+          const first = await cliInvoke(
+            [
+              kind,
+              'deploy',
+              '--directory',
+              directory,
+              '--message',
+              'First CLI release',
+            ],
+            headers,
+          );
+          assert.equal(first.code, 0, JSON.stringify(first));
+          expect(first.data.version).toBe(1);
+          expect(
+            (
+              await cliInvoke(
+                [kind, 'clone', id, '--directory', clone],
+                headers,
+              )
+            ).code,
+          ).toBe(0);
+          await writeFile(path.join(clone, 'release.txt'), 'second');
+          git(clone, 'add', '.');
+          git(
+            clone,
+            '-c',
+            'user.name=CLI integration',
+            '-c',
+            'user.email=fixture@example.test',
+            'commit',
+            '-m',
+            'Second',
+          );
+          const second = await cliInvoke(
+            [
+              kind,
+              'deploy',
+              '--directory',
+              clone,
+              '--message',
+              'Second CLI release',
+            ],
+            headers,
+          );
+          assert.equal(second.code, 0, JSON.stringify(second));
+          expect(second.data.version).toBe(2);
+          expect(
+            (
+              await cliInvoke(
+                [kind, 'update', '--directory', directory],
+                headers,
+              )
+            ).code,
+          ).toBe(0);
+          expect(git(directory, 'rev-parse', 'HEAD')).toBe(
+            git(clone, 'rev-parse', 'HEAD'),
+          );
+          await writeFile(path.join(directory, 'release.txt'), 'third');
+          git(directory, 'add', '.');
+          git(
+            directory,
+            '-c',
+            'user.name=CLI integration',
+            '-c',
+            'user.email=fixture@example.test',
+            'commit',
+            '-m',
+            'Third',
+          );
+          const third = await cliInvoke(
+            [kind, 'deploy', '--directory', directory],
+            headers,
+          );
+          expect(third.code).toBe(0);
+          expect(third.data.version).toBe(3);
+          const restored = await cliInvoke(
+            [kind, 'rollback', id, '--version', '2'],
+            headers,
+          );
+          expect(restored.code).toBe(0);
+          expect(restored.data.compatibility.isSupported).toBe(true);
+          expect(
+            (
+              await api(
+                `${kind === 'app' ? 'apps' : 'workflows'}/${id}/source`,
+                headers,
+              )
+            ).data.masterCommit,
+          ).toBe(git(clone, 'rev-parse', 'HEAD'));
+          await writeFile(path.join(directory, 'local-only.txt'), 'keep');
+          expect(
+            (
+              await cliInvoke(
+                [kind, 'update', '--directory', directory],
+                headers,
+              )
+            ).data.error.code,
+          ).toBe('dirty_workspace');
+          expect(
+            await readFile(path.join(directory, 'local-only.txt'), 'utf8'),
+          ).toBe('keep');
+        }
+      }
+    }, 240000);
 
     it('uses the same HTTP surface with an oRPC OpenAPILink typed client', async () => {
       const client: ContractRouterClient<typeof platformApiContract> =
@@ -728,7 +1145,7 @@ describe.runIf(Boolean(databaseUrl))(
       expect(excessive.data.code).toBe('PAYLOAD_TOO_LARGE');
     }, 60000);
 
-    it('publishes exactly the twelve contracts and removes old/public-internal surfaces', async () => {
+    it('publishes lifecycle, auth status and SDK contracts and removes old/public-internal surfaces', async () => {
       const spec = (await call(`${origin}/api/v1/openapi.json`)).data;
       if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
         await writeFile(
@@ -757,7 +1174,7 @@ describe.runIf(Boolean(databaseUrl))(
         Object.values(spec.paths).flatMap((item) =>
           Object.keys(item as object),
         ),
-      ).toHaveLength(12);
+      ).toHaveLength(14);
       for (const collection of ['apps', 'workflows']) {
         expect(Object.keys(spec.paths[`/${collection}`])).toEqual([
           'get',
@@ -845,6 +1262,9 @@ describe.runIf(Boolean(databaseUrl))(
       expect(
         (await api('apps', { cookie, 'x-api-key': key.key })).response.status,
       ).toBe(401);
+      expect(
+        (await cliInvoke(['auth', 'status'], { 'x-api-key': key.key })).code,
+      ).toBe(3);
       const revoked = await auth.api.createApiKey({
         body: { userId: owner!.user.id, name: 'Revocation fixture' },
       });
@@ -919,6 +1339,9 @@ describe.runIf(Boolean(databaseUrl))(
         (await api('apps', { cookie, ...bearer(expired.token) })).response
           .status,
       ).toBe(401);
+      expect(
+        (await cliInvoke(['auth', 'status'], bearer(expired.token))).code,
+      ).toBe(3);
     });
 
     it('enforces strict JSON, body caps, same-origin Cookie policy and safe error transport', async () => {

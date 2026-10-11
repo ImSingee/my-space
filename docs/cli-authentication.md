@@ -1,5 +1,7 @@
 # CLI authentication
 
+The installable CLI implements device/headless login, local profiles, native API key authentication, online status and explicit logout semantics. See [CLI README](../packages/hatch-cli/README.md) for env/config source priority, commands, safety, packaging and SDK preparation. `GET /api/v1/auth/status` reuses public API credential validation and projects safe session/key/Run metadata; it never accepts a locally decoded JWT as proof. CLI environment mode never persists credentials or reads `AGENT_RUNNER_TOKEN`.
+
 How scripts, the future `hatch` CLI and Agent Runs authenticate to the platform.
 The platform provides device authorization, user-managed API keys and Run JWTs;
 it does not implement the CLI, profile storage, environment injection or changes

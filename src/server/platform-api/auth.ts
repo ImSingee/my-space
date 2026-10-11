@@ -1,4 +1,5 @@
 /** Credential validity only: every authenticated caller has full public access. */
+import type { AuthStatus } from '~/platform-api/auth-schemas';
 import { ORPCError } from '@orpc/server';
 import { auth } from '~auth/server';
 import { db } from '~/db';
@@ -7,7 +8,10 @@ import {
   type RunTokenContext,
 } from '~server/agent-runner/run-auth';
 
-export type PublicApiContext = { run: RunTokenContext | null };
+export type PublicApiContext = {
+  run: RunTokenContext | null;
+  status?: AuthStatus;
+};
 
 export async function authenticatePublicApi(
   request: Request,
@@ -21,25 +25,66 @@ export async function authenticatePublicApi(
     if (!result.valid || !result.key) throw new ORPCError('UNAUTHORIZED');
     const owner = await db.query.user.findFirst({
       where: { id: result.key.referenceId },
-      columns: { id: true },
+      columns: { id: true, email: true, name: true },
     });
     if (!owner) throw new ORPCError('UNAUTHORIZED');
-    return { run: null };
+    return {
+      run: null,
+      status: {
+        authenticated: true,
+        credentialType: 'api-key',
+        authority: 'platform',
+        expiresAt: result.key.expiresAt?.toISOString() ?? null,
+        user: owner,
+        key: { id: result.key.id, name: result.key.name ?? null },
+      },
+    };
   }
   if (headers.has('authorization')) {
     const token = /^Bearer\s+(\S+)$/i.exec(
       headers.get('authorization') ?? '',
     )?.[1];
     if (!token) throw new ORPCError('UNAUTHORIZED');
-    if (token.split('.').length === 3)
-      return { run: await verifyRunToken(token) };
+    if (token.split('.').length === 3) {
+      const { expiresAt, ...run } = await verifyRunToken(token);
+      return {
+        run,
+        status: {
+          authenticated: true,
+          credentialType: 'run',
+          authority: 'platform',
+          expiresAt,
+          context: run,
+        },
+      };
+    }
     // Do not let the bearer plugin ignore invalid credentials and use a Cookie.
     const bearerOnly = new Headers({ authorization: `Bearer ${token}` });
     const session = await auth.api.getSession({ headers: bearerOnly });
     if (!session) throw new ORPCError('UNAUTHORIZED');
-    return { run: null };
+    return sessionContext(session);
   }
   const session = await auth.api.getSession({ headers });
   if (!session) throw new ORPCError('UNAUTHORIZED');
-  return { run: null };
+  return sessionContext(session);
+}
+
+function sessionContext(
+  value: Awaited<ReturnType<typeof auth.api.getSession>>,
+): PublicApiContext {
+  if (!value) throw new ORPCError('UNAUTHORIZED');
+  return {
+    run: null,
+    status: {
+      authenticated: true,
+      credentialType: 'session',
+      authority: 'platform',
+      expiresAt: value.session.expiresAt.toISOString(),
+      user: {
+        id: value.user.id,
+        email: value.user.email,
+        name: value.user.name,
+      },
+    },
+  };
 }
