@@ -510,8 +510,13 @@ export function Chat({ sessionId }: { sessionId: string }) {
     };
     // User intent must pause follow before the asynchronous scroll event, so
     // a token or resize arriving in the same frame cannot override it.
+    const pauseFollowForUpwardInput = () => {
+      // At the top, an upward gesture cannot move the viewport and may emit
+      // no scroll event. Keep following short replies as they begin to grow.
+      if (el.scrollTop > 0) stickToBottomRef.current = false;
+    };
     const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && event.deltaY < 0) stickToBottomRef.current = false;
+      if (!event.ctrlKey && event.deltaY < 0) pauseFollowForUpwardInput();
     };
     let touchY: number | undefined;
     const onTouchStart = (event: TouchEvent) => {
@@ -522,7 +527,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
       const nextY =
         event.touches.length === 1 ? event.touches[0].clientY : undefined;
       if (touchY !== undefined && nextY !== undefined && nextY > touchY) {
-        stickToBottomRef.current = false;
+        pauseFollowForUpwardInput();
       }
       touchY = nextY;
     };
@@ -550,7 +555,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
         event.key === 'Home' ||
         (event.key === ' ' && event.shiftKey)
       ) {
-        stickToBottomRef.current = false;
+        pauseFollowForUpwardInput();
       }
     };
     el.addEventListener('scroll', onScroll, { passive: true });

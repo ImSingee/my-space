@@ -28,7 +28,7 @@ vi.mock('~queries/agent', () => ({
       modelId: null,
       updatedAt: '2026-10-11T12:00:00.000Z',
       // Equal message counts ensure only the session identity resets scrolling.
-      messages: Array.from({ length: 12 }, (_, index) => ({
+      messages: Array.from({ length: id === 'empty' ? 0 : 12 }, (_, index) => ({
         role: 'assistant',
         content: [
           {
@@ -134,11 +134,11 @@ async function settleScroll() {
   );
 }
 
-async function mountChat() {
+async function mountChat(sessionId = 'short') {
   const router = getRouter();
   router.update({
     context: router.options.context,
-    history: createMemoryHistory({ initialEntries: ['/agent/short'] }),
+    history: createMemoryHistory({ initialEntries: [`/agent/${sessionId}`] }),
   });
   await router.load();
   const screen = await render(
@@ -242,7 +242,7 @@ test('stays at the bottom when loaded content changes height without a new messa
   await expect.poll(bottomGap).toBeLessThanOrEqual(2);
 });
 
-async function mountStreamingChat() {
+async function mountStreamingChat(sessionId = 'short') {
   fixtures.streaming = true;
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   vi.stubGlobal(
@@ -261,7 +261,7 @@ async function mountStreamingChat() {
         ),
     ),
   );
-  const { router } = await mountChat();
+  const { router } = await mountChat(sessionId);
   await expect.poll(() => Boolean(controller)).toBe(true);
   let seq = 0;
   const emit = (delta: string) =>
@@ -369,6 +369,23 @@ test('keeps mixed-case session URLs under the Chat scroll policy', async () => {
   expect(bottomGap()).toBeLessThanOrEqual(2);
 });
 
+function sendUpwardInput(viewport: HTMLDivElement, input: string) {
+  if (input === 'wheel') {
+    viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }));
+  } else if (input === 'touch') {
+    const touch = (clientY: number) =>
+      new Touch({ identifier: 1, target: viewport, clientY });
+    viewport.dispatchEvent(
+      new TouchEvent('touchstart', { touches: [touch(100)] }),
+    );
+    viewport.dispatchEvent(
+      new TouchEvent('touchmove', { touches: [touch(300)] }),
+    );
+  } else {
+    viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }));
+  }
+}
+
 test.each(['wheel', 'touch', 'keyboard'])(
   'pauses streaming on upward %s input before its scroll event',
   async (input) => {
@@ -380,20 +397,7 @@ test.each(['wheel', 'touch', 'keyboard'])(
     await expect.poll(bottomGap).toBeLessThanOrEqual(2);
     await settleScroll();
     const viewport = chatViewport();
-    if (input === 'wheel') {
-      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }));
-    } else if (input === 'touch') {
-      const touch = (clientY: number) =>
-        new Touch({ identifier: 1, target: viewport, clientY });
-      viewport.dispatchEvent(
-        new TouchEvent('touchstart', { touches: [touch(100)] }),
-      );
-      viewport.dispatchEvent(
-        new TouchEvent('touchmove', { touches: [touch(300)] }),
-      );
-    } else {
-      viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }));
-    }
+    sendUpwardInput(viewport, input);
     const readingTop = viewport.scrollTop;
     emit('More streaming output.\n\n'.repeat(20));
     await expect
@@ -410,5 +414,37 @@ test.each(['wheel', 'touch', 'keyboard'])(
       .poll(() => chatViewport().textContent)
       .toContain('Follow resumed.');
     await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  },
+);
+
+test.each(['wheel', 'touch', 'keyboard'])(
+  'keeps following after upward %s input cannot scroll a short reply',
+  async (input) => {
+    const { emit } = await mountStreamingChat('empty');
+    emit('A short streaming reply.');
+    await expect
+      .poll(() => chatViewport().textContent)
+      .toContain('A short streaming reply.');
+    await settleScroll();
+    const viewport = chatViewport();
+    expect(viewport.scrollHeight).toBe(viewport.clientHeight);
+    expect(viewport.scrollTop).toBe(0);
+    sendUpwardInput(viewport, input);
+    await settleScroll();
+    emit('The reply now fills the viewport.\n\n'.repeat(30));
+    await expect
+      .poll(() => viewport.scrollHeight)
+      .toBeGreaterThan(viewport.clientHeight + 500);
+    await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+    // Once scrolling is possible, the same input must still pause follow.
+    sendUpwardInput(viewport, input);
+    const readingTop = viewport.scrollTop;
+    emit('More output while reading history.\n\n'.repeat(20));
+    await expect
+      .poll(() => viewport.textContent)
+      .toContain('More output while reading history.');
+    await settleScroll();
+    expect(viewport.scrollTop).toBe(readingTop);
+    expect(bottomGap()).toBeGreaterThan(500);
   },
 );
