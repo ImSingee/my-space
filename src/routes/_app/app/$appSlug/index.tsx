@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Badge,
   Box,
   Button,
   Group,
@@ -231,6 +230,9 @@ export function AppView() {
   const reloadLabel = updateAvailable
     ? 'Update available — reload app'
     : 'Reload app';
+  // Clicking the pill hands off to the plain reload icon, which carries the
+  // loading state; the pill only returns if the reload fails.
+  const showUpdatePill = updateAvailable && !reloading;
 
   return (
     <Box className={classes.root}>
@@ -244,30 +246,47 @@ export function AppView() {
         <Group gap={4} wrap="nowrap">
           {canOpen || updateAvailable ? (
             <>
-              {updateAvailable ? (
-                <Badge
-                  component="output"
-                  className={classes.updateBadge}
-                  color="ember.7"
-                  variant="filled"
-                  size="lg"
-                  radius="sm"
-                  tt="none"
-                >
-                  Update available
-                </Badge>
-              ) : null}
-              <Tooltip label={reloadLabel} withArrow>
-                <ActionIcon
-                  variant={updateAvailable ? 'light' : 'subtle'}
-                  color={updateAvailable ? 'ember' : 'gray'}
-                  aria-label={reloadLabel}
-                  loading={reloading}
-                  onClick={reload}
-                >
-                  <IconRefresh size={18} stroke={1.7} />
-                </ActionIcon>
-              </Tooltip>
+              {showUpdatePill ? (
+                <Box component="output" className={classes.update}>
+                  <Tooltip label="Reload to apply the new version" withArrow>
+                    <Button
+                      size="compact-sm"
+                      variant="light"
+                      color="ember"
+                      // The light variant's default ember-6 text is ~3.3:1 on
+                      // its tint; ember-8 keeps small text above WCAG AA.
+                      c="ember.8"
+                      radius="xl"
+                      fw={500}
+                      className={classes.updateButton}
+                      aria-label={reloadLabel}
+                      onClick={reload}
+                      leftSection={
+                        <IconRefresh
+                          className={classes.updateIcon}
+                          size={15}
+                          stroke={2}
+                          aria-hidden
+                        />
+                      }
+                    >
+                      Update available
+                    </Button>
+                  </Tooltip>
+                </Box>
+              ) : (
+                <Tooltip label={reloadLabel} withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    aria-label={reloadLabel}
+                    loading={reloading}
+                    onClick={reload}
+                  >
+                    <IconRefresh size={18} stroke={1.7} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
               {canOpen ? (
                 <Tooltip label="Open in new tab" withArrow>
                   <ActionIcon
