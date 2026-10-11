@@ -228,6 +228,50 @@ export function toolDetail(
   };
 }
 
+function isLosslessJson(value: unknown, ancestors: Set<object>): boolean {
+  if (value === null) return true;
+  if (typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || ancestors.has(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  const keys = Object.keys(value);
+  // JSON.stringify serializes array holes as null, ignores non-index array
+  // properties and symbol keys, and defers to toJSON on other prototypes.
+  // Arrays therefore need exactly one own enumerable key per index.
+  const plainShape = Array.isArray(value)
+    ? prototype === Array.prototype &&
+      keys.length === value.length &&
+      keys.every((key, index) => key === String(index))
+    : prototype === Object.prototype || prototype === null;
+  if (!plainShape || Object.getOwnPropertySymbols(value).length > 0) {
+    return false;
+  }
+  ancestors.add(value);
+  const lossless = keys.every((key) =>
+    isLosslessJson((value as Record<string, unknown>)[key], ancestors),
+  );
+  // Shared, non-cyclic references are valid JSON and serialize as copies.
+  ancestors.delete(value);
+  return lossless;
+}
+
+/**
+ * The complete model-supplied tool arguments as indented JSON. Returns
+ * `undefined` for values that `JSON.stringify` would drop, coerce, or reject
+ * (e.g. `undefined`, non-finite numbers, class instances, or cycles) so the UI
+ * never presents a different request than the one the Agent made.
+ */
+export function toolRequestJson(value: unknown): string | undefined {
+  try {
+    return isLosslessJson(value, new Set())
+      ? JSON.stringify(value, null, 2)
+      : undefined;
+  } catch {
+    // Throwing getters or proxies cannot be shown faithfully either.
+    return undefined;
+  }
+}
+
 export type ToolInputDetail = {
   label: string;
   value: string;

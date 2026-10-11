@@ -1,6 +1,7 @@
 import { MantineProvider } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import type { AgentStreamEvent, AskAnswer } from '~agent/events';
 import { StreamingBubble } from './streaming-bubble';
@@ -175,6 +176,70 @@ test('waits for every concurrent tool and stops indicating work on failure', asy
     .element(screen.getByRole('alert'))
     .toMatchTextContent('Provider unavailable');
   await expect.element(thinking).not.toBeInTheDocument();
+});
+
+test('keeps a live tool request inspectable from running through failure', async () => {
+  const emit = mockLiveStream();
+  const screen = await render(<StreamHarness onTerminal={() => false} />);
+  const args = {
+    id: 'app-kv',
+    action: 'list',
+    cursor: '',
+    reveal_secrets: false,
+    extra: { values: [null, 0, ''] },
+  };
+  const error = 'cursor must not be empty';
+  emit({
+    type: 'tool_start',
+    id: 'kv-1',
+    name: 'query_app_kv',
+    label: 'Query app KV',
+    args,
+  });
+
+  const runningRequest = screen.getByRole('region', { name: 'Request' });
+  await expect.element(runningRequest).toBeVisible();
+  expect(
+    JSON.parse(runningRequest.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(args);
+  expect(
+    screen.getByRole('button', { name: /Query app KV/ }).query(),
+  ).toBeNull();
+
+  emit({
+    type: 'tool_end',
+    id: 'kv-1',
+    name: 'query_app_kv',
+    isError: true,
+    output: error,
+  });
+  const toggle = screen.getByRole('button', { name: /Query app KV/ });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect
+    .poll(() => screen.getByRole('region', { name: 'Request' }).query())
+    .toBeNull();
+
+  toggle.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+  const request = screen.getByRole('region', { name: 'Request' });
+  const errorRegion = screen.getByRole('region', { name: 'Error' });
+  await expect.element(request).toBeVisible();
+  await expect.element(errorRegion).toMatchTextContent(error);
+  expect(
+    JSON.parse(request.element().lastElementChild?.textContent ?? ''),
+  ).toStrictEqual(args);
+  expect(
+    request.element().compareDocumentPosition(errorRegion.element()) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  await userEvent.keyboard('{Space}');
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect
+    .element(screen.getByRole('region', { name: 'Request' }))
+    .toBeVisible();
 });
 
 test('shows one reasoning indicator and pauses it for human input', async () => {

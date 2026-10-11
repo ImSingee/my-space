@@ -64,3 +64,21 @@ certificates, MagicDNS, and a second authorized client. Synthetic connected
 snapshots prove only consuming UI and local boundary behavior, never tailnet
 connectivity. Missing external enrollment must remain blocked. Keep enrolled
 identities and state out of published artifacts.
+
+## 8. Agent tool request UI verification
+
+For tool-detail presentation, use a dedicated PostgreSQL container and the
+current worktree's production Platform build from sections 2 and 3. The Agent
+Runner and a real model provider are not required for deterministic consuming-UI
+checks. Seed isolated `agent_sessions.messages` with known assistant tool calls
+and their results; confirm the session response contains the seeded arguments,
+cold-load `/agent/<sessionId>`, and inspect expanded steps with Playwright.
+
+To inspect live activity, seed an isolated active run with a future lease and
+replay deterministic `tool_start` / `tool_end` events over the real events
+endpoint, preserving call IDs and original args. This proves the actual chat
+stream/reducer/rendering path, not model generation or tool/API execution.
+Keep fixtures, cookie state and evidence under the ignored acceptance round;
+never modify user records or expose real secrets. A screenshot must visibly
+include Request and the corresponding Output/Error; compare parsed visible JSON
+to fixture values instead of inferring completeness from page text alone.
