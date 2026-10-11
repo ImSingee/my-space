@@ -53,10 +53,7 @@ and mutation behavior:
 - A backend creates the same typed client with `HATCH_DATA_URL` and
   `HATCH_SIGNING_SECRET`.
 
-After deployment, use `query_app_data_table` for live data operations. Optional
-control fields treat `null`, `''`, `[]`, `{}` and numeric `0` exactly like
-omission; explicit `false` remains a boolean choice. Required mutation data
-and JSON contents keep their values.
+After deployment, use `query_app_data_table` for live data operations.
 
 - `inspect` reports the live schema, defaults, indexes, schema hash, and row
   estimates. Inspect before querying when the live schema is unknown.
@@ -104,8 +101,8 @@ After the first KV-capable deploy, use `query_app_kv` to inspect or initialize
 entries. Secret values are masked unless `reveal_secrets: true` is explicitly
 needed; revealed values enter model context. Deletion is permanent.
 
-For `action: 'list'`, omit `cursor` or pass an empty value (`null`, `''`,
-`[]`, `{}` or `0`) on the first tool call. All forms start from the first page. If the response has a non-null
+For `action: 'list'`, omit `cursor` or pass an empty value on the first tool
+call. If the response has a non-null
 `nextCursor`, pass that exact value as `cursor` on the next call. Stop when
 `nextCursor` is null. A nonempty continuation cursor must be a string of at most 512 characters.
 

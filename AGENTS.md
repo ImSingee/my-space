@@ -171,10 +171,8 @@ preserve meaningful empty data and the original recorded arguments, and retain
 strict required/action-specific validation.
 Validate original nonempty types and enum membership before provider coercion;
 an invalid string such as `"0"` must not become an empty numeric `0` default.
-Read
-[`skills/tool-call-contracts/SKILL.md`](skills/tool-call-contracts/SKILL.md)
-when implementing or reviewing Agent tools. Verify calls that populate optional
-fields with every empty spelling, not only calls that omit them.
+Verify calls that populate optional fields with every empty spelling, not only
+calls that omit them.
 
 Write TypeScript React function components. Oxfmt enforces semicolons, single quotes, trailing commas, and an 80-column print width.
 

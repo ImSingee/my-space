@@ -61,11 +61,6 @@ export function tool<S extends TSchema>(def: {
     def.execute(id, prepareArguments(args), signal, onUpdate);
   return {
     ...definition,
-    description:
-      def.description +
-      ' Optional control fields accept null, an empty string, empty array, ' +
-      'empty object or numeric zero as omission/default. Explicit false and ' +
-      'required data values keep their meaning.',
     parameters,
     prepareArguments,
     execute,
