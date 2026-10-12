@@ -67,6 +67,9 @@
   margin-top: 1px;
 }
 
+/* Keep the link's hit area to the address itself rather than the full row. */
 .address {
+  align-self: flex-start;
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
