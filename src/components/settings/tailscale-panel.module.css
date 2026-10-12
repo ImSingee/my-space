@@ -1,5 +1,6 @@
 /* State, device, and the connection-level action share one row; the action
-   drops below the state when the row runs out of room. */
+   wraps below the state at its natural width when the row runs out of room,
+   so it never outweighs the content on narrow screens. */
 .status {
   display: flex;
   flex-wrap: wrap;
@@ -68,10 +69,4 @@
 
 .address {
   overflow-wrap: anywhere;
-}
-
-@media (max-width: 36em) {
-  .statusAction {
-    width: 100%;
-  }
 }

@@ -458,7 +458,6 @@ export function TailscalePanel({
             variant="default"
             loading={pending}
             onClick={disconnect}
-            className={classes.statusAction}
           >
             {working || status.state === 'needs-login'
               ? 'Cancel connection'
@@ -734,6 +733,7 @@ export function TailscalePanel({
                     </Anchor>
                   </>
                 }
+                placeholder="tskey-auth-…"
                 value={authKey}
                 disabled={pending}
                 maxLength={4096}
