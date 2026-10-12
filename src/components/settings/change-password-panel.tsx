@@ -8,11 +8,12 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { modals } from '@mantine/modals';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { authClient } from '~auth/client';
+import { accountSessionsQueryOptions } from '~queries/account-sessions';
 
 const passwordSchema = z
   .object({
@@ -91,6 +92,7 @@ function ChangePasswordForm({
       );
     },
   });
+  const queryClient = useQueryClient();
   const change = useMutation({
     meta: { errorToast: false },
     networkMode: 'always',
@@ -111,6 +113,9 @@ function ChangePasswordForm({
         );
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: accountSessionsQueryOptions.queryKey,
+      });
       form.reset();
       toast.success('Password changed');
       onClose();

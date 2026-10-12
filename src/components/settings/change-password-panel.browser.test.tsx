@@ -9,6 +9,12 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import { ChangePasswordPanel } from './change-password-panel';
+import { accountSessionsQueryOptions } from '~queries/account-sessions';
+
+vi.mock('~server/account-sessions', () => ({
+  listAccountSessions: vi.fn<() => void>(),
+  revokeAccountSession: vi.fn<() => void>(),
+}));
 
 const mocks = vi.hoisted(() => ({
   success: vi.fn<(message: string) => void>(),
@@ -77,6 +83,7 @@ test('password changes require valid confirmation, send one authenticated reques
       }),
   );
   const { screen, client, dialog } = await panel();
+  client.setQueryData(accountSessionsQueryOptions.queryKey, []);
   const submit = dialog.getByRole('button', { name: 'Change password' });
   await submit.click();
   await expect
@@ -117,6 +124,9 @@ test('password changes require valid confirmation, send one authenticated reques
   });
   respond(Response.json({ token: 'returned-session-secret', user: {} }));
   await expect.element(dialog).not.toBeInTheDocument();
+  expect(
+    client.getQueryState(accountSessionsQueryOptions.queryKey)?.isInvalidated,
+  ).toBe(true);
   await screen
     .getByRole('button', { name: 'Change password', exact: true })
     .click();
