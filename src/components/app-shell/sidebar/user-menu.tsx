@@ -1,25 +1,19 @@
 import { ActionIcon, Avatar, Menu, Text } from '@mantine/core';
-import { Link, useRouter } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import {
   IconAppWindow,
   IconLayoutDashboard,
   IconLogout,
   IconSettings,
 } from '@tabler/icons-react';
-import { toast } from 'sonner';
 import { authClient } from '~auth/client';
+import { useSignOut } from '~auth/use-sign-out';
 
 export function UserMenu() {
-  const router = useRouter();
+  const { signOut, leaving } = useSignOut();
   const { data } = authClient.useSession();
   const email = data?.user.email ?? 'account';
   const name = data?.user.name || email;
-
-  const signOut = async () => {
-    await authClient.signOut();
-    toast.success('Signed out');
-    await router.navigate({ to: '/login' });
-  };
 
   return (
     <Menu
@@ -71,6 +65,7 @@ export function UserMenu() {
         <Menu.Item
           leftSection={<IconLogout size={16} stroke={1.6} />}
           onClick={signOut}
+          disabled={leaving}
         >
           Sign out
         </Menu.Item>
