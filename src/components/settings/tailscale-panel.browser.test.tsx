@@ -1,18 +1,28 @@
 import { MantineProvider } from '@mantine/core';
+import {
+  QueryClient,
+  QueryClientProvider,
+  onlineManager,
+} from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
-import { TailscalePanel } from './tailscale-panel';
-import type { TailscaleConfig, TailscaleStatus } from '~/tailscale';
+import { TailscalePanel, TailscaleSettings } from './tailscale-panel';
+import { configureTailscale, getTailscaleStatus } from '~server/tailscale';
+import type { TailscaleConfigureInput, TailscaleStatus } from '~/tailscale';
 
-type Configure = (config: TailscaleConfig) => Promise<TailscaleStatus>;
+type Configure = (config: TailscaleConfigureInput) => Promise<TailscaleStatus>;
 
 vi.mock('~server/tailscale', () => ({
   configureTailscale: vi.fn<() => void>(),
   getTailscaleStatus: vi.fn<() => void>(),
 }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  onlineManager.setOnline(true);
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
 
 const disconnected: TailscaleStatus = {
   available: true,
@@ -99,13 +109,13 @@ function popupFixture() {
   return { popup, open };
 }
 
-function view(
-  status: TailscaleStatus,
-  configure: (config: {
-    enabled: boolean;
-    hostname: string;
-  }) => Promise<TailscaleStatus>,
-) {
+type Screen = Awaited<ReturnType<typeof render>>;
+
+// Each option's accessible name starts with its label, then its description.
+const method = (screen: Screen, name: 'Interactive sign-in' | 'Auth key') =>
+  screen.getByRole('radio', { name: new RegExp(`^${name}`) });
+
+function view(status: TailscaleStatus, configure: Configure) {
   return (
     <MantineProvider>
       <TailscalePanel
@@ -117,6 +127,145 @@ function view(
     </MantineProvider>
   );
 }
+
+test('auth key enrollment validates input, prevents duplicate requests, and never opens a window', async () => {
+  const { open } = popupFixture();
+  let resolve!: (value: TailscaleStatus) => void;
+  const configure = vi.fn<Configure>(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const screen = await render(view(disconnected, configure));
+  await expect.element(method(screen, 'Interactive sign-in')).toBeChecked();
+  await method(screen, 'Auth key').click();
+  const submit = screen.getByRole('button', { name: 'Connect Tailscale' });
+  await expect.element(submit).toBeDisabled();
+  await screen
+    .getByLabelText('Auth key', { exact: true })
+    .fill('tskey-auth-fixture-secret');
+  await submit.click();
+  await expect
+    .element(screen.getByLabelText('Auth key', { exact: true }))
+    .toHaveValue('');
+  expect(open).not.toHaveBeenCalled();
+  expect(configure).toHaveBeenCalledExactlyOnceWith({
+    enabled: true,
+    hostname: 'hatch',
+    authKey: 'tskey-auth-fixture-secret',
+  });
+  await screen
+    .getByLabelText('Auth key', { exact: true })
+    .fill('tskey-auth-fixture-secret');
+  await submit.click();
+  expect(configure).toHaveBeenCalledOnce();
+  resolve(starting);
+  await screen.rerender(
+    view({ ...starting, state: 'needs-approval' }, configure),
+  );
+  await expect.element(screen.getByText('Approve this device')).toBeVisible();
+  await screen.rerender(view(httpsReady, configure));
+  await expect
+    .element(screen.getByRole('link', { name: 'Open Hatch' }))
+    .toHaveAttribute('href', connected.origin);
+  expect(open).not.toHaveBeenCalled();
+});
+
+test('key failures permit another key or interactive sign-in without retaining the input', async () => {
+  const { open } = popupFixture();
+  const failure: TailscaleStatus = {
+    ...starting,
+    state: 'error',
+    message: 'Auth key sign-in failed.',
+  };
+  const configure = vi
+    .fn<Configure>()
+    .mockResolvedValueOnce(failure)
+    .mockResolvedValueOnce(needsLogin);
+  const screen = await render(view(disconnected, configure));
+  await method(screen, 'Auth key').click();
+  await screen
+    .getByLabelText('Auth key', { exact: true })
+    .fill('tskey-auth-invalid-fixture');
+  await screen.getByRole('button', { name: 'Connect Tailscale' }).click();
+  await screen.rerender(view(failure, configure));
+  await expect
+    .element(screen.getByLabelText('Auth key', { exact: true }))
+    .toHaveValue('');
+  await expect
+    .element(screen.getByRole('button', { name: 'Reconnect' }))
+    .toBeDisabled();
+  await screen
+    .getByLabelText('Auth key', { exact: true })
+    .fill('tskey-auth-new-fixture');
+  await expect
+    .element(screen.getByRole('button', { name: 'Reconnect' }))
+    .toBeEnabled();
+  await method(screen, 'Interactive sign-in').click();
+  await screen.getByRole('button', { name: 'Reconnect' }).click();
+  expect(configure).toHaveBeenLastCalledWith({
+    enabled: true,
+    hostname: 'hatch',
+  });
+  expect(open).toHaveBeenCalledOnce();
+  await screen.rerender(view(needsLogin, configure));
+  await method(screen, 'Auth key').click();
+  await expect
+    .element(screen.getByLabelText('Auth key', { exact: true }))
+    .toHaveValue('');
+});
+
+test('settings keep enrollment credentials out of mutation/query caches and never replay failures on reconnect', async () => {
+  const { open } = popupFixture();
+  const client = new QueryClient();
+  vi.mocked(getTailscaleStatus).mockResolvedValue(disconnected);
+  let reject!: (reason: Error) => void;
+  const configure = vi.mocked(configureTailscale).mockImplementation(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  const screen = await render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <TailscaleSettings />
+      </QueryClientProvider>
+    </MantineProvider>,
+  );
+  await method(screen, 'Auth key').click();
+  const key = 'tskey-auth-cache-boundary-fixture';
+  await screen.getByLabelText('Auth key', { exact: true }).fill(key);
+  onlineManager.setOnline(false);
+  await screen.getByRole('button', { name: 'Connect Tailscale' }).click();
+  await expect.poll(() => configure.mock.calls.length).toBe(1);
+  const cached = () =>
+    JSON.stringify({
+      mutations: client
+        .getMutationCache()
+        .getAll()
+        .map((mutation) => mutation.state),
+      queries: client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.state),
+    });
+  expect(cached()).not.toContain(key);
+  reject(new Error('Could not connect. Try again.'));
+  await expect
+    .element(screen.getByText('Could not connect. Try again.'))
+    .toBeVisible();
+  onlineManager.setOnline(true);
+  await expect
+    .element(screen.getByRole('button', { name: 'Connect Tailscale' }))
+    .toBeDisabled();
+  expect(configure).toHaveBeenCalledOnce();
+  expect(cached()).not.toContain(key);
+  expect(open).not.toHaveBeenCalled();
+  await screen.unmount();
+  client.clear();
+});
 
 test('Connect reserves one window before the request and navigates it when authorization becomes ready', async () => {
   const { popup, open } = popupFixture();
@@ -140,6 +289,8 @@ test('Connect reserves one window before the request and navigates it when autho
   await expect
     .poll(() => popup.location.replace.mock.calls)
     .toEqual([[needsLogin.loginUrl]]);
+  await method(screen, 'Interactive sign-in').click();
+  expect(popup.closed).toBe(false);
   await screen.rerender(view({ ...needsLogin }, configure));
   expect(open).toHaveBeenCalledOnce();
   expect(popup.location.replace).toHaveBeenCalledOnce();
@@ -257,8 +408,6 @@ test('opening Settings during pending enrollment never opens an unsolicited wind
   expect(open).not.toHaveBeenCalled();
   expect(configure).not.toHaveBeenCalled();
 });
-
-type Screen = Awaited<ReturnType<typeof render>>;
 
 const dnsSettingsButton = (screen: Screen) =>
   screen.getByRole('link', { name: 'Open Tailscale DNS settings' });

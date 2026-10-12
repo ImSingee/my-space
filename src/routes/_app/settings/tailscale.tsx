@@ -10,7 +10,7 @@ export const Route = createFileRoute('/_app/settings/tailscale')({
     <>
       <SectionHead
         title="Tailscale"
-        description="Connect this space to your private network."
+        description="Open Hatch privately from devices on your tailnet. Access follows your tailnet rules, and visitors still sign in to Hatch."
       />
       <TailscaleSettings />
     </>
