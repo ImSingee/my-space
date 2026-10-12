@@ -36,6 +36,8 @@ async function fixture(
   const binary = path.join(dir, 'helper');
   const pidFile = path.join(dir, 'helper.pid');
   const statusFile = path.join(dir, 'status.json');
+  const inputFile = path.join(dir, 'input.json');
+  const argsFile = path.join(dir, 'args.json');
   await writeFile(
     statusFile,
     JSON.stringify(
@@ -46,8 +48,10 @@ async function fixture(
     binary,
     `#!/usr/bin/env node
 require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+require('node:fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
 if (process.env.SECRET || process.env.TS_AUTHKEY || process.env.DATABASE_URL) process.exit(2);
 process.stdin.resume();
+process.stdin.on('data', (chunk) => require('node:fs').writeFileSync(${JSON.stringify(inputFile)}, chunk));
 process.stdin.on('end', () => process.exit());
 let previous;
 setInterval(() => {
@@ -71,8 +75,140 @@ setInterval(() => {
     managers.push(manager);
     return manager;
   };
-  return { create, getConfig: () => config, binary, pidFile, statusFile };
+  return {
+    create,
+    getConfig: () => config,
+    binary,
+    pidFile,
+    statusFile,
+    inputFile,
+    argsFile,
+  };
 }
+
+it('enrolls with an explicit key over stdin without persisting or returning it, and restores without that key', async () => {
+  vi.stubEnv('TS_AUTHKEY', 'ambient-must-not-reach-helper');
+  const { create, getConfig, inputFile, argsFile } = await fixture();
+  const manager = create();
+  const authKey = 'tskey-auth-fixture-secret';
+  const initial = await manager.configure({
+    enabled: true,
+    hostname: 'hatch',
+    authKey,
+  });
+  await vi.waitFor(async () => {
+    expect(JSON.parse(await readFile(inputFile, 'utf8'))).toEqual({ authKey });
+  });
+  const args = JSON.parse(await readFile(argsFile, 'utf8'));
+  expect(args).toContain('--auth-key-stdin');
+  expect(JSON.stringify(args)).not.toContain(authKey);
+  expect(getConfig()).toEqual({ enabled: true, hostname: 'hatch' });
+  expect(JSON.stringify(initial)).not.toContain(authKey);
+  await vi.waitFor(() => expect(manager.snapshot().state).toBe('connected'));
+  expect(JSON.stringify(manager.snapshot())).not.toContain(authKey);
+  await manager.shutdown();
+  const restored = create();
+  await restored.initialize();
+  await vi.waitFor(() => expect(restored.snapshot().state).toBe('connected'));
+  expect(JSON.parse(await readFile(argsFile, 'utf8'))).not.toContain(
+    '--auth-key-stdin',
+  );
+});
+
+it('keeps enrollment failures after helper exit and can retry interactively', async () => {
+  const message = 'Auth key sign-in failed. Check the key and reconnect.';
+  const { create, binary, statusFile } = await fixture(undefined, {
+    state: 'error',
+    origin: '',
+    loginUrl: '',
+    message,
+  });
+  await writeFile(
+    binary,
+    `#!/usr/bin/env node
+process.stdin.once('data', () => {
+  console.log(require('node:fs').readFileSync(${JSON.stringify(statusFile)}, 'utf8'));
+  process.exit();
+});
+`,
+    { mode: 0o700 },
+  );
+  const manager = create();
+  await manager.configure({
+    enabled: true,
+    hostname: 'hatch',
+    authKey: 'fixture',
+  });
+  await vi.waitFor(() => expect(manager.snapshot().message).toBe(message));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(manager.snapshot()).toMatchObject({
+    state: 'error',
+    origin: null,
+    loginUrl: null,
+    message,
+  });
+  await manager.configure({ enabled: true, hostname: 'hatch' });
+  expect(manager.snapshot()).toMatchObject({
+    state: 'starting',
+    message: null,
+  });
+});
+
+it('never exposes an interactive authorization URL during key-based enrollment', async () => {
+  const { create } = await fixture(undefined, {
+    state: 'needs-login',
+    origin: '',
+    loginUrl: 'https://login.tailscale.com/a/fixture',
+    message: '',
+  });
+  const manager = create();
+  await manager.configure({
+    enabled: true,
+    hostname: 'hatch',
+    authKey: 'fixture',
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(manager.snapshot()).toMatchObject({
+    state: 'starting',
+    loginUrl: null,
+    origin: null,
+  });
+});
+
+it('rejects invalid enrollment requests before saving or starting a helper', async () => {
+  const { create, getConfig } = await fixture();
+  const manager = create();
+  await expect(
+    manager.configure({ enabled: true, hostname: 'hatch', authKey: '   ' }),
+  ).rejects.toThrow('Enter an auth key');
+  await expect(
+    manager.configure({
+      enabled: false,
+      hostname: 'hatch',
+      authKey: 'fixture',
+    }),
+  ).rejects.toThrow('Auth keys can only be used when connecting');
+  expect(getConfig()).toEqual({ enabled: false, hostname: 'hatch' });
+  expect(manager.snapshot().state).toBe('disconnected');
+});
+
+it('handles a failed helper spawn with credentials without unhandled stdin errors', async () => {
+  const { create, binary } = await fixture();
+  await writeFile(binary, '#!/nonexistent-hatch-interpreter\n', {
+    mode: 0o700,
+  });
+  const manager = create();
+  await manager.configure({
+    enabled: true,
+    hostname: 'hatch',
+    authKey: 'fixture-secret',
+  });
+  await vi.waitFor(() => expect(manager.snapshot().state).toBe('error'));
+  expect(manager.snapshot()).toMatchObject({ loginUrl: null, origin: null });
+  expect(JSON.stringify(manager.snapshot())).not.toContain('fixture-secret');
+  await manager.configure({ enabled: false, hostname: 'hatch' });
+  expect(manager.snapshot().state).toBe('disconnected');
+});
 
 it('forwards independent DNS diagnostics and clears them when lifecycle or helper data changes', async () => {
   const report = {

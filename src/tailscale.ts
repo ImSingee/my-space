@@ -7,6 +7,22 @@ export const tailscaleConfigSchema = z.object({
 
 export type TailscaleConfig = z.infer<typeof tailscaleConfigSchema>;
 
+export const tailscaleAuthKeySchema = z
+  .string()
+  .trim()
+  .min(1, 'Enter an auth key')
+  .max(4096, 'Auth key is too long')
+  .regex(/^[!-~]+$/, 'Enter an auth key without spaces');
+
+// Enrollment credentials belong to one request, never persisted configuration.
+export const tailscaleConfigureSchema = tailscaleConfigSchema
+  .extend({ authKey: tailscaleAuthKeySchema.optional() })
+  .refine((input) => input.enabled || input.authKey === undefined, {
+    message: 'Auth keys can only be used when connecting',
+  });
+
+export type TailscaleConfigureInput = z.infer<typeof tailscaleConfigureSchema>;
+
 export const tailscaleDnsStatusSchema = z.object({
   magicDnsEnabled: z.boolean().nullable(),
   httpsCertificatesEnabled: z.boolean().nullable(),

@@ -6,6 +6,9 @@ import {
   Code,
   Divider,
   Group,
+  Loader,
+  PasswordInput,
+  Radio,
   Skeleton,
   Stack,
   Table,
@@ -15,12 +18,15 @@ import {
 import { modals } from '@mantine/modals';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  IconAlertCircle,
+  IconAlertTriangle,
   IconCheck,
   IconCircleCheck,
   IconCircleX,
   IconCopy,
   IconExternalLink,
   IconHelpCircle,
+  IconInfoCircle,
 } from '@tabler/icons-react';
 import copy from 'copy-to-clipboard';
 import dayjs from 'dayjs';
@@ -30,23 +36,46 @@ import { tailscaleQueryOptions } from '~queries/tailscale';
 import { configureTailscale } from '~server/tailscale';
 import {
   tailscaleConfigSchema,
+  tailscaleAuthKeySchema,
   tailscaleLoginUrlSchema,
-  type TailscaleConfig,
+  type TailscaleConfigureInput,
   type TailscaleStatus,
 } from '~/tailscale';
 import { openTailscaleAuthorization } from './tailscale-authorization';
+import classes from './tailscale-panel.module.css';
 
-const STATE_LABELS = {
-  disconnected: 'Disconnected',
-  starting: 'Connecting',
-  'preparing-https': 'Preparing HTTPS',
-  'needs-login': 'Authorizing',
-  'needs-approval': 'Waiting for device approval',
-  connected: 'Connected',
-  error: 'Needs attention',
-} as const;
+const STATES = {
+  disconnected: { label: 'Not connected', color: 'gray' },
+  starting: { label: 'Connecting', color: 'blue' },
+  'preparing-https': { label: 'Preparing HTTPS', color: 'blue' },
+  'needs-login': { label: 'Waiting for sign-in', color: 'blue' },
+  'needs-approval': { label: 'Waiting for approval', color: 'blue' },
+  connected: { label: 'Connected', color: 'green' },
+  error: { label: 'Needs attention', color: 'red' },
+} as const satisfies Record<
+  TailscaleStatus['state'],
+  { label: string; color: string }
+>;
+
+const LOGIN_METHODS = [
+  {
+    value: 'interactive',
+    label: 'Interactive sign-in',
+    description: 'Sign in with your Tailscale account in a new window.',
+  },
+  {
+    value: 'auth-key',
+    label: 'Auth key',
+    description:
+      'Paste a key from the Tailscale admin console. No sign-in window opens.',
+  },
+] as const;
+
+type LoginMethod = (typeof LOGIN_METHODS)[number]['value'];
 
 const DNS_SETTINGS_URL = 'https://login.tailscale.com/admin/dns';
+const DEVICES_URL = 'https://login.tailscale.com/admin/machines';
+const AUTH_KEYS_URL = 'https://login.tailscale.com/admin/settings/keys';
 
 type HttpsPhase = NonNullable<TailscaleStatus['https']>['phase'];
 
@@ -122,33 +151,73 @@ function DnsSettingRow({
   );
 }
 
+function ExternalButton({ href, label }: { href: string; label: string }) {
+  return (
+    <Button
+      component="a"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      variant="default"
+      rightSection={<IconExternalLink size={16} />}
+    >
+      {label}
+    </Button>
+  );
+}
+
 export function TailscaleSettings() {
   const queryClient = useQueryClient();
   const query = useQuery(tailscaleQueryOptions);
+  const request = useRef<TailscaleConfigureInput | null>(null);
   const mutation = useMutation({
+    meta: { errorToast: false },
+    networkMode: 'always',
+    retry: false,
+    gcTime: 0,
     onMutate: () =>
       queryClient.cancelQueries({ queryKey: tailscaleQueryOptions.queryKey }),
-    mutationFn: (config: TailscaleConfig) =>
-      configureTailscale({ data: config }),
+    // Mutation variables are cached. Read a single-use request instead.
+    mutationFn: async () => {
+      const data = request.current;
+      request.current = null;
+      if (!data) throw new Error('Connection request is unavailable.');
+      return configureTailscale({ data });
+    },
     onSuccess: (status) => {
       queryClient.setQueryData(tailscaleQueryOptions.queryKey, status);
     },
   });
   if (!query.data) {
-    if (!query.error) return <Skeleton height={180} />;
+    if (!query.error) {
+      return (
+        <Stack gap="lg">
+          <Skeleton height={28} width={160} />
+          <Skeleton height={60} />
+          <Skeleton height={84} />
+          <Skeleton height={36} width={170} />
+        </Stack>
+      );
+    }
     return (
-      <Alert color="red" title="Connection status unavailable">
-        <Text size="sm">
-          {query.error?.message ?? 'Loading connection status…'}
-        </Text>
-        <Button
-          type="button"
-          variant="subtle"
-          onClick={() => void query.refetch()}
-          loading={query.isFetching}
-        >
-          Retry
-        </Button>
+      <Alert
+        color="red"
+        title="Connection status unavailable"
+        icon={<IconAlertCircle size={18} />}
+      >
+        <Stack gap="sm" align="flex-start">
+          <Text size="sm">
+            {query.error?.message ?? 'Loading connection status…'}
+          </Text>
+          <Button
+            type="button"
+            variant="default"
+            onClick={() => void query.refetch()}
+            loading={query.isFetching}
+          >
+            Try again
+          </Button>
+        </Stack>
       </Alert>
     );
   }
@@ -157,7 +226,14 @@ export function TailscaleSettings() {
       status={query.data}
       pending={mutation.isPending}
       error={mutation.error?.message ?? query.error?.message ?? null}
-      onConfigure={(config) => mutation.mutateAsync(config)}
+      onConfigure={async (input) => {
+        request.current = input;
+        try {
+          return await mutation.mutateAsync();
+        } finally {
+          request.current = null;
+        }
+      }}
     />
   );
 }
@@ -171,10 +247,13 @@ export function TailscalePanel({
   status: TailscaleStatus;
   pending: boolean;
   error: string | null;
-  onConfigure: (config: TailscaleConfig) => Promise<TailscaleStatus>;
+  onConfigure: (config: TailscaleConfigureInput) => Promise<TailscaleStatus>;
 }) {
   const [hostname, setHostname] = useState<string | null>(null);
   const [copiedOrigin, setCopiedOrigin] = useState<string | null>(null);
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('interactive');
+  const [authKey, setAuthKey] = useState('');
+  const submitting = useRef(false);
   const authorization = useRef<{
     popup: Window | null;
     ready: boolean;
@@ -225,29 +304,55 @@ export function TailscalePanel({
     },
     [],
   );
+  const canAuthenticate =
+    !status.enabled ||
+    status.state === 'needs-login' ||
+    (status.state === 'error' && !status.dns && !status.https);
+  const usesAuthKey = canAuthenticate && loginMethod === 'auth-key';
   const connect = async (deviceName: string) => {
-    if (pending || authorization.current || !status.available) return;
+    if (pending || submitting.current || !status.available) return;
+    const key = usesAuthKey ? tailscaleAuthKeySchema.safeParse(authKey) : null;
+    if (key && !key.success) return;
+    submitting.current = true;
+    finishAuthorization();
     const attempt = {
-      popup: openTailscaleAuthorization(),
+      popup: !key ? openTailscaleAuthorization() : null,
       ready: false,
       navigated: false,
     };
     authorization.current = attempt;
+    setAuthKey('');
     try {
-      const next = await onConfigure({ enabled: true, hostname: deviceName });
+      const next = await onConfigure({
+        enabled: true,
+        hostname: deviceName,
+        ...(key?.success ? { authKey: key.data } : {}),
+      });
       if (authorization.current !== attempt) return;
       attempt.ready = true;
       syncAuthorization(next);
     } catch {
       if (authorization.current === attempt) finishAuthorization();
+    } finally {
+      submitting.current = false;
     }
   };
   const name = status.enabled ? status.hostname : (hostname ?? status.hostname);
   const validName =
     tailscaleConfigSchema.shape.hostname.safeParse(name).success;
+  const validKey = tailscaleAuthKeySchema.safeParse(authKey).success;
+  const keyReady = !usesAuthKey || validKey;
+  const chooseLoginMethod = (value: string) => {
+    // Re-selecting the current method must not close a pending sign-in.
+    if (value === loginMethod) return;
+    finishAuthorization();
+    setAuthKey('');
+    setLoginMethod(value === 'auth-key' ? 'auth-key' : 'interactive');
+  };
   const disconnect = () => {
     const apply = () => {
       finishAuthorization();
+      setAuthKey('');
       void onConfigure({ enabled: false, hostname: status.hostname }).catch(
         () => {},
       );
@@ -279,6 +384,18 @@ export function TailscalePanel({
     !status.https &&
     status.dns?.magicDnsEnabled === true &&
     status.dns.httpsCertificatesEnabled === true;
+  // Errors that still allow signing in mean the connection itself failed;
+  // DNS and certificate problems are settings the user can fix and wait on.
+  const connectionFailed = status.state === 'error' && canAuthenticate;
+  const problemTitle =
+    httpsProblem?.title ??
+    (httpsNotReady
+      ? 'HTTPS is not ready'
+      : connectionFailed
+        ? 'Could not connect to Tailscale'
+        : 'Connection needs attention');
+  const problemColor =
+    httpsProblem?.color ?? (connectionFailed ? 'red' : 'yellow');
   const retryAt =
     status.https?.phase === 'rate-limited' ? status.https.retryAt : null;
   const retryTime = retryAt ? dayjs(retryAt) : null;
@@ -288,33 +405,74 @@ export function TailscalePanel({
     ? httpsProblem.dnsSettings
     : Boolean(status.dns) ||
       /dns|certificate settings/i.test(status.message ?? '');
-  const badge = httpsProblem ?? {
-    badge: STATE_LABELS[status.state],
-    color:
-      status.state === 'connected'
-        ? 'green'
-        : status.state === 'error'
-          ? 'red'
-          : 'gray',
-  };
+  const badge = httpsProblem
+    ? { label: httpsProblem.badge, color: httpsProblem.color }
+    : {
+        label: STATES[status.state].label,
+        color:
+          status.state === 'error' ? problemColor : STATES[status.state].color,
+      };
+  const working =
+    status.state === 'starting' || status.state === 'preparing-https';
+  // Restarting cannot lift a provider rate limit; the helper already waits
+  // until the retry time. A pending interactive sign-in continues through its
+  // authorization link instead.
+  const submitLabel = !status.enabled
+    ? 'Connect Tailscale'
+    : (status.state === 'error' && status.https?.phase !== 'rate-limited') ||
+        (status.state === 'needs-login' && usesAuthKey)
+      ? 'Reconnect'
+      : null;
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-start">
-        <Stack gap={4}>
-          <Text fw={600}>Private access</Text>
-          <Text size="sm" c="dimmed" maw={560}>
-            Open Hatch from your devices on Tailscale. Access follows your
-            tailnet rules, and visitors still sign in to Hatch.
-          </Text>
-        </Stack>
-        <Badge variant="light" color={badge.color} aria-live="polite">
-          {badge.badge}
-        </Badge>
-      </Group>
+      <div className={classes.status}>
+        <div className={classes.statusMain}>
+          <Badge
+            size="lg"
+            radius="sm"
+            variant="light"
+            color={badge.color}
+            leftSection={
+              working && !httpsProblem ? (
+                <Loader size={10} color={badge.color} />
+              ) : undefined
+            }
+            className={classes.badge}
+            aria-live="polite"
+          >
+            {badge.label}
+          </Badge>
+          {status.enabled && (
+            <Text size="sm" c="dimmed" truncate className={classes.device}>
+              Device{' '}
+              <Text span inherit fw={500} c="var(--mantine-color-text)">
+                {status.hostname}
+              </Text>
+            </Text>
+          )}
+        </div>
+        {status.enabled && (
+          <Button
+            type="button"
+            variant="default"
+            loading={pending}
+            onClick={disconnect}
+            className={classes.statusAction}
+          >
+            {working || status.state === 'needs-login'
+              ? 'Cancel connection'
+              : 'Disconnect'}
+          </Button>
+        )}
+      </div>
 
       {!status.available && (
-        <Alert title="Tailscale is not installed" color="yellow">
+        <Alert
+          title="Tailscale is not installed"
+          color="yellow"
+          icon={<IconAlertTriangle size={18} />}
+        >
           <Text size="sm">
             Use a Hatch Docker image that includes Tailscale. For a source
             installation, build the connection helper with{' '}
@@ -323,8 +481,64 @@ export function TailscalePanel({
         </Alert>
       )}
       {error && (
-        <Alert title="Unable to update connection" color="red">
+        <Alert
+          title="Could not update the connection"
+          color="red"
+          icon={<IconAlertCircle size={18} />}
+        >
           {error}
+        </Alert>
+      )}
+      {status.state === 'starting' && (
+        <Text component="output" size="sm" c="dimmed">
+          Connecting to your tailnet. With interactive sign-in, the
+          authorization window continues automatically if Tailscale asks you to
+          sign in.
+        </Text>
+      )}
+      {status.state === 'needs-login' && loginMethod === 'interactive' && (
+        <Alert
+          title="Finish signing in to Tailscale"
+          color="blue"
+          role="note"
+          icon={<IconInfoCircle size={18} />}
+        >
+          <Stack gap="sm" align="flex-start">
+            <Text size="sm">
+              Complete authorization in the Tailscale window. If it didn’t open
+              or you closed it, continue here. This page updates when you
+              finish.
+            </Text>
+            {status.loginUrl ? (
+              <ExternalButton
+                href={status.loginUrl}
+                label="Continue authorization"
+              />
+            ) : (
+              <Text component="output" size="sm">
+                Preparing authorization…
+              </Text>
+            )}
+          </Stack>
+        </Alert>
+      )}
+      {status.state === 'needs-approval' && (
+        <Alert
+          title="Approve this device"
+          color="blue"
+          role="note"
+          icon={<IconInfoCircle size={18} />}
+        >
+          <Stack gap="sm" align="flex-start">
+            <Text size="sm">
+              Your tailnet requires an admin to approve new devices. Approve{' '}
+              <Text span inherit fw={600}>
+                {status.hostname}
+              </Text>{' '}
+              in the Tailscale admin console; this page updates automatically.
+            </Text>
+            <ExternalButton href={DEVICES_URL} label="Open Tailscale devices" />
+          </Stack>
         </Alert>
       )}
       {status.state === 'preparing-https' && (
@@ -333,24 +547,26 @@ export function TailscalePanel({
           color="blue"
           role="note"
           aria-live="polite"
+          icon={<IconInfoCircle size={18} />}
         >
           <Text size="sm">
-            Your device is connected to Tailscale. We’re preparing its HTTPS
-            certificate so you can open Hatch securely. First-time setup can
-            take a few minutes. You can leave this page; Hatch will keep trying
-            and show your private address when it’s ready.
+            Your device is connected to Tailscale. Hatch is getting its HTTPS
+            certificate, which can take a few minutes the first time. You can
+            leave this page; your private address appears here when it’s ready.
           </Text>
         </Alert>
       )}
       {status.message && status.state !== 'preparing-https' && (
         <Alert
-          title={
-            httpsProblem?.title ??
-            (httpsNotReady
-              ? 'HTTPS is not ready'
-              : 'Connection needs attention')
+          title={problemTitle}
+          color={problemColor}
+          icon={
+            problemColor === 'red' ? (
+              <IconAlertCircle size={18} />
+            ) : (
+              <IconAlertTriangle size={18} />
+            )
           }
-          color={httpsProblem?.color ?? 'yellow'}
         >
           <Stack gap="sm" align="flex-start">
             <Text size="sm">{status.message}</Text>
@@ -388,116 +604,33 @@ export function TailscalePanel({
               </Table>
             )}
             {showDnsSettings && (
-              <Button
-                component="a"
+              <ExternalButton
                 href={DNS_SETTINGS_URL}
-                target="_blank"
-                rel="noreferrer"
-                variant="default"
-                rightSection={<IconExternalLink size={16} />}
-              >
-                Open Tailscale DNS settings
-              </Button>
+                label="Open Tailscale DNS settings"
+              />
             )}
           </Stack>
         </Alert>
       )}
-
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (validName && !status.enabled) void connect(name);
-        }}
-      >
-        <Stack gap="md">
-          <TextInput
-            label="Device name"
-            description="How this Hatch installation appears in Tailscale."
-            value={name}
-            onChange={(event) => setHostname(event.currentTarget.value)}
-            disabled={status.enabled || pending}
-            maxLength={63}
-            error={
-              !validName
-                ? 'Use lowercase letters, numbers, and hyphens; start and end with a letter or number.'
-                : undefined
-            }
-          />
-          {!status.enabled && (
-            <Group>
-              <Button
-                type="submit"
-                loading={pending}
-                disabled={!status.available || !validName}
-              >
-                Connect Tailscale
-              </Button>
-            </Group>
-          )}
-        </Stack>
-      </form>
-
-      {status.state === 'starting' && (
-        <Text component="output" size="sm">
-          Connecting to your network. Authorization will open automatically if
-          needed.
-        </Text>
-      )}
-      {status.state === 'needs-login' && (
-        <Stack gap="sm">
-          <Text size="sm">
-            Complete authorization with Tailscale to finish connecting. If the
-            authorization window is not open, continue below. This page updates
-            automatically when you finish.
-          </Text>
-          <Group>
-            {status.loginUrl ? (
-              <Anchor
-                href={status.loginUrl}
-                target="_blank"
-                rel="noreferrer"
-                size="sm"
-              >
-                Continue authorization
-              </Anchor>
-            ) : (
-              <Text component="output" size="sm">
-                Preparing authorization…
-              </Text>
-            )}
-          </Group>
-        </Stack>
-      )}
-      {status.state === 'needs-approval' && (
-        <Alert title="Approve this device" color="blue">
-          <Text size="sm">
-            Your tailnet requires administrator approval before this device can
-            connect.
-          </Text>
-          <Anchor
-            href="https://login.tailscale.com/admin/machines"
-            target="_blank"
-            rel="noreferrer"
-            size="sm"
-          >
-            Open Tailscale devices
-          </Anchor>
-        </Alert>
-      )}
       {status.state === 'connected' && status.origin && (
-        <Stack gap="sm">
-          <Text fw={600} size="sm">
-            Your private address
+        <Stack gap="xs">
+          <Text size="sm" fw={600}>
+            Private address
           </Text>
           <Anchor
             href={status.origin}
             target="_blank"
             rel="noreferrer"
-            style={{ overflowWrap: 'anywhere' }}
+            fw={500}
+            td="underline"
+            className={classes.address}
           >
             {status.origin}
           </Anchor>
-          <Group>
+          <Text size="sm" c="dimmed">
+            Open it from any device signed in to your tailnet.
+          </Text>
+          <Group gap="sm" mt={4}>
             <Button
               type="button"
               variant="default"
@@ -533,40 +666,114 @@ export function TailscalePanel({
         </Stack>
       )}
 
-      {status.enabled && (
-        <Group>
-          {/* Restarting cannot lift a provider rate limit; the helper already
-              waits until the retry time. */}
-          {status.state === 'error' &&
-            status.https?.phase !== 'rate-limited' && (
-              <Button
-                type="button"
-                loading={pending}
-                disabled={!status.available}
-                onClick={() => void connect(status.hostname)}
-              >
-                Reconnect
-              </Button>
+      {(canAuthenticate || submitLabel) && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (submitLabel && validName && keyReady) void connect(name);
+          }}
+        >
+          <Stack gap="lg">
+            {!status.enabled && (
+              <TextInput
+                label="Device name"
+                description="Names this device in Tailscale and in its private address."
+                value={name}
+                onChange={(event) => setHostname(event.currentTarget.value)}
+                disabled={pending}
+                maxLength={63}
+                error={
+                  !validName
+                    ? 'Use lowercase letters, numbers, and hyphens; start and end with a letter or number.'
+                    : undefined
+                }
+              />
             )}
-          <Button
-            type="button"
-            variant="default"
-            loading={pending}
-            onClick={disconnect}
-          >
-            {status.state === 'starting' ||
-            status.state === 'needs-login' ||
-            status.state === 'preparing-https'
-              ? 'Cancel connection'
-              : 'Disconnect'}
-          </Button>
-        </Group>
+            {canAuthenticate && (
+              <Radio.Group
+                label="Sign-in method"
+                value={loginMethod}
+                onChange={chooseLoginMethod}
+              >
+                <div className={classes.methods}>
+                  {LOGIN_METHODS.map((method) => (
+                    <Radio.Card
+                      key={method.value}
+                      value={method.value}
+                      disabled={pending}
+                      className={classes.method}
+                    >
+                      <Radio.Indicator className={classes.methodIndicator} />
+                      <div>
+                        <Text size="sm" fw={500}>
+                          {method.label}
+                        </Text>
+                        <Text size="sm" c="dimmed">
+                          {method.description}
+                        </Text>
+                      </div>
+                    </Radio.Card>
+                  ))}
+                </div>
+              </Radio.Group>
+            )}
+            {usesAuthKey && (
+              <PasswordInput
+                label="Auth key"
+                description={
+                  <>
+                    Used once to add this device. Hatch doesn’t save it.{' '}
+                    <Anchor
+                      href={AUTH_KEYS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      inherit
+                      td="underline"
+                    >
+                      Create an auth key
+                    </Anchor>
+                  </>
+                }
+                value={authKey}
+                disabled={pending}
+                maxLength={4096}
+                // A single-use enrollment key is not a site password: keep
+                // spelling services and password managers away from it.
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore
+                onChange={(event) => setAuthKey(event.currentTarget.value)}
+                error={
+                  authKey && !validKey
+                    ? 'Enter the key exactly as Tailscale shows it, without spaces.'
+                    : undefined
+                }
+              />
+            )}
+            {submitLabel && (
+              <Group>
+                <Button
+                  type="submit"
+                  loading={pending}
+                  disabled={!status.available || !validName || !keyReady}
+                >
+                  {submitLabel}
+                </Button>
+              </Group>
+            )}
+          </Stack>
+        </form>
       )}
+
       <Divider />
       <Text size="sm" c="dimmed">
-        Hatch remembers this connection and restores it after a restart.
-        Disconnecting stops private access and keeps the device identity for
-        next time. Your original Hatch address stays available.
+        Hatch restores this connection after a restart. Disconnecting turns off
+        private access and keeps the device identity for next time. Your
+        original Hatch address keeps working.
       </Text>
     </Stack>
   );

@@ -1,5 +1,8 @@
 import { createServerFn } from '@tanstack/react-start';
-import { tailscaleConfigSchema, type TailscaleConfig } from '../tailscale';
+import {
+  tailscaleConfigureSchema,
+  type TailscaleConfigureInput,
+} from '../tailscale';
 import { authMiddleware } from './auth';
 import { getTailscaleManager } from './tailscale-manager';
 
@@ -11,7 +14,12 @@ export const getTailscaleStatus = createServerFn({ method: 'GET' })
 
 export const configureTailscale = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: TailscaleConfig) => tailscaleConfigSchema.parse(input))
+  .validator((input: TailscaleConfigureInput) => {
+    const result = tailscaleConfigureSchema.safeParse(input);
+    if (!result.success)
+      throw new Error('Invalid Tailscale connection settings.');
+    return result.data;
+  })
   .handler(async ({ data }) => {
     return getTailscaleManager().configure(data);
   });

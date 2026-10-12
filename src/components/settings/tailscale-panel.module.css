@@ -1,0 +1,77 @@
+/* State, device, and the connection-level action share one row; the action
+   drops below the state when the row runs out of room. */
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+}
+
+.statusMain {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+}
+
+.badge {
+  flex-shrink: 0;
+}
+
+.device {
+  min-width: 0;
+}
+
+.methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--mantine-spacing-sm);
+  margin-top: var(--mantine-spacing-xs);
+}
+
+.method {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border-color: var(--mantine-color-default-border);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.method:where(:not(:disabled)):hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
+.method[data-checked] {
+  border-color: var(--mantine-primary-color-filled);
+  /* A faint wash: the indicator and border mark the choice, and the submit
+     button stays the one strong accent in the form. */
+  background-color: color-mix(
+    in srgb,
+    var(--mantine-primary-color-filled) 5%,
+    var(--mantine-color-body)
+  );
+}
+
+.method:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Center the indicator on the first line of the option label. */
+.methodIndicator {
+  margin-top: 1px;
+}
+
+.address {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 36em) {
+  .statusAction {
+    width: 100%;
+  }
+}

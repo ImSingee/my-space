@@ -1,13 +1,25 @@
 # Tailscale access
 
 Open **Settings → Tailscale** to connect Hatch to your private Tailscale network.
-Enter a device name and select **Connect Tailscale**. A connection window opens
+Enter a device name, choose **Interactive sign-in**, and select **Connect Tailscale**. A connection window opens
 and automatically takes you to Tailscale authorization when needed. If the
 device is already authorized, the waiting window closes automatically. The
 panel keeps updating while you authorize and, if required, approve the device
 in your Tailscale admin console. If your browser blocks the window or you close
 it, use **Continue authorization** to resume. **Cancel connection** stops a
 pending connection.
+
+Alternatively, choose **Auth key**, paste a Tailscale auth key, and connect.
+This does not open an authorization window. Hatch clears the input after
+submission and does not save the key. If sign-in fails, enter a valid key and
+select **Reconnect**, or switch to interactive sign-in. Device approval may
+still be required by your tailnet policy.
+
+Auth keys enroll a device that needs authentication; they do not replace an
+already enrolled identity or switch its tailnet. Restarts and reconnects reuse
+the private device state without the enrollment key. Prefer a non-ephemeral
+auth key for a persistent installation. Key-based sign-in still requires the
+DNS and HTTPS settings below.
 
 Enable MagicDNS and HTTPS certificates in your
 [Tailscale DNS settings](https://login.tailscale.com/admin/dns). Your tailnet
@@ -100,9 +112,11 @@ address. Per-App domains and Tailscale Services are not configured.
 - Only the Platform's HTTP service is proxied; the Runner API and database ports
   are not listeners on the Tailscale node. Funnel is not enabled.
 - Only authenticated Hatch users can read or change connection settings.
-- Enrollment uses Tailscale's browser login. No auth key is stored in the panel,
-  and Platform credentials or ambient Tailscale credentials are not passed to
-  the helper process.
+- Enrollment supports interactive browser sign-in or an explicitly supplied
+  auth key. Auth keys are sent through the helper's private stdin pipe, never
+  saved in platform configuration, returned in status, or passed as process
+  arguments or environment variables. Platform credentials and ambient
+  Tailscale credentials are not passed to the helper process.
 - Hatch trusts only the exact HTTPS origin reported by its active helper for
   authentication requests. It never trusts all `*.ts.net` origins or uses
   Tailscale identity headers to bypass Hatch authentication.

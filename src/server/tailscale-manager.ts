@@ -8,11 +8,13 @@ import { WORKSPACE_ROOT } from '../agent/paths';
 import { resolveTailscalePort } from '../platform-port';
 import {
   tailscaleConfigSchema,
+  tailscaleConfigureSchema,
   tailscaleDnsStatusSchema,
   tailscaleHttpsStatusSchema,
   tailscaleLoginUrlSchema,
   tailscaleOriginSchema,
   type TailscaleConfig,
+  type TailscaleConfigureInput,
   type TailscaleStatus,
 } from '../tailscale';
 import { getPlatformConfig, setPlatformConfig } from './platform-config';
@@ -130,8 +132,9 @@ export class TailscaleManager {
     return this.snapshot();
   }
 
-  async configure(input: TailscaleConfig) {
-    const config = tailscaleConfigSchema.parse(input);
+  async configure(input: TailscaleConfigureInput) {
+    const request = tailscaleConfigureSchema.parse(input);
+    const config = tailscaleConfigSchema.parse(request);
     await this.initialize();
     return this.serialize(async () => {
       if (config.enabled && !(await this.isAvailable())) {
@@ -143,12 +146,12 @@ export class TailscaleManager {
       await this.deps.save(config);
       this.status = { ...this.status, ...config };
       await this.stop();
-      if (config.enabled) await this.start();
+      if (config.enabled) await this.start(request.authKey);
       return this.snapshot();
     });
   }
 
-  private async start() {
+  private async start(authKey?: string) {
     this.status.available = await this.isAvailable();
     if (!this.status.available) {
       this.clear('error', 'Tailscale is not included in this installation.');
@@ -159,7 +162,7 @@ export class TailscaleManager {
     this.clear('starting');
     this.lastStatus = Date.now();
     // Do not pass platform secrets, database URLs, or ambient TS_AUTHKEY to
-    // the helper. Enrollment happens explicitly through its login URL.
+    // the helper. Explicit enrollment credentials use its private stdin pipe.
     const env: NodeJS.ProcessEnv = {};
     for (const key of [
       'PATH',
@@ -183,10 +186,22 @@ export class TailscaleManager {
         this.deps.stateDir,
         '--port',
         String(this.deps.port),
+        ...(authKey ? ['--auth-key-stdin'] : []),
       ],
       { env, stdio: 'pipe' },
     );
     this.child = child;
+    const authKeyMode = Boolean(authKey);
+    child.stdin.on('error', () => {
+      if (this.child !== child) return;
+      this.clear(
+        'error',
+        'Unable to send connection settings. Reconnect to try again.',
+      );
+      child.kill('SIGTERM');
+    });
+    if (authKey) child.stdin.write(`${JSON.stringify({ authKey })}\n`);
+    authKey = undefined;
     const lines = createInterface({ input: child.stdout });
     lines.on('line', (line) => {
       if (this.child !== child) return;
@@ -197,13 +212,16 @@ export class TailscaleManager {
             ? tailscaleOriginSchema.parse(next.origin)
             : null;
         const loginUrl =
-          next.state === 'needs-login' && next.loginUrl
+          !authKeyMode && next.state === 'needs-login' && next.loginUrl
             ? tailscaleLoginUrlSchema.parse(next.loginUrl)
             : null;
         this.lastStatus = Date.now();
         this.status = {
           ...this.status,
-          state: next.state,
+          state:
+            authKeyMode && next.state === 'needs-login'
+              ? 'starting'
+              : next.state,
           origin,
           loginUrl,
           message: next.message || null,
@@ -227,6 +245,7 @@ export class TailscaleManager {
       lines.close();
       if (this.child !== child) return;
       this.child = null;
+      if (this.status.state === 'error') return;
       this.clear(
         'error',
         'The Tailscale connection stopped. Reconnect to try again.',
