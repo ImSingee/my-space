@@ -43,8 +43,8 @@ const sourceRelativePath = z
  */
 export const WORKFLOW_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
-/** Mutable human-facing Workflow slug used in `/workflow/<slug>`. */
-export const WORKFLOW_SLUG_RE = /^[a-z][a-z0-9-]*$/;
+/** Mutable `/workflow/<slug>` segment, starting with a letter or digit. */
+export const WORKFLOW_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /** True when `id` is a safe Workflow id path segment (ULID or legacy kebab). */
 export function isValidWorkflowId(id: string): boolean {

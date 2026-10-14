@@ -214,7 +214,7 @@ export async function renameAppSlug(
   if (!isValidAppSlug(slug)) {
     throw new Error(
       'Slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
-        'starting with a letter).',
+        'starting with a letter or digit).',
     );
   }
 

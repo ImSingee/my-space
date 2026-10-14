@@ -128,9 +128,9 @@ describe('createApp', () => {
     await expect(db.query.apps.findFirst()).resolves.toMatchObject({ name });
   });
 
-  it('returns the default scaffold without assigning draft capabilities', async () => {
+  it('creates a digit-leading slug with the default scaffold and separate identity', async () => {
     const result = await createApp({
-      slug: 'hello-world',
+      slug: '123-test-app',
       name: 'Hello "World"',
       description: 'First line\nSecond line',
     });
@@ -155,7 +155,7 @@ describe('createApp', () => {
     });
     expect(
       JSON.parse(renderedFile(result.files, 'package.json')),
-    ).toMatchObject({ name: 'hello-world' });
+    ).toMatchObject({ name: '123-test-app' });
     expect(renderedFile(result.files, 'app/index.html')).toContain(
       '<title>Hello "World"</title>',
     );
@@ -167,7 +167,7 @@ describe('createApp', () => {
     expect(mocks.ensureAppRepo).toHaveBeenCalledWith(result.id);
     await expect(db.query.apps.findFirst()).resolves.toMatchObject({
       id: result.id,
-      slug: 'hello-world',
+      slug: '123-test-app',
       name: 'Hello "World"',
       description: 'First line\nSecond line',
       status: 'draft',

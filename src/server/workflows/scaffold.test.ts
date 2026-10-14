@@ -37,13 +37,13 @@ beforeEach(async () => {
 describe('createWorkflow', () => {
   it('generates an immutable id and uses the slug only for human-facing state', async () => {
     const created = await createWorkflow({
-      slug: 'daily-digest',
+      slug: '123-test-workflow',
       name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
       description: 'First line\nSecond line \\ __WORKFLOW_ID__',
     });
 
     expect(created).toMatchObject({
-      slug: 'daily-digest',
+      slug: '123-test-workflow',
       name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
     });
     expect(created.id).toMatch(/^[0-9a-z]{26}$/);
@@ -60,11 +60,11 @@ describe('createWorkflow', () => {
     });
     expect(
       JSON.parse(renderedFile(created.files, 'package.json')),
-    ).toMatchObject({ name: 'daily-digest' });
+    ).toMatchObject({ name: '123-test-workflow' });
     expect(mocks.ensureWorkflowRepo).toHaveBeenCalledWith(created.id);
     await expect(db.query.workflows.findFirst()).resolves.toMatchObject({
       id: created.id,
-      slug: 'daily-digest',
+      slug: '123-test-workflow',
       name: 'Daily "digest" __WORKFLOW_DESCRIPTION__',
       description: 'First line\nSecond line \\ __WORKFLOW_ID__',
       repoPath: `/test/workflow-repos/${created.id}.git`,
@@ -96,7 +96,7 @@ describe('createWorkflow', () => {
 
   it('rejects invalid slugs before creating repository or database state', async () => {
     await expect(
-      createWorkflow({ slug: '01numeric-slug', name: 'Invalid' }),
+      createWorkflow({ slug: '-invalid-slug', name: 'Invalid' }),
     ).rejects.toThrow('slug must be kebab-case');
     await expect(
       createWorkflow({

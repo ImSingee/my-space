@@ -151,7 +151,7 @@ export async function renameWorkflowSlug(
   if (!isValidWorkflowSlug(slug)) {
     throw new Error(
       'Slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
-        'starting with a letter).',
+        'starting with a letter or digit).',
     );
   }
 

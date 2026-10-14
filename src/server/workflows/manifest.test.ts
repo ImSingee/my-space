@@ -25,9 +25,11 @@ describe('Workflow identity manifest', () => {
     ).toBe(generatedId);
   });
 
-  it('keeps mutable slug validation separate from immutable id validation', () => {
+  it('accepts digit-leading slugs while rejecting unsafe path segments', () => {
     expect(isValidWorkflowId('01k43s9az5t2qpy7ejf0hm6vwc')).toBe(true);
-    expect(isValidWorkflowSlug('01k43s9az5t2qpy7ejf0hm6vwc')).toBe(false);
+    expect(isValidWorkflowSlug('01k43s9az5t2qpy7ejf0hm6vwc')).toBe(true);
+    expect(isValidWorkflowSlug('../daily-digest')).toBe(false);
+    expect(isValidWorkflowSlug('-daily-digest')).toBe(false);
     expect(isValidWorkflowSlug('daily-digest')).toBe(true);
     expect(isValidWorkflowId('../daily-digest')).toBe(false);
   });

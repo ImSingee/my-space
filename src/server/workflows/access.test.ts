@@ -90,14 +90,18 @@ describe('renameWorkflowSlug', () => {
       .set({ manifest: { id: '01immutableworkflow' } })
       .where(eq(schema.workflows.id, '01immutableworkflow'));
 
-    await renameWorkflowSlug('01immutableworkflow', 'renamed-workflow');
+    await renameWorkflowSlug('01immutableworkflow', '123-test-workflow');
+    await expect(workflowIdForSlug('123-test-workflow')).resolves.toBe(
+      '01immutableworkflow',
+    );
+    await expect(workflowIdForSlug('human-readable-slug')).resolves.toBeNull();
 
     const current = await db.query.workflows.findFirst({
       where: { id: '01immutableworkflow' },
       columns: { slug: true, manifest: true },
     });
     expect(current).toEqual({
-      slug: 'renamed-workflow',
+      slug: '123-test-workflow',
       manifest: { id: '01immutableworkflow' },
     });
   });

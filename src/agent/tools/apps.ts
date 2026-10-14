@@ -355,7 +355,8 @@ export function createAppTools(options: {
         minLength: 1,
         maxLength: APP_SLUG_MAX_LENGTH,
         description:
-          'kebab-case URL slug, e.g. "todo" or "habit-tracker". Used in the ' +
+          'URL slug using lowercase letters, digits, and hyphens, starting ' +
+          'with a letter or digit. Used in the ' +
           'human-facing /app/<slug> URL. It can be ' +
           'changed later from the manage page, so it is not permanent; ' +
           'technical APIs use the immutable app id.',

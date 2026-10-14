@@ -20,6 +20,8 @@ import {
 } from './workspace';
 import type { Kind, Workspace } from './workspace';
 import { readInput } from './input';
+import { isValidAppSlug } from '../../hatch-manifest/src/app-schema.js';
+import { isValidWorkflowSlug } from '../../hatch-manifest/src/workflow-schema.js';
 
 export async function runLifecycle(
   args: readonly string[],
@@ -160,13 +162,12 @@ export async function runLifecycle(
       operation === 'create'
         ? await readInput(String(values.file ?? ''), signal)
         : null;
-    if (
-      input &&
-      (typeof input.slug !== 'string' || !/^[a-z][a-z0-9-]*$/.test(input.slug))
-    )
+    const isValidSlug = kind === 'app' ? isValidAppSlug : isValidWorkflowSlug;
+    if (input && (typeof input.slug !== 'string' || !isValidSlug(input.slug)))
       throw new CliError(
         'invalid_input',
-        'Create input requires a kebab-case slug.',
+        'Create input requires a slug of at most 64 characters using lowercase ' +
+          'letters, digits, and hyphens, starting with a letter or digit.',
       );
     const detail =
       operation === 'clone' ? await api.get({ id: positional[0] }) : null;

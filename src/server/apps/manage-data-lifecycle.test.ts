@@ -109,10 +109,11 @@ vi.mock('./build-identity', () => ({
 vi.mock('./git', () => ({
   moveMasterToDeploymentTag: mocks.moveMasterToDeploymentTag,
 }));
-vi.mock('./manifest', () => ({
-  isValidAppId: () => true,
-  isValidAppSlug: () => true,
-}));
+vi.mock('./manifest', async () => {
+  const { isValidAppId, isValidAppSlug } =
+    await import('../../../packages/hatch-manifest/src/app-schema.js');
+  return { isValidAppId, isValidAppSlug };
+});
 vi.mock('./provision', () => ({ dropAppDatabase: mocks.dropAppDatabase }));
 vi.mock('./data-table/provision', () => ({
   dropAppDataDatabase: mocks.dropAppDataDatabase,
@@ -204,14 +205,14 @@ describe('App Data lifecycle recovery', () => {
       .mockResolvedValueOnce({ id: APP_ID, slug: 'old-slug' })
       .mockResolvedValueOnce(undefined);
 
-    await expect(renameAppSlug(APP_ID, 'legacy-kebab-id')).resolves.toEqual({
-      slug: 'legacy-kebab-id',
+    await expect(renameAppSlug(APP_ID, '01existing-app-id')).resolves.toEqual({
+      slug: '01existing-app-id',
     });
 
-    expect(mocks.updateSet).toHaveBeenCalledWith({ slug: 'legacy-kebab-id' });
+    expect(mocks.updateSet).toHaveBeenCalledWith({ slug: '01existing-app-id' });
     expect(mocks.findApp.mock.calls[1]?.[0]).toMatchObject({
       where: {
-        AND: [{ slug: 'legacy-kebab-id' }, { id: { ne: APP_ID } }],
+        AND: [{ slug: '01existing-app-id' }, { id: { ne: APP_ID } }],
       },
     });
   });

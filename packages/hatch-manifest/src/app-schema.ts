@@ -280,11 +280,11 @@ export const capabilitiesSchema = supportedCapabilitiesSchema
 export const APP_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
- * Canonical app-slug shape: kebab-case, must start with a letter. Used in the
- * mutable, human-facing `/app/<slug>` URL. Stricter than `APP_ID_RE` so slugs
- * stay readable and never collide with a bare numeric id.
+ * Canonical app-slug shape: lowercase letters, digits, and hyphens, starting
+ * with a letter or digit. Used in the mutable, human-facing `/app/<slug>` URL.
+ * Slugs and immutable ids occupy independent namespaces.
  */
-export const APP_SLUG_RE = /^[a-z][a-z0-9-]*$/;
+export const APP_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 /** True when `id` is a safe app-id path segment (ULID or legacy kebab). */
 export function isValidAppId(id: string): boolean {

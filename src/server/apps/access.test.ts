@@ -20,16 +20,14 @@ beforeEach(async () => {
   await db.delete(schema.apps);
   await db.insert(schema.apps).values({
     id: '01immutableid',
-    slug: 'human-readable-slug',
+    slug: '123-test-app',
     name: 'Strict slug app',
   });
 });
 
 describe('appIdForSlug', () => {
   it('resolves the current slug to the immutable id', async () => {
-    await expect(appIdForSlug('human-readable-slug')).resolves.toBe(
-      '01immutableid',
-    );
+    await expect(appIdForSlug('123-test-app')).resolves.toBe('01immutableid');
   });
 
   it('does not accept an immutable id that differs from the slug', async () => {
@@ -49,14 +47,14 @@ describe('appIdForSlug', () => {
 
 describe('appSlugExists', () => {
   it('checks only the mutable slug namespace', async () => {
-    await expect(appSlugExists('human-readable-slug')).resolves.toBe(true);
+    await expect(appSlugExists('123-test-app')).resolves.toBe(true);
     await expect(appSlugExists('01immutableid')).resolves.toBe(false);
   });
 
   it('excludes the App being renamed', async () => {
-    await expect(
-      appSlugExists('human-readable-slug', '01immutableid'),
-    ).resolves.toBe(false);
+    await expect(appSlugExists('123-test-app', '01immutableid')).resolves.toBe(
+      false,
+    );
   });
 });
 
@@ -85,7 +83,7 @@ describe('normalizedManifestFor', () => {
 
     const manifest = await normalizedManifestFor('01immutableid');
 
-    expect(manifest?.app?.url).toBe('/app/human-readable-slug');
+    expect(manifest?.app?.url).toBe('/app/123-test-app');
     expect(manifest?.widgets[0]?.url).toBe(
       '/api/app/01immutableid/widget/summary',
     );

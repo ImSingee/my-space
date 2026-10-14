@@ -45,7 +45,7 @@ export async function createWorkflow(
   if (!isValidWorkflowSlug(slug)) {
     throw new Error(
       'slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
-        'starting with a letter).',
+        'starting with a letter or digit).',
     );
   }
 

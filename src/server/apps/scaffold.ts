@@ -121,7 +121,7 @@ export async function createApp(
   if (!isValidAppSlug(slug)) {
     throw new Error(
       'slug must be kebab-case (lowercase letters, digits, and hyphens, ' +
-        'starting with a letter).',
+        'starting with a letter or digit).',
     );
   }
 
