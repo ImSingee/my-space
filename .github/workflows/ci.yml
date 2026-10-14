@@ -60,6 +60,11 @@ jobs:
       - name: Run linter
         run: pnpm lint
 
+      - name: Export mobile iOS bundle
+        run: pnpm mobile:export:ios
+        env:
+          EXPO_NO_TELEMETRY: 1
+
       # The passkey integration test drives a real browser.
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium

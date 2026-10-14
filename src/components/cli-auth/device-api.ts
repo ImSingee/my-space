@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Browser side of the CLI device login, on Better Auth's device endpoints.
+ * Browser side of CLI and mobile device login, on Better Auth's device endpoints.
  * Every call is an explicit user action made with the real Cookie session;
  * nothing is cached, retried or persisted, and the browser never sees the
  * device code or the session token the device receives.
@@ -27,7 +27,10 @@ export function formatUserCode(code: string): string {
 }
 
 /** A pending request this account has claimed and may decide. */
-export type DeviceRequest = { userCode: string };
+export type DeviceRequest = {
+  userCode: string;
+  clientId: 'hatch-cli' | 'hatch-mobile';
+};
 export type DeviceDecision = 'approve' | 'deny';
 export type DeviceOutcome = 'approved' | 'denied';
 
@@ -119,9 +122,12 @@ export async function claimDeviceRequest(
       response.status,
     );
   }
-  if (parsed.data.client_id !== 'hatch-cli')
+  if (
+    parsed.data.client_id !== 'hatch-cli' &&
+    parsed.data.client_id !== 'hatch-mobile'
+  )
     throw new DeviceAuthError('unexpected_response', response.status);
-  return { userCode };
+  return { userCode, clientId: parsed.data.client_id };
 }
 
 export async function decideDeviceRequest(

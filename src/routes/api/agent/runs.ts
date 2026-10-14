@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
 import { composerInputSchema, hasComposerText } from '~agent/composer-content';
-import { auth } from '~auth/server';
+import { authenticateSessionRequest } from '~server/session-http-auth';
 import { startAgentRun } from '~server/agent-runs';
 import { errorResponse } from '~server/errors';
 
@@ -136,8 +136,8 @@ export async function postAgentRun({
 }: {
   request: Request;
 }): Promise<Response> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return new Response('Unauthorized', { status: 401 });
+  const session = await authenticateSessionRequest(request);
+  if (session instanceof Response) return session;
 
   let parsed: z.infer<typeof bodySchema>;
   try {

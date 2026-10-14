@@ -144,3 +144,12 @@ Hatch is source-available under the
 read, run, and modify it for your own use; no redistribution or hosted-service
 offerings. Each released version automatically converts to Apache 2.0 four
 years after its release. See [LICENSE.md](LICENSE.md) for the full terms.
+
+## Mobile development client
+
+The iPhone-first Expo application lives in [`mobile/`](mobile/README.md). It uses
+native app/conversation screens and a secure WebView handoff for generated Apps.
+Deploy the matching backend before connecting the development build. See the
+[mobile API contract](docs/mobile-api.md) and
+[verification record](docs/mobile-verification.md) for boundaries and device
+acceptance requirements.

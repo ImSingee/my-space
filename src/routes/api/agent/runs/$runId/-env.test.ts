@@ -1,3 +1,6 @@
+vi.mock('~server/tailscale-manager', () => ({
+  getTailscaleManager: () => ({ trustedOrigin: () => null }),
+}));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EnvEntry } from '~agent/protocol';
 import { AppError } from '~server/errors';

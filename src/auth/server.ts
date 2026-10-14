@@ -117,15 +117,16 @@ export const auth = betterAuth({
         requireSession: true,
       },
     }),
-    // CLI login: the device signs in through the browser approval page at
+    // CLI and mobile login: the device signs in through the browser approval page at
     // /cli/authorize and receives an ordinary session token, which it sends as
-    // `Authorization: Bearer`. A CLI session has the same authority as a
+    // `Authorization: Bearer`. A native session has the same authority as a
     // browser session.
     deviceAuthorization({
       expiresIn: '10m',
       interval: '5s',
       verificationUri: `${appUrl}/cli/authorize`,
-      validateClient: (clientId) => clientId === 'hatch-cli',
+      validateClient: (clientId) =>
+        clientId === 'hatch-cli' || clientId === 'hatch-mobile',
     }),
     bearer(),
     tanstackStartCookies(), // This should be the last plugin

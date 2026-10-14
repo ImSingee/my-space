@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
-import { auth } from '~auth/server';
+import { authenticateSessionRequest } from '~server/session-http-auth';
 import { envEntriesSchema, envRequestIdSchema } from '~agent/protocol';
 import { submitAgentEnv } from '~server/agent-runs';
 import { AppError } from '~server/errors';
@@ -61,8 +61,8 @@ async function handleAgentRunEnvPost({
 }: {
   request: Request;
 }): Promise<Response> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return textResponse('Unauthorized', 401);
+  const session = await authenticateSessionRequest(request);
+  if (session instanceof Response) return session;
 
   const runId = parseRunId(request);
   if (!runId) return textResponse('Not found', 404);
