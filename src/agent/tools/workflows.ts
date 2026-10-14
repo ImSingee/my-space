@@ -289,7 +289,8 @@ export function createWorkflowTools(options: {
         minLength: 1,
         maxLength: WORKFLOW_SLUG_MAX_LENGTH,
         description:
-          'kebab-case URL slug, e.g. "digest" or "sync-stars". Used in ' +
+          'URL slug using lowercase letters, digits, and hyphens, starting ' +
+          'with a letter or digit. Used in ' +
           'the human-facing /workflow/<slug> URL and changeable later; ' +
           'technical APIs use the generated Workflow id.',
       }),

@@ -118,7 +118,9 @@ generated OpenAPI contract; no DB migration or Runner wire change is needed.
 The [CLI](../packages/hatch-cli/README.md) uses OpenAPILink with request/response
 validation and bundles the pure contract.
 Create accepts `slug`, `name`, optional `description`/`pin`, and returns `id`,
-`slug`, `name`, rendered `files` (`path`, `contentBase64`). Source returns `id`,
+`slug`, `name`, rendered `files` (`path`, `contentBase64`). App and Workflow slugs
+use at most 64 characters: lowercase letters, digits, and hyphens, starting with
+a letter or digit. Source returns `id`,
 nullable `masterCommit` and `bundleBase64`. Decode the latter into a Git bundle
 and clone it locally; commit changes and export a new bundle for deployment.
 

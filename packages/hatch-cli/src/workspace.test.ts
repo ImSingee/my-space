@@ -10,6 +10,7 @@ import {
   rm,
   readdir,
   symlink,
+  realpath,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
@@ -24,6 +25,8 @@ let master: string | null;
 let deploys: number;
 let loseResponse: boolean;
 let sdkDelay: (() => Promise<void>) | undefined;
+let resourceSlug: string;
+let createRequests: unknown[];
 const token = 'private-workspace-test-secret';
 const server = createServer(async (request, response) => {
   const body: Buffer[] = [];
@@ -31,7 +34,7 @@ const server = createServer(async (request, response) => {
   const data = body.length ? JSON.parse(Buffer.concat(body).toString()) : {};
   const row = {
     id: 'immutable',
-    slug: 'fixture',
+    slug: resourceSlug,
     name: 'Fixture',
     description: null,
     status: 'draft',
@@ -54,11 +57,16 @@ const server = createServer(async (request, response) => {
     );
     return;
   }
-  if (request.url === '/api/v1/workflows' && request.method === 'POST')
+  if (
+    ['/api/v1/apps', '/api/v1/workflows'].includes(request.url ?? '') &&
+    request.method === 'POST'
+  ) {
+    createRequests.push(data);
+    resourceSlug = data.slug;
     send(
       {
         id: row.id,
-        slug: row.slug,
+        slug: resourceSlug,
         name: row.name,
         files: [
           {
@@ -77,10 +85,17 @@ const server = createServer(async (request, response) => {
       },
       201,
     );
-  else if (request.url === '/api/v1/workflows/immutable') send(row);
+  } else if (
+    ['/api/v1/apps/immutable', '/api/v1/workflows/immutable'].includes(
+      request.url ?? '',
+    )
+  )
+    send(row);
   else if (request.url === '/api/v1/workflows/immutable/source')
     send({ id: row.id, masterCommit: master, bundleBase64: bundle });
-  else if (request.url === '/api/v1/sdk/workflow') {
+  else if (
+    ['/api/v1/sdk/app', '/api/v1/sdk/workflow'].includes(request.url ?? '')
+  ) {
     await sdkDelay?.();
     send({
       files: [
@@ -199,6 +214,8 @@ describe('CLI workspace safety', { timeout: 30_000 }, () => {
     deploys = 0;
     loseResponse = false;
     sdkDelay = undefined;
+    resourceSlug = 'fixture';
+    createRequests = [];
     await new Promise<void>((resolve) =>
       server.listen(0, '127.0.0.1', resolve),
     );
@@ -208,6 +225,62 @@ describe('CLI workspace safety', { timeout: 30_000 }, () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   });
+  it.each(['app', 'workflow'])(
+    'creates a %s with a digit-leading slug in the default directory',
+    async (kind) => {
+      const input = {
+        slug: `123-test-${kind}`,
+        name: 'Test resource',
+        pin: false,
+      };
+      const file = join(directory, 'input.json');
+      await writeFile(file, JSON.stringify(input));
+
+      const result = await run([
+        kind,
+        'create',
+        '--file',
+        file,
+        '--workdir',
+        directory,
+      ]).result;
+
+      assert.equal(result.code, 0, JSON.stringify(result));
+      expect(createRequests).toEqual([input]);
+      const root = join(directory, input.slug);
+      expect(result.data.directory).toBe(await realpath(root));
+      expect(
+        JSON.parse(await readFile(join(root, '.git/hatch-cli.json'), 'utf8')),
+      ).toMatchObject({ kind, id: 'immutable' });
+      expect(git(root, 'log', '-1', '--format=%s')).toBe('Initialize scaffold');
+      expect(await readFile(join(root, '.hatch/import-map.json'), 'utf8')).toBe(
+        '{"imports":{}}',
+      );
+    },
+  );
+  it.each(['app', 'workflow'])(
+    'rejects unsafe %s slugs before creating remote or local state',
+    async (kind) => {
+      const file = join(directory, 'input.json');
+      await writeFile(
+        file,
+        JSON.stringify({ slug: '../123-test-resource', name: 'Test resource' }),
+      );
+
+      const result = await run([
+        kind,
+        'create',
+        '--file',
+        file,
+        '--workdir',
+        directory,
+      ]).result;
+
+      expect(result.data.error.code).toBe('invalid_input');
+      expect(createRequests).toEqual([]);
+      expect(await readdir(directory)).toEqual(['input.json']);
+    },
+  );
   it('protects existing directories, dirty trees, generation and instance bindings', async () => {
     const root = await create();
     await publish(root);

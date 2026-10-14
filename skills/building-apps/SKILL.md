@@ -33,7 +33,9 @@ Do not import generated files or execution modules from the manifest.
    provided and ask only for missing fields; if both are provided, skip `ask`.
    After both are confirmed, call `create_app`; pin user-facing Apps and leave
    backend-only or widget-only Apps unpinned.
-   The slug is the human-facing `/app/<slug>` segment. Hatch generates a
+   The slug is the human-facing `/app/<slug>` segment. Use at most 64
+   characters: lowercase letters, digits, and hyphens, starting with a letter
+   or digit. Hatch generates a
    separate immutable id for the repository, data relations, and technical
    `/api/app/<id>/...` URLs.
 2. For an existing App, inspect it with `list_apps` and `get_app`. If this

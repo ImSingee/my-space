@@ -280,7 +280,9 @@ replace platform validation of paths, cross-field requirements, or serializabili
    user choose or enter each value independently. Explain that both are
    editable later. Reuse values the user has already explicitly provided and
    ask only for missing fields; if both are provided, skip `ask`.
-   The slug is the human-facing `/workflow/<slug>` segment;
+   The slug is the human-facing `/workflow/<slug>` segment. Use at most 64
+   characters: lowercase letters, digits, and hyphens, starting with a letter
+   or digit.
    Hatch generates a separate id for the manifest, Git repository, runs,
    webhook, and all technical APIs. Always pass that id to existing-Workflow
    tools, never the slug. Only then call `create_workflow`.
