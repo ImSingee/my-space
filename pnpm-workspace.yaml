@@ -1,3 +1,6 @@
+packages:
+  - mobile
+
 allowBuilds:
   '@bufbuild/buf': false
   '@google/genai': false

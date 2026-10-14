@@ -25,7 +25,7 @@
     "test:browser": "vitest run --project browser",
     "lint": "oxlint .",
     "format": "oxfmt --write . && oxlint . --fix && oxfmt --write . && oxlint .",
-    "check:types": "tsc --noEmit && pnpm hatch-sdk:check",
+    "check:types": "tsc --noEmit && pnpm hatch-sdk:check && pnpm mobile:check",
     "hatch-sdk:build": "tsx scripts/build-hatch-sdk.ts",
     "hatch-sdk:check": "tsc -p sdk-internal/tsconfig.json --noEmit",
     "migrations:generate": "drizzle-kit generate",
@@ -35,7 +35,11 @@
     "db:seed": "tsx scripts/seed-db.ts",
     "drizzle:studio": "drizzle-kit studio",
     "platform-api:generate": "tsx scripts/generate-platform-api.ts",
-    "platform-api:check": "tsx scripts/generate-platform-api.ts --check"
+    "platform-api:check": "tsx scripts/generate-platform-api.ts --check",
+    "mobile:start": "pnpm --dir mobile start",
+    "mobile:check": "pnpm --dir mobile check:types",
+    "mobile:test": "pnpm --dir mobile test",
+    "mobile:export:ios": "pnpm --dir mobile export:ios"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.7",
