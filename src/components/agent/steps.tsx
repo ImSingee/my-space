@@ -465,6 +465,7 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyId = useId();
   const running = !tool.done;
+  const awaitingAnswer = running && tool.name === 'ask';
   const isError = tool.isError === true;
   const result = {
     text: tool.output ?? '',
@@ -472,11 +473,7 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
     isError: tool.isError,
   };
   const editDetails = successfulEditDetails(tool.name, result);
-  // The answer form owns the questions while an ask is running.
-  const inputs =
-    running && tool.name === 'ask'
-      ? undefined
-      : resolvedToolInputs(tool.name, tool.args, result);
+  const inputs = resolvedToolInputs(tool.name, tool.args, result);
   const outputPresentationDetails = outputPresentation(
     tool.name,
     isError,
@@ -493,8 +490,8 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
         : tool.done && tool.name === 'run_command' && inputs !== undefined
           ? ''
           : undefined));
-  // Every call has at least its request to inspect, so a running step shows
-  // its body and a finished one collapses to a re-expandable row.
+  // Running calls show their details, except asks whose answer form owns the
+  // questions. Finished calls collapse to a re-expandable row.
   const showBody = running || open;
   const expandable = !running;
 
@@ -556,18 +553,20 @@ export function StreamingToolStep({ tool }: { tool: StreamTool }) {
       ) : (
         <Box className={classes.stepHeader}>{header}</Box>
       )}
-      <Collapse id={bodyId} expanded={showBody}>
-        <ToolStepBody
-          name={tool.name}
-          args={tool.args}
-          inputs={inputs}
-          output={output}
-          outputRef={bodyRef}
-          editDiff={editDetails?.diff}
-          outputLabel={outputPresentationDetails.label}
-          outputEmptyText={outputPresentationDetails.emptyText}
-        />
-      </Collapse>
+      {awaitingAnswer ? null : (
+        <Collapse id={bodyId} expanded={showBody}>
+          <ToolStepBody
+            name={tool.name}
+            args={tool.args}
+            inputs={inputs}
+            output={output}
+            outputRef={bodyRef}
+            editDiff={editDetails?.diff}
+            outputLabel={outputPresentationDetails.label}
+            outputEmptyText={outputPresentationDetails.emptyText}
+          />
+        </Collapse>
+      )}
     </Box>
   );
 }

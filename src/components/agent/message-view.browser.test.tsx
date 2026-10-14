@@ -11,8 +11,10 @@ import { expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { MessageView } from './message-view';
 import { StreamingToolStep } from './steps';
+import { AskForm } from './ask-form';
 import type { AppListItem } from '~server/apps';
 import type { EditFileDetails } from '~agent/edit-file-details';
+import type { AskAnswer } from '~agent/events';
 import type { WorkflowListItem } from '~server/workflows';
 import type { ChatMessage, ToolResultMessage, ToolCallBlock } from './types';
 import { pairToolResults } from './types';
@@ -207,6 +209,64 @@ test.each([false, true])(
     );
   },
 );
+
+test('keeps a pending ask in its answer form and preserves completed details', async () => {
+  const onSubmit = vi.fn<(answers: AskAnswer[]) => void>();
+  const question = {
+    id: 'release',
+    prompt: 'Which release should we use?',
+    options: [
+      { id: 'stable', label: 'Stable' },
+      { id: 'preview', label: 'Preview' },
+    ],
+    allowMultiple: false,
+  };
+  const args = { questions: [question] };
+  const view = (done: boolean) => (
+    <MantineProvider>
+      <Box w={600} p="md">
+        <StreamingToolStep
+          tool={{
+            id: 'ask-release',
+            name: 'ask',
+            args,
+            done,
+            output: done
+              ? 'Q: Which release should we use?\nA: Stable'
+              : undefined,
+          }}
+        />
+        {done ? null : <AskForm questions={[question]} onSubmit={onSubmit} />}
+      </Box>
+    </MantineProvider>
+  );
+  const screen = await render(view(false));
+  await expect.element(screen.getByText(question.prompt)).toBeVisible();
+  expect(screen.getByRole('region', { name: 'Request' }).query()).toBeNull();
+  expect(screen.getByRole('region', { name: 'Questions' }).query()).toBeNull();
+  const submit = screen.getByRole('button', { name: 'Send answer' });
+  await expect.element(submit).toBeDisabled();
+  await screen.getByRole('radio', { name: 'Stable', exact: true }).click();
+  await submit.click();
+  expect(onSubmit).toHaveBeenCalledWith([
+    {
+      questionId: 'release',
+      selectedOptionIds: ['stable'],
+      customText: undefined,
+    },
+  ]);
+
+  await screen.rerender(view(true));
+  const toggle = screen.getByRole('button', { name: 'Ask the user' });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect
+    .element(screen.getByRole('region', { name: 'Questions' }))
+    .toMatchTextContent(question.prompt);
+  await expect
+    .element(screen.getByRole('region', { name: 'Output' }))
+    .toMatchTextContent('A: Stable');
+});
 
 test.each([
   {
