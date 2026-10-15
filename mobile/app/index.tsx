@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
 import { FlatList, Pressable, RefreshControl, View } from 'react-native';
@@ -17,6 +17,7 @@ import {
 
 export default function HomeScreen() {
   const { api, origin } = useSession();
+  const queryClient = useQueryClient();
   const c = usePalette();
   const lifetimeSignal = useLifetimeSignal();
   const [tab, setTab] = useState<'apps' | 'chats'>('apps');
@@ -39,8 +40,10 @@ export default function HomeScreen() {
     mutationFn: () =>
       api!.createSession(config.data?.defaultModel ?? {}, lifetimeSignal()),
     onSuccess: (result) => {
-      if (!lifetimeSignal().aborted)
+      if (!lifetimeSignal().aborted) {
+        void queryClient.invalidateQueries({ queryKey: [origin, 'sessions'] });
         router.push({ pathname: '/chat/[id]', params: { id: result.id } });
+      }
     },
   });
   const rows = tab === 'apps' ? (apps.data ?? []) : (sessions.data ?? []);
