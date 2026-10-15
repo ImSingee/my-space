@@ -22,6 +22,7 @@ import {
 } from 'react-native-safe-area-context';
 import type { AskAnswer, JsonValue } from '../../src/core';
 import { useSession } from '../../src/state/session';
+import { useChatDraft, type Picked } from '../../src/state/use-chat-draft';
 import { useRunStream } from '../../src/state/use-run-stream';
 import { useLifetimeSignal } from '../../src/state/use-lifetime-signal';
 import { AskCard } from '../../src/ui/ask-card';
@@ -37,22 +38,13 @@ import {
   usePalette,
 } from '../../src/ui/primitives';
 
-type Picked = {
-  id: string;
-  name: string;
-  uri: string;
-  mimeType: string;
-  size: number;
-  image?: string;
-};
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api, origin } = useSession();
   const c = usePalette();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState('');
-  const [files, setFiles] = useState<Picked[]>([]);
+  const { draft, setDraft, files, setFiles } = useChatDraft(id);
   const [problem, setProblem] = useState<string | null>(null);
   const [optimisticRun, setOptimisticRun] = useState<string | null>(null);
   const [model, setModel] = useState<{
