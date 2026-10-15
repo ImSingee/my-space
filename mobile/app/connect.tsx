@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DeviceLogin, canonicalizeInstanceUrl } from '../src/core';
 import { createNativeClient, openLoginBrowser } from '../src/core/native';
@@ -18,6 +11,8 @@ import {
 import {
   Action,
   Card,
+  Text,
+  TextInput,
   errorText,
   styles,
   usePalette,
@@ -133,6 +128,7 @@ export default function ConnectScreen() {
             }}
           >
             <Text
+              allowFontScaling={false}
               style={{ fontSize: 39, color: c.background, fontWeight: '700' }}
             >
               h

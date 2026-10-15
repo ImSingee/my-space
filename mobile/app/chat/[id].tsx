@@ -14,8 +14,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import {
@@ -32,6 +30,8 @@ import {
   Action,
   Busy,
   Notice,
+  Text,
+  TextInput,
   errorText,
   styles,
   usePalette,
