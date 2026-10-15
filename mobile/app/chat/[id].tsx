@@ -62,6 +62,8 @@ export default function ChatScreen() {
   const [showModels, setShowModels] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const list = useRef<FlatList<JsonValue>>(null);
+  const frame = useRef<View>(null);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sending = useRef(false);
   const lifetimeSignal = useLifetimeSignal();
   const session = useQuery({
@@ -311,315 +313,342 @@ export default function ChatScreen() {
   const busy = send.isPending || retryRun.isPending;
   const lastRun = detail?.runs.at(-1);
   return (
-    <KeyboardAvoidingView
+    <View
+      ref={frame}
       style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={insets.top + 44}
+      onLayout={() =>
+        frame.current?.measureInWindow((_x, y) => setKeyboardOffset(y))
+      }
     >
-      <Stack.Screen options={{ title: detail?.title ?? 'Conversation' }} />
-      {session.isPending ? (
-        <Busy />
-      ) : session.error && !detail ? (
-        <Notice
-          title="Couldn’t load this conversation"
-          detail={errorText(session.error)}
-          action={{ label: 'Try again', onPress: () => void session.refetch() }}
-        />
-      ) : (
-        <FlatList
-          ref={list}
-          data={detail?.messages ?? []}
-          keyExtractor={(_, index) => String(index)}
-          contentContainerStyle={styles.content}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          onScroll={(event) => {
-            const { contentOffset, layoutMeasurement, contentSize } =
-              event.nativeEvent;
-            setAtBottom(
-              contentOffset.y + layoutMeasurement.height >=
-                contentSize.height - 100,
-            );
-          }}
-          scrollEventThrottle={100}
-          onContentSizeChange={() => {
-            if (atBottom) list.current?.scrollToEnd({ animated: false });
-          }}
-          renderItem={({ item }) => <TranscriptMessage value={item} />}
-          ListEmptyComponent={
-            !runId ? (
-              <Notice
-                title="Start with an idea."
-                detail="Build an app, explore your data, or pick up an unfinished project. Photos and files can help explain what you mean."
-              />
-            ) : null
-          }
-          ListFooterComponent={
-            <View style={{ gap: 16 }}>
-              {runId ? (
-                <>
-                  <Text style={[styles.caption, { color: c.muted }]}>
-                    {stream.connection === 'live'
-                      ? 'Agent is working on your server'
-                      : stream.connection === 'paused'
-                        ? 'Updates paused. Your Agent keeps working.'
-                        : 'Reconnecting to your Agent…'}
-                  </Text>
-                  <LiveTranscript state={stream.state} />
-                </>
-              ) : null}
-              {ask && runId ? (
-                <AskCard
-                  key={ask.askId}
-                  ask={ask}
-                  busy={answer.isPending}
-                  onAnswer={(answers) => answer.mutate(answers)}
-                />
-              ) : null}
-              {env && runId ? (
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={keyboardOffset}
+      >
+        <Stack.Screen options={{ title: detail?.title ?? 'Conversation' }} />
+        {session.isPending ? (
+          <Busy />
+        ) : session.error && !detail ? (
+          <Notice
+            title="Couldn’t load this conversation"
+            detail={errorText(session.error)}
+            action={{
+              label: 'Try again',
+              onPress: () => void session.refetch(),
+            }}
+          />
+        ) : (
+          <FlatList
+            style={styles.screen}
+            ref={list}
+            data={detail?.messages ?? []}
+            keyExtractor={(_, index) => String(index)}
+            contentContainerStyle={styles.content}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            onScroll={(event) => {
+              const { contentOffset, layoutMeasurement, contentSize } =
+                event.nativeEvent;
+              setAtBottom(
+                contentOffset.y + layoutMeasurement.height >=
+                  contentSize.height - 100,
+              );
+            }}
+            scrollEventThrottle={100}
+            onContentSizeChange={() => {
+              if (atBottom) list.current?.scrollToEnd({ animated: false });
+            }}
+            renderItem={({ item }) => <TranscriptMessage value={item} />}
+            ListEmptyComponent={
+              !runId ? (
                 <Notice
-                  title="Continue in Hatch web"
-                  detail={`${env.reason} Open this conversation in your browser to provide environment values securely.`}
+                  title="Start with an idea."
+                  detail="Build an app, explore your data, or pick up an unfinished project. Photos and files can help explain what you mean."
+                />
+              ) : null
+            }
+            ListFooterComponent={
+              <View style={{ gap: 16 }}>
+                {runId ? (
+                  <>
+                    <Text style={[styles.caption, { color: c.muted }]}>
+                      {stream.connection === 'live'
+                        ? 'Agent is working on your server'
+                        : stream.connection === 'paused'
+                          ? 'Updates paused. Your Agent keeps working.'
+                          : 'Reconnecting to your Agent…'}
+                    </Text>
+                    <LiveTranscript state={stream.state} />
+                  </>
+                ) : null}
+                {ask && runId ? (
+                  <AskCard
+                    key={ask.askId}
+                    ask={ask}
+                    busy={answer.isPending}
+                    onAnswer={(answers) => answer.mutate(answers)}
+                  />
+                ) : null}
+                {env && runId ? (
+                  <Notice
+                    title="Continue in Hatch web"
+                    detail={`${env.reason} Open this conversation in your browser to provide environment values securely.`}
+                    action={{
+                      label: 'Open conversation in browser',
+                      onPress: () =>
+                        void WebBrowser.openBrowserAsync(
+                          `${origin}/agent/${encodeURIComponent(id)}`,
+                        ).catch((error: unknown) =>
+                          setProblem(errorText(error)),
+                        ),
+                    }}
+                  />
+                ) : null}
+                {!runId &&
+                lastRun &&
+                ['failed', 'interrupted', 'cancelled'].includes(
+                  lastRun.status,
+                ) ? (
+                  <Notice
+                    title={
+                      lastRun.status === 'cancelled'
+                        ? 'Run stopped'
+                        : 'The Agent couldn’t finish'
+                    }
+                    detail={
+                      lastRun.error ??
+                      'Your conversation is saved. You can continue with another message.'
+                    }
+                    action={
+                      selectedModel && lastRun.status !== 'cancelled'
+                        ? {
+                            label: retryRun.isPending
+                              ? 'Retrying…'
+                              : 'Retry this turn',
+                            onPress: () => {
+                              if (!retryRun.isPending) retryRun.mutate();
+                            },
+                          }
+                        : undefined
+                    }
+                  />
+                ) : null}
+                {(detail?.appIds ?? []).map((appId) => (
+                  <Action
+                    key={appId}
+                    label={`Open ${apps.data?.find((app) => app.id === appId)?.name ?? 'app'}`}
+                    secondary
+                    onPress={() =>
+                      router.push({
+                        pathname: '/apps/[id]',
+                        params: { id: appId },
+                      })
+                    }
+                  />
+                ))}
+              </View>
+            }
+          />
+        )}
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingTop: 10,
+            paddingBottom: Math.max(insets.bottom, 12),
+            backgroundColor: c.card,
+            borderTopWidth: 1,
+            borderTopColor: c.border,
+            gap: 10,
+            flexShrink: 1,
+            maxHeight: '75%',
+          }}
+        >
+          <ScrollView
+            style={{ flexGrow: 0, flexShrink: 1 }}
+            contentContainerStyle={{ gap: 10 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {problem ? (
+              <Pressable onPress={() => setProblem(null)}>
+                <Text
+                  accessibilityRole="alert"
+                  style={[styles.caption, { color: c.danger }]}
+                >
+                  {problem}
+                </Text>
+              </Pressable>
+            ) : null}
+            <View style={styles.row}>
+              <Pressable
+                disabled={Boolean(runId) || busy}
+                onPress={() => setShowModels(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Choose model"
+                style={{ flex: 1, minHeight: 34, justifyContent: 'center' }}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[styles.caption, { color: c.accent }]}
+                >
+                  {choice
+                    ? `${choice.providerName} · ${choice.name}`
+                    : (selectedModel?.modelId ?? 'Choose a model')}{' '}
+                  ⌄
+                </Text>
+              </Pressable>
+              {runId ? (
+                <Pressable
+                  disabled={cancel.isPending}
+                  accessibilityRole="button"
+                  onPress={() =>
+                    Alert.alert(
+                      'Stop this run?',
+                      'Work already completed is kept.',
+                      [
+                        { text: 'Keep running', style: 'cancel' },
+                        {
+                          text: 'Stop',
+                          style: 'destructive',
+                          onPress: () => cancel.mutate(),
+                        },
+                      ],
+                    )
+                  }
+                >
+                  <Text style={{ color: c.danger }}>
+                    {cancel.isPending ? 'Stopping…' : 'Stop'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {files.length ? (
+              <ScrollView horizontal contentContainerStyle={{ gap: 8 }}>
+                {files.map((file) => (
+                  <Pressable
+                    key={file.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${file.name}`}
+                    disabled={busy}
+                    onPress={() =>
+                      setFiles((value) =>
+                        value.filter((item) => item.id !== file.id),
+                      )
+                    }
+                    style={{
+                      backgroundColor: c.subtle,
+                      padding: 10,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <Text style={[styles.caption, { color: c.text }]}>
+                      {file.image ? 'Photo' : file.name} ×
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
+            <TextInput
+              accessibilityLabel="Message your Agent"
+              maxLength={50000}
+              multiline
+              value={draft}
+              onChangeText={setDraft}
+              editable={!busy}
+              placeholder={
+                runId
+                  ? 'Draft your next message…'
+                  : 'What would you like to make?'
+              }
+              placeholderTextColor={c.muted}
+              style={[
+                styles.input,
+                {
+                  color: c.text,
+                  borderColor: c.border,
+                  maxHeight: 150,
+                  minHeight: 52,
+                },
+              ]}
+            />
+          </ScrollView>
+          <View style={styles.row}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy || files.length >= 6}
+              onPress={() =>
+                Alert.alert('Attach to this message', undefined, [
+                  {
+                    text: 'Photo library',
+                    onPress: () => void choose('photo'),
+                  },
+                  { text: 'Choose files', onPress: () => void choose('file') },
+                  { text: 'Cancel', style: 'cancel' },
+                ])
+              }
+              style={{ flex: 1, minHeight: 44, justifyContent: 'center' }}
+            >
+              <Text style={{ color: c.accent }}>＋ Attach</Text>
+            </Pressable>
+            <Action
+              label={send.isPending ? 'Sending…' : 'Send'}
+              disabled={
+                busy ||
+                Boolean(runId) ||
+                !selectedModel ||
+                (!draft.trim() && !files.length)
+              }
+              onPress={submit}
+            />
+          </View>
+        </View>
+        <Modal
+          visible={showModels}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowModels(false)}
+        >
+          <SafeAreaView
+            style={[styles.screen, { backgroundColor: c.background }]}
+          >
+            <ScrollView contentContainerStyle={styles.content}>
+              <Text style={[styles.heading, { color: c.text }]}>
+                Choose a model
+              </Text>
+              {config.error ? (
+                <Notice
+                  title="Couldn’t load models"
+                  detail={errorText(config.error)}
                   action={{
-                    label: 'Open conversation in browser',
-                    onPress: () =>
-                      void WebBrowser.openBrowserAsync(
-                        `${origin}/agent/${encodeURIComponent(id)}`,
-                      ).catch((error: unknown) => setProblem(errorText(error))),
+                    label: 'Try again',
+                    onPress: () => void config.refetch(),
                   }}
                 />
               ) : null}
-              {!runId &&
-              lastRun &&
-              ['failed', 'interrupted', 'cancelled'].includes(
-                lastRun.status,
-              ) ? (
-                <Notice
-                  title={
-                    lastRun.status === 'cancelled'
-                      ? 'Run stopped'
-                      : 'The Agent couldn’t finish'
-                  }
-                  detail={
-                    lastRun.error ??
-                    'Your conversation is saved. You can continue with another message.'
-                  }
-                  action={
-                    selectedModel && lastRun.status !== 'cancelled'
-                      ? {
-                          label: retryRun.isPending
-                            ? 'Retrying…'
-                            : 'Retry this turn',
-                          onPress: () => {
-                            if (!retryRun.isPending) retryRun.mutate();
-                          },
-                        }
-                      : undefined
-                  }
-                />
+              {!choices.length ? (
+                <Text style={[styles.body, { color: c.muted }]}>
+                  Configure and enable a provider model in Hatch web to start a
+                  conversation.
+                </Text>
               ) : null}
-              {(detail?.appIds ?? []).map((appId) => (
+              {choices.map((item) => (
                 <Action
-                  key={appId}
-                  label={`Open ${apps.data?.find((app) => app.id === appId)?.name ?? 'app'}`}
+                  key={`${item.providerId}:${item.modelId}`}
                   secondary
-                  onPress={() =>
-                    router.push({
-                      pathname: '/apps/[id]',
-                      params: { id: appId },
-                    })
-                  }
+                  label={`${item.providerName} · ${item.name}`}
+                  onPress={() => {
+                    setModel({
+                      providerId: item.providerId,
+                      modelId: item.modelId,
+                    });
+                    setShowModels(false);
+                  }}
                 />
               ))}
-            </View>
-          }
-        />
-      )}
-      <View
-        style={{
-          paddingHorizontal: 16,
-          paddingTop: 10,
-          paddingBottom: Math.max(insets.bottom, 12),
-          backgroundColor: c.card,
-          borderTopWidth: 1,
-          borderTopColor: c.border,
-          gap: 10,
-        }}
-      >
-        {problem ? (
-          <Pressable onPress={() => setProblem(null)}>
-            <Text
-              accessibilityRole="alert"
-              style={[styles.caption, { color: c.danger }]}
-            >
-              {problem}
-            </Text>
-          </Pressable>
-        ) : null}
-        <View style={styles.row}>
-          <Pressable
-            disabled={Boolean(runId) || busy}
-            onPress={() => setShowModels(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Choose model"
-            style={{ flex: 1, minHeight: 34, justifyContent: 'center' }}
-          >
-            <Text
-              numberOfLines={1}
-              style={[styles.caption, { color: c.accent }]}
-            >
-              {choice
-                ? `${choice.providerName} · ${choice.name}`
-                : (selectedModel?.modelId ?? 'Choose a model')}{' '}
-              ⌄
-            </Text>
-          </Pressable>
-          {runId ? (
-            <Pressable
-              disabled={cancel.isPending}
-              accessibilityRole="button"
-              onPress={() =>
-                Alert.alert(
-                  'Stop this run?',
-                  'Work already completed is kept.',
-                  [
-                    { text: 'Keep running', style: 'cancel' },
-                    {
-                      text: 'Stop',
-                      style: 'destructive',
-                      onPress: () => cancel.mutate(),
-                    },
-                  ],
-                )
-              }
-            >
-              <Text style={{ color: c.danger }}>
-                {cancel.isPending ? 'Stopping…' : 'Stop'}
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-        {files.length ? (
-          <ScrollView horizontal contentContainerStyle={{ gap: 8 }}>
-            {files.map((file) => (
-              <Pressable
-                key={file.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${file.name}`}
-                disabled={busy}
-                onPress={() =>
-                  setFiles((value) =>
-                    value.filter((item) => item.id !== file.id),
-                  )
-                }
-                style={{
-                  backgroundColor: c.subtle,
-                  padding: 10,
-                  borderRadius: 10,
-                }}
-              >
-                <Text style={[styles.caption, { color: c.text }]}>
-                  {file.image ? 'Photo' : file.name} ×
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        ) : null}
-        <TextInput
-          accessibilityLabel="Message your Agent"
-          maxLength={50000}
-          multiline
-          value={draft}
-          onChangeText={setDraft}
-          editable={!busy}
-          placeholder={
-            runId ? 'Draft your next message…' : 'What would you like to make?'
-          }
-          placeholderTextColor={c.muted}
-          style={[
-            styles.input,
-            {
-              color: c.text,
-              borderColor: c.border,
-              maxHeight: 150,
-              minHeight: 52,
-            },
-          ]}
-        />
-        <View style={styles.row}>
-          <Pressable
-            accessibilityRole="button"
-            disabled={busy || files.length >= 6}
-            onPress={() =>
-              Alert.alert('Attach to this message', undefined, [
-                { text: 'Photo library', onPress: () => void choose('photo') },
-                { text: 'Choose files', onPress: () => void choose('file') },
-                { text: 'Cancel', style: 'cancel' },
-              ])
-            }
-            style={{ flex: 1, minHeight: 44, justifyContent: 'center' }}
-          >
-            <Text style={{ color: c.accent }}>＋ Attach</Text>
-          </Pressable>
-          <Action
-            label={send.isPending ? 'Sending…' : 'Send'}
-            disabled={
-              busy ||
-              Boolean(runId) ||
-              !selectedModel ||
-              (!draft.trim() && !files.length)
-            }
-            onPress={submit}
-          />
-        </View>
-      </View>
-      <Modal
-        visible={showModels}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowModels(false)}
-      >
-        <SafeAreaView
-          style={[styles.screen, { backgroundColor: c.background }]}
-        >
-          <ScrollView contentContainerStyle={styles.content}>
-            <Text style={[styles.heading, { color: c.text }]}>
-              Choose a model
-            </Text>
-            {config.error ? (
-              <Notice
-                title="Couldn’t load models"
-                detail={errorText(config.error)}
-                action={{
-                  label: 'Try again',
-                  onPress: () => void config.refetch(),
-                }}
-              />
-            ) : null}
-            {!choices.length ? (
-              <Text style={[styles.body, { color: c.muted }]}>
-                Configure and enable a provider model in Hatch web to start a
-                conversation.
-              </Text>
-            ) : null}
-            {choices.map((item) => (
-              <Action
-                key={`${item.providerId}:${item.modelId}`}
-                secondary
-                label={`${item.providerName} · ${item.name}`}
-                onPress={() => {
-                  setModel({
-                    providerId: item.providerId,
-                    modelId: item.modelId,
-                  });
-                  setShowModels(false);
-                }}
-              />
-            ))}
-            <Action label="Done" onPress={() => setShowModels(false)} />
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-    </KeyboardAvoidingView>
+              <Action label="Done" onPress={() => setShowModels(false)} />
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
