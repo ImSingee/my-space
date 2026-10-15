@@ -1,7 +1,14 @@
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import type { AskAnswer, PendingAsk } from '../core';
-import { Action, Card, styles, usePalette } from './primitives';
+import {
+  Action,
+  Card,
+  Text,
+  TextInput,
+  styles,
+  usePalette,
+} from './primitives';
 
 export function AskCard({
   ask,

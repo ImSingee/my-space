@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, View } from 'react-native';
 import type { AppSummary, SessionSummary } from '../src/core';
 import { useSession } from '../src/state/session';
 import { useLifetimeSignal } from '../src/state/use-lifetime-signal';
@@ -9,6 +9,7 @@ import {
   Action,
   Busy,
   Notice,
+  Text,
   errorText,
   styles,
   usePalette,
@@ -60,7 +61,12 @@ export default function HomeScreen() {
               onPress={() => router.push('/settings')}
               hitSlop={10}
             >
-              <Text style={{ color: c.accent, fontSize: 16 }}>Instance</Text>
+              <Text
+                maxFontSizeMultiplier={1.4}
+                style={{ color: c.accent, fontSize: 16 }}
+              >
+                Instance
+              </Text>
             </Pressable>
           ),
         }}
@@ -178,6 +184,7 @@ export default function HomeScreen() {
                 }}
               >
                 <Text
+                  allowFontScaling={false}
                   style={{ fontSize: 22, fontWeight: '600', color: c.accent }}
                 >
                   {'name' in item ? item.name.charAt(0).toUpperCase() : '↗'}
@@ -194,7 +201,12 @@ export default function HomeScreen() {
               >
                 {'name' in item ? item.name : item.title}
               </Text>
-              <Text style={{ color: c.muted, fontSize: 22 }}>›</Text>
+              <Text
+                allowFontScaling={false}
+                style={{ color: c.muted, fontSize: 22 }}
+              >
+                ›
+              </Text>
             </View>
             <Text
               style={[styles.caption, { color: c.muted }]}

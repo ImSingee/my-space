@@ -3,10 +3,25 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
+  Text as NativeText,
+  TextInput as NativeTextInput,
+  type TextProps,
+  type TextInputProps,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from 'react-native';
+
+// Refresh native text layout on Dynamic Type changes without resetting screen state.
+export function Text(props: TextProps) {
+  const { fontScale } = useWindowDimensions();
+  return <NativeText key={fontScale} {...props} />;
+}
+
+export function TextInput(props: TextInputProps) {
+  const { fontScale } = useWindowDimensions();
+  return <NativeTextInput key={fontScale} {...props} />;
+}
 
 export function usePalette() {
   const dark = useColorScheme() === 'dark';
