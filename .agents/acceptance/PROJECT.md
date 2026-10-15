@@ -82,3 +82,27 @@ Keep fixtures, cookie state and evidence under the ignored acceptance round;
 never modify user records or expose real secrets. A screenshot must visibly
 include Request and the corresponding Output/Error; compare parsed visible JSON
 to fixture values instead of inferring completeness from page text alone.
+
+## 9. Native mobile verification
+
+Use the Expo development client in `mobile/`, never Expo Go. Resolve the latest
+PR branch SHA before building. Run `pnpm --dir mobile exec expo prebuild
+--platform ios` and `pnpm --dir mobile ios` against a dedicated Simulator. Changes
+to `mobile/plugins/with-private-networking.cjs` require prebuild plus native
+compilation and installation; Metro reload cannot apply them.
+
+Use the isolated PostgreSQL, Platform origin, and data directory from section 2.
+Development loopback HTTP is allowed only in development clients. A deterministic
+loopback OpenAI-compatible provider may exercise the actual Runner and streaming
+transport; disclose that it proves client/Runner integration, not model quality.
+Static deployed-App fixtures may exercise real handoff/runtime boundaries but do
+not prove the deployment builder. Never use production credentials or data.
+
+On Xcode 27, Device Hub may replace the standalone Simulator app. Computer Use
+can select the dedicated device there. Probe AXe for native HID/AX operations;
+use `simctl io <UDID>` for device screenshots and recordings. Record source SHA,
+prebuild/build/install provenance, device model/runtime/UDID, Metro origin, and
+all fault injection outcomes. Capture the answer HTTP payload/status and persisted
+answer when checking single-choice/Other or duplicate-answer protection.
+Keep auth state and fixture secrets private under the ignored round runtime;
+upload only sanitized evidence. Stop only this round's services and database.
