@@ -218,6 +218,8 @@ describe('instance and credential boundaries', () => {
     expect(url).not.toContain('fixture-token');
     expect(options.redirect).toBe('error');
     expect(options.credentials).toBe('omit');
+    expect(options.cache).toBe('no-store');
+    expect(new Headers(options.headers).get('cache-control')).toBe('no-store');
     expect(new Headers(options.headers).get('authorization')).toBe(
       'Bearer fixture-token',
     );
@@ -225,6 +227,33 @@ describe('instance and credential boundaries', () => {
       { code: 'invalid_path' },
     );
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('disables HTTP caching for device tokens, authenticated data, and event streams', async () => {
+    const fetcher = vi
+      .fn<FetchLike>()
+      .mockResolvedValueOnce(json({ access_token: 'fixture-token' }))
+      .mockResolvedValueOnce(json({ apps: [] }))
+      .mockResolvedValueOnce(stream([event(1, { type: 'done' })]));
+    const { client, vault } = setup(fetcher);
+    const signal = new AbortController().signal;
+    await client.deviceRequest('/api/auth/device/token', {}, signal, 1000);
+    await vault.set(origin, 'fixture-token');
+    await client.apps();
+    await client.streamRun('run-1', { signal, onEvent: () => {} });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    for (const [, options] of fetcher.mock.calls) {
+      expect(options.cache).toBe('no-store');
+      expect(new Headers(options.headers).get('cache-control')).toBe(
+        'no-store',
+      );
+      expect(options.credentials).toBe('omit');
+    }
+    expect(
+      new Headers(fetcher.mock.calls[0][1].headers).has('authorization'),
+    ).toBe(false);
+    expect(
+      new Headers(fetcher.mock.calls[1][1].headers).get('authorization'),
+    ).toBe('Bearer fixture-token');
   });
   it('never retries an ambiguous run submission and retains upload identity', async () => {
     const fetcher = vi
