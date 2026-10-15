@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import type { AskAnswer, PendingAsk } from '../core';
+import { updateAskAnswer } from '../core/ask-answer';
 import {
   Action,
   Card,
@@ -40,21 +41,21 @@ export function AskCard({
             return (
               <Pressable
                 key={option.id}
-                accessibilityRole="checkbox"
+                accessibilityRole={
+                  question.allowMultiple ? 'checkbox' : 'radio'
+                }
                 accessibilityState={{ checked: selected, disabled: busy }}
                 disabled={busy}
                 onPress={() => {
-                  const previous = get(question.id);
-                  const selectedOptionIds = selected
-                    ? previous.selectedOptionIds.filter(
-                        (id) => id !== option.id,
-                      )
-                    : question.allowMultiple
-                      ? [...previous.selectedOptionIds, option.id]
-                      : [option.id];
                   setAnswers((value) => ({
                     ...value,
-                    [question.id]: { ...previous, selectedOptionIds },
+                    [question.id]: updateAskAnswer(
+                      question,
+                      value[question.id],
+                      {
+                        optionId: option.id,
+                      },
+                    ),
                   }));
                 }}
                 style={{
@@ -82,7 +83,9 @@ export function AskCard({
             onChangeText={(customText) =>
               setAnswers((value) => ({
                 ...value,
-                [question.id]: { ...get(question.id), customText },
+                [question.id]: updateAskAnswer(question, value[question.id], {
+                  customText,
+                }),
               }))
             }
             style={[styles.input, { color: c.text, borderColor: c.border }]}
