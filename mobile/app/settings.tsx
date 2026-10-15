@@ -37,6 +37,7 @@ export default function SettingsScreen() {
     );
   return (
     <ScrollView
+      style={styles.screen}
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
     >

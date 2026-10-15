@@ -11,6 +11,7 @@ import {
 export function usePalette() {
   const dark = useColorScheme() === 'dark';
   return {
+    dark,
     background: dark ? '#101214' : '#F4F5F7',
     card: dark ? '#1B1E22' : '#FFFFFF',
     text: dark ? '#F4F6F8' : '#15191E',

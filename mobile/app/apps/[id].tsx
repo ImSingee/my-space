@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { webViewHandoffSource } from '../../src/core';
 import { useSession } from '../../src/state/session';
 import {
   Busy,
@@ -68,12 +69,7 @@ export default function AppScreen() {
       ) : (
         <WebView
           key={`${epoch}-${attempt}`}
-          source={{
-            uri: data.url,
-            method: 'POST',
-            body: `ticket=${encodeURIComponent(data.ticket)}`,
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          }}
+          source={webViewHandoffSource(origin!, data)}
           incognito
           sharedCookiesEnabled={false}
           thirdPartyCookiesEnabled={false}
