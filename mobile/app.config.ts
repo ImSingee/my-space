@@ -11,7 +11,10 @@ const config: ExpoConfig = {
     supportsTablet: false,
     deploymentTarget: '16.4',
     bundleIdentifier: 'app.hatch.mobile',
-    infoPlist: { ITSAppUsesNonExemptEncryption: false },
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+      UIViewControllerBasedStatusBarAppearance: true,
+    },
   },
   android: { package: 'app.hatch.mobile' },
   plugins: [
