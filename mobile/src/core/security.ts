@@ -1,3 +1,5 @@
+import type { AppHandoff } from './types';
+
 export type InstanceUrlOptions = { allowDevelopmentLoopback?: boolean };
 
 export class MobileError extends Error {
@@ -154,6 +156,18 @@ export function validateHandoff(
 
 export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new MobileError('cancelled', 'Cancelled.');
+}
+
+export function webViewHandoffSource(origin: string, handoff: AppHandoff) {
+  return {
+    uri: handoff.url,
+    method: 'POST' as const,
+    body: `ticket=${encodeURIComponent(handoff.ticket)}`,
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Origin: origin,
+    },
+  };
 }
 
 export function boundedSignal(parent?: AbortSignal, timeoutMs?: number) {

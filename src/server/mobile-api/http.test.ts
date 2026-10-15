@@ -11,6 +11,7 @@ import {
 } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
+import { webViewHandoffSource } from '../../../mobile/src/core/security';
 
 const fixture = vi.hoisted(() => ({
   database: undefined as
@@ -371,6 +372,34 @@ describe('native API contracts and authority', () => {
 });
 
 describe('one-use WebView handoff', () => {
+  it('accepts the native WebView source without relaxing opaque or cross-site origin checks', async () => {
+    const ticket = await handoff();
+    for (const headers of [
+      { origin: 'null', 'sec-fetch-site': 'none' },
+      { origin, 'sec-fetch-site': 'cross-site' },
+      { origin: 'https://evil.example', 'sec-fetch-site': 'none' },
+    ]) {
+      expect((await consume(ticket.ticket, { headers })).status).toBe(403);
+    }
+    const source = webViewHandoffSource(origin, ticket);
+    expect(new URL(source.uri).search).toBe('');
+    expect([...new URLSearchParams(source.body)]).toEqual([
+      ['ticket', ticket.ticket],
+    ]);
+    expect(source.headers).not.toHaveProperty('Authorization');
+    expect(source.headers).not.toHaveProperty('Cookie');
+    const response = await handleMobileRequest(
+      new Request(source.uri, {
+        method: source.method,
+        headers: { ...source.headers, 'sec-fetch-site': 'none' },
+        body: source.body,
+      }),
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(ticket.targetPath);
+    expect((await consume(ticket.ticket)).status).toBe(401);
+  });
+
   it('sets a real host-only HttpOnly cookie and fixed 303 App target without exposing Bearer', async () => {
     const ticket = await handoff();
     expect(new URL(ticket.url).search).toBe('');
