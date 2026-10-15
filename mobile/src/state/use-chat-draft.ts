@@ -1,5 +1,5 @@
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SetStateAction } from 'react';
+import { useState, type SetStateAction } from 'react';
 import { useSession } from './session';
 
 export type Picked = {
@@ -24,10 +24,16 @@ export function useChatDraft(id: string) {
     gcTime: Infinity,
     staleTime: Infinity,
   });
+  const scope = JSON.stringify([origin, id]);
+  // Query notifications are batched. Feeding them back into a native controlled
+  // input can overwrite newer keystrokes and move the selection backwards.
+  const [input, setInput] = useState({ scope, text: data.text });
+  if (input.scope !== scope) setInput({ scope, text: data.text });
   return {
-    draft: data.text,
+    draft: input.scope === scope ? input.text : data.text,
     files: data.files,
     setDraft: (text: string) => {
+      setInput({ scope, text });
       client.setQueryData<ChatDraft>(queryKey, (previous = emptyDraft) => ({
         ...previous,
         text,
