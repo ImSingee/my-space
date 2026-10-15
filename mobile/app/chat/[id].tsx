@@ -332,6 +332,15 @@ export default function ChatScreen() {
   }, [stream.state.lastSeq, detail?.messages.length, atBottom]);
   const busy = send.isPending || retryRun.isPending;
   const lastRun = detail?.runs.at(-1);
+  const lastMessage = detail?.messages.at(-1);
+  // Match the server's retry contract. An interrupted run can end with an
+  // aborted assistant message, which is not a retryable provider error.
+  const retryable =
+    lastMessage !== null &&
+    typeof lastMessage === 'object' &&
+    !Array.isArray(lastMessage) &&
+    lastMessage.role === 'assistant' &&
+    lastMessage.stopReason === 'error';
   return (
     <View
       ref={frame}
@@ -449,7 +458,9 @@ export default function ChatScreen() {
                       'Your conversation is saved. You can continue with another message.'
                     }
                     action={
-                      selectedModel && lastRun.status !== 'cancelled'
+                      selectedModel &&
+                      retryable &&
+                      lastRun.status !== 'cancelled'
                         ? {
                             label: retryRun.isPending
                               ? 'Retrying…'
