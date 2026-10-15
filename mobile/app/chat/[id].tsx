@@ -60,6 +60,10 @@ export default function ChatScreen() {
     modelId: string;
   } | null>(null);
   const [showModels, setShowModels] = useState(false);
+  const [submittedAnswer, setSubmittedAnswer] = useState<{
+    runId: string;
+    askId: string;
+  } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const list = useRef<FlatList<JsonValue>>(null);
   const frame = useRef<View>(null);
@@ -116,6 +120,14 @@ export default function ChatScreen() {
   const ask = stream.state.lastSeq
     ? stream.state.pendingAsk
     : detail?.activeRun?.pendingAsk;
+  const answerSubmitted = Boolean(
+    ask &&
+    runId &&
+    ((submittedAnswer?.runId === runId &&
+      submittedAnswer.askId === ask.askId) ||
+      (detail?.activeRun?.id === runId &&
+        detail.activeRun.answeredAskId === ask.askId)),
+  );
   const env = stream.state.lastSeq
     ? stream.state.pendingEnv
     : detail?.activeRun?.pendingEnvRequest;
@@ -185,11 +197,27 @@ export default function ChatScreen() {
     },
   });
   const answer = useMutation({
-    mutationFn: (answers: AskAnswer[]) =>
-      api!.answerRun(runId!, ask!.askId, answers, lifetimeSignal()),
-    onSuccess: refresh,
-    onError: (error) => {
-      if (!lifetimeSignal().aborted) setProblem(errorText(error));
+    mutationFn: (submission: {
+      runId: string;
+      askId: string;
+      answers: AskAnswer[];
+    }) =>
+      api!.answerRun(
+        submission.runId,
+        submission.askId,
+        submission.answers,
+        lifetimeSignal(),
+      ),
+    onSuccess: async (_result, submission) => {
+      if (lifetimeSignal().aborted) return;
+      setSubmittedAnswer({ runId: submission.runId, askId: submission.askId });
+      await refresh();
+    },
+    onError: async (error) => {
+      if (!lifetimeSignal().aborted) {
+        setProblem(errorText(error));
+        await session.refetch();
+      }
     },
   });
   const cancel = useMutation({
@@ -382,12 +410,21 @@ export default function ChatScreen() {
                   </>
                 ) : null}
                 {ask && runId ? (
-                  <AskCard
-                    key={ask.askId}
-                    ask={ask}
-                    busy={answer.isPending}
-                    onAnswer={(answers) => answer.mutate(answers)}
-                  />
+                  answerSubmitted ? (
+                    <Notice
+                      title="Answer sent"
+                      detail="Your answer is saved on the server. Waiting for your Agent to continue."
+                    />
+                  ) : (
+                    <AskCard
+                      key={ask.askId}
+                      ask={ask}
+                      busy={answer.isPending}
+                      onAnswer={(answers) =>
+                        answer.mutate({ runId, askId: ask.askId, answers })
+                      }
+                    />
+                  )
                 ) : null}
                 {env && runId ? (
                   <Notice
