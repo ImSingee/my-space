@@ -64,6 +64,10 @@ The mobile app reuses the existing public session-authenticated endpoints:
   attachment IDs; or the existing revision-guarded retry payload.
 - `GET /api/agent/runs/:runId/events?after=N`: existing `{ seq, event }` SSE packets.
 - `POST /api/agent/runs/:runId/answer`: `{ askId, answers }`.
+  Acceptance persists the answer once; concurrent/repeated submissions conflict
+  with HTTP 409 instead of replacing it. Session snapshots include the optional
+  `activeRun.answeredAskId` until Runner acknowledgement, so native clients show
+  a saved/waiting state across reconnects without offering duplicate submission.
 - `POST /api/agent/runs/:runId/cancel`.
 - `PUT /api/agent/sessions/:sessionId/attachments/:attachmentId`: raw file body,
   `Content-Type`, and percent-encoded `X-Attachment-Name`.

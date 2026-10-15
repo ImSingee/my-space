@@ -82,6 +82,7 @@ export type ActiveRun = {
   startedAt: string;
   userTurn: number | null;
   pendingAsk: PendingAsk | null;
+  answeredAskId?: string | null;
   pendingEnvRequest: PendingEnv | null;
 };
 export type SessionSummary = {
