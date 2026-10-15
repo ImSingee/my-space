@@ -1,5 +1,4 @@
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { SessionProvider, useSession } from '../src/state/session';
 import { Busy, usePalette } from '../src/ui/primitives';
 
@@ -15,6 +14,7 @@ function Navigation() {
         headerStyle: { backgroundColor: c.background },
         contentStyle: { backgroundColor: c.background },
         headerShadowVisible: false,
+        statusBarStyle: c.dark ? 'light' : 'dark',
       }}
     >
       <Stack.Protected guard={!origin}>
@@ -34,8 +34,7 @@ function Navigation() {
           name="settings"
           options={{
             title: 'Your instance',
-            presentation: 'formSheet',
-            sheetAllowedDetents: [0.75, 1],
+            presentation: 'modal',
           }}
         />
       </Stack.Protected>
@@ -46,7 +45,6 @@ function Navigation() {
 export default function RootLayout() {
   return (
     <SessionProvider>
-      <StatusBar style="auto" />
       <Navigation />
     </SessionProvider>
   );
