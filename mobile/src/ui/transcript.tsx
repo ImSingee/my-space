@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Pressable, View } from 'react-native';
 import type { JsonValue, StreamState } from '../core';
-import { Card, styles, usePalette } from './primitives';
+import { Card, Text, styles, usePalette } from './primitives';
 
 function record(
   value: JsonValue | undefined,

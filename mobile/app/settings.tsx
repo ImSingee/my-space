@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert, ScrollView, Text, useWindowDimensions } from 'react-native';
+import { Alert, ScrollView } from 'react-native';
 import { useSession } from '../src/state/session';
 import {
   Action,
   Card,
+  Text,
   errorText,
   styles,
   usePalette,
@@ -14,7 +15,6 @@ import {
 export default function SettingsScreen() {
   const { origin, disconnect } = useSession();
   const c = usePalette();
-  const { fontScale } = useWindowDimensions();
   const [busy, setBusy] = useState(false);
   const signOut = () =>
     Alert.alert(
@@ -38,7 +38,6 @@ export default function SettingsScreen() {
     );
   return (
     <ScrollView
-      key={fontScale}
       style={styles.screen}
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"

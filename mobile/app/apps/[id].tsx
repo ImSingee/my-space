@@ -2,13 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { webViewHandoffSource } from '../../src/core';
 import { useSession } from '../../src/state/session';
 import {
   Busy,
   Notice,
+  Text,
   errorText,
   styles,
   usePalette,
@@ -53,7 +54,9 @@ export default function AppScreen() {
               onPress={retry}
               hitSlop={10}
             >
-              <Text style={{ color: c.accent }}>Reload</Text>
+              <Text maxFontSizeMultiplier={1.4} style={{ color: c.accent }}>
+                Reload
+              </Text>
             </Pressable>
           ),
         }}
