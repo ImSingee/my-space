@@ -24,10 +24,7 @@ function Navigation() {
         />
       </Stack.Protected>
       <Stack.Protected guard={Boolean(origin)}>
-        <Stack.Screen
-          name="index"
-          options={{ title: 'Hatch', headerLargeTitle: true }}
-        />
+        <Stack.Screen name="index" options={{ title: 'Hatch' }} />
         <Stack.Screen name="chat/[id]" options={{ title: 'Conversation' }} />
         <Stack.Screen name="apps/[id]" options={{ title: 'App' }} />
         <Stack.Screen
