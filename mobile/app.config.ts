@@ -18,6 +18,7 @@ const config: ExpoConfig = {
   },
   android: { package: 'app.hatch.mobile' },
   plugins: [
+    './plugins/with-private-networking.cjs',
     'expo-router',
     'expo-secure-store',
     ['expo-build-properties', { ios: { enableSceneSupport: true } }],

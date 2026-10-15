@@ -127,6 +127,13 @@ export default function HomeScreen() {
                 {errorText(create.error)}
               </Text>
             ) : null}
+            {failure && rows.length > 0 ? (
+              <Notice
+                title="Couldn’t refresh your Hatch"
+                detail={errorText(failure)}
+                action={{ label: 'Try again', onPress: refresh }}
+              />
+            ) : null}
           </View>
         }
         ListEmptyComponent={
