@@ -92,6 +92,7 @@ export class HatchApiClient {
     if (options.authenticate !== false && !token) throw statusError(401);
     const headers = new Headers(options.headers);
     headers.set('accept', headers.get('accept') ?? 'application/json');
+    headers.set('cache-control', 'no-store');
     // Credentials never travel through URL query strings, cookies, or redirects.
     if (token) headers.set('authorization', `Bearer ${token}`);
     let response: Response;
@@ -103,6 +104,7 @@ export class HatchApiClient {
         signal: options.signal,
         redirect: 'error',
         credentials: 'omit',
+        cache: 'no-store',
       });
     } catch {
       throwIfAborted(options.signal);

@@ -53,7 +53,7 @@ bundle identifier with your own before distribution.
 
 - Native Apps and conversations lists, pull-to-refresh, loading/error/empty states.
 - New conversations, configured model selection, history, selectable answer text,
-  expandable reasoning/tool output, and links to generated Apps.
+  expandable reasoning/tool requests and output, and links to generated Apps.
 - Up to six combined attachments per message: files up to 25 MiB each, plus JPEG,
   PNG, WebP, and GIF images. Photos use model image input. Oversized images are
   rejected with guidance rather than silently truncated. Repeated file uploads
@@ -77,6 +77,12 @@ Tokens use a SHA-256-origin storage key and Keychain
 `WHEN_UNLOCKED_THIS_DEVICE_ONLY`. Requests bind to one canonical instance, use
 `Authorization: Bearer`, omit cookies, and reject redirects before following.
 Late 401 responses and cancelled sign-ins cannot delete a newer stored token.
+On iOS, the private-networking config plugin installs an ephemeral Expo Fetch
+session with no HTTP cache, cookie store, or credential store before React starts.
+It also clears the app's legacy URLCache files on launch. API requests explicitly
+disable caching; TanStack Query keeps list and conversation data in memory only.
+Re-run `pnpm exec expo prebuild --platform ios` from `mobile/` and rebuild the
+native client after changing this plugin; a Metro reload is not sufficient.
 The UI serializes instance transitions, clears query state, and remounts native
 navigation/WebViews when the identity changes. Removing a screen also aborts its
 unfinished uploads and mutations so an old operation cannot pick up a newly

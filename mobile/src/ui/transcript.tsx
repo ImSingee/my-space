@@ -119,9 +119,11 @@ export function TranscriptMessage({ value }: { value: JsonValue }) {
           );
         if (block.type === 'toolCall' && typeof block.name === 'string')
           return (
-            <Text key={index} style={[styles.caption, { color: c.muted }]}>
-              {block.name.replaceAll('_', ' ')}
-            </Text>
+            <Expandable
+              key={index}
+              title={`Request · ${block.name.replaceAll('_', ' ')}`}
+              text={JSON.stringify(block.arguments ?? {}, null, 2)}
+            />
           );
         if (block.type === 'image' && typeof block.data === 'string')
           return (
@@ -179,12 +181,17 @@ export function LiveTranscript({ state }: { state: StreamState }) {
         if (block.kind !== 'tool') return null;
         const tool = state.tools.find((item) => item.id === block.id);
         return tool ? (
-          <Expandable
-            key={index}
-            title={`${tool.done ? (tool.isError ? 'Failed' : 'Done') : 'Working'} · ${tool.label ?? tool.name.replaceAll('_', ' ')}`}
-            text={tool.output ?? tool.summary}
-            error={tool.isError}
-          />
+          <View key={index} style={{ gap: 8 }}>
+            <Expandable
+              title={`Request · ${tool.name.replaceAll('_', ' ')}`}
+              text={JSON.stringify(tool.args ?? {}, null, 2)}
+            />
+            <Expandable
+              title={`${tool.done ? (tool.isError ? 'Failed' : 'Done') : 'Working'} · ${tool.label ?? tool.name.replaceAll('_', ' ')}`}
+              text={tool.output ?? tool.summary}
+              error={tool.isError}
+            />
+          </View>
         ) : null;
       })}
       {!state.blocks.length ? (
