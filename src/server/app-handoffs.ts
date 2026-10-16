@@ -108,7 +108,7 @@ export async function createAppHandoff(
     expiresAt,
   });
   return {
-    url: `${origin}/api/v1/auth/handoffs/consume`,
+    url: `${origin}/api/auth/handoffs/consume`,
     ticket,
     expiresAt: expiresAt.toISOString(),
     targetPath,
@@ -192,4 +192,36 @@ export async function consumeAppHandoff(request: Request) {
       'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
     },
   });
+}
+
+/** Native auth transport: a form POST and redirect cannot be a unary RPC. */
+export async function handleAppHandoffRequest(
+  request: Request,
+): Promise<Response> {
+  let response: Response;
+  try {
+    if (request.method !== 'POST') {
+      response = new Response('Method not allowed', {
+        status: 405,
+        headers: { allow: 'POST' },
+      });
+    } else {
+      response = await consumeAppHandoff(request);
+    }
+  } catch (error) {
+    const status = error instanceof AppError ? error.status : 500;
+    response = Response.json(
+      {
+        message:
+          status < 500 && error instanceof AppError
+            ? error.message
+            : 'Internal server error.',
+      },
+      { status },
+    );
+  }
+  response.headers.set('cache-control', 'no-store');
+  response.headers.set('referrer-policy', 'no-referrer');
+  response.headers.set('x-content-type-options', 'nosniff');
+  return response;
 }

@@ -7,12 +7,12 @@ polling and sign-out remain native HTTP endpoints under `/api/auth/*`.
 
 The authoritative contract is
 `packages/hatch-platform-api/proto/hatch/platform/v1/`.
-`app.proto`, `workflow.proto`, `auth.proto` and `sdk.proto` own their respective
+`app.proto`, `workflow.proto`, `auth.proto`, `agent.proto` and `sdk.proto` own their respective
 services and request/response messages. `lifecycle.proto` shares App/Workflow
 resource and release messages; `file.proto` shares file payloads; `error.proto`
 owns business error details. All files retain the `hatch.platform.v1` package.
 The contract defines `hatch.platform.v1.AppService`, `WorkflowService`, `AuthService` and
-`SdkService`. Both lifecycle services provide list, create, get, get-source,
+`SdkService`, plus session-only `AgentService`. Both lifecycle services provide list, create, get, get-source,
 deploy and rollback RPCs. Auth provides `GetStatus`; Sdk provides `GetSdk`.
 There are no REST aliases or OpenAPI endpoint. Former `/api/v1/*`, including
 `openapi.json`, and `/api/cli/v1/*` return JSON 404 rather than the SPA shell.
@@ -85,8 +85,11 @@ artifact/data fences. Deployment requests include the resource's observed
 ## Authentication and transport policy
 
 Every valid Better Auth session (Cookie or Bearer session token), user API key
-(`x-api-key`), or Agent Run JWT has full access to public procedures. There are
-no added scopes or roles. A Run's context associates newly created Apps with
+(`x-api-key`), or Agent Run JWT has full access to the existing lifecycle, auth
+status and SDK procedures. Interactive Agent methods and `CreateAppHandoff`
+require a Better Auth user session; API keys and Run JWTs receive
+`permission_denied` with `SESSION_REQUIRED`, even alongside a valid Cookie.
+There are no added scopes or roles. A Run's context associates newly created Apps with
 its conversation. `GetStatus` returns a credential oneof and safe user/key/Run
 metadata, never secrets or raw account/session rows.
 
@@ -99,10 +102,91 @@ Internal fleet HTTP/WS remains separate.
 
 Browser requests are same-origin only at canonical `APP_URL`. Foreign Origins
 and Cookie-only `Sec-Fetch-Site: cross-site` requests are denied. No permissive
-CORS headers/preflight are added. Ordinary request messages are capped at 16 KiB;
+CORS headers/preflight are added. Interactive methods preserve the existing
+session origin policy: canonical `APP_URL` or the current trusted Tailscale
+origin, and no `Sec-Fetch-Site: cross-site` request even with an explicit token.
+Ordinary request messages are capped at 16 KiB;
 deploy messages at 256 MiB. Limits apply to actual received and decompressed
 bytes, including chunked requests. Responses use `no-store`, `nosniff` and
 `no-referrer`.
+
+## Interactive Agent and App resources
+
+These client-neutral resources extend the shared `hatch.platform.v1` contract.
+There is no mobile service, duplicate App projection, REST alias, oRPC contract,
+or OpenAPI document. Native clients reuse `AppService/ListApps` (`{resources}`)
+and `GetApp` (`{resource}`), including their exact-ID-before-slug resolution.
+
+All methods below are Connect unary POSTs beneath `/api/rpc/hatch.platform.v1.`
+and require Cookie or session Bearer. Request fields are validated with Buf
+Protovalidate and the ordinary 16 KiB limit. Protobuf unknown-field evolution
+rules replace the retired strict JSON DTOs; only declared fields influence
+behavior. Empty repeated/default scalar fields may be omitted in Protobuf JSON;
+generated clients restore defaults. Optional fields retain presence rather than
+REST `null`. Timestamps remain ISO strings.
+
+| Service/method                 | Input                                                                                      | Output and reuse                                                                                                                                                                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AgentService/GetModelCatalog` | Empty message                                                                              | `{providers, defaultModel?}` containing enabled provider/model IDs, labels, reasoning flag and token/context limits. No provider keys or base URLs. Read-only, without provider-management side effects.                                                                                       |
+| `AgentService/ListSessions`    | Optional `appId` (1–200 characters)                                                        | `{sessions}` newest first; each includes `id`, `title`, `appIds`, optional `providerId`/`modelId`, `messageCount`, `updatedAt`. Reuses the browser store and association filter.                                                                                                               |
+| `AgentService/CreateSession`   | Optional `title` (≤200 characters), `providerId`/`modelId` (1–200 characters when present) | `{id}`. Blank title becomes `New chat`; omitted models remain unset. Availability is checked when a run starts.                                                                                                                                                                                |
+| `AgentService/GetSession`      | `id` (1–200 characters)                                                                    | `{session}` with transcript `google.protobuf.Value` messages, optional `activeRun`, run timings, `updatedAt` Retry CAS and `serverTime`. One repeatable-read snapshot; pending questions/environment requests and `answeredAskId` preserve reconnect behavior. Missing session is `not_found`. |
+| `AppService/CreateAppHandoff`  | App `id` or slug (1–191 characters)                                                        | `{url, ticket, expiresAt, targetPath}`. Rechecks a current supported frontend deployment and non-archived App; unavailable Apps are `aborted`/`CONFLICT`. No client redirect target.                                                                                                           |
+
+### Native authentication and one-use browser handoff
+
+Login/device/logout retain Better Auth's existing HTTP contract. Native callers
+use `/api/auth/device/code` and `/api/auth/device/token` with
+`client_id: "hatch-mobile"`; `/cli/authorize` labels the request **Hatch Mobile**.
+Open only the same-instance verification URL in the system browser, honor polling
+intervals and pending/slow-down/denied/expired results, and keep the returned
+session token in secure storage scoped to the exact instance origin.
+
+The only added native auth transport is
+`POST /api/auth/handoffs/consume`: exactly one URL-encoded `ticket` form field,
+maximum 1 KiB, no substitute Cookie/API key/Bearer authorization. Successful
+consumption returns a 303 to the server-computed App embed path and sets a signed,
+host-only HttpOnly cookie for the **original session**. This form/redirect flow
+cannot be represented by a unary RPC. Other methods receive 405. Errors are
+plain HTTP JSON; no Connect request or header is required for this endpoint.
+
+Open the form POST in an incognito WebView after validating its origin and
+fixed consume path. The random capability expires within 60 seconds or original
+session expiry, whichever is earlier. Only its SHA-256 identifier and bounded
+session/App/origin binding are stored in the existing verification table. Atomic
+DELETE RETURNING prevents reuse across consumers. Consumption rechecks original
+session revocation, trusted origin, App identity/slug and deployment availability
+and compatibility. Sign-out/revocation ends pending tickets and WebView sessions.
+There is no token URL, arbitrary redirect, JavaScript credential bridge, new
+long-lived credential or permission scope. Responses are no-store and no CORS
+permissions are added.
+
+### Existing Agent run transport
+
+The native client continues reusing the existing session-authenticated HTTP
+transport. Explicit invalid Bearer never falls back to Cookie; API keys, Run
+JWTs and cross-site requests cannot enter this interactive boundary.
+
+| Method/path                                                      | Existing contract                                                                                                                                                      |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/agent/runs`                                           | Session/model IDs, composer text, optional images/attachments or revision-guarded Retry; returns run identity.                                                         |
+| `GET /api/agent/runs/{runId}/events?after=N`                     | SSE `{seq,event}` and persistent replay.                                                                                                                               |
+| `POST /api/agent/runs/{runId}/answer`                            | `{askId, answers}`, saved once; duplicates/concurrent submissions conflict. Snapshot `answeredAskId` covers pending Runner acknowledgement.                            |
+| `POST /api/agent/runs/{runId}/cancel`                            | Existing cancellation behavior.                                                                                                                                        |
+| `PUT /api/agent/sessions/{sessionId}/attachments/{attachmentId}` | Raw bytes, Content-Type and percent-encoded X-Attachment-Name; 25 MiB per-file limit, idempotent attachment ID, combined six-file and 25,000,000-byte run-body limits. |
+
+### Migration and release order
+
+Deploy this backend before the rebased native client. The unshipped generic-v1
+interactive endpoints and `/api/mobile/v1` are removed without aliases. An old
+client must upgrade; the new client never falls back to Server Functions or API
+keys when `GetModelCatalog` is unavailable. Previously issued handoff tickets
+expire within 60 seconds; request a fresh ticket after upgrading. There is no
+schema/backfill or Platform/Runner/App/Workflow compatibility version change.
+Rollback pairs backend and client revisions and leaves ordinary session
+revocation available. Historical SDK58/generic-v1 native acceptance does not
+verify this Connect migration; its checks are unit/contracts, type checks and
+builds only.
 
 ## Errors and recovery
 

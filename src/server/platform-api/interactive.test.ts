@@ -1,4 +1,12 @@
 /** Real Better Auth and migrated PGlite protect native transport/auth contracts. */
+import { createClient, ConnectError, Code } from '@connectrpc/connect';
+import { createConnectTransport } from '@connectrpc/connect-web';
+import { errorFromJson } from '@connectrpc/connect/protocol-connect';
+import { toJson } from '@bufbuild/protobuf';
+import { ValueSchema } from '@bufbuild/protobuf/wkt';
+import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
+import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import { PublicErrorSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/error_pb';
 import { randomUUID } from 'node:crypto';
 import {
   afterAll,
@@ -38,6 +46,7 @@ await import('~/db');
 const { db, schema } = fixture.database!;
 const { auth } = await import('~auth/server');
 const { handlePlatformApiRequest } = await import('./http');
+const { handleAppHandoffRequest } = await import('../app-handoffs');
 const { authenticateSessionRequest } = await import('../session-http-auth');
 const origin = 'https://hatch.example.test';
 let cookie = '';
@@ -64,29 +73,53 @@ async function authCall(
   );
 }
 function call(
-  path: string,
+  method: string,
   options: {
     body?: unknown;
     headers?: Record<string, string>;
     method?: string;
     origin?: string;
+    cookieOnly?: boolean;
   } = {},
 ) {
+  const verb = options.method ?? 'POST';
   return handlePlatformApiRequest(
-    new Request(`${options.origin ?? origin}/api/v1/${path}`, {
-      method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        ...options.headers,
+    new Request(
+      `${options.origin ?? origin}/api/rpc/hatch.platform.v1.${method}`,
+      {
+        method: verb,
+        headers: {
+          ...(options.cookieOnly ? {} : { authorization: `Bearer ${token}` }),
+          'content-type': 'application/json',
+          'connect-protocol-version': '1',
+          ...options.headers,
+        },
+        body: verb === 'GET' ? undefined : JSON.stringify(options.body ?? {}),
       },
-      body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
-    }),
+    ),
   );
 }
+function client(useBinaryFormat: boolean) {
+  const transport = createConnectTransport({
+    baseUrl: `${origin}/api/rpc`,
+    useBinaryFormat,
+    interceptors: [
+      (next) => (request) => {
+        request.header.set('authorization', `Bearer ${token}`);
+        return next(request);
+      },
+    ],
+    fetch: (input, init) => handlePlatformApiRequest(new Request(input, init)),
+  });
+  return {
+    agent: createClient(AgentService, transport),
+    apps: createClient(AppService, transport),
+  };
+}
 async function handoff() {
-  const response = await call('apps/app-one/handoffs', { body: {} });
+  const response = await call('AppService/CreateAppHandoff', {
+    body: { id: 'app-one' },
+  });
   expect(response.status).toBe(200);
   return (await response.json()) as {
     ticket: string;
@@ -104,8 +137,8 @@ function consume(
     method?: string;
   } = {},
 ) {
-  return handlePlatformApiRequest(
-    new Request(`${options.origin ?? origin}/api/v1/auth/handoffs/consume`, {
+  return handleAppHandoffRequest(
+    new Request(`${options.origin ?? origin}/api/auth/handoffs/consume`, {
       method: options.method ?? 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -209,67 +242,146 @@ describe('interactive Platform API contracts and authority', () => {
       { authorization: `Bearer ${jwt.token}`, cookie },
     ] as Record<string, string>[]) {
       // Existing resource access remains unchanged for both real credential types.
-      expect((await call('apps', { headers })).status).toBe(200);
+      expect((await call('AppService/ListApps', { headers })).status).toBe(200);
       for (const [path, body] of [
-        ['agent/models', undefined],
-        ['agent/sessions', undefined],
-        [`agent/sessions/${runSession}`, undefined],
-        ['agent/sessions', {}],
-        ['apps/app-one/handoffs', {}],
+        ['AgentService/GetModelCatalog', {}],
+        ['AgentService/ListSessions', {}],
+        ['AgentService/GetSession', { id: runSession }],
+        ['AgentService/CreateSession', {}],
+        ['AppService/CreateAppHandoff', { id: 'app-one' }],
       ] as const) {
         const response = await call(path, { headers, body });
         expect(response.status).toBe(403);
-        expect(await response.json()).toMatchObject({
-          code: 'SESSION_REQUIRED',
-        });
+        const error = errorFromJson(
+          await response.json(),
+          undefined,
+          new ConnectError('Invalid error'),
+        );
+        expect(error.code).toBe(Code.PermissionDenied);
+        expect(error.findDetails(PublicErrorSchema)).toMatchObject([
+          { code: 'SESSION_REQUIRED' },
+        ]);
       }
     }
-    const browser = await handlePlatformApiRequest(
-      new Request(`${origin}/api/v1/agent/sessions`, {
-        headers: { cookie, origin, 'sec-fetch-site': 'same-origin' },
-      }),
-    );
+    const browser = await call('AgentService/ListSessions', {
+      cookieOnly: true,
+      headers: { cookie, origin, 'sec-fetch-site': 'same-origin' },
+    });
     expect(browser.status).toBe(200);
     expect(
       (
-        await call('agent/models', {
+        await call('AgentService/GetModelCatalog', {
           headers: { cookie, authorization: 'Bearer invalid' },
         })
       ).status,
     ).toBe(401);
     expect(
       (
-        await call('agent/models', {
+        await call('AgentService/GetModelCatalog', {
           headers: { 'sec-fetch-site': 'cross-site' },
         })
       ).status,
     ).toBe(403);
   });
 
-  it('publishes resource contracts and the exceptional ticket transport in the existing OpenAPI', async () => {
-    const { generatePlatformOpenApi } = await import('./openapi');
-    const spec = await generatePlatformOpenApi();
-    for (const [path, method] of [
-      ['/agent/models', 'get'],
-      ['/agent/sessions', 'get'],
-      ['/agent/sessions', 'post'],
-      ['/agent/sessions/{id}', 'get'],
-      ['/apps/{id}/handoffs', 'post'],
-    ] as const) {
-      expect(spec.paths?.[path]?.[method]?.security).toEqual([
-        { sessionCookie: [] },
-        { sessionBearer: [] },
+  it.each([false, true])(
+    'round-trips generated clients, transcript values and optional presence (binary=%s)',
+    async (binary) => {
+      const api = client(binary);
+      const created = await api.agent.createSession({ title: 'Typed client' });
+      const messages = [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello 👋' }],
+          timestamp: 123,
+        },
+        null,
+        false,
+        0,
+      ];
+      await db
+        .update(schema.agentSessions)
+        .set({ messages })
+        .where(eq(schema.agentSessions.id, created.id));
+      const snapshot = (await api.agent.getSession({ id: created.id }))
+        .session!;
+      expect(snapshot.id).toBe(created.id);
+      expect(snapshot.providerId).toBeUndefined();
+      expect(snapshot.activeRun).toBeUndefined();
+      expect(snapshot.runs).toEqual([]);
+      expect(
+        snapshot.messages.map((value) => toJson(ValueSchema, value)),
+      ).toEqual(messages);
+      expect(snapshot.updatedAt).toMatch(/^\d{4}-/);
+      expect(snapshot.serverTime).toMatch(/^\d{4}-/);
+      expect((await api.agent.listSessions({})).sessions).toMatchObject([
+        { id: created.id, messageCount: 4 },
       ]);
-    }
-    const consume = spec.paths?.['/auth/handoffs/consume']?.post;
-    expect(consume?.security).toEqual([]);
-    expect(consume?.responses?.['303']).toBeDefined();
-    expect(JSON.stringify(spec.paths)).not.toContain('/mobile');
-  });
+      await db
+        .insert(schema.agentSessionApps)
+        .values({ sessionId: created.id, appId: 'app-one' });
+      expect(
+        (await api.agent.listSessions({ appId: 'app-one' })).sessions.map(
+          (row) => row.id,
+        ),
+      ).toEqual([created.id]);
+      expect(
+        (await api.agent.listSessions({ appId: 'other-app' })).sessions,
+      ).toEqual([]);
+      const pendingAsk = {
+        askId: 'ask-one',
+        questions: [
+          {
+            id: 'question-one',
+            prompt: 'Choose',
+            allowMultiple: false,
+            options: [{ id: 'yes', label: 'Yes' }],
+          },
+        ],
+      };
+      const pendingEnvRequest = {
+        requestId: 'env-one',
+        reason: 'Run app',
+        variables: [{ key: 'TOKEN', description: 'App token', secret: true }],
+      };
+      await db.insert(schema.agentRuns).values({
+        id: 'snapshot-run',
+        sessionId: created.id,
+        providerId: 'fixture',
+        modelId: 'fixture',
+        status: 'blocked',
+        input: { text: 'Hello', userTurn: 0 },
+        pendingAsk,
+        pendingEnvRequest,
+        pendingAnswer: {
+          askId: 'ask-one',
+          answers: [{ questionId: 'question-one', selectedOptionIds: ['yes'] }],
+        },
+      });
+      const running = (await api.agent.getSession({ id: created.id })).session!;
+      expect(running.activeRun).toMatchObject({
+        id: 'snapshot-run',
+        userTurn: 0,
+        pendingAsk,
+        answeredAskId: 'ask-one',
+        pendingEnvRequest,
+      });
+      expect(running.runs).toMatchObject([
+        { id: 'snapshot-run', userTurn: 0, status: 'blocked' },
+      ]);
+      expect(running.runs[0].completedAt).toBeUndefined();
+      const handoff = await api.apps.createAppHandoff({ id: 'example-app' });
+      expect(handoff.url).toBe(`${origin}/api/auth/handoffs/consume`);
+      expect((await consume(handoff.ticket)).status).toBe(303);
+    },
+  );
 
   it('returns safe App projections, real session snapshots, and enabled model defaults', async () => {
-    for (const path of ['apps', 'apps/app-one']) {
-      const response = await call(path);
+    for (const [method, body] of [
+      ['AppService/ListApps', {}],
+      ['AppService/GetApp', { id: 'app-one' }],
+    ] as const) {
+      const response = await call(method, { body });
       expect(response.status).toBe(200);
       expect(response.headers.get('cache-control')).toBe('no-store');
       const text = await response.text();
@@ -278,24 +390,26 @@ describe('interactive Platform API contracts and authority', () => {
         /never-return|private\/repo|webhookSecret|signingSecret/,
       );
     }
-    expect((await call('apps/missing')).status).toBe(404);
-    const created = await call('agent/sessions', {
+    expect(
+      (await call('AppService/GetApp', { body: { id: 'missing' } })).status,
+    ).toBe(404);
+    const created = await call('AgentService/CreateSession', {
       body: { title: 'From mobile' },
     });
-    expect(created.status).toBe(201);
+    expect(created.status).toBe(200);
     const { id } = (await created.json()) as { id: string };
-    const list = await call('agent/sessions');
-    expect(await list.json()).toMatchObject([
-      { id, title: 'From mobile', messageCount: 0, appIds: [] },
-    ]);
-    const detail = await call(`agent/sessions/${id}`);
-    expect(await detail.json()).toMatchObject({
-      id,
-      messages: [],
-      activeRun: null,
-      runs: [],
+    const list = await call('AgentService/ListSessions');
+    expect(await list.json()).toMatchObject({
+      sessions: [{ id, title: 'From mobile' }],
     });
-    expect((await call('agent/sessions/missing')).status).toBe(404);
+    const detail = await call('AgentService/GetSession', { body: { id } });
+    expect(await detail.json()).toMatchObject({
+      session: { id, title: 'From mobile' },
+    });
+    expect(
+      (await call('AgentService/GetSession', { body: { id: 'missing' } }))
+        .status,
+    ).toBe(404);
     await db.insert(schema.agentProviders).values([
       {
         id: 'enabled',
@@ -334,7 +448,7 @@ describe('interactive Platform API contracts and authority', () => {
         modelId: 'model-other',
       },
     ]);
-    const config = await (await call('agent/models')).json();
+    const config = await (await call('AgentService/GetModelCatalog')).json();
     expect(config).toMatchObject({
       providers: [{ id: 'enabled', models: [{ modelId: 'model-good' }] }],
       defaultModel: { providerId: 'enabled', modelId: 'model-good' },
@@ -356,10 +470,11 @@ describe('interactive Platform API contracts and authority', () => {
         cookie,
       },
     ] as Record<string, string>[])
-      expect((await call('apps', { headers })).status).toBe(401);
-    const cookieOnly = await handlePlatformApiRequest(
-      new Request(`${origin}/api/v1/apps`, { headers: { cookie } }),
-    );
+      expect((await call('AppService/ListApps', { headers })).status).toBe(401);
+    const cookieOnly = await call('AppService/ListApps', {
+      cookieOnly: true,
+      headers: { cookie },
+    });
     expect(cookieOnly.status).toBe(200);
     // Browser Agent routes continue to support their existing Cookie session.
     expect(
@@ -384,28 +499,64 @@ describe('interactive Platform API contracts and authority', () => {
       { origin: 'null' },
       { 'sec-fetch-site': 'cross-site' },
     ] as Record<string, string>[]) {
-      const response = await call('agent/sessions', { body: {}, headers });
+      const response = await call('AgentService/CreateSession', {
+        body: {},
+        headers,
+      });
       expect(response.status).toBe(403);
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
     }
     expect(
       (
-        await call('apps', {
+        await call('AppService/ListApps', {
           method: 'OPTIONS',
           headers: { origin: 'https://evil.example' },
         })
       ).status,
-    ).toBe(403);
+    ).toBe(405);
   });
 
-  it('enforces bounded JSON bodies and rejects unrequested fields', async () => {
+  it('keeps trusted instance origins and exact App IDs when creating handoffs', async () => {
+    const tailscale = 'https://hatch.example.ts.net';
+    const response = await call('AppService/CreateAppHandoff', {
+      origin: tailscale,
+      body: { id: 'app-one', targetPath: 'https://evil.example' },
+      headers: { origin: tailscale },
+    });
+    expect(response.status).toBe(200);
+    const ticket = await response.json();
+    expect(ticket.url).toBe(`${tailscale}/api/auth/handoffs/consume`);
+    expect(ticket.targetPath).toBe('/app/example-app/embed/');
     expect(
-      (await call('agent/sessions', { body: { title: 'x', extra: true } }))
-        .status,
+      (
+        await consume(ticket.ticket, {
+          origin: tailscale,
+          headers: { origin: tailscale },
+        })
+      ).status,
+    ).toBe(303);
+    await db.insert(schema.apps).values({
+      id: 'shadow',
+      slug: 'app-one',
+      name: 'Slug shadow',
+      status: 'draft',
+    });
+    expect(
+      (await client(true).apps.createAppHandoff({ id: 'app-one' })).targetPath,
+    ).toBe('/app/example-app/embed/');
+  });
+
+  it('enforces Protovalidate fields and Connect message limits', async () => {
+    expect(
+      (
+        await call('AgentService/CreateSession', {
+          body: { title: 'x'.repeat(201) },
+        })
+      ).status,
     ).toBe(400);
     expect(
       (
-        await call('agent/sessions', {
+        await call('AgentService/CreateSession', {
           body: {},
           headers: { 'content-type': 'text/plain' },
         })
@@ -413,12 +564,11 @@ describe('interactive Platform API contracts and authority', () => {
     ).toBe(415);
     expect(
       (
-        await call('agent/sessions', {
+        await call('AgentService/CreateSession', {
           body: { title: 'x'.repeat(20_000) },
-          headers: { 'content-length': '1' },
         })
       ).status,
-    ).toBe(413);
+    ).toBe(429);
   });
 
   it('authorizes hatch-mobile through the existing explicit browser device approval', async () => {
@@ -460,7 +610,7 @@ describe('interactive Platform API contracts and authority', () => {
       .access_token;
     expect(
       (
-        await call('apps', {
+        await call('AppService/ListApps', {
           headers: { authorization: `Bearer ${mobileToken}` },
         })
       ).status,
@@ -557,8 +707,8 @@ describe('one-use WebView handoff', () => {
     expect((await consume(ticket.ticket)).status).toBe(401);
     expect(
       (
-        await call('apps/app-one/handoffs', {
-          body: { targetPath: 'https://evil.example' },
+        await call('AppService/CreateAppHandoff', {
+          body: { id: '' },
         })
       ).status,
     ).toBe(400);
@@ -575,9 +725,10 @@ describe('one-use WebView handoff', () => {
       .update(schema.apps)
       .set({ slug: 'example-app', status: 'archived' })
       .where(eq(schema.apps.id, 'app-one'));
-    expect((await call('apps/app-one/handoffs', { body: {} })).status).toBe(
-      409,
-    );
+    expect(
+      (await call('AppService/CreateAppHandoff', { body: { id: 'app-one' } }))
+        .status,
+    ).toBe(409);
     await db
       .update(schema.apps)
       .set({ status: 'deployed' })
@@ -585,9 +736,10 @@ describe('one-use WebView handoff', () => {
     await db
       .update(schema.deployments)
       .set({ compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION + 1 });
-    expect((await call('apps/app-one/handoffs', { body: {} })).status).toBe(
-      409,
-    );
+    expect(
+      (await call('AppService/CreateAppHandoff', { body: { id: 'app-one' } }))
+        .status,
+    ).toBe(409);
   });
 
   it('invalidates browser cookies and pending tickets when the native session signs out', async () => {
@@ -599,10 +751,16 @@ describe('one-use WebView handoff', () => {
     const otherToken = ((await signedIn.json()) as { token: string }).token;
     const headers = { authorization: `Bearer ${otherToken}` };
     const first = (await (
-      await call('apps/app-one/handoffs', { body: {}, headers })
+      await call('AppService/CreateAppHandoff', {
+        body: { id: 'app-one' },
+        headers,
+      })
     ).json()) as { ticket: string };
     const pending = (await (
-      await call('apps/app-one/handoffs', { body: {}, headers })
+      await call('AppService/CreateAppHandoff', {
+        body: { id: 'app-one' },
+        headers,
+      })
     ).json()) as { ticket: string };
     const browser = await consume(first.ticket);
     expect(browser.status).toBe(303);

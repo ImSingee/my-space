@@ -8,6 +8,8 @@ import "hatch/platform/v1/lifecycle.proto";
 
 // Public API for CLI and native clients. Platform Web UI uses Server Functions.
 service AppService {
+  // A one-use browser handoff requires a Better Auth user session.
+  rpc CreateAppHandoff(CreateAppHandoffRequest) returns (CreateAppHandoffResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
   rpc CreateApp(CreateAppRequest) returns (CreateAppResponse);
   rpc GetApp(GetAppRequest) returns (GetAppResponse);
@@ -92,4 +94,17 @@ message RollbackAppRequest {
 
 message RollbackAppResponse {
   RestoredVersion restored = 1;
+}
+
+message CreateAppHandoffRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+message CreateAppHandoffResponse {
+  string url = 1;
+  string ticket = 2;
+  string expires_at = 3;
+  string target_path = 4;
 }
