@@ -13,6 +13,8 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { ulid as genUlid0 } from 'ulid';
+import { user } from './auth-schema';
+import type { HomepageTarget } from '../homepage';
 
 export * from './auth-schema';
 
@@ -788,5 +790,14 @@ export const logs = snakeCase.table('logs', {
 export const platformConfig = snakeCase.table('platform_config', {
   key: text().primaryKey(),
   value: jsonb().$type<JsonValue>().notNull(),
+  updatedAt,
+});
+
+/** Personal account preferences; platform resources remain shared. */
+export const userPreferences = snakeCase.table('user_preferences', {
+  userId: text()
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  homepage: jsonb().$type<HomepageTarget>().notNull(),
   updatedAt,
 });

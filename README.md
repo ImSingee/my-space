@@ -57,6 +57,19 @@ wished existed, built for an audience of one: you.
   your server, your AI provider keys. App backends run sandboxed with scoped
   database access.
 
+## Personal homepage
+
+Set **Settings → Account → Homepage** to choose where Hatch opens. Each account
+has its own homepage, saved on the server and synchronized across devices.
+Choose a platform page, a specific dashboard, or a deployed App with a frontend;
+Apps also support an optional internal page through their hash router.
+
+Opening the platform root or signing in without a deep link uses your homepage.
+Signing in from a protected deep link returns to that page instead. The default
+is the existing Dashboard selection. If your chosen dashboard is deleted or your
+App is deleted, archived, or unavailable, Hatch opens the default Dashboard and
+retains your choice so it can recover when the App becomes available again.
+
 ## Run it
 
 All you need is Docker. From the folder containing `docker-compose.yml`:
