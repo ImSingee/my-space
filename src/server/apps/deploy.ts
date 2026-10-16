@@ -14,7 +14,8 @@ import {
 import { db, schema } from '~/db';
 import { AppError } from '~server/errors';
 import type { JsonObject } from '~/db/schema';
-import { createDeployLock, workspaceRelative } from '~server/deploy-lock';
+import { workspaceRelative } from '~server/deploy-lock';
+import { appDeployLock } from './deploy-lock';
 import { publishPlatformEvent } from '~server/platform-events';
 import { buildApp, type BuildResult } from './build';
 import {
@@ -245,7 +246,7 @@ async function restoreLiveBuild(
  * workflows). Rollback (manage.ts) shares this lock so its artifact/Git/row
  * mutations can't interleave with a concurrent deploy's.
  */
-export const appDeployLock = createDeployLock(1);
+export { appDeployLock } from './deploy-lock';
 
 /**
  * Reconcile a durable activation fence left by a crash or an unavailable
@@ -949,6 +950,8 @@ async function deployAppInner(
       // otherwise leave this true with no row and strand the release tag.
       recorded = true;
     }
+    // Runtime startup resolves the database under the same lifecycle lock.
+    await appDatabaseLease?.release();
     await finishCommittedRelease(
       id,
       liveBackup,
@@ -1025,6 +1028,7 @@ async function deployAppInner(
       // The release transaction committed and is already live. Finish the same
       // idempotent post-commit work as the ordinary success path and report
       // success instead of falling through to destructive failure cleanup.
+      await appDatabaseLease?.release();
       await finishCommittedRelease(
         id,
         liveBackup,

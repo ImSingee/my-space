@@ -1,3 +1,5 @@
+import { deleteAppDatabase } from './apps/database';
+import { deleteAppDataDatabase } from './apps/data-table/delete';
 /** Server functions for app management (list/detail, deployments, ops, KV). */
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
@@ -217,7 +219,6 @@ export const deleteAppDatabaseFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, dbName: z.string().min(1) }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { deleteAppDatabase } = await import('./apps/database');
     return deleteAppDatabase(data.id, data.dbName);
   });
 
@@ -227,7 +228,6 @@ export const deleteAppDataDatabaseFn = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, dbName: z.string().min(1) }).parse(input),
   )
   .handler(async ({ data }) => {
-    const { deleteAppDataDatabase } = await import('./apps/data-table/delete');
     return deleteAppDataDatabase(data.id, data.dbName);
   });
 

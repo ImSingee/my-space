@@ -150,17 +150,24 @@ function DeploymentItem<TDeployment extends DeploymentLike>({
   const rollbackReasonId = `rollback-reason-${deployment.id}`;
   const artifactNode =
     deployment.status === 'deployed' ? renderArtifact(deployment) : null;
-  const defaultRollbackAction = deployment.canRollback ? (
-    <Button
-      size="compact-sm"
-      variant="default"
-      leftSection={<IconRestore size={14} />}
-      loading={rolling}
-      onClick={() => onRollback(deployment.id)}
-    >
-      Restore
-    </Button>
-  ) : null;
+  const defaultRollbackAction =
+    deployment.canRollback || deployment.rollbackBlockedReason ? (
+      <Button
+        size="compact-sm"
+        variant="default"
+        leftSection={<IconRestore size={14} />}
+        loading={deployment.canRollback && rolling}
+        disabled={!deployment.canRollback}
+        aria-describedby={
+          deployment.rollbackBlockedReason ? rollbackReasonId : undefined
+        }
+        onClick={() => {
+          if (deployment.canRollback) onRollback(deployment.id);
+        }}
+      >
+        Restore
+      </Button>
+    ) : null;
 
   const body = (
     <Stack gap={6}>

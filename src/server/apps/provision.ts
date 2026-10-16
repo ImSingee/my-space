@@ -284,7 +284,7 @@ async function resolveAppDatabaseUrlUnlocked(
   admin: AdminConnection,
 ): Promise<string> {
   const app = await db.query.apps.findFirst({
-    where: (row, { eq: equal }) => equal(row.id, id),
+    where: { id },
     columns: { dbName: true, dbPasswordCiphertext: true },
   });
   if (!app?.dbName) throw new Error(APP_DATABASE_NOT_PROVISIONED_ERROR);

@@ -1,6 +1,7 @@
 /** Server-only: permanent deletion for a disabled managed Data Table. */
 import { eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
+import { appDeployLock } from '../deploy-lock';
 import { waitForDataMigrationBarrier } from './migrate';
 import { dropAppDataDatabase, withAppDataCutoverLock } from './provision';
 import { closeDataRealtime } from './realtime';
@@ -20,13 +21,10 @@ export async function deleteAppDataDatabase(
   id: string,
   expectedDbName: string,
 ): Promise<{ ok: true }> {
-  // Dynamic import avoids loading the deploy/runtime graph from ordinary Data
-  // Table request modules.
-  const { appDeployLock } = await import('../deploy');
   return appDeployLock.withLock(id, () =>
     withAppDataCutoverLock(id, async () => {
       const app = await db.query.apps.findFirst({
-        where: (row, { eq: equal }) => equal(row.id, id),
+        where: { id },
         columns: {
           status: true,
           capabilities: true,

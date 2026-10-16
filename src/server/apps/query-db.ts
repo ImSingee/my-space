@@ -33,7 +33,7 @@ export async function queryAppDatabase(
   // Reject an unregistered database before opening the APP_DATABASE_URL lock
   // connection so the stable product error wins even on a partial install.
   const registered = await db.query.apps.findFirst({
-    where: (row, { eq }) => eq(row.id, id),
+    where: { id },
     columns: { dbName: true },
   });
   if (!registered?.dbName) {

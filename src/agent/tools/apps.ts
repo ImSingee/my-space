@@ -196,11 +196,8 @@ export function createAppTools(options: {
         detail.ops.backend.capable
           ? `Network: ${formatNetworkAccess(detail.ops.backend.network)}`
           : null,
-        `Database: ${detail.dbName ?? 'not provisioned'}`,
-        detail.ops.dataTable.enabled
-          ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +
-            `(${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
-          : null,
+        `Database: ${databaseStatus}`,
+        `Data Tables: ${dataTableStatus}`,
         detail.ops.storage.enabled
           ? 'Persistent storage: enabled (backend STORAGE_DIR)'
           : null,
@@ -232,14 +229,16 @@ export function createAppTools(options: {
         'Deployments (newest first):',
         ...detail.deployments
           .slice(0, 10)
-          .map(
-            (d) =>
-              `  v${d.version} — ${d.status} · compatibility v${d.compatibility.version}${d.isCurrent ? ' (current)' : ''}${
-                d.canRollback ? ' [rollbackable]' : ''
-              }${!d.compatibility.isSupported ? ' [Agent restore only; runtime disabled]' : ''}${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${
-                d.createdAt
-              }`,
-          ),
+          .flatMap((d) => [
+            `  v${d.version} — ${d.status} · compatibility v${d.compatibility.version}${d.isCurrent ? ' (current)' : ''}${
+              d.canRollback ? ' [rollbackable]' : ''
+            }${!d.compatibility.isSupported ? ' [Agent restore only; runtime disabled]' : ''}${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${d.createdAt}`,
+            d.sourceTag ? `    Source tag: ${d.sourceTag}` : null,
+            d.sourceCommit ? `    Source commit: ${d.sourceCommit}` : null,
+            d.rollbackBlockedReason
+              ? `    Restore blocked: ${d.rollbackBlockedReason}`
+              : null,
+          ]),
       ];
       return text(lines.filter((l) => l !== null).join('\n'), detail);
     },
@@ -561,7 +560,10 @@ export function createAppTools(options: {
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
       "restored. Agent can restore versions outside the platform's supported " +
       'compatibility range, but their runtime stays disabled until the App or ' +
-      'platform is updated.',
+      'platform is updated. A version requiring an App database or Data Table ' +
+      'database cannot be restored after that resource is permanently deleted. ' +
+      'Restore its get_app source tag tree onto current master, commit, and ' +
+      'deploy as a new release to provision an empty database.',
     parameters: Type.Object({
       id: Type.String({
         description: 'App id.',

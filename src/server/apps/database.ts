@@ -1,6 +1,7 @@
 /** Server-only: registered App Database lifecycle and manual deletion. */
 import { eq } from 'drizzle-orm';
 import { db, schema } from '~/db';
+import { appDeployLock } from './deploy-lock';
 import { withAppDataCutoverLock } from './data-table/provision';
 import {
   APP_DATABASE_NOT_PROVISIONED_ERROR,
@@ -19,13 +20,11 @@ export async function deleteAppDatabase(
   id: string,
   expectedDbName: string,
 ): Promise<{ ok: true }> {
-  // Dynamic import avoids a database -> deploy -> runtime -> database cycle.
-  const { appDeployLock } = await import('./deploy');
   return appDeployLock.withLock(id, () =>
     withAppDataCutoverLock(id, () =>
       withAppDatabaseLifecycle(id, async (database) => {
         const app = await db.query.apps.findFirst({
-          where: (row, { eq: equal }) => equal(row.id, id),
+          where: { id },
           columns: {
             status: true,
             capabilities: true,

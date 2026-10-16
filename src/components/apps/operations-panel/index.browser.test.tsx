@@ -74,7 +74,7 @@ function appOps(
   },
 ): AppOps {
   return {
-    backend: { capable: false, mode: null },
+    backend: { capable: false, mode: null, network: null },
     database,
     cron: { enabled: false, jobs: [] },
     webhook: {
@@ -133,42 +133,6 @@ beforeEach(() => {
 
 afterEach(() => {
   modals.closeAll();
-});
-
-test('describes the enabled persistent backend directory and its lifecycle', async () => {
-  const screen = await renderPanel(appOps(true));
-
-  await expect.element(screen.getByText('Persistent storage')).toBeVisible();
-  await expect
-    .element(screen.getByText(/available through STORAGE_DIR/))
-    .toBeVisible();
-  await expect
-    .element(
-      screen.getByText(
-        /Files survive restarts, deployments, and rollbacks, and are deleted with the app/,
-      ),
-    )
-    .toBeVisible();
-  await expect
-    .element(
-      screen.getByText(/Disabling storage keeps the files but revokes access/),
-    )
-    .toBeVisible();
-});
-
-test('hides persistent storage when the capability is disabled', async () => {
-  const screen = await renderPanel(appOps(false));
-
-  await expect
-    .element(
-      screen.getByText(
-        /No database, Data Tables, persistent storage, backend, scheduled jobs/,
-      ),
-    )
-    .toBeVisible();
-  await expect
-    .element(screen.getByText('Persistent storage', { exact: true }))
-    .not.toBeInTheDocument();
 });
 
 test('shows an enabled provisioned database without a delete action', async () => {

@@ -33,7 +33,7 @@ vi.mock('~/db', () => ({
     }),
   },
 }));
-vi.mock('./deploy', () => ({
+vi.mock('./deploy-lock', () => ({
   appDeployLock: {
     withLock: async <T>(_id: string, run: () => Promise<T>): Promise<T> => {
       mocks.events.push('deploy-lock');

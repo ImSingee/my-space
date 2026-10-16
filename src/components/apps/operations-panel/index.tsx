@@ -10,8 +10,16 @@ import {
   backendLastExitLabel,
 } from '~components/apps/backend-controls';
 import { NetworkAccessDetails } from '~components/system/network-access';
-import { appBackendsQueryOptions, appOpsQueryOptions, deploymentsQueryOptions } from '~queries/apps';
-import { deleteAppDatabaseFn, type AppOps } from '~server/apps';
+import {
+  appBackendsQueryOptions,
+  appOpsQueryOptions,
+  deploymentsQueryOptions,
+} from '~queries/apps';
+import {
+  deleteAppDataDatabaseFn,
+  deleteAppDatabaseFn,
+  type AppOps,
+} from '~server/apps';
 import { CronSection } from './cron-section';
 import { DataTableSection } from './data-table-section';
 import { DatabaseSection } from './database-section';

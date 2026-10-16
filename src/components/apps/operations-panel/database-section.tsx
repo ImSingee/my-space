@@ -45,7 +45,12 @@ function DeleteDatabaseForm({
       <Stack gap="sm">
         <Text size="sm">
           This permanently deletes{' '}
-          <Text span fw={600} ff="monospace">
+          <Text
+            span
+            fw={600}
+            ff="monospace"
+            style={{ overflowWrap: 'anywhere' }}
+          >
             {dbName}
           </Text>{' '}
           and all data stored in it. This cannot be undone.
@@ -59,6 +64,7 @@ function DeleteDatabaseForm({
           value={confirmation}
           onChange={(event) => setConfirmation(event.currentTarget.value)}
           ff="monospace"
+          styles={{ label: { overflowWrap: 'anywhere' } }}
           autoComplete="off"
           data-autofocus
         />

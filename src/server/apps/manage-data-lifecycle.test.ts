@@ -116,7 +116,10 @@ vi.mock('./manifest', async () => {
     await import('../../../packages/hatch-manifest/src/app-schema.js');
   return { isValidAppId, isValidAppSlug };
 });
-vi.mock('./provision', () => ({ dropAppDatabase: mocks.dropAppDatabase, withAppDatabaseLifecycle: mocks.withAppDatabaseLifecycle }));
+vi.mock('./provision', () => ({
+  dropAppDatabase: mocks.dropAppDatabase,
+  withAppDatabaseLifecycle: mocks.withAppDatabaseLifecycle,
+}));
 vi.mock('./data-table/provision', () => ({
   dropAppDataDatabase: mocks.dropAppDataDatabase,
   withAppDataCutoverLock: async (_id: string, run: () => Promise<unknown>) => {

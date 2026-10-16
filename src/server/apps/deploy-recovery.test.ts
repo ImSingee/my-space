@@ -1250,6 +1250,79 @@ describe('App deployment activation recovery', () => {
     });
   });
 
+  it('releases database provisioning before warming a database backend', async () => {
+    const id = 'database-warm-start';
+    let released = false;
+    let warmState: Record<string, unknown> | undefined;
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+      dbName: null,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(async (appId, options) => {
+      const build = (await stageFrontendBuild(appId, options)) as {
+        source: Row;
+      };
+      build.source.capabilities = { database: true, backend: true };
+      build.source.backendMode = 'long-running';
+      build.source.backend = { entry: 'backend/main.ts', network: [] };
+      return build;
+    });
+    mocks.beginAppDatabaseDeployment.mockResolvedValueOnce({
+      dbName: `app_${id}`,
+      release: async () => {
+        released = true;
+      },
+    });
+    mocks.ensureAppRunning.mockImplementationOnce(async () => {
+      warmState = {
+        released,
+        dbName: app.dbName,
+        dataActivationId: app.dataActivationId,
+      };
+      return 4100;
+    });
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+    await deployApp(id, {
+      message: 'Database warm start',
+      sourceDir: '/source',
+    });
+    expect(mocks.ensureAppRunning).toHaveBeenCalledOnce();
+    expect(warmState).toEqual({
+      released: true,
+      dbName: `app_${id}`,
+      dataActivationId: null,
+    });
+  });
+
+  it('does not resurrect a deleted registration from a database-free build snapshot', async () => {
+    const id = 'database-disabled';
+    const app = appState(id, {
+      status: 'draft',
+      currentDeploymentId: null,
+      capabilities: null,
+      backendMode: null,
+      dataActivationId: null,
+      dbName: `app_${id}`,
+    });
+    mocks.apps.set(id, app);
+    mocks.buildApp.mockImplementationOnce(stageFrontendBuild);
+    mocks.beginAppDatabaseDeployment.mockImplementationOnce(async () => {
+      app.dbName = null;
+      return { dbName: undefined, release: async () => {} };
+    });
+    await fs.mkdir(`${mocks.root}/live`, { recursive: true });
+    await deployApp(id, {
+      message: 'Database-free deployment',
+      sourceDir: '/source',
+    });
+    expect(app.dbName).toBeNull();
+  });
+
   it('retains Data state when a successful release disables the capability', async () => {
     const id = 'disable-retained-data';
     const app = appState(id, {
