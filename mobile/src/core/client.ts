@@ -1,4 +1,22 @@
 import {
+  createClient,
+  ConnectError,
+  Code,
+  type Client,
+} from '@connectrpc/connect';
+import { createConnectTransport } from '@connectrpc/connect-web';
+import {
+  AppService,
+  AgentService,
+  PublicErrorSchema,
+} from '@hatch/platform-api';
+import {
+  appProjection,
+  catalogProjection,
+  sessionProjection,
+  summaryProjection,
+} from './rpc-projections';
+import {
   apiPath,
   boundedSignal,
   canonicalizeInstanceUrl,
@@ -34,7 +52,7 @@ export type ClientOptions = InstanceUrlOptions & {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT';
   body?: BodyInit;
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   signal?: AbortSignal;
   authenticate?: boolean;
   timeoutMs?: number;
@@ -69,12 +87,36 @@ export class HatchApiClient {
   readonly origin: string;
   readonly vault: InstanceVault;
   private readonly fetcher: FetchLike;
+  private readonly appRpc: Client<typeof AppService>;
+  private readonly agentRpc: Client<typeof AgentService>;
   private readonly onUnauthorized?: (origin: string) => void;
   constructor(options: ClientOptions) {
     this.origin = canonicalizeInstanceUrl(options.origin, options);
     this.vault = options.vault;
     this.fetcher = options.fetch;
     this.onUnauthorized = options.onUnauthorized;
+    const transport = createConnectTransport({
+      baseUrl: `${this.origin}/api/rpc`,
+      useBinaryFormat: false,
+      // Use the same credential snapshot, redirect, cookie and cache boundary as
+      // native auth and Agent transport. Connect owns message encoding/decoding.
+      fetch: (input, init) => {
+        if (
+          typeof input !== 'string' ||
+          !input.startsWith(`${this.origin}/api/rpc/`) ||
+          init?.method !== 'POST'
+        )
+          throw new MobileError('invalid_path', 'Invalid RPC destination.');
+        return this.fetchResponse(input.slice(this.origin.length), {
+          method: 'POST',
+          headers: init.headers,
+          body: init.body ?? undefined,
+          signal: init.signal ?? undefined,
+        });
+      },
+    });
+    this.appRpc = createClient(AppService, transport);
+    this.agentRpc = createClient(AgentService, transport);
   }
 
   private async fetchResponse(
@@ -217,70 +259,128 @@ export class HatchApiClient {
     }
   }
 
-  apps(signal?: AbortSignal): Promise<AppSummary[]> {
-    return this.request('/api/v1/apps', { signal });
+  private async rpcRequest<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const bounded = boundedSignal(signal, 30_000);
+    try {
+      throwIfAborted(bounded.signal);
+      const result = await operation(bounded.signal);
+      throwIfAborted(bounded.signal);
+      return result;
+    } catch (error) {
+      if (bounded.signal.aborted && !signal?.aborted)
+        throw new MobileError(
+          'request_timeout',
+          'The instance took too long to respond.',
+        );
+      throwIfAborted(signal);
+      if (error instanceof MobileError) throw error;
+      if (error instanceof ConnectError) {
+        if (error.cause instanceof MobileError) throw error.cause;
+        const detail = error.findDetails(PublicErrorSchema)[0];
+        if (detail) throw statusError(detail.httpStatus);
+        const statuses: Partial<Record<Code, number>> = {
+          [Code.InvalidArgument]: 400,
+          [Code.Unauthenticated]: 401,
+          [Code.PermissionDenied]: 403,
+          [Code.NotFound]: 404,
+          [Code.Aborted]: 409,
+          [Code.FailedPrecondition]: 409,
+          [Code.ResourceExhausted]: 429,
+          [Code.Unimplemented]: 501,
+          [Code.Unavailable]: 503,
+        };
+        const status = statuses[error.code];
+        if (status) throw statusError(status);
+      }
+      // Never show raw server/decoder text (which can contain private data).
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned an invalid response.',
+      );
+    } finally {
+      bounded.dispose();
+    }
   }
-  app(id: string, signal?: AbortSignal): Promise<AppDetail> {
-    return this.request(`/api/v1/apps/${pathId(id)}`, { signal });
+
+  async apps(signal?: AbortSignal): Promise<AppSummary[]> {
+    const response = await this.rpcRequest(
+      (signal) => this.appRpc.listApps({}, { signal }),
+      signal,
+    );
+    return response.resources.map(appProjection);
   }
-  sessions(appId?: string, signal?: AbortSignal): Promise<SessionSummary[]> {
-    const query = appId ? `?appId=${pathId(appId)}` : '';
-    return this.request(`/api/v1/agent/sessions${query}`, { signal });
+  async app(id: string, signal?: AbortSignal): Promise<AppDetail> {
+    const response = await this.rpcRequest(
+      (signal) => this.appRpc.getApp({ id }, { signal }),
+      signal,
+    );
+    if (!response.resource)
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned no App.',
+      );
+    return appProjection(response.resource);
   }
-  session(id: string, signal?: AbortSignal): Promise<SessionDetail> {
-    return this.request(`/api/v1/agent/sessions/${pathId(id)}`, { signal });
+  async sessions(
+    appId?: string,
+    signal?: AbortSignal,
+  ): Promise<SessionSummary[]> {
+    const response = await this.rpcRequest(
+      (signal) => this.agentRpc.listSessions({ appId }, { signal }),
+      signal,
+    );
+    return response.sessions.map(summaryProjection);
+  }
+  async session(id: string, signal?: AbortSignal): Promise<SessionDetail> {
+    const response = await this.rpcRequest(
+      (signal) => this.agentRpc.getSession({ id }, { signal }),
+      signal,
+    );
+    if (!response.session)
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned no session.',
+      );
+    return sessionProjection(response.session);
   }
   async config(signal?: AbortSignal): Promise<AgentModelCatalog> {
-    let config: AgentModelCatalog;
     try {
-      config = await this.request('/api/v1/agent/models', { signal });
+      return catalogProjection(
+        await this.rpcRequest(
+          (signal) => this.agentRpc.getModelCatalog({}, { signal }),
+          signal,
+        ),
+      );
     } catch (error) {
-      if (error instanceof MobileError && error.status === 404) {
+      if (
+        error instanceof MobileError &&
+        (error.status === 404 || error.status === 501)
+      ) {
         throw new MobileError(
           'unsupported_api',
-          'This instance does not provide the interactive Platform API. Update Hatch before connecting.',
+          'This instance does not provide the interactive Connect API. Update Hatch before connecting.',
         );
       }
       throw error;
     }
-    if (
-      !config ||
-      typeof config !== 'object' ||
-      !Array.isArray(config.providers) ||
-      !config.providers.every(
-        (provider) =>
-          provider &&
-          typeof provider.id === 'string' &&
-          typeof provider.name === 'string' &&
-          Array.isArray(provider.models) &&
-          provider.models.every(
-            (model) =>
-              model &&
-              typeof model.id === 'string' &&
-              typeof model.modelId === 'string' &&
-              typeof model.name === 'string' &&
-              typeof model.reasoning === 'boolean' &&
-              Number.isFinite(model.contextWindow) &&
-              Number.isFinite(model.maxTokens),
-          ),
-      ) ||
-      (config.defaultModel !== null &&
-        (!config.defaultModel ||
-          typeof config.defaultModel.providerId !== 'string' ||
-          typeof config.defaultModel.modelId !== 'string'))
-    ) {
-      throw new MobileError(
-        'invalid_response',
-        'The instance returned an invalid Agent model catalog.',
-      );
-    }
-    return config;
   }
-  createSession(
+  async createSession(
     input: { title?: string; providerId?: string; modelId?: string } = {},
     signal?: AbortSignal,
   ): Promise<{ id: string }> {
-    return this.post('/api/v1/agent/sessions', input, signal);
+    const response = await this.rpcRequest(
+      (signal) => this.agentRpc.createSession(input, { signal }),
+      signal,
+    );
+    if (!response.id)
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned no session identity.',
+      );
+    return { id: response.id };
   }
   private post<T>(
     path: string,
@@ -359,11 +459,16 @@ export class HatchApiClient {
     ).attachment;
   }
   async handoff(appId: string, signal?: AbortSignal): Promise<AppHandoff> {
-    const handoff = await this.post<AppHandoff>(
-      `/api/v1/apps/${pathId(appId)}/handoffs`,
-      {},
+    const result = await this.rpcRequest(
+      (signal) => this.appRpc.createAppHandoff({ id: appId }, { signal }),
       signal,
     );
+    const handoff = {
+      url: result.url,
+      ticket: result.ticket,
+      expiresAt: result.expiresAt,
+      targetPath: result.targetPath,
+    };
     validateHandoff(this.origin, handoff);
     return handoff;
   }

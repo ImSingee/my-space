@@ -1,5 +1,6 @@
 packages:
   - mobile
+  - packages/hatch-platform-api
 
 allowBuilds:
   '@bufbuild/buf': false

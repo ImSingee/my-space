@@ -1,4 +1,25 @@
-/** Mobile wire DTOs. Keep this boundary independent of server/database modules. */
+/** UI projections derive from shared RPC descriptors; Agent SSE keeps its own contract. */
+import type {
+  Resource,
+  AgentModel,
+  AgentProvider,
+  AgentModelSelection,
+  AgentQuestion,
+  AgentPendingAsk,
+  AgentPendingEnvironment,
+  AgentSessionSummary as RpcSessionSummary,
+} from '@hatch/platform-api';
+
+/** Remove Protobuf runtime metadata without duplicating the shared contract. */
+type Plain<T> = T extends (infer Item)[]
+  ? Plain<Item>[]
+  : T extends object
+    ? {
+        [Key in keyof T as Key extends `$${string}` ? never : Key]: Plain<
+          T[Key]
+        >;
+      }
+    : T;
 export type JsonValue =
   | null
   | boolean
@@ -7,45 +28,23 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export type AppSummary = {
-  id: string;
-  slug: string;
-  name: string;
+export type AppSummary = Omit<Plain<Resource>, 'description'> & {
   description: string | null;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
 };
 export type AppDetail = AppSummary;
-export type Model = {
-  id: string;
-  modelId: string;
-  name: string;
-  reasoning: boolean;
-  contextWindow: number;
-  maxTokens: number;
-};
+export type Model = Plain<AgentModel>;
 export type AgentModelCatalog = {
-  providers: { id: string; name: string; models: Model[] }[];
-  defaultModel: { providerId: string; modelId: string } | null;
+  providers: Plain<AgentProvider>[];
+  defaultModel: Plain<AgentModelSelection> | null;
 };
-export type AskQuestion = {
-  id: string;
-  prompt: string;
-  options: { id: string; label: string }[];
-  allowMultiple: boolean;
-};
+export type AskQuestion = Plain<AgentQuestion>;
 export type AskAnswer = {
   questionId: string;
   selectedOptionIds: string[];
   customText?: string;
 };
-export type PendingAsk = { askId: string; questions: AskQuestion[] };
-export type PendingEnv = {
-  requestId: string;
-  reason: string;
-  variables: { key: string; description: string; secret: boolean }[];
-};
+export type PendingAsk = Plain<AgentPendingAsk>;
+export type PendingEnv = Plain<AgentPendingEnvironment>;
 export type RunStatus =
   | 'running'
   | 'blocked'
@@ -62,14 +61,12 @@ export type ActiveRun = {
   answeredAskId?: string | null;
   pendingEnvRequest: PendingEnv | null;
 };
-export type SessionSummary = {
-  id: string;
-  title: string;
-  appIds: string[];
+export type SessionSummary = Omit<
+  Plain<RpcSessionSummary>,
+  'providerId' | 'modelId'
+> & {
   providerId: string | null;
   modelId: string | null;
-  messageCount: number;
-  updatedAt: string;
 };
 export type SessionDetail = Omit<SessionSummary, 'messageCount'> & {
   messages: JsonValue[];

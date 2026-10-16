@@ -87,7 +87,7 @@ afterEach(() => {
 });
 
 describe('instance and credential boundaries', () => {
-  it('uses existing v1 App shapes and generic Agent resources without a mobile namespace', async () => {
+  it('uses generated Connect clients and projects shared App/Agent messages for the UI', async () => {
     const app = {
       id: 'app-1',
       slug: 'example',
@@ -111,17 +111,17 @@ describe('instance and credential boundaries', () => {
     };
     const handoff = {
       ticket: 'a'.repeat(43),
-      url: `${origin}/api/v1/auth/handoffs/consume`,
+      url: `${origin}/api/auth/handoffs/consume`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       targetPath: '/app/example/embed/',
     };
     const fetcher = vi
       .fn<FetchLike>()
-      .mockResolvedValueOnce(json([app]))
-      .mockResolvedValueOnce(json(app))
-      .mockResolvedValueOnce(json([]))
-      .mockResolvedValueOnce(json({ id: session.id }, 201))
-      .mockResolvedValueOnce(json(session))
+      .mockResolvedValueOnce(json({ resources: [app] }))
+      .mockResolvedValueOnce(json({ resource: app }))
+      .mockResolvedValueOnce(json({}))
+      .mockResolvedValueOnce(json({ id: session.id }))
+      .mockResolvedValueOnce(json({ session }))
       .mockResolvedValueOnce(json(handoff));
     const { client, vault } = setup(fetcher);
     await vault.set(origin, 'fixture-token');
@@ -132,14 +132,29 @@ describe('instance and credential boundaries', () => {
     expect(await client.session(session.id)).toEqual(session);
     expect(await client.handoff(app.id)).toEqual(handoff);
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      `${origin}/api/v1/apps`,
-      `${origin}/api/v1/apps/app-1`,
-      `${origin}/api/v1/agent/sessions?appId=app-1`,
-      `${origin}/api/v1/agent/sessions`,
-      `${origin}/api/v1/agent/sessions/session-1`,
-      `${origin}/api/v1/apps/app-1/handoffs`,
+      `${origin}/api/rpc/hatch.platform.v1.AppService/ListApps`,
+      `${origin}/api/rpc/hatch.platform.v1.AppService/GetApp`,
+      `${origin}/api/rpc/hatch.platform.v1.AgentService/ListSessions`,
+      `${origin}/api/rpc/hatch.platform.v1.AgentService/CreateSession`,
+      `${origin}/api/rpc/hatch.platform.v1.AgentService/GetSession`,
+      `${origin}/api/rpc/hatch.platform.v1.AppService/CreateAppHandoff`,
     ]);
-    expect(JSON.parse(fetcher.mock.calls[5][1].body as string)).toEqual({});
+    expect(
+      JSON.parse(
+        new TextDecoder().decode(fetcher.mock.calls[5][1].body as Uint8Array),
+      ),
+    ).toEqual({ id: 'app-1' });
+    expect(
+      JSON.parse(
+        new TextDecoder().decode(fetcher.mock.calls[2][1].body as Uint8Array),
+      ),
+    ).toEqual({ appId: 'app-1' });
+    for (const [, options] of fetcher.mock.calls) {
+      expect(options.method).toBe('POST');
+      expect(new Headers(options.headers).get('connect-protocol-version')).toBe(
+        '1',
+      );
+    }
   });
   it('canonicalizes HTTPS origins while rejecting normalized path tricks and credential-bearing URLs', () => {
     expect(canonicalizeInstanceUrl('https://HATCH.example.test:443/')).toBe(
@@ -193,7 +208,7 @@ describe('instance and credential boundaries', () => {
   it('hands off through an origin-checked form POST without URL or cookie credentials', () => {
     const handoff = {
       ticket: 'a'.repeat(32),
-      url: `${origin}/api/v1/auth/handoffs/consume`,
+      url: `${origin}/api/auth/handoffs/consume`,
       targetPath: '/app/example-app/embed/',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
@@ -224,7 +239,7 @@ describe('instance and credential boundaries', () => {
       expect(() => apiPath(origin, path)).toThrow(MobileError);
     }
     const valid = {
-      url: `${origin}/api/v1/auth/handoffs/consume`,
+      url: `${origin}/api/auth/handoffs/consume`,
       ticket: 'a'.repeat(32),
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
       targetPath: '/app/demo/embed/',
@@ -233,7 +248,13 @@ describe('instance and credential boundaries', () => {
     expect(() =>
       validateHandoff(origin, {
         ...valid,
-        url: 'https://evil.test/api/v1/auth/handoffs/consume',
+        url: `${origin}/api/v1/auth/handoffs/consume`,
+      }),
+    ).toThrow(MobileError);
+    expect(() =>
+      validateHandoff(origin, {
+        ...valid,
+        url: 'https://evil.test/api/auth/handoffs/consume',
       }),
     ).toThrow(MobileError);
     expect(() =>
@@ -291,7 +312,7 @@ describe('instance and credential boundaries', () => {
       code: 'redirect_blocked',
     });
     const [url, options] = fetcher.mock.calls[0];
-    expect(url).toBe(`${origin}/api/v1/apps`);
+    expect(url).toBe(`${origin}/api/rpc/hatch.platform.v1.AppService/ListApps`);
     expect(url).not.toContain('fixture-token');
     expect(options.redirect).toBe('error');
     expect(options.credentials).toBe('omit');
@@ -309,7 +330,7 @@ describe('instance and credential boundaries', () => {
     const fetcher = vi
       .fn<FetchLike>()
       .mockResolvedValueOnce(json({ access_token: 'fixture-token' }))
-      .mockResolvedValueOnce(json([]))
+      .mockResolvedValueOnce(json({}))
       .mockResolvedValueOnce(stream([event(1, { type: 'done' })]));
     const { client, vault } = setup(fetcher);
     const signal = new AbortController().signal;

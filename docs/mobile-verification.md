@@ -1,6 +1,30 @@
 # Mobile verification
 
-## Generic v1 API follow-up on macOS — 2026-10-16 UTC
+## Connect RPC migration — 2026-10-16 UTC
+
+The backend branch was rebased onto master `ea3f974d` (#194) and migrated in
+`8bb65d0c15d99f7bd2461acb1067b366bc9e2150`. The mobile branch is rebased above
+that backend. App and Agent business calls now use generated shared descriptors
+and Connect JSON at `/api/rpc`; handoff consumption uses the native auth form
+endpoint `/api/auth/handoffs/consume`. Run/SSE/attachment and Better Auth device
+transports remain separate. Native dependencies and UI behavior are preserved; the WebView allowlist now
+shares the handoff-consumption path with the client validator.
+
+This revision is a protocol migration verified through focused unit/contracts,
+root/mobile type checks, lint/format, generated-code consistency, frozen install
+and production/iOS bundle builds. It has **no new UI acceptance, Simulator
+execution, native compilation/install, physical-device or Android evidence**.
+The earlier evidence below retains its original commit/runtime provenance and
+must not be described as verification of Connect. Backend remote CI, CLI builds
+and Docker checks passed on the exact backend head. Local combined regression
+passed 101 tests across nine files (39 mobile and 62 backend); all three
+production builds and the iOS Hermes export passed. The platform build was
+retried successfully with a 2 GiB Node heap and two Rust workers after an initial
+resource kill. This cloud sandbox blocks tsx CLI Unix IPC, so generation and
+Runner/CLI build scripts used equivalent `node --import tsx` invocation. Current
+exact-head remote results are recorded in PR #184.
+
+## Historical generic v1 API follow-up on macOS — 2026-10-16 UTC
 
 Backend Draft #189 (`feat/hatch-mobile-api`, `b150ca77c52679c6a97ac2d9fd75317b95c2b00c`)
 exposes interactive resources through the existing public API. Mobile Draft #184
