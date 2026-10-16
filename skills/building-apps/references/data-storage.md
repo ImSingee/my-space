@@ -31,9 +31,12 @@ modules share the emitted bundle URL.
 
 ## App Postgres database
 
-Enable `database`. The backend receives `DATABASE_URL`; create required tables
-idempotently on startup so a fresh deployment works. Use `query_app_db` during
-development to inspect or initialize data. Each App database is isolated.
+Enable `database` and deploy successfully to provision the database. The backend
+receives `DATABASE_URL` only while the capability is enabled; create required
+tables idempotently on startup so a fresh deployment works. `query_app_db` can
+inspect or initialize an already-provisioned database and can query it while
+retained after capability disable, but never provisions or recreates one. Each
+App database is isolated.
 
 ## Managed Data Tables
 
@@ -69,6 +72,12 @@ After deployment, use `query_app_data_table` for live data operations.
   `data` tables. Do not use DDL, TRUNCATE, maintenance, transaction-control,
   permission, role, database, or `_hatch` operations. Inspect first because
   physical column names are returned exactly as stored.
+
+The current deployment must keep `capabilities.dataTable` enabled for App,
+Agent, and Realtime access. Disabling it retains the managed database and latest
+schema but revokes all access. Operations can permanently delete that retained
+data; the next Data Table-capable release provisions an empty database and
+applies its schema.
 
 Use `data/schema.ts` plus `deploy_app` for every schema change.
 
@@ -147,3 +156,11 @@ encrypted at rest with the platform's stable `SECRET`; changing that platform
 secret directly makes encrypted KV entries unreadable. This protects current
 database storage, not plaintext returned to an authorized backend or explicit
 Agent reveal, nor older backups.
+
+## Re-enabling retained databases
+
+Re-enabling Database or Data Tables after a capability disable reuses the retained
+database, schema, and rows. Only explicit permanent deletion causes a later
+enabled deployment to create an empty database. Before initializing data after
+a deployment, inspect the existing schema and rows with `query_app_db` or
+`query_app_data_table`; never assume the database is empty.

@@ -33,7 +33,11 @@ import {
   isValidAppId,
   isValidAppSlug,
 } from './manifest';
-import { dropAppDatabase } from './provision';
+import { dropAppDatabase, withAppDatabaseLifecycle } from './provision';
+import {
+  deploymentRollbackBlockedReason,
+  deploymentRequiresDatabase,
+} from './rollback-policy';
 import {
   dropAppDataDatabase,
   withAppDataCutoverLock,
@@ -65,6 +69,7 @@ export type DeploymentSummary = {
   createdAt: string;
   isCurrent: boolean;
   canRollback: boolean;
+  rollbackBlockedReason: string | null;
   /** Commit on the app's `master` branch this version was built from. */
   sourceCommit: string | null;
   /** Immutable `deploy/v<version>` Git tag for this version. */
@@ -108,6 +113,21 @@ export async function listDeployments(
         (d.artifactPath
           ? await pathExists(deploymentArtifactDir(id, d.id))
           : false) || (await pathExists(deploymentBuildDir(id, d.id)));
+      const baseCanRollback =
+        !isCurrent &&
+        d.status === 'deployed' &&
+        Boolean(d.sourceTag) &&
+        hasArtifact;
+      const rollbackBlockedReason = baseCanRollback
+        ? deploymentRollbackBlockedReason(
+            {
+              dbName: app?.dbName ?? null,
+              dataDbName: app?.dataDbName ?? null,
+              dataDbPasswordCiphertext: app?.dataDbPasswordCiphertext ?? null,
+            },
+            d.manifestNormalized,
+          )
+        : null;
       return {
         id: d.id,
         version: d.version,
@@ -120,16 +140,13 @@ export async function listDeployments(
         sourceTag: d.sourceTag,
         hasArtifact,
         hasBuildLog: Boolean(d.buildLog),
+        rollbackBlockedReason,
         dataSchemaMismatch:
           (dataActivationPending && !isCurrent) ||
           (Boolean(d.dataSchemaHash || liveDataSchemaHash) &&
             (d.dataSchemaHash ?? null) !== liveDataSchemaHash),
         compatibility: appCompatibility(d.compatibilityVersion),
-        canRollback:
-          !isCurrent &&
-          d.status === 'deployed' &&
-          Boolean(d.sourceTag) &&
-          hasArtifact,
+        canRollback: baseCanRollback && !rollbackBlockedReason,
       };
     }),
   );
@@ -188,7 +205,9 @@ async function setAppArchivedInner(
       // A Data request may already hold the shared migration lock after checking
       // the previous live status. Drain it before reporting archive complete, so
       // no mutation can commit after the user sees the App as archived.
-      await waitForDataMigrationBarrier(id);
+      if (app.dataDbPasswordCiphertext) {
+        await waitForDataMigrationBarrier(id);
+      }
     }
   }
   // Archived apps must not keep firing cron; restored ones resume.
@@ -303,6 +322,14 @@ async function rollbackAppInner(
   }
   const sourceTag = deployment.sourceTag;
   const manifest = deployment.manifestNormalized as NormalizedManifest | null;
+  const requiresDatabase = deploymentRequiresDatabase(manifest);
+  const initiallyBlockedReason = deploymentRollbackBlockedReason(app, manifest);
+  if (initiallyBlockedReason) {
+    throw new AppError(
+      `Cannot restore v${deployment.version}. ${initiallyBlockedReason}`,
+      409,
+    );
+  }
   const restoredName = manifest?.name ?? app.name;
   if (!isAppNameWithinMaxLength(restoredName)) {
     throw new Error(
@@ -334,58 +361,80 @@ async function rollbackAppInner(
   // advisory lock deploy holds for its version→tag→record step, so a concurrent
   // deploy on another process blocks until we finish (and vice versa).
   let previousDeploymentId = app.currentDeploymentId ?? null;
-  await db.transaction(async (tx) => {
-    await appDeployLock.acquire(tx, id);
-    const current = await tx.query.apps.findFirst({
-      where: { id },
-      columns: { currentDeploymentId: true },
-    });
-    if (!current) throw new Error(`App "${id}" not found.`);
-    previousDeploymentId = current.currentDeploymentId ?? null;
-    const live = appBuildDir(id);
-    await fs.rm(live, { recursive: true, force: true });
-    await fs.mkdir(live, { recursive: true });
-    // Legacy artifacts predate the immutable deployment marker. Always stamp
-    // the live copy before changing the platform pointer so another worker can
-    // distinguish rollback bytes from the still-current deployment while this
-    // transaction is in flight.
-    await fs.writeFile(
-      path.join(live, 'deployment.json'),
-      JSON.stringify({ deploymentId: deployment.id }, null, 2),
-      'utf8',
-    );
-    await fs.cp(snapshot, live, { recursive: true });
-    const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
-    if (pendingActivationBackup) {
-      // The activation id is the durable key used to find this recovery state.
-      // Remove the backup before the transaction clears that key so a crash can
-      // never leave a snapshot that no later lifecycle operation can identify.
-      await fs.rm(pendingActivationBackup, { recursive: true, force: true });
-    }
+  const performCutover = () =>
+    db.transaction(async (tx) => {
+      await appDeployLock.acquire(tx, id);
+      const current = await tx.query.apps.findFirst({
+        where: { id },
+        columns: {
+          currentDeploymentId: true,
+          dbName: true,
+          dataDbName: true,
+          dataDbPasswordCiphertext: true,
+        },
+      });
+      if (!current) throw new Error(`App "${id}" not found.`);
+      const rollbackBlockedReason = deploymentRollbackBlockedReason(
+        current,
+        manifest,
+      );
+      if (rollbackBlockedReason) {
+        throw new AppError(
+          `Cannot restore v${deployment.version}. ${rollbackBlockedReason}`,
+          409,
+        );
+      }
+      previousDeploymentId = current.currentDeploymentId ?? null;
+      const live = appBuildDir(id);
+      await fs.rm(live, { recursive: true, force: true });
+      await fs.mkdir(live, { recursive: true });
+      // Legacy artifacts predate the immutable deployment marker. Always stamp
+      // the live copy before changing the platform pointer so another worker can
+      // distinguish rollback bytes from the still-current deployment while this
+      // transaction is in flight.
+      await fs.writeFile(
+        path.join(live, 'deployment.json'),
+        JSON.stringify({ deploymentId: deployment.id }, null, 2),
+        'utf8',
+      );
+      await fs.cp(snapshot, live, { recursive: true });
+      const sourceCommit = await moveMasterToDeploymentTag(id, sourceTag);
+      if (pendingActivationBackup) {
+        // The activation id is the durable key used to find this recovery state.
+        // Remove the backup before the transaction clears that key so a crash can
+        // never leave a snapshot that no later lifecycle operation can identify.
+        await fs.rm(pendingActivationBackup, { recursive: true, force: true });
+      }
 
-    await tx
-      .update(schema.apps)
-      .set({
-        status: 'deployed',
-        currentDeploymentId: deployment.id,
-        currentSourceCommit: sourceCommit,
-        name: restoredName,
-        // Restore the rolled-back version's full metadata too. Otherwise the row
-        // keeps the newer deployment's capabilities/backendMode/description — e.g.
-        // the cron scheduler reads app.capabilities.cron and would skip jobs the
-        // restored version actually defines (mirrors what the deploy path writes).
-        description: manifest?.description || null,
-        capabilities: manifest?.capabilities ?? app.capabilities,
-        backendMode: manifest?.backendMode ?? app.backendMode,
-        manifest: deployment.manifestNormalized ?? app.manifest,
-        dataSchemaHash: latestDataSchemaHash,
-        // Rollback is an explicit user-selected cutover. It may intentionally
-        // restore code whose forward-only Data schema differs. Clear a failed
-        // deployment's fence only after its migration outcome was resolved.
-        dataActivationId: dataMigrationResolved ? null : app.dataActivationId,
-      })
-      .where(eq(schema.apps.id, id));
-  });
+      await tx
+        .update(schema.apps)
+        .set({
+          status: 'deployed',
+          currentDeploymentId: deployment.id,
+          currentSourceCommit: sourceCommit,
+          name: restoredName,
+          // Restore the rolled-back version's full metadata too. Otherwise the row
+          // keeps the newer deployment's capabilities/backendMode/description — e.g.
+          // the cron scheduler reads app.capabilities.cron and would skip jobs the
+          // restored version actually defines (mirrors what the deploy path writes).
+          description: manifest?.description || null,
+          capabilities: manifest?.capabilities ?? app.capabilities,
+          backendMode: manifest?.backendMode ?? app.backendMode,
+          manifest: deployment.manifestNormalized ?? app.manifest,
+          dataSchemaHash: latestDataSchemaHash,
+          // Rollback is an explicit user-selected cutover. It may intentionally
+          // restore code whose forward-only Data schema differs. Clear a failed
+          // deployment's fence only after its migration outcome was resolved.
+          dataActivationId: dataMigrationResolved ? null : app.dataActivationId,
+        })
+        .where(eq(schema.apps.id, id));
+    });
+
+  if (requiresDatabase) {
+    await withAppDatabaseLifecycle(id, performCutover);
+  } else {
+    await performCutover();
+  }
 
   if (previousDeploymentId !== deployment.id) {
     publishPlatformEvent({
@@ -475,6 +524,7 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
     columns: {
       capabilities: true,
       dataDbName: true,
+      dataDbPasswordCiphertext: true,
       dataSchemaHash: true,
       dataActivationId: true,
     },
@@ -496,7 +546,9 @@ async function deleteAppInner(id: string): Promise<{ ok: true }> {
   stopApp(id);
   if (hasManagedData) {
     await closeDataRealtime(id);
-    await waitForDataMigrationBarrier(id);
+    if (app?.dataDbPasswordCiphertext) {
+      await waitForDataMigrationBarrier(id);
+    }
 
     // Data DB ownership is derived from the reusable App id. Do not delete the
     // platform row when cleanup fails: losing that ownership record would let a

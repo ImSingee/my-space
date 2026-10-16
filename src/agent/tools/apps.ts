@@ -47,6 +47,11 @@ import {
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
+const DATABASE_DATA_GUIDANCE =
+  'Database persists across deployments and capability disable/re-enable. It may contain historical data; inspect its schema and rows with query_app_db before initializing or changing data.';
+const DATA_TABLE_DATA_GUIDANCE =
+  'Data Tables persist across capability disable/re-enable unless explicitly deleted. Inspect the existing schema and rows with query_app_data_table before initializing or changing data.';
+
 const APP_COMPATIBILITY_COPY = {
   resourceName: 'App',
   skillName: 'app-compatibility',
@@ -158,6 +163,20 @@ export function createAppTools(options: {
       const detail = await platform.getApp(params.id);
       if (!detail) throw new Error(`App "${params.id}" not found.`);
       const m = detail.manifest;
+      const databaseEnabled = detail.capabilities.includes('database');
+      const databaseStatus = detail.dbName
+        ? `${detail.dbName} (${databaseEnabled ? 'enabled' : 'disabled, retained'})`
+        : databaseEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
+      const dataTableEnabled = detail.capabilities.includes('dataTable');
+      const dataTableStatus = detail.ops.dataTable.dbName
+        ? `${detail.ops.dataTable.dbName} (${
+            dataTableEnabled ? 'enabled' : 'disabled, retained'
+          }; ${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+        : dataTableEnabled
+          ? 'enabled, not provisioned'
+          : 'not provisioned';
       const lines: (string | null)[] = [
         `${detail.name} (slug: ${detail.slug}, id: ${detail.id}) — ${detail.status}` +
           (detail.currentVersion != null
@@ -182,10 +201,11 @@ export function createAppTools(options: {
         detail.ops.backend.capable
           ? `Network: ${formatNetworkAccess(detail.ops.backend.network)}`
           : null,
-        `Database: ${detail.dbName ?? 'not provisioned'}`,
-        detail.ops.dataTable.enabled
-          ? `Data Tables: ${detail.ops.dataTable.dbName ?? 'not provisioned'} ` +
-            `(${detail.ops.dataTable.schemaHash?.slice(0, 10) ?? 'no schema'})`
+        `Database: ${databaseStatus}`,
+        `Data Tables: ${dataTableStatus}`,
+        databaseEnabled && detail.dbName ? DATABASE_DATA_GUIDANCE : null,
+        dataTableEnabled && detail.ops.dataTable.dbName
+          ? DATA_TABLE_DATA_GUIDANCE
           : null,
         detail.ops.storage.enabled
           ? 'Persistent storage: enabled (backend STORAGE_DIR)'
@@ -218,14 +238,16 @@ export function createAppTools(options: {
         'Deployments (newest first):',
         ...detail.deployments
           .slice(0, 10)
-          .map(
-            (d) =>
-              `  v${d.version} — ${d.status} · compatibility v${d.compatibility.version}${d.isCurrent ? ' (current)' : ''}${
-                d.canRollback ? ' [rollbackable]' : ''
-              }${!d.compatibility.isSupported ? ' [Agent restore only; runtime disabled]' : ''}${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${
-                d.createdAt
-              }`,
-          ),
+          .flatMap((d) => [
+            `  v${d.version} — ${d.status} · compatibility v${d.compatibility.version}${d.isCurrent ? ' (current)' : ''}${
+              d.canRollback ? ' [rollbackable]' : ''
+            }${!d.compatibility.isSupported ? ' [Agent restore only; runtime disabled]' : ''}${d.dataSchemaMismatch ? ' [Data Table schema differs]' : ''} · ${d.createdAt}`,
+            d.sourceTag ? `    Source tag: ${d.sourceTag}` : null,
+            d.sourceCommit ? `    Source commit: ${d.sourceCommit}` : null,
+            d.rollbackBlockedReason
+              ? `    Restore blocked: ${d.rollbackBlockedReason}`
+              : null,
+          ]),
       ];
       return text(lines.filter((l) => l !== null).join('\n'), detail);
     },
@@ -521,6 +543,12 @@ export function createAppTools(options: {
           });
           const lines = [
             `Deployed "${detail.id}" (v${res.version}, compatibility v${res.compatibilityVersion}).`,
+            res.normalized.capabilities.database
+              ? DATABASE_DATA_GUIDANCE
+              : null,
+            res.normalized.capabilities.dataTable
+              ? DATA_TABLE_DATA_GUIDANCE
+              : null,
             res.normalized.app ? `App URL: ${res.normalized.app.url}` : null,
             res.normalized.widgets.length > 0
               ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`
@@ -547,7 +575,10 @@ export function createAppTools(options: {
       '(e.g. 4 to restore v4); only successfully deployed versions can be ' +
       "restored. Agent can restore versions outside the platform's supported " +
       'compatibility range, but their runtime stays disabled until the App or ' +
-      'platform is updated.',
+      'platform is updated. A version requiring an App database or Data Table ' +
+      'database cannot be restored after that resource is permanently deleted. ' +
+      'Restore its get_app source tag tree onto current master, commit, and ' +
+      'deploy as a new release to provision an empty database.',
     parameters: Type.Object({
       id: Type.String({
         description: 'App id.',
@@ -588,8 +619,11 @@ export function createAppTools(options: {
     name: 'query_app_db',
     label: 'Query app DB',
     description:
-      "Run SQL against an app's own Postgres database (provisioned on first " +
-      'use). Use to create tables and inspect data. Returns up to 100 rows.',
+      "Run SQL against an app's already-provisioned Postgres database. This " +
+      'tool never provisions or recreates a database; deploy a version with ' +
+      'capabilities.database enabled first. A retained database remains ' +
+      'queryable after the capability is disabled until the user deletes it. ' +
+      'Returns up to 100 rows.',
     parameters: Type.Object({
       id: Type.String({
         description: 'App id.',
