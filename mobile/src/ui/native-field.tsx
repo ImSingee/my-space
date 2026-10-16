@@ -5,8 +5,12 @@ import {
   textFieldStyle,
 } from '@expo/ui/swift-ui/modifiers';
 import { useFieldState } from './use-field-state';
+import { useImperativeHandle, type Ref } from 'react';
+
+export type NativeFieldRef = { getText: () => string };
 
 export function NativeField({
+  ref,
   label,
   value,
   onChange,
@@ -15,6 +19,7 @@ export function NativeField({
   multiline,
   maxLength,
 }: {
+  ref?: Ref<NativeFieldRef>;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -24,6 +29,11 @@ export function NativeField({
   maxLength?: number;
 }) {
   const binding = useFieldState(value, onChange);
+  // Native state can advance before its asynchronous onChangeText reaches JS.
+  // Submission reads this authoritative snapshot, not the last React event.
+  useImperativeHandle(ref, () => ({ getText: () => binding.value.get() }), [
+    binding.value,
+  ]);
   return (
     <Host
       matchContents={{ vertical: true }}
