@@ -9,6 +9,7 @@ import {
   canonicalizeInstanceUrl,
   validateHandoff,
   validateVerificationUrl,
+  webViewHandoffSource,
 } from './security';
 import {
   initialStreamState,
@@ -135,6 +136,28 @@ describe('instance and credential boundaries', () => {
         MobileError,
       );
   });
+  it('hands off through an origin-checked form POST without URL or cookie credentials', () => {
+    const handoff = {
+      ticket: 'a'.repeat(32),
+      url: `${origin}/api/mobile/v1/handoffs/consume`,
+      targetPath: '/app/example-app/embed/',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const source = webViewHandoffSource(origin, handoff);
+    expect(source.method).toBe('POST');
+    expect(source.uri).toBe(handoff.url);
+    expect(new URL(source.uri).search).toBe('');
+    expect([...new URLSearchParams(source.body)]).toEqual([
+      ['ticket', handoff.ticket],
+    ]);
+    expect(source.headers).toMatchObject({
+      Origin: origin,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    });
+    expect(source.headers).not.toHaveProperty('Authorization');
+    expect(source.headers).not.toHaveProperty('Cookie');
+  });
+
   it('rejects cross-origin, encoded traversal, and invalid handoff destinations', () => {
     for (const path of [
       '//evil.test/api',
