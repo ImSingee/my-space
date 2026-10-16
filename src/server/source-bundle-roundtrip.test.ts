@@ -32,7 +32,8 @@ process.env.HATCH_DATA_DIR = path.join(root, 'runner-data');
 const { bundleWorktreeForDeploy, checkoutFromBundle, initNewWorktree } =
   await import('~agent/local-sources');
 const { agentHomeDir } = await import('~agent/paths');
-const { sandboxSpawn } = await import('~agent/shell-sandbox');
+const { sandboxSpawn, prepareAgentSessionSandbox } =
+  await import('~agent/shell-sandbox');
 const { createGitSource } = await import('~server/source-git');
 
 const platform = createGitSource({
@@ -220,6 +221,33 @@ afterAll(async () => {
 describe('git bundle round-trip (platform <-> runner)', () => {
   const APP_ID = 'rt-app';
   const SESSION = 'rt-session';
+
+  it('checks out canonical master regardless of the agent Git default branch', async () => {
+    const id = 'nondefault-branch-app';
+    const sessionId = 'nondefault-branch-session';
+    const commit = await seedPlatformSource(id);
+    prepareAgentSessionSandbox(sessionId);
+    await writeFile(
+      path.join(agentHomeDir(sessionId), '.gitconfig'),
+      '[init]\n\tdefaultBranch = unrelated\n',
+    );
+    const checkout = await checkoutFromBundle(
+      sessionId,
+      'app',
+      await exportSource(id),
+    );
+    expect(checkout).toMatchObject({
+      dirty: false,
+      headCommit: commit,
+      remoteCommit: commit,
+    });
+    await expect(currentBranch(checkout.absolutePath, sessionId)).resolves.toBe(
+      'master',
+    );
+    await expect(
+      readFile(path.join(checkout.absolutePath, 'README.md'), 'utf8'),
+    ).resolves.toBe('v1\n');
+  });
 
   it('transfers source both ways and fast-forwards canonical master', async () => {
     // -- Seed the canonical repo with an initial commit (platform side). ----

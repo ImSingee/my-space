@@ -1,3 +1,14 @@
+import { fromJson } from '@bufbuild/protobuf';
+import { ValueSchema } from '@bufbuild/protobuf/wkt';
+import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
+import { getAgentModelCatalog } from '~server/agent-model-catalog';
+import { createAppHandoff } from '~server/app-handoffs';
+import {
+  insertAgentSession,
+  listSessionSummaries,
+  loadSessionDetail,
+} from '~server/agent-session-store';
+import { sessionOriginError } from '~server/session-http-auth';
 import { sdkPayload } from './sdk';
 import {
   createContextKey,
@@ -8,7 +19,7 @@ import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platf
 import { WorkflowService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workflow_pb';
 import { AuthService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/auth_pb';
 import { SdkService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/sdk_pb';
-import { publicApiError } from './errors';
+import { publicApiError, publicError } from './errors';
 import { db } from '~/db';
 import { deployApp } from '~server/apps/deploy';
 import {
@@ -26,7 +37,7 @@ import {
 } from '~server/workflows/git';
 import { rollbackWorkflowToVersion } from '~server/workflows/manage';
 import { createWorkflow } from '~server/workflows/scaffold';
-import type { PublicApiContext } from './auth';
+import { authenticatePublicApi, type PublicApiContext } from './auth';
 
 export const publicApiContext = createContextKey<PublicApiContext>({
   run: null,
@@ -176,6 +187,85 @@ export function registerPlatformApi(
   router: ConnectRouter,
   deployBodyLimit: number,
 ) {
+  // Override only the interactive methods' gate. Their origin/credential boundary
+  // must remain stricter than the platform-authority lifecycle RPCs.
+  const sessionOnly = {
+    grpc: false,
+    grpcWeb: false,
+    requestGate: async (context: HandlerContext) => {
+      try {
+        const request = new Request(context.url, {
+          headers: context.requestHeader,
+        });
+        if (sessionOriginError(request)) throw publicApiError('FORBIDDEN');
+        const auth = await authenticatePublicApi(request);
+        if (auth.status?.credentialType !== 'session' || !auth.session)
+          throw publicApiError('SESSION_REQUIRED');
+        context.values.set(publicApiContext, auth);
+      } catch (error) {
+        throw publicError(error);
+      }
+    },
+  };
+  router.service(
+    AgentService,
+    {
+      getModelCatalog: async () => {
+        const catalog = await getAgentModelCatalog();
+        return { ...catalog, defaultModel: catalog.defaultModel ?? undefined };
+      },
+      listSessions: async (input) => ({
+        sessions: (await listSessionSummaries(input)).map((session) => ({
+          ...session,
+          providerId: session.providerId ?? undefined,
+          modelId: session.modelId ?? undefined,
+        })),
+      }),
+      createSession: (input) => insertAgentSession(input),
+      getSession: async (input) => {
+        const session = await loadSessionDetail(input.id);
+        if (!session) throw publicApiError('NOT_FOUND');
+        const active = session.activeRun;
+        return {
+          session: {
+            ...session,
+            providerId: session.providerId ?? undefined,
+            modelId: session.modelId ?? undefined,
+            messages: session.messages.map((message) =>
+              fromJson(ValueSchema, message),
+            ),
+            activeRun: active
+              ? {
+                  ...active,
+                  userTurn: active.userTurn ?? undefined,
+                  pendingAsk: active.pendingAsk ?? undefined,
+                  answeredAskId: active.answeredAskId ?? undefined,
+                  pendingEnvRequest: active.pendingEnvRequest ?? undefined,
+                }
+              : undefined,
+            runs: session.runs.map((run) => ({
+              ...run,
+              completedAt: run.completedAt ?? undefined,
+              error: run.error ?? undefined,
+            })),
+          },
+        };
+      },
+    },
+    sessionOnly,
+  );
+  router.rpc(
+    AppService.method.createAppHandoff,
+    async (input, context) => {
+      const app = await find('apps', input.id);
+      return createAppHandoff(
+        new Request(context.url, { headers: context.requestHeader }),
+        context.values.get(publicApiContext).session!,
+        app.id,
+      );
+    },
+    sessionOnly,
+  );
   const apps = lifecycle('apps');
   const workflows = lifecycle('workflows');
   router.rpc(AppService.method.listApps, apps.list);

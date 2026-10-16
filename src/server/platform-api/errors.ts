@@ -9,6 +9,7 @@ const definitions = {
   UNAUTHORIZED: [Code.Unauthenticated, 401, 'Authentication required.'],
   INVALID_TOKEN: [Code.Unauthenticated, 401, 'Invalid Run credential.'],
   RUN_ENDED: [Code.Unauthenticated, 401, 'Run is no longer live.'],
+  SESSION_REQUIRED: [Code.PermissionDenied, 403, 'A user session is required.'],
   FORBIDDEN: [Code.PermissionDenied, 403, 'Cross-origin request denied.'],
   NOT_FOUND: [Code.NotFound, 404, 'Resource not found.'],
   CONFLICT: [Code.Aborted, 409, 'Resource conflict.'],
@@ -47,6 +48,7 @@ export function publicError(error: unknown): ConnectError {
   if (error instanceof AppError && error.status < 500) {
     const codes: Record<number, PublicErrorCode> = {
       400: 'BAD_REQUEST',
+      401: 'UNAUTHORIZED',
       403: 'FORBIDDEN',
       404: 'NOT_FOUND',
       409: 'CONFLICT',

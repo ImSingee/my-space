@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
-import { auth } from '~auth/server';
+import { authenticateSessionRequest } from '~server/session-http-auth';
 import { answerAgentRun } from '~server/agent-runs';
 import { errorResponse } from '~server/errors';
 
@@ -29,8 +29,8 @@ export const Route = createFileRoute('/api/agent/runs/$runId/answer')({
   server: {
     handlers: {
       POST: async ({ request }: { request: Request }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
-        if (!session) return new Response('Unauthorized', { status: 401 });
+        const session = await authenticateSessionRequest(request);
+        if (session instanceof Response) return session;
 
         const runId = parseRunId(request);
         if (!runId) return new Response('Not found', { status: 404 });

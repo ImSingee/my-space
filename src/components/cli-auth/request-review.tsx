@@ -28,7 +28,14 @@ export function RequestReview({
 
   return (
     <>
-      <ViewHeader title="Approve Hatch CLI?" focus>
+      <ViewHeader
+        title={
+          request.clientId === 'hatch-mobile'
+            ? 'Approve Hatch Mobile?'
+            : 'Approve Hatch CLI?'
+        }
+        focus
+      >
         Signing in as{' '}
         <Text span inherit fw={500} c="var(--mantine-color-text)">
           {account ?? 'your account'}

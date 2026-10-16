@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/struct.proto";
+
+// Interactive resources require a Better Auth user session, never API keys or Run JWTs.
+service AgentService {
+  rpc GetModelCatalog(GetModelCatalogRequest) returns (GetModelCatalogResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+}
+
+message GetModelCatalogRequest {}
+message GetModelCatalogResponse {
+  repeated AgentProvider providers = 1;
+  AgentModelSelection default_model = 2;
+}
+message AgentProvider {
+  string id = 1;
+  string name = 2;
+  repeated AgentModel models = 3;
+}
+message AgentModel {
+  string id = 1;
+  string model_id = 2;
+  string name = 3;
+  bool reasoning = 4;
+  double context_window = 5;
+  double max_tokens = 6;
+}
+message AgentModelSelection {
+  string provider_id = 1;
+  string model_id = 2;
+}
+message ListSessionsRequest {
+  optional string app_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 200
+  }];
+}
+message ListSessionsResponse {
+  repeated AgentSessionSummary sessions = 1;
+}
+message AgentSessionSummary {
+  string id = 1;
+  string title = 2;
+  repeated string app_ids = 3;
+  optional string provider_id = 4;
+  optional string model_id = 5;
+  uint32 message_count = 6;
+  string updated_at = 7;
+}
+message CreateSessionRequest {
+  optional string title = 1 [(buf.validate.field).string.max_len = 200];
+  optional string provider_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 200
+  }];
+  optional string model_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 200
+  }];
+}
+message CreateSessionResponse {
+  string id = 1;
+}
+message GetSessionRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 200
+  }];
+}
+message GetSessionResponse {
+  AgentSession session = 1;
+}
+message AgentSession {
+  string id = 1;
+  string title = 2;
+  repeated string app_ids = 3;
+  optional string provider_id = 4;
+  optional string model_id = 5;
+  // Revision guard for Retry; all transcript/run fields share a repeatable-read snapshot.
+  string updated_at = 6;
+  // Persisted Agent message union retains its existing JSON content and numeric semantics.
+  repeated google.protobuf.Value messages = 7;
+  ActiveAgentRun active_run = 8;
+  repeated AgentRunTiming runs = 9;
+  string server_time = 10;
+}
+message ActiveAgentRun {
+  string id = 1;
+  string status = 2;
+  string started_at = 3;
+  optional int32 user_turn = 4;
+  AgentPendingAsk pending_ask = 5;
+  optional string answered_ask_id = 6;
+  AgentPendingEnvironment pending_env_request = 7;
+}
+message AgentRunTiming {
+  string id = 1;
+  string status = 2;
+  int32 user_turn = 3;
+  string started_at = 4;
+  optional string completed_at = 5;
+  optional string error = 6;
+}
+message AgentPendingAsk {
+  string ask_id = 1;
+  repeated AgentQuestion questions = 2;
+}
+message AgentQuestion {
+  string id = 1;
+  string prompt = 2;
+  bool allow_multiple = 3;
+  repeated AgentQuestionOption options = 4;
+}
+message AgentQuestionOption {
+  string id = 1;
+  string label = 2;
+}
+message AgentPendingEnvironment {
+  string request_id = 1;
+  string reason = 2;
+  repeated AgentEnvironmentVariable variables = 3;
+}
+message AgentEnvironmentVariable {
+  string key = 1;
+  string description = 2;
+  bool secret = 3;
+}

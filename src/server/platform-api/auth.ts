@@ -1,4 +1,4 @@
-/** Credential validity only: every authenticated caller has full public access. */
+/** Credential validity; interactive RPCs additionally require a user session. */
 import type { AuthStatus } from '../../../packages/hatch-platform-api/auth';
 import { publicApiError } from './errors';
 import { auth } from '~auth/server';
@@ -11,6 +11,7 @@ import {
 export type PublicApiContext = {
   run: RunTokenContext | null;
   status?: AuthStatus;
+  session?: { id: string; expiresAt: Date };
 };
 
 export async function authenticatePublicApi(
@@ -75,6 +76,7 @@ function sessionContext(
   if (!value) throw publicApiError('UNAUTHORIZED');
   return {
     run: null,
+    session: { id: value.session.id, expiresAt: value.session.expiresAt },
     status: {
       authenticated: true,
       credentialType: 'session',

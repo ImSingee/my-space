@@ -25,6 +25,13 @@
   box-shadow: var(--mantine-shadow-md);
 }
 
+/* Avoid iOS input zoom persisting into the device approval page after sign-in. */
+@media (pointer: coarse) {
+  .card input {
+    font-size: max(1rem, 16px);
+  }
+}
+
 @keyframes panel-rise {
   from {
     opacity: 0;
