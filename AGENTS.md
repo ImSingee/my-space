@@ -2,6 +2,14 @@
 
 This file provides guidance to AI Code Agent when working with code in this repository.
 
+## README Audience and Approval
+
+`README.md` is intended for end users of the product, rather than developers.
+Before making any change to `README.md`, present the proposed changes, ask the
+user for a second confirmation, and receive explicit approval. An initial task
+request or a general documentation update request does not replace this
+confirmation.
+
 ## Writing Plans
 
 Keep plans concise and proportional to the task. Consider these sections in order:

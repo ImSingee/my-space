@@ -76,8 +76,7 @@ Then open [http://localhost:3700](http://localhost:3700) and:
    and turn off **Allow sign-up**. It takes effect immediately, no redeploy
    needed — and you can reopen it from the same place to invite someone.
 3. **Connect your AI** — go to **Settings → Providers** and add your model
-   provider API key. Attached images are sent to every model without a separate
-   image-capability setting.
+   provider API key.
 4. **Build your first app** — open the agent and ask for something you have
    always wanted.
 
@@ -88,23 +87,6 @@ scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
 `.env` to serve on a different host port, update `APP_URL` to match. When Hatch
 is behind a domain or reverse proxy, set `APP_URL` to that external origin
 (for example, `https://hatch.example.com`).
-
-Passkeys use the `APP_URL` hostname as their relying-party ID. Keep that
-hostname stable after users register passkeys, and use HTTPS in production
-(`http://localhost` is supported for local development). Password sign-in
-remains available if a passkey cannot be used.
-IP-literal origins (including `127.0.0.1` and `[::1]`) do not support passkey
-registration or sign-in. Use a domain or `localhost` instead; existing
-passkeys can still be renamed or deleted from Account on an IP deployment.
-The browser must use the same public origin configured in `APP_URL`.
-Session freshness checks are disabled globally: any valid signed-in session
-can manage passkeys without reauthentication. Session expiration and required
-authentication still apply.
-
-For a private HTTPS address on your Tailscale network, open **Settings →
-Tailscale**, connect using interactive sign-in or an auth key. The Docker image includes the connection
-helper and remembers its identity across restarts. See [Tailscale access](docs/tailscale.md)
-for prerequisites and source installations.
 
 `HATCH_RUNNER_ID` is required and must remain paired one-to-one with the Agent
 Runner's persistent workspace volume. The default Compose deployment
@@ -122,13 +104,6 @@ because it changes when the pod is recreated.
 The Agent's web search and page-fetch tools use Tavily's keyless access mode by
 default. To use your Tavily account and quota, set `TAVILY_API_KEY` in `.env`
 and recreate the Agent Runner (`docker compose up -d --force-recreate agent`).
-
-Beta features are configured only on the Platform with the optional,
-comma-separated `HATCH_BETA` value. Set `HATCH_BETA=workflow` in `.env` to
-expose Workflow tools and guidance to Agent Runners. Restart the Platform after
-changing the value; connected Runners automatically reconnect and receive the
-new feature set. Unknown feature names are ignored by Runners that do not
-support them.
 
 ## Ideas to try
 
