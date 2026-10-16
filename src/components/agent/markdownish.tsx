@@ -8,7 +8,15 @@ import 'katex/dist/katex.min.css';
 import classes from './chat.module.css';
 
 function MarkdownLink(props: ComponentPropsWithoutRef<'a'>) {
-  return <Anchor {...props} target="_blank" rel="noreferrer" />;
+  return (
+    <Anchor
+      {...props}
+      inherit
+      underline="hover"
+      target="_blank"
+      rel="noreferrer"
+    />
+  );
 }
 
 type PluginList = NonNullable<MarkdownOptions['rehypePlugins']>;
