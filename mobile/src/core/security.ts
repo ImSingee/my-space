@@ -1,5 +1,7 @@
 import type { AppHandoff } from './types';
 
+export const APP_HANDOFF_PATH = '/api/auth/handoffs/consume';
+
 export type InstanceUrlOptions = { allowDevelopmentLoopback?: boolean };
 
 export class MobileError extends Error {
@@ -136,7 +138,7 @@ export function validateHandoff(
   }
   if (
     url.origin !== origin ||
-    url.pathname !== '/api/v1/auth/handoffs/consume' ||
+    url.pathname !== APP_HANDOFF_PATH ||
     url.username ||
     url.password ||
     url.search ||

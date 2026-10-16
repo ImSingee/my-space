@@ -96,7 +96,7 @@ and layout are verified separately from a successful bundle export.
 
 ## Security and architecture
 
-`src/core/` contains platform-independent contracts, storage/transport interfaces,
+`src/core/` contains shared-Connect message projections, storage/transport interfaces,
 URL validation, login orchestration, and SSE state. Only `core/native.ts` imports
 SecureStore, Expo Crypto, WebBrowser, and Expo's streaming `fetch`.
 
@@ -129,15 +129,31 @@ a user choice before opening the browser. Android's WebView cookie behavior is
 platform-global rather than iOS's isolated nonpersistent store; this first pass
 is iPhone-first and does not claim Android session-isolation acceptance.
 
-The client reuses existing `/api/v1/apps` list/detail shapes and generic
-`/api/v1/agent/models`, `/api/v1/agent/sessions` and App handoff resources.
-There is no mobile API namespace or envelope adapter. Existing Agent run, SSE,
-answer, cancel and attachment transports stay at `/api/agent/...`. Interactive
-resources require an ordinary user session; API keys and Run JWTs cannot acquire
-conversation or browser sessions. No database migration or Platform/Runner, App,
-or Workflow compatibility-version bump is required. Browser server functions
-reuse the same session store; the phone uses the documented HTTP contract.
-See [the API contract](../docs/platform-api.md#interactive-agent-and-app-resources).
+The client uses generated `@hatch/platform-api` descriptors with Connect Web
+unary JSON transport at `/api/rpc`. App list/detail use `AppService/ListApps`
+and `GetApp`; model catalog and session list/create/detail use `AgentService`;
+`AppService/CreateAppHandoff` issues the ticket. The browser consumes it with
+form `POST /api/auth/handoffs/consume` and follows its 303 redirect. There is no
+mobile API namespace, REST alias or fallback to undocumented Server Functions.
+The shared proto is the wire contract. A small UI projection restores nullable
+fields and transcript JSON from Protobuf optional fields and Value messages.
+Metro resolves the shared package's ESM `.js` specifiers to its checked-in
+TypeScript sources without modifying generated files or third-party resolution.
+
+Connect requests retain the same per-origin SecureStore, explicit Bearer,
+no-cookie/no-cache/no-redirect, cancellation and stale-401 safeguards. PublicError
+details map logical errors (including size limits) to existing native recovery;
+raw server errors are never displayed and mutations are never automatically
+retried. An unavailable model-catalog RPC reports an unsupported backend.
+Existing Agent run, SSE, answer, cancel and attachment transports stay at
+`/api/agent/...`, and device/login/logout remain Better Auth HTTP endpoints.
+Interactive resources require an ordinary user session; API keys and Run JWTs
+cannot acquire conversation or browser sessions. No database migration or
+Platform/Runner, App, or Workflow compatibility-version bump is required.
+
+Deploy backend #189 before this client. Previously issued tickets expire within
+60 seconds; request a fresh handoff after upgrading. Rollback must pair the
+client and backend protocol revisions. See [the API contract](../docs/platform-api.md#interactive-agent-and-app-resources).
 
 ## Native-first UI
 
@@ -176,11 +192,13 @@ pnpm test:unit
 pnpm test:browser src/components/cli-auth/device-approval.browser.test.tsx
 ```
 
-The iOS export verifies Metro and Hermes bundling. Separate macOS acceptance
-compiled and installed the development client on dedicated iOS 26/27 Simulators
-and exercised native authentication, keyboard/layout, and the main user journeys.
-Physical-device and Android acceptance remain unverified. See
-[the verification record](../docs/mobile-verification.md) and its acceptance link.
+The iOS export verifies Metro and Hermes bundling, not native runtime behavior.
+The Connect migration is verified with unit/contract tests, type checks and
+builds only; no Simulator or UI acceptance was run for this revision. Earlier
+macOS acceptance compiled and installed SDK58 on dedicated iOS 26/27 Simulators
+and exercised the old generic-v1 protocol. That evidence remains historical and
+does not verify Connect. Physical-device and Android acceptance remain
+unverified. See [the verification record](../docs/mobile-verification.md).
 
 ## Deliberate first-version limits
 
