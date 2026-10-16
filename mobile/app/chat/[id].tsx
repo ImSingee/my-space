@@ -15,6 +15,7 @@ import {
   Platform,
   ScrollView,
   View,
+  type ScrollViewInstance,
   type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,6 +59,7 @@ export default function ChatScreen() {
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sending = useRef(false);
   const composer = useRef<NativeFieldRef>(null);
+  const composerScroll = useRef<ScrollViewInstance>(null);
   const lifetimeSignal = useLifetimeSignal();
   const session = useQuery({
     queryKey: [origin, 'session', id],
@@ -497,9 +499,16 @@ export default function ChatScreen() {
           }}
         >
           <ScrollView
+            ref={composerScroll}
             style={{ flexGrow: 0, flexShrink: 1 }}
             contentContainerStyle={{ gap: 10 }}
             keyboardShouldPersistTaps="handled"
+            onLayout={() =>
+              composerScroll.current?.scrollToEnd({ animated: false })
+            }
+            onContentSizeChange={() =>
+              composerScroll.current?.scrollToEnd({ animated: false })
+            }
           >
             {problem ? (
               <View>
