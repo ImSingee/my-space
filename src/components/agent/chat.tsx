@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { hasComposerText } from '~agent/composer-content';
+import { composerDisplayText, hasComposerText } from '~agent/composer-content';
 import { nextUserTurn } from '~agent/user-turns';
 import { appsQueryOptions } from '~queries/apps';
 import { sessionQueryOptions, sessionsQueryOptions } from '~queries/agent';
@@ -86,6 +86,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const [, setLastSelectedModel] = useLastSelectedModel();
   const [reconnectToken, setReconnectToken] = useState(0);
   const [retrying, setRetrying] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<{
+    userTurn: number;
+    message: Extract<ChatMessage, { role: 'user' }>;
+  } | null>(null);
   const [consumedRetryIdentity, setConsumedRetryIdentity] = useState<
     string | null
   >(null);
@@ -190,9 +194,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
   );
   // What a snapshot said about its active run, kept after the run leaves
   // `activeRun`. Runs that predate recorded user turns are bound by the server
-  // within that same snapshot. An optimistic Send placeholder never has a
-  // turn: its snapshot does not contain the new user message yet. An
-  // optimistic Retry does, because it replays a user turn that snapshot holds.
+  // within that same snapshot. A locally started run is bound to the prompt
+  // added to that snapshot when the start request succeeds.
   const [observedRun, setObservedRun] = useState<{
     id: string;
     userTurn: number;
@@ -265,10 +268,14 @@ export function Chat({ sessionId }: { sessionId: string }) {
     [effectiveModel],
   );
 
-  const messages = useMemo(
-    () => (session?.messages ?? []) as unknown as ChatMessage[],
-    [session?.messages],
-  );
+  const messages = useMemo(() => {
+    const history = (session?.messages ?? []) as unknown as ChatMessage[];
+    // A background snapshot may already contain the submitted turn. Keep
+    // exactly one prompt while the start request and history race.
+    return pendingMessage && nextUserTurn(history) === pendingMessage.userTurn
+      ? [...history, pendingMessage.message]
+      : history;
+  }, [pendingMessage, session?.messages]);
   // Memoize the rendered transcript so a streaming token — which only updates
   // local `streamState` — doesn't re-run every past message's markdown/KaTeX
   // parse. While a run streams, `session.messages` is stable, so `turns`,
@@ -329,11 +336,9 @@ export function Chat({ sessionId }: { sessionId: string }) {
       const parsed = splitModelValue(modelValue);
       if (!parsed) return false;
 
-      let attachmentIds: string[];
+      let attachments;
       try {
-        attachmentIds = (await uploadAgentFiles(sessionId, files)).map(
-          (attachment) => attachment.id,
-        );
+        attachments = await uploadAgentFiles(sessionId, files);
       } catch (error) {
         toast.error(
           error instanceof Error ? error.message : 'Could not upload files.',
@@ -341,15 +346,31 @@ export function Chat({ sessionId }: { sessionId: string }) {
         return false;
       }
 
+      const userTurn = nextUserTurn(messages);
+      const message: Extract<ChatMessage, { role: 'user' }> = {
+        role: 'user',
+        content: [
+          { type: 'text', text: composerDisplayText(content) },
+          ...images.map((image) => ({ type: 'image', ...image })),
+        ],
+        composerContent: content,
+        attachments,
+      };
+      // Publish the prompt in the same render that starts the work indicator,
+      // without putting an unaccepted message into the session cache.
+      setPendingMessage({ userTurn, message });
       const started = await sendRun({
         sessionId,
         content,
         images,
-        attachmentIds,
+        attachmentIds: attachments.map((attachment) => attachment.id),
         providerId: parsed.providerId,
         modelId: parsed.modelId,
       });
-      if (!started) return false;
+      if (!started) {
+        setPendingMessage(null);
+        return false;
+      }
       // A successful start has consumed this exact failure revision even if the
       // new user message cannot be refetched yet (or the run ends before the
       // active state is observed). Any later failure has a new session revision;
@@ -363,24 +384,36 @@ export function Chat({ sessionId }: { sessionId: string }) {
         old
           ? {
               ...old,
+              messages:
+                nextUserTurn(old.messages) === userTurn
+                  ? ([...old.messages, message] as typeof old.messages)
+                  : old.messages,
               providerId: parsed.providerId,
               modelId: parsed.modelId,
               activeRun: {
                 id: started.runId,
                 status: 'running' as const,
                 startedAt: started.startedAt,
-                // Unknown until a fetched snapshot holds the new user message.
-                userTurn: null,
+                userTurn,
                 pendingAsk: null,
                 pendingEnvRequest: null,
               },
             }
           : old,
       );
+      setPendingMessage(null);
       revalidateSession();
       return true;
     },
-    [qc, revalidateSession, retryIdentity, runBusy, sendRun, sessionId],
+    [
+      messages,
+      qc,
+      revalidateSession,
+      retryIdentity,
+      runBusy,
+      sendRun,
+      sessionId,
+    ],
   );
 
   // Keep the retry action mounted while its POST is pending so MessageView can
