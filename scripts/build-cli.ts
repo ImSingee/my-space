@@ -2,6 +2,7 @@ import { chmod, readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { resolveBuildInfo } from './build-info';
 
 const entry = fileURLToPath(
   new URL('../packages/hatch-cli/src/main.ts', import.meta.url),
@@ -11,6 +12,7 @@ const output = fileURLToPath(
 );
 
 const result = await build({
+  define: { __HATCH_BUILD_INFO__: JSON.stringify(resolveBuildInfo()) },
   metafile: true,
   entryPoints: [entry],
   outfile: output,
