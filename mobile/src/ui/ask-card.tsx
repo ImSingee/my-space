@@ -1,6 +1,6 @@
 import { Choice, OptionToggle } from './native-controls';
-import { NativeField } from './native-field';
-import { useState } from 'react';
+import { NativeField, type NativeFieldRef } from './native-field';
+import { useRef, useState } from 'react';
 import { View } from 'react-native';
 import type { AskAnswer, PendingAsk } from '../core';
 import { updateAskAnswer } from '../core/ask-answer';
@@ -17,6 +17,7 @@ export function AskCard({
 }) {
   const c = usePalette();
   const [answers, setAnswers] = useState<Record<string, AskAnswer>>({});
+  const fields = useRef<Record<string, NativeFieldRef | null>>({});
   const get = (id: string): AskAnswer =>
     answers[id] ?? { questionId: id, selectedOptionIds: [], customText: '' };
   return (
@@ -76,6 +77,9 @@ export function AskCard({
             />
           ) : null}
           <NativeField
+            ref={(field) => {
+              fields.current[question.id] = field;
+            }}
             label={`Other answer: ${question.prompt}`}
             placeholder="Or write your own answer…"
             value={get(question.id).customText ?? ''}
@@ -102,7 +106,16 @@ export function AskCard({
           )
         }
         onPress={() =>
-          onAnswer(ask.questions.map((question) => get(question.id)))
+          onAnswer(
+            ask.questions.map((question) =>
+              updateAskAnswer(question, get(question.id), {
+                customText:
+                  fields.current[question.id]?.getText() ??
+                  get(question.id).customText ??
+                  '',
+              }),
+            ),
+          )
         }
       />
     </Card>
