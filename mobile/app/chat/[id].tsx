@@ -15,6 +15,7 @@ import {
   Platform,
   ScrollView,
   View,
+  type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AskAnswer, JsonValue } from '../../src/core';
@@ -53,7 +54,7 @@ export default function ChatScreen() {
   } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const list = useRef<FlatList<JsonValue>>(null);
-  const frame = useRef<View>(null);
+  const frame = useRef<ViewInstance>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sending = useRef(false);
   const lifetimeSignal = useLifetimeSignal();
@@ -350,7 +351,12 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={keyboardOffset}
       >
-        <Stack.Screen options={{ title: detail?.title ?? 'Conversation' }} />
+        <Stack.Screen
+          options={{
+            title: detail?.title ?? 'Conversation',
+            headerTransparent: false,
+          }}
+        />
         {session.isPending ? (
           <Busy />
         ) : session.error && !detail ? (
@@ -365,6 +371,7 @@ export default function ChatScreen() {
         ) : (
           <FlatList
             style={styles.screen}
+            contentInsetAdjustmentBehavior="automatic"
             ref={list}
             data={detail?.messages ?? []}
             keyExtractor={(_, index) => String(index)}
@@ -390,7 +397,7 @@ export default function ChatScreen() {
                   title="Start with an idea."
                   detail="Build an app, explore your data, or pick up an unfinished project. Photos and files can help explain what you mean."
                 />
-              ) : null
+              ) : undefined
             }
             ListFooterComponent={
               <View style={{ gap: 16 }}>

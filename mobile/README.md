@@ -9,15 +9,16 @@ open in a separate authenticated WebView.
 
 Requirements:
 
-- Node.js 22.19+ and the repository's pnpm 12.11.2.
+- Node.js 26 (recommended) and the repository's pnpm 12.11.2. Expo also
+  supports the compatible even-numbered Node 22/24 releases.
 - The Hatch platform **from this branch**, with its normal database, at least one
   enabled provider/model, and a connected Agent Runner. Existing server setup is
   described in the [root README](../README.md).
 - An HTTPS origin reachable from the phone. Enter the canonical `APP_URL` without
   a path, query, or fragment. Browser approval must stay on that exact origin.
 - For a local iOS development build: macOS, Xcode 26.4+, an iOS 16.4+ simulator or
-  device, and the usual Xcode signing setup for physical devices. Scene lifecycle
-  support is enabled for Xcode 27/iOS 27 through the SDK 57 config plugin.
+  device, and the usual Xcode signing setup for physical devices. SDK 58 generates the
+  scene lifecycle required by Xcode 27/iOS 27 automatically.
 
 From the repository root:
 
@@ -48,6 +49,32 @@ contains development, simulator, and preview profiles. Running an EAS build,
 creating signing credentials, uploading to TestFlight, or publishing a release
 are separate actions; none were performed for this delivery. Replace the sample
 bundle identifier with your own before distribution.
+
+## SDK 58 compatibility
+
+Expo is pinned to `58.0.12`; the official installer aligns React `19.3.0`,
+React Native `0.88.0`, Router `58.0.21`, `@expo/ui` `58.0.19`, WebView `14.0.1`,
+and their native companions. See the [SDK 58 release notes](https://expo.dev/changelog/sdk-58)
+and [upgrade guide](https://docs.expo.dev/workflow/upgrading-expo-sdk-walkthrough/).
+The lockfile records exact resolutions. Release-age exclusions are limited to
+the exact new Expo package versions selected by the installer; other supply-chain
+checks remain enabled.
+
+Regenerate the ignored iOS/Android projects when upgrading SDKs and rebuild the
+development client. SDK 58 generates `SceneDelegate.swift`; the old
+`expo-build-properties` scene-support opt-in is no longer needed. The app still
+applies its private-networking plugin before React starts. `expo-status-bar` and
+`expo-web-browser` now have explicit config plugins.
+
+The mobile project uses the React Native strict TypeScript API, including native
+instance ref types, without the legacy opt-out. Its base tsconfig includes the
+`.json` extension so the test transformer can resolve SDK 58's package exports.
+The chat list uses automatic content-inset adjustment. Home, chat, and WebView
+screens explicitly use Router's supported opaque system header, keeping short
+histories and segmented controls below navigation. Home and WebView apply only
+left/right safe areas; Home lets React Native own its Host safe area to prevent
+the native form from intercepting segmented-control touches. Native controls
+and layout are verified separately from a successful bundle export.
 
 ## What is included
 

@@ -21,7 +21,8 @@ const config: ExpoConfig = {
     './plugins/with-private-networking.cjs',
     'expo-router',
     'expo-secure-store',
-    ['expo-build-properties', { ios: { enableSceneSupport: true } }],
+    'expo-status-bar',
+    'expo-web-browser',
     ['expo-dev-client', { launchMode: 'launcher' }],
     [
       'expo-image-picker',

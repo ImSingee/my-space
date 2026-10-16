@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { FieldGroup, Host, ListItem, Text as FormText } from '@expo/ui';
 import SegmentedControl from '@expo/ui/community/segmented-control';
 import { refreshable } from '@expo/ui/swift-ui/modifiers';
@@ -48,9 +49,10 @@ export default function HomeScreen() {
     void (tab === 'apps' ? apps.refetch() : sessions.refetch());
   };
   return (
-    <View style={styles.screen}>
+    <SafeAreaView style={styles.screen} edges={['left', 'right']}>
       <Stack.Screen
         options={{
+          headerTransparent: false,
           headerRight: () => (
             <Action
               compact
@@ -70,7 +72,7 @@ export default function HomeScreen() {
           }
         />
       </View>
-      <Host style={styles.screen}>
+      <Host style={styles.screen} ignoreSafeArea="all">
         <FieldGroup
           modifiers={[
             refreshable(async () => {
@@ -128,6 +130,6 @@ export default function HomeScreen() {
           action={{ label: 'Try again', onPress: refresh }}
         />
       ) : null}
-    </View>
+    </SafeAreaView>
   );
 }
