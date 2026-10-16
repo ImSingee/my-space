@@ -1,5 +1,5 @@
 import { AttachmentMenu, Choice } from '../../src/ui/native-controls';
-import { NativeField } from '../../src/ui/native-field';
+import { NativeField, type NativeFieldRef } from '../../src/ui/native-field';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
@@ -57,6 +57,7 @@ export default function ChatScreen() {
   const frame = useRef<ViewInstance>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sending = useRef(false);
+  const composer = useRef<NativeFieldRef>(null);
   const lifetimeSignal = useLifetimeSignal();
   const session = useQuery({
     queryKey: [origin, 'session', id],
@@ -119,6 +120,7 @@ export default function ChatScreen() {
   const send = useMutation({
     mutationFn: async () => {
       const signal = lifetimeSignal();
+      const text = (composer.current?.getText() ?? draft).trim();
       if (!selectedModel) throw new Error('Choose a configured model first.');
       if (runId)
         throw new Error('Wait for the current reply or stop it first.');
@@ -139,7 +141,7 @@ export default function ChatScreen() {
         {
           sessionId: id,
           ...selectedModel,
-          content: draft.trim() ? [{ type: 'text', text: draft.trim() }] : [],
+          content: text ? [{ type: 'text', text }] : [],
           attachmentIds,
           images: files
             .filter((item) => item.image)
@@ -602,6 +604,7 @@ export default function ChatScreen() {
               </ScrollView>
             ) : null}
             <NativeField
+              ref={composer}
               label="Message your Agent"
               maxLength={50000}
               multiline

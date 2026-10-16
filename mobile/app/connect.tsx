@@ -58,7 +58,9 @@ export default function ConnectScreen() {
     setPending(true);
     setCode(null);
     try {
-      const origin = canonicalizeInstanceUrl(url, { allowDevelopmentLoopback });
+      const origin = canonicalizeInstanceUrl(urlField.value.get(), {
+        allowDevelopmentLoopback,
+      });
       setUrl(origin);
       const client = createNativeClient({
         origin,
