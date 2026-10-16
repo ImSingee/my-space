@@ -1,5 +1,13 @@
+import { FormButton } from '../src/ui/form-button';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import { FieldGroup, Host, Text, TextInput } from '@expo/ui';
+import {
+  accessibilityLabel,
+  font,
+  foregroundStyle,
+  textSelection,
+} from '@expo/ui/swift-ui/modifiers';
+import { PlatformColor } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DeviceLogin, canonicalizeInstanceUrl } from '../src/core';
 import { createNativeClient, openLoginBrowser } from '../src/core/native';
@@ -8,15 +16,8 @@ import {
   useSession,
   vault,
 } from '../src/state/session';
-import {
-  Action,
-  Card,
-  Text,
-  TextInput,
-  errorText,
-  styles,
-  usePalette,
-} from '../src/ui/primitives';
+import { errorText, styles, usePalette } from '../src/ui/primitives';
+import { useFieldState } from '../src/ui/use-field-state';
 
 type Approval = {
   userCode: string;
@@ -27,6 +28,7 @@ export default function ConnectScreen() {
   const { connect, origins, authError } = useSession();
   const c = usePalette();
   const [url, setUrl] = useState(origins[0] ?? '');
+  const urlField = useFieldState(url, setUrl);
   const [pending, setPending] = useState(false);
   const [code, setCode] = useState<Approval | null>(null);
   const [error, setError] = useState<string | null>(authError);
@@ -108,139 +110,103 @@ export default function ConnectScreen() {
   };
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: c.background }]}>
-      <KeyboardAvoidingView
-        style={styles.screen}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingTop: 46 }]}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View
-            style={{
-              width: 68,
-              height: 68,
-              borderRadius: 23,
-              backgroundColor: c.accent,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 8,
-            }}
-          >
-            <Text
-              allowFontScaling={false}
-              style={{ fontSize: 39, color: c.background, fontWeight: '700' }}
-            >
-              h
+      <Host style={styles.screen}>
+        <FieldGroup>
+          <FieldGroup.Section title="Connect to Hatch">
+            <Text modifiers={[font({ textStyle: 'title2', weight: 'bold' })]}>
+              Your Hatch. In your pocket.
             </Text>
-          </View>
-          <Text
-            accessibilityRole="header"
-            style={{
-              fontSize: 37,
-              letterSpacing: -1.5,
-              color: c.text,
-              fontWeight: '700',
-            }}
-          >
-            {'Your Hatch.\nIn your pocket.'}
-          </Text>
-          <Text style={[styles.body, { color: c.muted }]}>
-            Open your apps, talk with your Agent, and pick up where you left
-            off.
-          </Text>
-          <Card>
-            <Text style={[styles.label, { color: c.muted }]}>INSTANCE URL</Text>
+            <Text>
+              Open your apps, talk with your Agent, and pick up where you left
+              off.
+            </Text>
+          </FieldGroup.Section>
+          <FieldGroup.Section title="Instance URL">
             <TextInput
-              accessibilityLabel="Hatch instance URL"
-              value={url}
-              onChangeText={setUrl}
+              {...urlField}
               editable={!pending}
               placeholder="https://hatch.example.com"
-              placeholderTextColor={c.muted}
               keyboardType="url"
               autoCapitalize="none"
               autoCorrect={false}
-              textContentType="URL"
+              autoComplete="url"
               returnKeyType="go"
               onSubmitEditing={() => void begin()}
-              style={[styles.input, { color: c.text, borderColor: c.border }]}
+              modifiers={[accessibilityLabel('Hatch instance URL')]}
             />
-            <Text style={[styles.caption, { color: c.muted }]}>
-              Use your HTTPS Hatch address. Sign-in opens this instance in your
-              system browser. Approving grants this phone full account access.
-            </Text>
             {!pending ? (
-              <Action
+              <FormButton
                 label="Continue in browser"
-                disabled={!url.trim()}
+
+                unavailable={!url.trim()}
                 onPress={() => void begin()}
               />
             ) : null}
-          </Card>
-          {code ? (
-            <Card>
-              <Text style={[styles.label, { color: c.muted }]}>
-                CHECK THIS CODE IN YOUR BROWSER
+            <FieldGroup.SectionFooter>
+              <Text>
+                Use your HTTPS Hatch address. Sign-in opens this instance in
+                your system browser. Approving grants this phone full account
+                access.
               </Text>
+            </FieldGroup.SectionFooter>
+          </FieldGroup.Section>
+          {code ? (
+            <FieldGroup.Section title="Check this code in your browser">
               <Text
-                selectable
-                style={{
-                  fontSize: 34,
-                  letterSpacing: 4,
-                  fontWeight: '700',
-                  color: c.text,
-                }}
+                modifiers={[
+                  font({
+                    textStyle: 'title',
+                    design: 'monospaced',
+                    weight: 'bold',
+                  }),
+                  textSelection(true),
+                ]}
               >
                 {code.userCode}
               </Text>
-              <Text style={[styles.body, { color: c.muted }]}>
-                Approve only the request you just started. Return here after
-                approval; your session will connect automatically.
-              </Text>
-              <Action
-                secondary
+              <FormButton
                 label="Reopen approval page"
+
                 onPress={() =>
                   void openLoginBrowser(code.verificationUrl).catch(
                     (failure: unknown) => setError(errorText(failure)),
                   )
                 }
               />
-            </Card>
+              <FieldGroup.SectionFooter>
+                <Text>
+                  Approve only the request you just started. Return here after
+                  approval; your session will connect automatically.
+                </Text>
+              </FieldGroup.SectionFooter>
+            </FieldGroup.Section>
           ) : null}
           {pending ? (
-            <Action
-              secondary
-              label={code ? 'Cancel sign-in' : 'Cancel connection'}
-              onPress={cancel}
-            />
+            <FieldGroup.Section>
+              <FormButton label="Cancel sign-in" onPress={cancel} />
+            </FieldGroup.Section>
           ) : null}
           {error ? (
-            <Text
-              accessibilityRole="alert"
-              style={[styles.body, { color: c.danger }]}
-            >
-              {error}
-            </Text>
-          ) : null}
-          {!pending && origins.length > 0 ? (
-            <View style={{ gap: 10 }}>
-              <Text style={[styles.label, { color: c.muted }]}>
-                RECENT INSTANCES
+            <FieldGroup.Section title="Couldn’t connect">
+              <Text modifiers={[foregroundStyle(PlatformColor('systemRed'))]}>
+                {error}
               </Text>
+            </FieldGroup.Section>
+          ) : null}
+          {!pending && origins.length ? (
+            <FieldGroup.Section title="Recent instances">
               {origins.map((item) => (
-                <Action
+                <FormButton
                   key={item}
                   label={item.replace(/^https?:\/\//, '')}
-                  secondary
+
                   onPress={() => setUrl(item)}
                 />
               ))}
-            </View>
+            </FieldGroup.Section>
           ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FieldGroup>
+      </Host>
     </SafeAreaView>
   );
 }

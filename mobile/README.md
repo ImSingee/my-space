@@ -2,7 +2,7 @@
 
 An iPhone-first Expo development build for a self-hosted Hatch instance. The app
 library, conversation list, model picker, chat, attachments, questions, and run
-controls use React Native views and Expo Router's native stack. Generated Apps
+controls prefer `@expo/ui` native components and Expo Router's native stack. Generated Apps
 open in a separate authenticated WebView.
 
 ## Run it
@@ -107,6 +107,31 @@ Runner, App, or Workflow compatibility-version bump. Existing web server
 functions reuse the extracted session store; they are not called by the phone.
 See [the API contract](../docs/mobile-api.md).
 
+## Native-first UI
+
+Follow [the mobile development conventions](AGENTS.md). Connection and settings
+use native grouped forms; the library uses native list rows and a segmented
+control. Buttons, model/single-answer pickers, multiple-answer switches, attachment
+menus, text fields, and tool disclosures use system controls. iOS uses SwiftUI
+through `@expo/ui`; Expo Router supplies the native navigation stack. System
+semantic colors and typography follow light/dark appearance and Dynamic Type.
+
+React Native still lays out the conversation transcript, streamed content, status
+messages, and image previews because these are Hatch-specific content, rather
+than standard form controls. Its KeyboardAvoidingView owns the composer's keyboard
+inset; small embedded native Hosts ignore their own safe areas to avoid applying
+it twice. Generated Apps remain authenticated WebViews. Browser approval, alerts,
+Photos, and Files keep their existing system APIs. Android uses the corresponding
+universal components or system controls; iOS acceptance does not establish Android
+layout or session isolation.
+
+Native text fields keep their text binding on the native side. JavaScript updates
+external changes (such as selecting a recent instance or clearing a sent draft)
+without replaying each delayed edit over newer input or moving its caret.
+
+Re-run prebuild and compile/install the development client after adding `@expo/ui`.
+A Metro reload cannot add a native module.
+
 ## Checks
 
 ```sh
@@ -119,9 +144,11 @@ pnpm test:unit
 pnpm test:browser src/components/cli-auth/device-approval.browser.test.tsx
 ```
 
-The iOS export verifies Metro and Hermes bundling, **not** an Xcode build,
-simulator launch, native authentication, keyboard behavior, or physical-device
-acceptance. See [the verification record](../docs/mobile-verification.md).
+The iOS export verifies Metro and Hermes bundling. Separate macOS acceptance
+compiled and installed the development client on dedicated iOS 26/27 Simulators
+and exercised native authentication, keyboard/layout, and the main user journeys.
+Physical-device and Android acceptance remain unverified. See
+[the verification record](../docs/mobile-verification.md) and its acceptance link.
 
 ## Deliberate first-version limits
 

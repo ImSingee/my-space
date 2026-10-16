@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Image, Pressable, View } from 'react-native';
+import { Details } from './native-controls';
+import { Image, View } from 'react-native';
 import type { JsonValue, StreamState } from '../core';
 import { Card, Text, styles, usePalette } from './primitives';
 
@@ -10,45 +10,7 @@ function record(
     ? value
     : null;
 }
-export function Expandable({
-  title,
-  text,
-  error,
-}: {
-  title: string;
-  text?: string;
-  error?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const c = usePalette();
-  return (
-    <View style={{ gap: 8 }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        onPress={() => setExpanded((value) => !value)}
-        style={{ paddingVertical: 10 }}
-      >
-        <Text
-          style={[
-            styles.caption,
-            { color: error ? c.danger : c.muted, fontWeight: '600' },
-          ]}
-        >
-          {expanded ? '⌄' : '›'} {title}
-        </Text>
-      </Pressable>
-      {expanded && text ? (
-        <Text
-          selectable
-          style={[styles.caption, { color: c.muted, fontFamily: 'monospace' }]}
-        >
-          {text}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
+const Expandable = Details;
 export function TranscriptMessage({ value }: { value: JsonValue }) {
   const c = usePalette();
   const message = record(value);
