@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { webViewHandoffSource } from '../../src/core';
+import { APP_HANDOFF_PATH, webViewHandoffSource } from '../../src/core';
 import { useSession } from '../../src/state/session';
 import {
   Busy,
@@ -88,7 +88,7 @@ export default function AppScreen() {
             const sameOrigin =
               url.origin === origin && !url.username && !url.password;
             const allowedPath =
-              url.pathname === '/api/v1/auth/handoffs/consume' ||
+              url.pathname === APP_HANDOFF_PATH ||
               url.pathname.startsWith(data.targetPath);
             if (sameOrigin && allowedPath) return true;
             if (request.isTopFrame === false) return sameOrigin;
