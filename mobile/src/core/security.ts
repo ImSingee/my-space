@@ -136,7 +136,7 @@ export function validateHandoff(
   }
   if (
     url.origin !== origin ||
-    url.pathname !== '/api/mobile/v1/handoffs/consume' ||
+    url.pathname !== '/api/v1/auth/handoffs/consume' ||
     url.username ||
     url.password ||
     url.search ||

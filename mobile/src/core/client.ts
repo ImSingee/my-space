@@ -18,7 +18,7 @@ import type {
   AskAnswer,
   Attachment,
   CreateRunInput,
-  MobileConfig,
+  AgentModelCatalog,
   RunCreated,
   SessionDetail,
   SessionSummary,
@@ -217,52 +217,35 @@ export class HatchApiClient {
     }
   }
 
-  async apps(signal?: AbortSignal): Promise<AppSummary[]> {
-    return (
-      await this.request<{ apps: AppSummary[] }>('/api/mobile/v1/apps', {
-        signal,
-      })
-    ).apps;
+  apps(signal?: AbortSignal): Promise<AppSummary[]> {
+    return this.request('/api/v1/apps', { signal });
   }
-  async app(id: string, signal?: AbortSignal): Promise<AppDetail> {
-    return (
-      await this.request<{ app: AppDetail }>(
-        `/api/mobile/v1/apps/${pathId(id)}`,
-        { signal },
-      )
-    ).app;
+  app(id: string, signal?: AbortSignal): Promise<AppDetail> {
+    return this.request(`/api/v1/apps/${pathId(id)}`, { signal });
   }
-  async sessions(
-    appId?: string,
-    signal?: AbortSignal,
-  ): Promise<SessionSummary[]> {
+  sessions(appId?: string, signal?: AbortSignal): Promise<SessionSummary[]> {
     const query = appId ? `?appId=${pathId(appId)}` : '';
-    return (
-      await this.request<{ sessions: SessionSummary[] }>(
-        `/api/mobile/v1/sessions${query}`,
-        { signal },
-      )
-    ).sessions;
+    return this.request(`/api/v1/agent/sessions${query}`, { signal });
   }
-  async session(id: string, signal?: AbortSignal): Promise<SessionDetail> {
-    return (
-      await this.request<{ session: SessionDetail }>(
-        `/api/mobile/v1/sessions/${pathId(id)}`,
-        { signal },
-      )
-    ).session;
+  session(id: string, signal?: AbortSignal): Promise<SessionDetail> {
+    return this.request(`/api/v1/agent/sessions/${pathId(id)}`, { signal });
   }
-  async config(signal?: AbortSignal): Promise<MobileConfig> {
-    const config = await this.request<MobileConfig>('/api/mobile/v1/config', {
-      signal,
-    });
-    if (config.apiVersion !== 1) {
-      throw new MobileError(
-        'unsupported_api',
-        'This instance uses an unsupported mobile API. Update Hatch and this app.',
-      );
+  async config(signal?: AbortSignal): Promise<AgentModelCatalog> {
+    let config: AgentModelCatalog;
+    try {
+      config = await this.request('/api/v1/agent/models', { signal });
+    } catch (error) {
+      if (error instanceof MobileError && error.status === 404) {
+        throw new MobileError(
+          'unsupported_api',
+          'This instance does not provide the interactive Platform API. Update Hatch before connecting.',
+        );
+      }
+      throw error;
     }
     if (
+      !config ||
+      typeof config !== 'object' ||
       !Array.isArray(config.providers) ||
       !config.providers.every(
         (provider) =>
@@ -277,8 +260,6 @@ export class HatchApiClient {
               typeof model.modelId === 'string' &&
               typeof model.name === 'string' &&
               typeof model.reasoning === 'boolean' &&
-              Array.isArray(model.input) &&
-              model.input.every((input) => typeof input === 'string') &&
               Number.isFinite(model.contextWindow) &&
               Number.isFinite(model.maxTokens),
           ),
@@ -290,7 +271,7 @@ export class HatchApiClient {
     ) {
       throw new MobileError(
         'invalid_response',
-        'The instance returned an invalid mobile configuration.',
+        'The instance returned an invalid Agent model catalog.',
       );
     }
     return config;
@@ -299,7 +280,7 @@ export class HatchApiClient {
     input: { title?: string; providerId?: string; modelId?: string } = {},
     signal?: AbortSignal,
   ): Promise<{ id: string }> {
-    return this.post('/api/mobile/v1/sessions', input, signal);
+    return this.post('/api/v1/agent/sessions', input, signal);
   }
   private post<T>(
     path: string,
@@ -379,8 +360,8 @@ export class HatchApiClient {
   }
   async handoff(appId: string, signal?: AbortSignal): Promise<AppHandoff> {
     const handoff = await this.post<AppHandoff>(
-      '/api/mobile/v1/handoffs',
-      { appId },
+      `/api/v1/apps/${pathId(appId)}/handoffs`,
+      {},
       signal,
     );
     validateHandoff(this.origin, handoff);

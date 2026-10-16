@@ -88,11 +88,7 @@ export default function ChatScreen() {
         providerName: provider.name,
       })),
     ) ?? [];
-  const choice = choices.find(
-    (item) =>
-      item.providerId === selectedModel?.providerId &&
-      item.modelId === selectedModel?.modelId,
-  );
+
   const runId = detail?.activeRun?.id ?? optimisticRun;
   const refresh = useCallback(async () => {
     if (lifetimeSignal().aborted) return true;
@@ -124,14 +120,6 @@ export default function ChatScreen() {
     mutationFn: async () => {
       const signal = lifetimeSignal();
       if (!selectedModel) throw new Error('Choose a configured model first.');
-      if (
-        files.some((file) => file.image) &&
-        choice &&
-        !choice.input.includes('image')
-      )
-        throw new Error(
-          'Choose a model that supports images, or attach the image as a file.',
-        );
       if (runId)
         throw new Error('Wait for the current reply or stop it first.');
       const attachmentIds: string[] = [];
