@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import type { AgentStreamEvent } from '~agent/events';
 import type { SessionSnapshot } from '~queries/agent';
@@ -1033,6 +1033,106 @@ test('does not bind a just-started run to an earlier turn', async () => {
 
   await expect.element(screen.getByText('New answer.')).toBeVisible();
   await expect.element(screen.getByText('Old answer.')).toBeVisible();
+  await expect
+    .element(screen.getByText('New question', { exact: true }))
+    .toBeVisible();
+});
+
+test('shows the submitted prompt before work starts and keeps one copy through history handoff', async () => {
+  fixtures.session = snapshot({});
+  const startGate = deferred();
+  const historyGate = deferred();
+  const stream = liveStream();
+  const startedAt = Date.now();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input) === '/api/agent/runs') {
+        await startGate.promise;
+        fixtures.sessionGate = historyGate.promise;
+        return Response.json({ runId: 'run-1', startedAt: iso(startedAt) });
+      }
+      return stream.response(init?.signal);
+    }),
+  );
+  const { screen, queryClient } = await renderChat();
+  const editor = screen.getByPlaceholder('Message the Agent…');
+  await editor.fill('Build my tracker');
+  const transcript = page.elementLocator(
+    document.querySelector('[data-scrollarea-viewport]')!,
+  );
+  // Observe every committed DOM state, including while the POST is pending.
+  const missingPrompt: string[] = [];
+  const observer = new MutationObserver(() => {
+    if (
+      screen.getByRole('button', { name: WORK_HEADER }).all().length &&
+      !transcript.getByText('Build my tracker', { exact: true }).all().length
+    ) {
+      missingPrompt.push('Working appeared without its prompt');
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  try {
+    await screen.getByRole('button', { name: 'Send' }).click();
+    const prompt = transcript.getByText('Build my tracker', { exact: true });
+    await expect.element(prompt).toBeVisible();
+    const work = screen.getByRole('button', { name: WORK_HEADER });
+    await expect.element(work).toBeVisible();
+    expect(
+      prompt.element().compareDocumentPosition(work.element()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    startGate.resolve();
+    await vi.waitFor(() => expect(stream.connected).toBe(true));
+    await expect.element(prompt).toBeVisible();
+    stream.emit({ type: 'text', delta: 'I am building it.' });
+    await expect.element(screen.getByText('I am building it.')).toBeVisible();
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Build my tracker' },
+    ];
+    fixtures.session = runningSession(startedAt, messages);
+    historyGate.resolve();
+    await invalidateSession(queryClient);
+    expect(prompt.all()).toHaveLength(1);
+    expect(missingPrompt).toEqual([]);
+  } finally {
+    observer.disconnect();
+    startGate.resolve();
+    historyGate.resolve();
+  }
+});
+
+test('removes an unaccepted prompt and work indicator while preserving the draft on send failure', async () => {
+  fixtures.session = snapshot({});
+  const startGate = deferred();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async () => {
+      await startGate.promise;
+      return new Response('Runner unavailable', { status: 503 });
+    }),
+  );
+  const { screen } = await renderChat();
+  const editor = screen.getByPlaceholder('Message the Agent…');
+  await editor.fill('Keep my draft');
+  const transcript = page.elementLocator(
+    document.querySelector('[data-scrollarea-viewport]')!,
+  );
+  await screen.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .element(transcript.getByText('Keep my draft', { exact: true }))
+    .toBeVisible();
+  startGate.resolve();
+  await expect
+    .element(screen.getByRole('button', { name: 'Send' }))
+    .toBeEnabled();
+  await expect.element(editor).toHaveTextContent('Keep my draft');
+  expect(
+    transcript.getByText('Keep my draft', { exact: true }).all(),
+  ).toHaveLength(0);
+  expect(screen.getByRole('button', { name: WORK_HEADER }).all()).toHaveLength(
+    0,
+  );
 });
 
 test('retries a failed turn without resurrecting its superseded failure', async () => {
