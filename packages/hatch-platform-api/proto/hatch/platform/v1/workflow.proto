@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+import "buf/validate/validate.proto";
+import "hatch/platform/v1/file.proto";
+import "hatch/platform/v1/lifecycle.proto";
+
+service WorkflowService {
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  rpc CreateWorkflow(CreateWorkflowRequest) returns (CreateWorkflowResponse);
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  rpc GetWorkflowSource(GetWorkflowSourceRequest) returns (GetWorkflowSourceResponse);
+  rpc DeployWorkflow(DeployWorkflowRequest) returns (DeployWorkflowResponse);
+  rpc RollbackWorkflow(RollbackWorkflowRequest) returns (RollbackWorkflowResponse);
+}
+
+message ListWorkflowsRequest {}
+
+message ListWorkflowsResponse {
+  repeated Resource resources = 1;
+}
+
+message CreateWorkflowRequest {
+  string slug = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+  }];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  optional string description = 3;
+  optional bool pin = 4;
+}
+
+message CreateWorkflowResponse {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  repeated File files = 4;
+}
+
+message GetWorkflowRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+
+message GetWorkflowResponse {
+  Resource resource = 1;
+}
+
+message GetWorkflowSourceRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+
+message GetWorkflowSourceResponse {
+  Source source = 1;
+}
+
+message DeployWorkflowRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+  string generation = 3 [(buf.validate.field).string.min_len = 1];
+  bytes bundle = 4 [(buf.validate.field).bytes.min_len = 1];
+  optional bool allow_destructive_data_migration = 5;
+  optional string data_migration_approval_token = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+message DeployWorkflowResponse {
+  Deployment deployment = 1;
+}
+
+message RollbackWorkflowRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  uint32 version = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
+message RollbackWorkflowResponse {
+  RestoredVersion restored = 1;
+}

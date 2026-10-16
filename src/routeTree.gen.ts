@@ -37,8 +37,7 @@ import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/use
 import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/index'
 import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
-import { Route as ApiV1OpenapiDotjsonRouteImport } from './routes/api/v1/openapi[.]json'
+import { Route as ApiRpcSplatRouteImport } from './routes/api/rpc/$'
 import { Route as AppAppAppSlugIndexRouteImport } from './routes/_app/app/$appSlug/index'
 import { Route as AppAppAppSlugManageRouteImport } from './routes/_app/app/$appSlug/manage'
 import { Route as AppWorkflowWorkflowSlugIndexRouteImport } from './routes/_app/workflow/$workflowSlug/index'
@@ -201,14 +200,9 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiV1SplatRoute = ApiV1SplatRouteImport.update({
-  id: '/api/v1/$',
-  path: '/api/v1/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiV1OpenapiDotjsonRoute = ApiV1OpenapiDotjsonRouteImport.update({
-  id: '/api/v1/openapi.json',
-  path: '/api/v1/openapi.json',
+const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
+  id: '/api/rpc/$',
+  path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAppAppSlugIndexRoute = AppAppAppSlugIndexRouteImport.update({
@@ -354,8 +348,7 @@ export interface FileRoutesByFullPath {
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/v1/$': typeof ApiV1SplatRoute
-  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
+  '/api/rpc/$': typeof ApiRpcSplatRoute
   '/agent/': typeof AppAgentIndexRoute
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
@@ -405,8 +398,7 @@ export interface FileRoutesByTo {
   '/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/v1/$': typeof ApiV1SplatRoute
-  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
+  '/api/rpc/$': typeof ApiRpcSplatRoute
   '/agent': typeof AppAgentIndexRoute
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
@@ -460,8 +452,7 @@ export interface FileRoutesById {
   '/_app/settings/users': typeof AppSettingsUsersRoute
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/v1/$': typeof ApiV1SplatRoute
-  '/api/v1/openapi.json': typeof ApiV1OpenapiDotjsonRoute
+  '/api/rpc/$': typeof ApiRpcSplatRoute
   '/_app/agent/': typeof AppAgentIndexRoute
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
@@ -515,8 +506,7 @@ export interface FileRouteTypes {
     | '/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
-    | '/api/v1/$'
-    | '/api/v1/openapi.json'
+    | '/api/rpc/$'
     | '/agent/'
     | '/apps/'
     | '/dashboard/'
@@ -566,8 +556,7 @@ export interface FileRouteTypes {
     | '/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
-    | '/api/v1/$'
-    | '/api/v1/openapi.json'
+    | '/api/rpc/$'
     | '/agent'
     | '/apps'
     | '/dashboard'
@@ -620,8 +609,7 @@ export interface FileRouteTypes {
     | '/_app/settings/users'
     | '/api/agent/runs'
     | '/api/auth/$'
-    | '/api/v1/$'
-    | '/api/v1/openapi.json'
+    | '/api/rpc/$'
     | '/_app/agent/'
     | '/_app/apps/'
     | '/_app/dashboard/'
@@ -662,8 +650,7 @@ export interface RootRouteChildren {
   CliAuthorizeRoute: typeof CliAuthorizeRoute
   ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiV1SplatRoute: typeof ApiV1SplatRoute
-  ApiV1OpenapiDotjsonRoute: typeof ApiV1OpenapiDotjsonRoute
+  ApiRpcSplatRoute: typeof ApiRpcSplatRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
@@ -876,18 +863,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/v1/$': {
-      id: '/api/v1/$'
-      path: '/api/v1/$'
-      fullPath: '/api/v1/$'
-      preLoaderRoute: typeof ApiV1SplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/v1/openapi.json': {
-      id: '/api/v1/openapi.json'
-      path: '/api/v1/openapi.json'
-      fullPath: '/api/v1/openapi.json'
-      preLoaderRoute: typeof ApiV1OpenapiDotjsonRouteImport
+    '/api/rpc/$': {
+      id: '/api/rpc/$'
+      path: '/api/rpc/$'
+      fullPath: '/api/rpc/$'
+      preLoaderRoute: typeof ApiRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/app/$appSlug/': {
@@ -1154,8 +1134,7 @@ const rootRouteChildren: RootRouteChildren = {
   CliAuthorizeRoute: CliAuthorizeRoute,
   ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiV1SplatRoute: ApiV1SplatRoute,
-  ApiV1OpenapiDotjsonRoute: ApiV1OpenapiDotjsonRoute,
+  ApiRpcSplatRoute: ApiRpcSplatRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,

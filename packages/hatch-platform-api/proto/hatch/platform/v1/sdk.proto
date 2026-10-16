@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+import "buf/validate/validate.proto";
+import "hatch/platform/v1/file.proto";
+
+service SdkService {
+  rpc GetSdk(GetSdkRequest) returns (GetSdkResponse);
+}
+
+message GetSdkRequest {
+  string kind = 1 [
+    (buf.validate.field).string.in = "app",
+    (buf.validate.field).string.in = "workflow"
+  ];
+}
+
+message Tooling {
+  string buf_version = 1;
+  string protoc_gen_es_version = 2;
+}
+
+message GetSdkResponse {
+  repeated File files = 1;
+  optional Tooling tooling = 2;
+}

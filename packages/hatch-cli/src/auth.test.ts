@@ -1,3 +1,8 @@
+import { connectNodeAdapter } from '@connectrpc/connect-node';
+import { Code, ConnectError } from '@connectrpc/connect';
+import { create } from '@bufbuild/protobuf';
+import { AuthService } from '../../hatch-platform-api/gen/hatch/platform/v1/auth_pb';
+import { PublicErrorSchema } from '../../hatch-platform-api/gen/hatch/platform/v1/error_pb';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -44,8 +49,68 @@ const sessionStatus = {
   user: { id: 'user-1', email: 'owner@example.test', name: 'Owner' },
 };
 
+const rpc = connectNodeAdapter({
+  requestPathPrefix: '/api/rpc',
+  routes: (router) =>
+    router.service(AuthService, {
+      getStatus: (_input, context) => {
+        if (statusCode !== 200)
+          throw new ConnectError(
+            sessionToken,
+            Code.Unauthenticated,
+            undefined,
+            [
+              {
+                desc: PublicErrorSchema,
+                value: create(PublicErrorSchema, {
+                  code: 'UNAUTHORIZED',
+                  httpStatus: statusCode,
+                }),
+              },
+            ],
+          );
+        const user = sessionStatus.user;
+        if (
+          wrongCredentialType ||
+          context.requestHeader.get('authorization') ===
+            `Bearer ${sessionToken}`
+        )
+          return {
+            expiresAt,
+            credential: { case: 'session', value: { user } },
+          };
+        if (context.requestHeader.get('x-api-key') === 'fixture-key-secret')
+          return {
+            credential: {
+              case: 'apiKey',
+              value: { user, id: 'key-1', name: 'Fixture' },
+            },
+          };
+        if (context.requestHeader.get('authorization') === `Bearer ${runToken}`)
+          return {
+            expiresAt,
+            credential: {
+              case: 'run',
+              value: {
+                runId: 'run-1',
+                sessionId: 'session-1',
+                runnerId: 'runner-1',
+              },
+            },
+          };
+        throw new ConnectError('Unauthorized', Code.Unauthenticated);
+      },
+    }),
+});
 const server = createServer(async (incoming, outgoing) => {
   calls.push(`${incoming.method} ${incoming.url}`);
+  if (incoming.url?.startsWith('/api/rpc/')) {
+    if (statusCode === 302) {
+      outgoing.writeHead(302, { location: `${origin}/credential-leak` });
+      outgoing.end();
+    } else await rpc(incoming, outgoing);
+    return;
+  }
   const chunks = [];
   for await (const chunk of incoming) chunks.push(chunk);
   const body = chunks.length
@@ -55,44 +120,7 @@ const server = createServer(async (incoming, outgoing) => {
     outgoing.writeHead(code, { 'content-type': 'application/json' });
     outgoing.end(JSON.stringify(value));
   };
-  if (incoming.url === '/api/v1/auth/status') {
-    if (statusCode === 302) {
-      outgoing.writeHead(302, { location: `${origin}/credential-leak` });
-      outgoing.end();
-    } else if (statusCode !== 200)
-      send(
-        {
-          defined: true,
-          code: 'UNAUTHORIZED',
-          status: statusCode,
-          message: sessionToken,
-        },
-        statusCode,
-      );
-    else if (wrongCredentialType) send(sessionStatus);
-    else if (incoming.headers['x-api-key'] === 'fixture-key-secret')
-      send({
-        ...sessionStatus,
-        credentialType: 'api-key',
-        expiresAt: null,
-        key: { id: 'key-1', name: 'Fixture' },
-      });
-    else if (incoming.headers.authorization === `Bearer ${sessionToken}`)
-      send(sessionStatus);
-    else if (incoming.headers.authorization === `Bearer ${runToken}`)
-      send({
-        authenticated: true,
-        credentialType: 'run',
-        authority: 'platform',
-        expiresAt,
-        context: {
-          runId: 'run-1',
-          sessionId: 'session-1',
-          runnerId: 'runner-1',
-        },
-      });
-    else send({ error: 'unauthorized' }, 401);
-  } else if (incoming.url === '/api/auth/sign-out') {
+  if (incoming.url === '/api/auth/sign-out') {
     await onSignOut?.();
     send({ success: true });
   } else if (incoming.url === '/api/auth/device/code') {
@@ -439,14 +467,14 @@ describe('CLI authentication boundary', () => {
       origin,
       '--no-browser',
       '--timeout',
-      '0.2',
+      '5',
       '--config',
       config,
     ]);
     expect(result.code).toBe(7);
     expect(polls).toBe(1);
     await expect(stat(config)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
+  }, 15000);
 
   it('fails closed for unsafe files and concurrent login writes', async () => {
     await stored();

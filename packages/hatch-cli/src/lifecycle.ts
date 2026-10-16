@@ -192,7 +192,7 @@ export async function runLifecycle(
         );
         let metadata: Workspace;
         if (operation === 'create') {
-          // Validate using the same public input contract before making a mutation.
+          // The platform validates this request against the Protobuf contract.
           const created =
             kind === 'app'
               ? await client.apps.create(
@@ -426,13 +426,11 @@ export async function runLifecycle(
     }
   });
 }
-import { ORPCError } from '@orpc/client';
 function isRejected(error: unknown) {
   return (
-    (error instanceof ORPCError && error.status >= 400 && error.status < 500) ||
-    (error instanceof CliError &&
-      !!error.httpStatus &&
-      error.httpStatus >= 400 &&
-      error.httpStatus < 500)
+    error instanceof CliError &&
+    !!error.httpStatus &&
+    error.httpStatus >= 400 &&
+    error.httpStatus < 500
   );
 }

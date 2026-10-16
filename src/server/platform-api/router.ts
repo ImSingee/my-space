@@ -1,5 +1,14 @@
 import { sdkPayload } from './sdk';
-import { implement, ORPCError } from '@orpc/server';
+import {
+  createContextKey,
+  type HandlerContext,
+  type ConnectRouter,
+} from '@connectrpc/connect';
+import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import { WorkflowService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workflow_pb';
+import { AuthService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/auth_pb';
+import { SdkService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/sdk_pb';
+import { publicApiError } from './errors';
 import { db } from '~/db';
 import { deployApp } from '~server/apps/deploy';
 import {
@@ -17,10 +26,11 @@ import {
 } from '~server/workflows/git';
 import { rollbackWorkflowToVersion } from '~server/workflows/manage';
 import { createWorkflow } from '~server/workflows/scaffold';
-import { platformApiContract } from '~/platform-api/contract';
 import type { PublicApiContext } from './auth';
 
-const api = implement(platformApiContract).$context<PublicApiContext>();
+export const publicApiContext = createContextKey<PublicApiContext>({
+  run: null,
+});
 const columns = {
   id: true,
   slug: true,
@@ -50,6 +60,7 @@ function project(row: {
 }) {
   return {
     ...row,
+    description: row.description ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -60,7 +71,7 @@ async function find(kind: Kind, id: string) {
       ? db.query.apps.findFirst({ where, columns })
       : db.query.workflows.findFirst({ where, columns });
   const row = (await lookup({ id })) ?? (await lookup({ slug: id }));
-  if (!row) throw new ORPCError('NOT_FOUND');
+  if (!row) throw publicApiError('NOT_FOUND');
   return row;
 }
 async function source(kind: Kind, id: string) {
@@ -69,105 +80,150 @@ async function source(kind: Kind, id: string) {
     const bundle = await exportAppMasterBundle(row.id);
     return {
       id: row.id,
-      masterCommit: await appMasterCommit(row.id),
-      bundleBase64: bundle?.toString('base64') ?? null,
+      masterCommit: (await appMasterCommit(row.id)) ?? undefined,
+      bundle: bundle ?? undefined,
     };
   }
   const bundle = await exportWorkflowMasterBundle(row.id);
   return {
     id: row.id,
-    masterCommit: await workflowMasterCommit(row.id),
-    bundleBase64: bundle?.toString('base64') ?? null,
+    masterCommit: (await workflowMasterCommit(row.id)) ?? undefined,
+    bundle: bundle ?? undefined,
   };
 }
 
-export const platformApiRouter = api.router({
-  auth: {
-    status: api.auth.status.handler(({ context }) => {
-      if (!context.status) throw new ORPCError('UNAUTHORIZED');
-      return context.status;
+function files(value: { files: { path: string; contentBase64: string }[] }) {
+  return value.files.map((file) => ({
+    path: file.path,
+    content: Buffer.from(file.contentBase64, 'base64'),
+  }));
+}
+function lifecycle(kind: Kind) {
+  return {
+    list: async () => ({ resources: await list(kind) }),
+    create: async (
+      input: {
+        slug: string;
+        name: string;
+        description?: string;
+        pin?: boolean;
+      },
+      context: HandlerContext,
+    ) => {
+      const { run } = context.values.get(publicApiContext);
+      const created =
+        kind === 'apps'
+          ? await createApp(input, run ? { sessionId: run.sessionId } : {})
+          : await createWorkflow(input);
+      return { ...created, files: files(created) };
+    },
+    get: async (input: { id: string }) => ({
+      resource: project(await find(kind, input.id)),
     }),
-  },
-  sdk: { get: api.sdk.get.handler(({ input }) => sdkPayload(input.kind)) },
-  apps: {
-    list: api.apps.list.handler(() => list('apps')),
-    create: api.apps.create.handler(async ({ input, context }) => {
-      return createApp(
-        input,
-        context.run ? { sessionId: context.run.sessionId } : {},
-      );
+    source: async (input: { id: string }) => ({
+      source: await source(kind, input.id),
     }),
-    get: api.apps.get.handler(async ({ input }) =>
-      project(await find('apps', input.id)),
-    ),
-    source: api.apps.source.handler(({ input }) => source('apps', input.id)),
-    deploy: api.apps.deploy.handler(async ({ input }) => {
-      const row = await find('apps', input.params.id);
-      const body = input.body;
-      if (body.generation !== row.createdAt.toISOString())
-        throw new ORPCError('RESOURCE_GENERATION_CONFLICT', { status: 409 });
-      const staged = await stageAppBundleCheckout(
-        row.id,
-        Buffer.from(body.bundleBase64, 'base64'),
-      );
+    deploy: async (input: {
+      id: string;
+      message: string;
+      generation: string;
+      bundle: Uint8Array;
+      allowDestructiveDataMigration?: boolean;
+      dataMigrationApprovalToken?: string;
+    }) => {
+      const row = await find(kind, input.id);
+      if (input.generation !== row.createdAt.toISOString())
+        throw publicApiError('RESOURCE_GENERATION_CONFLICT');
+      const staged =
+        kind === 'apps'
+          ? await stageAppBundleCheckout(row.id, Buffer.from(input.bundle))
+          : await stageWorkflowBundleCheckout(
+              row.id,
+              Buffer.from(input.bundle),
+            );
       try {
-        const result = await deployApp(row.id, {
-          ...body,
+        const deploy = kind === 'apps' ? deployApp : deployWorkflow;
+        const result = await deploy(row.id, {
+          message: input.message,
+          allowDestructiveDataMigration: input.allowDestructiveDataMigration,
+          dataMigrationApprovalToken: input.dataMigrationApprovalToken,
           sourceDir: staged.dir,
-          expectedGeneration: body.generation,
+          expectedGeneration: input.generation,
         });
         return {
-          deploymentId: result.deploymentId,
-          version: result.version,
-          compatibilityVersion: result.compatibilityVersion,
+          deployment: {
+            deploymentId: result.deploymentId,
+            version: result.version,
+            compatibilityVersion: result.compatibilityVersion,
+          },
         };
       } finally {
         await staged.cleanup();
       }
-    }),
-    rollback: api.apps.rollback.handler(async ({ input }) => {
-      const row = await find('apps', input.params.id);
-      return rollbackAppToVersion(row.id, input.body.version);
-    }),
-  },
-  workflows: {
-    list: api.workflows.list.handler(() => list('workflows')),
-    create: api.workflows.create.handler(async ({ input }) => {
-      return createWorkflow(input);
-    }),
-    get: api.workflows.get.handler(async ({ input }) =>
-      project(await find('workflows', input.id)),
-    ),
-    source: api.workflows.source.handler(({ input }) =>
-      source('workflows', input.id),
-    ),
-    deploy: api.workflows.deploy.handler(async ({ input }) => {
-      const row = await find('workflows', input.params.id);
-      const body = input.body;
-      if (body.generation !== row.createdAt.toISOString())
-        throw new ORPCError('RESOURCE_GENERATION_CONFLICT', { status: 409 });
-      const staged = await stageWorkflowBundleCheckout(
-        row.id,
-        Buffer.from(body.bundleBase64, 'base64'),
-      );
-      try {
-        const result = await deployWorkflow(row.id, {
-          ...body,
-          sourceDir: staged.dir,
-          expectedGeneration: body.generation,
-        });
+    },
+    rollback: async (input: { id: string; version: number }) => {
+      const row = await find(kind, input.id);
+      const restored =
+        kind === 'apps'
+          ? await rollbackAppToVersion(row.id, input.version)
+          : await rollbackWorkflowToVersion(row.id, input.version);
+      return { restored };
+    },
+  };
+}
+
+export function registerPlatformApi(
+  router: ConnectRouter,
+  deployBodyLimit: number,
+) {
+  const apps = lifecycle('apps');
+  const workflows = lifecycle('workflows');
+  router.rpc(AppService.method.listApps, apps.list);
+  router.rpc(AppService.method.createApp, apps.create);
+  router.rpc(AppService.method.getApp, apps.get);
+  router.rpc(AppService.method.getAppSource, apps.source);
+  router.rpc(AppService.method.rollbackApp, apps.rollback);
+  router.rpc(AppService.method.deployApp, apps.deploy, {
+    readMaxBytes: deployBodyLimit,
+  });
+  router.rpc(WorkflowService.method.listWorkflows, workflows.list);
+  router.rpc(WorkflowService.method.createWorkflow, workflows.create);
+  router.rpc(WorkflowService.method.getWorkflow, workflows.get);
+  router.rpc(WorkflowService.method.getWorkflowSource, workflows.source);
+  router.rpc(WorkflowService.method.rollbackWorkflow, workflows.rollback);
+  router.rpc(WorkflowService.method.deployWorkflow, workflows.deploy, {
+    readMaxBytes: deployBodyLimit,
+  });
+  router.service(AuthService, {
+    getStatus: (_input, context) => {
+      const status = context.values.get(publicApiContext).status;
+      if (!status) throw publicApiError('UNAUTHORIZED');
+      const expiresAt = status.expiresAt ?? undefined;
+      if (status.credentialType === 'session')
         return {
-          deploymentId: result.deploymentId,
-          version: result.version,
-          compatibilityVersion: result.compatibilityVersion,
+          expiresAt,
+          credential: { case: 'session', value: { user: status.user } },
         };
-      } finally {
-        await staged.cleanup();
-      }
-    }),
-    rollback: api.workflows.rollback.handler(async ({ input }) => {
-      const row = await find('workflows', input.params.id);
-      return rollbackWorkflowToVersion(row.id, input.body.version);
-    }),
-  },
-});
+      if (status.credentialType === 'api-key')
+        return {
+          expiresAt,
+          credential: {
+            case: 'apiKey',
+            value: {
+              user: status.user,
+              id: status.key.id,
+              name: status.key.name ?? undefined,
+            },
+          },
+        };
+      return { expiresAt, credential: { case: 'run', value: status.context } };
+    },
+  });
+  router.service(SdkService, {
+    getSdk: async (input) => {
+      // The interceptor validates the closed set before any domain access.
+      const result = await sdkPayload(input.kind as 'app' | 'workflow');
+      return { files: files(result), tooling: result.tooling };
+    },
+  });
+}

@@ -1,12 +1,35 @@
-/** Pure contract + OpenAPI transport; never imports platform server modules. */
 import {
-  RequestValidationPlugin,
-  ResponseValidationPlugin,
-} from '@orpc/contract/plugins';
-import { createORPCClient, ORPCError } from '@orpc/client';
-import type { ContractRouterClient } from '@orpc/contract';
-import { OpenAPILink } from '@orpc/openapi-client/fetch';
-import { platformApiContract } from '../../../src/platform-api/contract';
+  fromJson,
+  type DescMessage,
+  type JsonObject,
+} from '@bufbuild/protobuf';
+/** Connect transport with CLI-specific projection and recovery semantics. */
+import {
+  createClient,
+  Code,
+  ConnectError,
+  type Transport,
+} from '@connectrpc/connect';
+import { createConnectTransport } from '@connectrpc/connect-web';
+import {
+  CreateAppRequestSchema,
+  AppService,
+} from '../../hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import {
+  CreateWorkflowRequestSchema,
+  WorkflowService,
+} from '../../hatch-platform-api/gen/hatch/platform/v1/workflow_pb';
+import { AuthService } from '../../hatch-platform-api/gen/hatch/platform/v1/auth_pb';
+import { SdkService } from '../../hatch-platform-api/gen/hatch/platform/v1/sdk_pb';
+import { PublicErrorSchema } from '../../hatch-platform-api/gen/hatch/platform/v1/error_pb';
+import {
+  type Resource,
+  type Source,
+  type Deployment,
+  type RestoredVersion,
+} from '../../hatch-platform-api/gen/hatch/platform/v1/lifecycle_pb';
+import { type File } from '../../hatch-platform-api/gen/hatch/platform/v1/file_pb';
+import type { AuthStatus } from '../../hatch-platform-api/auth';
 import type { Profile } from './config';
 import { CliError } from './error';
 
@@ -15,80 +38,334 @@ export function credentialHeaders(credential: Profile): Record<string, string> {
     ? { 'x-api-key': credential.apiKey }
     : { authorization: `Bearer ${credential.token}` };
 }
+function required<T>(value: T | undefined): T {
+  if (value === undefined)
+    throw new CliError(
+      'invalid_response',
+      'The platform returned an incomplete response.',
+      7,
+    );
+  return value;
+}
+const resource = (value: Resource) => ({
+  id: value.id,
+  slug: value.slug,
+  name: value.name,
+  description: value.description ?? null,
+  status: value.status,
+  createdAt: value.createdAt,
+  updatedAt: value.updatedAt,
+});
+const files = (values: File[]) =>
+  values.map((value) => ({
+    path: value.path,
+    contentBase64: Buffer.from(value.content).toString('base64'),
+  }));
+const source = (value: Source) => ({
+  id: value.id,
+  masterCommit: value.masterCommit ?? null,
+  bundleBase64:
+    value.bundle === undefined
+      ? null
+      : Buffer.from(value.bundle).toString('base64'),
+});
+const deployment = (value: Deployment) => ({
+  deploymentId: value.deploymentId,
+  version: value.version,
+  compatibilityVersion: value.compatibilityVersion,
+});
+const restored = (value: RestoredVersion) => ({
+  version: value.version,
+  compatibility: {
+    version: required(value.compatibility).version,
+    latestVersion: required(value.compatibility).latestVersion,
+    minimumSupportedVersion: required(value.compatibility)
+      .minimumSupportedVersion,
+    isSupported: required(value.compatibility).isSupported,
+    isLatest: required(value.compatibility).isLatest,
+  },
+  ...(value.dataSchemaMismatch === undefined
+    ? {}
+    : { dataSchemaMismatch: value.dataSchemaMismatch }),
+});
+type CreateInput = {
+  slug: string;
+  name: string;
+  description?: string;
+  pin?: boolean;
+};
+type DeployInput = {
+  params: { id: string };
+  body: {
+    message: string;
+    generation: string;
+    bundleBase64: string;
+    allowDestructiveDataMigration?: boolean;
+    dataMigrationApprovalToken?: string;
+  };
+};
+
+/** Keep the CLI's persisted/output DTOs separate from generated wire messages. */
+function parseCreate<D extends DescMessage>(schema: D, input: CreateInput) {
+  try {
+    return fromJson(schema, input as JsonObject, { ignoreUnknownFields: true });
+  } catch {
+    throw new CliError(
+      'invalid_input',
+      'Create input does not match the Protobuf message types.',
+      2,
+    );
+  }
+}
+
+export function cliClient(transport: Transport) {
+  const apps = createClient(AppService, transport);
+  const workflows = createClient(WorkflowService, transport);
+  function lifecycle(client: {
+    list: (
+      request: Record<string, never>,
+    ) => Promise<{ resources: Resource[] }>;
+    create: (
+      request: CreateInput,
+    ) => Promise<{ id: string; slug: string; name: string; files: File[] }>;
+    get: (request: { id: string }) => Promise<{ resource?: Resource }>;
+    source: (request: { id: string }) => Promise<{ source?: Source }>;
+    deploy: (request: {
+      id: string;
+      message: string;
+      generation: string;
+      bundle: Uint8Array;
+      allowDestructiveDataMigration?: boolean;
+      dataMigrationApprovalToken?: string;
+    }) => Promise<{ deployment?: Deployment }>;
+    rollback: (request: {
+      id: string;
+      version: number;
+    }) => Promise<{ restored?: RestoredVersion }>;
+  }) {
+    return {
+      list: async (_input: Record<string, never>) =>
+        (await client.list({})).resources.map(resource),
+      create: async (input: CreateInput) => {
+        const result = await client.create(input);
+        return {
+          id: result.id,
+          slug: result.slug,
+          name: result.name,
+          files: files(result.files),
+        };
+      },
+      get: async (input: { id: string }) =>
+        resource(required((await client.get(input)).resource)),
+      source: async (input: { id: string }) =>
+        source(required((await client.source(input)).source)),
+      deploy: async (input: DeployInput) =>
+        deployment(
+          required(
+            (
+              await client.deploy({
+                id: input.params.id,
+                ...input.body,
+                bundle: Buffer.from(input.body.bundleBase64, 'base64'),
+              })
+            ).deployment,
+          ),
+        ),
+      rollback: async (input: {
+        params: { id: string };
+        body: { version: number };
+      }) =>
+        restored(
+          required(
+            (
+              await client.rollback({
+                id: input.params.id,
+                version: input.body.version,
+              })
+            ).restored,
+          ),
+        ),
+    };
+  }
+  const auth = createClient(AuthService, transport);
+  const sdk = createClient(SdkService, transport);
+  return {
+    apps: lifecycle({
+      list: apps.listApps,
+      create: (input) =>
+        apps.createApp(parseCreate(CreateAppRequestSchema, input)),
+      get: apps.getApp,
+      source: apps.getAppSource,
+      deploy: apps.deployApp,
+      rollback: apps.rollbackApp,
+    }),
+    workflows: lifecycle({
+      list: workflows.listWorkflows,
+      create: (input) =>
+        workflows.createWorkflow(
+          parseCreate(CreateWorkflowRequestSchema, input),
+        ),
+      get: workflows.getWorkflow,
+      source: workflows.getWorkflowSource,
+      deploy: workflows.deployWorkflow,
+      rollback: workflows.rollbackWorkflow,
+    }),
+    auth: {
+      status: async (_input: Record<string, never>): Promise<AuthStatus> => {
+        const result = await auth.getStatus({});
+        const common = {
+          authenticated: true as const,
+          authority: 'platform' as const,
+          expiresAt: result.expiresAt ?? null,
+        };
+        const credential = result.credential;
+        if (credential.case === 'run')
+          return {
+            ...common,
+            credentialType: 'run',
+            context: {
+              runId: credential.value.runId,
+              sessionId: credential.value.sessionId,
+              runnerId: credential.value.runnerId,
+            },
+          };
+        if (credential.case === 'session' || credential.case === 'apiKey') {
+          const value = credential.value;
+          if (!value.user)
+            throw new CliError(
+              'invalid_response',
+              'Missing authorization metadata.',
+              7,
+            );
+          const user = {
+            id: value.user.id,
+            email: value.user.email,
+            name: value.user.name,
+          };
+          if (credential.case === 'session')
+            return { ...common, credentialType: 'session', user };
+          return {
+            ...common,
+            credentialType: 'api-key',
+            user,
+            key: {
+              id: credential.value.id,
+              name: credential.value.name ?? null,
+            },
+          };
+        }
+        throw new CliError(
+          'invalid_response',
+          'Missing authorization metadata.',
+          7,
+        );
+      },
+    },
+    sdk: {
+      get: async (input: { kind: 'app' | 'workflow' }) => {
+        const result = await sdk.getSdk(input);
+        return {
+          files: files(result.files),
+          ...(result.tooling
+            ? {
+                tooling: {
+                  bufVersion: result.tooling.bufVersion,
+                  protocGenEsVersion: result.tooling.protocGenEsVersion,
+                },
+              }
+            : {}),
+        };
+      },
+    },
+  };
+}
+
 export function platformClient(
   credential: Profile,
   timeout: number,
   signal: AbortSignal,
-): ContractRouterClient<typeof platformApiContract> {
-  return createORPCClient(
-    new OpenAPILink(platformApiContract, {
-      url: `${credential.url}/api/v1`,
-      headers: credentialHeaders(credential),
-      plugins: [
-        new RequestValidationPlugin(platformApiContract),
-        new ResponseValidationPlugin(platformApiContract),
-      ],
-      interceptors: [
-        async ({ next }) => {
-          try {
-            return await next();
-          } catch (error) {
-            const safe = publicError(error);
-            let message = safe.message;
-            for (const value of [credential.token, credential.apiKey])
-              if (value) message = message.replaceAll(value, '[redacted]');
-            throw new CliError(
-              safe.code,
-              message,
-              safe.exitCode,
-              safe.httpStatus,
-            );
-          }
-        },
-      ],
-      fetch: async (input, init) => {
-        try {
-          return await fetch(input, {
-            ...init,
-            redirect: 'error',
-            signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
-          });
-        } catch {
-          throw new CliError(
-            signal.aborted ? 'cancelled' : 'outcome_unknown',
-            signal.aborted
-              ? 'Cancelled. An in-flight mutation may still finish; inspect the platform before retrying.'
-              : 'Request failed or timed out. A mutation may have finished; inspect resource/source/version before retrying.',
-            signal.aborted ? 130 : 7,
-          );
-        }
+) {
+  const headers = credentialHeaders(credential);
+  const transport = createConnectTransport({
+    baseUrl: `${credential.url}/api/rpc`,
+    useBinaryFormat: true,
+    defaultTimeoutMs: timeout,
+    interceptors: [
+      (next) => (request) => {
+        for (const [key, value] of Object.entries(headers))
+          request.header.set(key, value);
+        return next(request);
       },
-    }),
-  );
+    ],
+    fetch: async (input, init) => fetch(input, { ...init, redirect: 'error' }),
+  });
+  // Convert errors after Connect's call boundary, which wraps interceptor errors.
+  return cliClient({
+    ...transport,
+    unary: async (
+      method,
+      callSignal,
+      timeoutMs,
+      callHeaders,
+      input,
+      contextValues,
+    ) => {
+      try {
+        return await transport.unary(
+          method,
+          callSignal ? AbortSignal.any([callSignal, signal]) : signal,
+          timeoutMs,
+          callHeaders,
+          input,
+          contextValues,
+        );
+      } catch (error) {
+        const safe = publicError(error);
+        let message = safe.message;
+        for (const value of [credential.token, credential.apiKey])
+          if (value) message = message.replaceAll(value, '[redacted]');
+        throw new CliError(safe.code, message, safe.exitCode, safe.httpStatus);
+      }
+    },
+  });
 }
+
 export function publicError(error: unknown): CliError {
   if (error instanceof CliError) return error;
-  if (error instanceof ORPCError) {
+  if (error instanceof ConnectError) {
+    const detail = error.findDetails(PublicErrorSchema)[0];
+    const status = detail?.httpStatus;
     const exit =
-      error.status === 401
+      error.code === Code.Unauthenticated
         ? 3
-        : error.status === 403
+        : error.code === Code.PermissionDenied
           ? 4
-          : error.status === 404
+          : error.code === Code.NotFound
             ? 5
-            : error.status === 409
+            : error.code === Code.Aborted ||
+                error.code === Code.AlreadyExists ||
+                error.code === Code.FailedPrecondition
               ? 6
-              : error.status >= 500
-                ? 7
-                : 2;
-    const safe = error.status < 500 && error.defined;
+              : error.code === Code.InvalidArgument ||
+                  error.code === Code.OutOfRange ||
+                  error.code === Code.ResourceExhausted
+                ? 2
+                : error.code === Code.Canceled
+                  ? 130
+                  : 7;
+    const known = !!detail && !!status && status < 500;
     return new CliError(
-      error.code,
-      safe
-        ? error.message
+      detail?.code ??
+        (error.code === Code.Canceled
+          ? 'cancelled'
+          : error.code === Code.DeadlineExceeded
+            ? 'outcome_unknown'
+            : 'rpc_error'),
+      known
+        ? error.rawMessage
         : 'The platform request failed. Inspect platform state before retrying mutations.',
       exit,
-      error.status,
+      status,
     );
   }
   return new CliError('internal_error', 'CLI operation failed.', 1);
