@@ -23,6 +23,7 @@ beforeAll(async () => {
     'scripts/build-info.ts',
     'src',
     'packages/hatch-manifest',
+    'packages/hatch-platform-api',
     'packages/hatch-cli/package.json',
     'packages/hatch-cli/src',
   ]) {
