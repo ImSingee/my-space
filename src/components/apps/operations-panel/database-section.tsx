@@ -1,17 +1,7 @@
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Group,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
+import { ActionIcon, Box, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { useMutation } from '@tanstack/react-query';
 import { IconDatabase, IconTrash } from '@tabler/icons-react';
-import { useState } from 'react';
+import { DeleteDatabaseForm } from './delete-database-form';
 import { SectionHeader, StatusDot } from './section-header';
 
 export type DatabaseOperationState = {
@@ -19,93 +9,16 @@ export type DatabaseOperationState = {
   dbName: string | null;
 };
 
-function DeleteDatabaseForm({
-  dbName,
-  modalId,
-  onDelete,
-}: {
-  dbName: string;
-  modalId: string;
-  onDelete: () => Promise<void>;
-}) {
-  const [confirmation, setConfirmation] = useState('');
-  const remove = useMutation({
-    mutationFn: onDelete,
-    onSuccess: () => modals.close(modalId),
-  });
-  const confirmed = confirmation === dbName;
-
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (confirmed && !remove.isPending) remove.mutate();
-      }}
-    >
-      <Stack gap="sm">
-        <Text size="sm">
-          This permanently deletes{' '}
-          <Text
-            span
-            fw={600}
-            ff="monospace"
-            style={{ overflowWrap: 'anywhere' }}
-          >
-            {dbName}
-          </Text>{' '}
-          and all data stored in it. This cannot be undone.
-        </Text>
-        <Text size="sm" c="dimmed">
-          To use a database again, deploy a version with the database capability
-          enabled.
-        </Text>
-        <TextInput
-          label={`Type ${dbName} to confirm`}
-          value={confirmation}
-          onChange={(event) => setConfirmation(event.currentTarget.value)}
-          ff="monospace"
-          styles={{ label: { overflowWrap: 'anywhere' } }}
-          autoComplete="off"
-          data-autofocus
-        />
-        {remove.isError ? (
-          <Text size="sm" c="red" role="alert">
-            {remove.error instanceof Error
-              ? remove.error.message
-              : 'Failed to delete the database.'}
-          </Text>
-        ) : null}
-        <Group justify="flex-end" gap="sm">
-          <Button
-            type="button"
-            variant="default"
-            disabled={remove.isPending}
-            onClick={() => modals.close(modalId)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            color="red"
-            loading={remove.isPending}
-            disabled={!confirmed}
-          >
-            Delete database
-          </Button>
-        </Group>
-      </Stack>
-    </form>
-  );
-}
-
 export function DatabaseSection({
   appId,
+  appName,
   database,
   onDelete,
 }: {
   appId: string;
+  appName: string;
   database: DatabaseOperationState;
-  onDelete: (dbName: string) => Promise<void>;
+  onDelete: (dbName: string, appName: string) => Promise<void>;
 }) {
   const { enabled, dbName } = database;
   if (!enabled && !dbName) return null;
@@ -119,9 +32,10 @@ export function DatabaseSection({
       centered: true,
       children: (
         <DeleteDatabaseForm
-          dbName={dbName}
+          appName={appName}
+          managed={false}
           modalId={modalId}
-          onDelete={() => onDelete(dbName)}
+          onDelete={(confirmation) => onDelete(dbName, confirmation)}
         />
       ),
     });

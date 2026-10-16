@@ -156,3 +156,11 @@ encrypted at rest with the platform's stable `SECRET`; changing that platform
 secret directly makes encrypted KV entries unreadable. This protects current
 database storage, not plaintext returned to an authorized backend or explicit
 Agent reveal, nor older backups.
+
+## Re-enabling retained databases
+
+Re-enabling Database or Data Tables after a capability disable reuses the retained
+database, schema, and rows. Only explicit permanent deletion causes a later
+enabled deployment to create an empty database. Before initializing data after
+a deployment, inspect the existing schema and rows with `query_app_db` or
+`query_app_data_table`; never assume the database is empty.

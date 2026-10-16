@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type AppState = {
+  name: string;
   status: string;
   capabilities: { dataTable?: boolean } | null;
   dataDbName: string | null;
@@ -66,6 +67,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.events.length = 0;
   mocks.app = {
+    name: 'Example App',
     status: 'deployed',
     capabilities: { dataTable: false },
     dataDbName: 'hatch_data_example',
@@ -87,7 +89,7 @@ beforeEach(() => {
 describe('deleteAppDataDatabase', () => {
   it('drains readers and drops resources before clearing retained state', async () => {
     await expect(
-      deleteAppDataDatabase('example', 'hatch_data_example'),
+      deleteAppDataDatabase('example', 'hatch_data_example', 'Example App'),
     ).resolves.toEqual({ ok: true });
 
     expect(mocks.events).toEqual([
@@ -116,7 +118,7 @@ describe('deleteAppDataDatabase', () => {
     mocks.dropDatabase.mockRejectedValueOnce(failure);
 
     await expect(
-      deleteAppDataDatabase('example', 'hatch_data_example'),
+      deleteAppDataDatabase('example', 'hatch_data_example', 'Example App'),
     ).rejects.toBe(failure);
 
     expect(mocks.updateValues).not.toHaveBeenCalled();
@@ -132,7 +134,7 @@ describe('deleteAppDataDatabase', () => {
     mocks.app.dataDbPasswordCiphertext = null;
 
     await expect(
-      deleteAppDataDatabase('example', 'hatch_data_example'),
+      deleteAppDataDatabase('example', 'hatch_data_example', 'Example App'),
     ).resolves.toEqual({ ok: true });
 
     expect(mocks.events).toEqual([
@@ -165,7 +167,7 @@ describe('deleteAppDataDatabase', () => {
     Object.assign(mocks.app as AppState, change);
 
     await expect(
-      deleteAppDataDatabase('example', 'hatch_data_example'),
+      deleteAppDataDatabase('example', 'hatch_data_example', 'Example App'),
     ).rejects.toThrow(message);
 
     expect(mocks.closeRealtime).not.toHaveBeenCalled();
@@ -176,10 +178,17 @@ describe('deleteAppDataDatabase', () => {
 
   it('requires an exact, case-sensitive database name confirmation', async () => {
     await expect(
-      deleteAppDataDatabase('example', 'HATCH_DATA_EXAMPLE'),
+      deleteAppDataDatabase('example', 'HATCH_DATA_EXAMPLE', 'Example App'),
     ).rejects.toThrow('confirmation does not match');
 
     expect(mocks.closeRealtime).not.toHaveBeenCalled();
     expect(mocks.dropDatabase).not.toHaveBeenCalled();
+  });
+  it('rejects a stale or incorrect App name before deleting resources', async () => {
+    await expect(
+      deleteAppDataDatabase('example', 'hatch_data_example', 'example app'),
+    ).rejects.toThrow('App name confirmation does not match');
+    expect(mocks.dropDatabase).not.toHaveBeenCalled();
+    expect(mocks.updateValues).not.toHaveBeenCalled();
   });
 });

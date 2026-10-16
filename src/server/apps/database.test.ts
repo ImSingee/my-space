@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type AppState = {
+  name: string;
   status: string;
   capabilities: { database?: boolean } | null;
   dbName: string | null;
@@ -67,6 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.events.length = 0;
   mocks.app = {
+    name: 'Example App',
     status: 'deployed',
     capabilities: { database: false },
     dbName: 'app_example',
@@ -77,7 +79,9 @@ beforeEach(() => {
 
 describe('deleteAppDatabase', () => {
   it('drops the retained resources before clearing registration and credentials', async () => {
-    await expect(deleteAppDatabase('example', 'app_example')).resolves.toEqual({
+    await expect(
+      deleteAppDatabase('example', 'app_example', 'Example App'),
+    ).resolves.toEqual({
       ok: true,
     });
 
@@ -101,9 +105,9 @@ describe('deleteAppDatabase', () => {
     const failure = new Error('role is still in use');
     mocks.drop.mockRejectedValueOnce(failure);
 
-    await expect(deleteAppDatabase('example', 'app_example')).rejects.toBe(
-      failure,
-    );
+    await expect(
+      deleteAppDatabase('example', 'app_example', 'Example App'),
+    ).rejects.toBe(failure);
 
     expect(mocks.updateValues).not.toHaveBeenCalled();
     expect(mocks.app).toMatchObject({
@@ -127,19 +131,26 @@ describe('deleteAppDatabase', () => {
   ])('rejects deletion when %s', async (_label, change, message) => {
     Object.assign(mocks.app as AppState, change);
 
-    await expect(deleteAppDatabase('example', 'app_example')).rejects.toThrow(
-      message,
-    );
+    await expect(
+      deleteAppDatabase('example', 'app_example', 'Example App'),
+    ).rejects.toThrow(message);
 
     expect(mocks.drop).not.toHaveBeenCalled();
     expect(mocks.updateValues).not.toHaveBeenCalled();
   });
 
   it('requires an exact, case-sensitive database name confirmation', async () => {
-    await expect(deleteAppDatabase('example', 'APP_EXAMPLE')).rejects.toThrow(
-      'confirmation does not match',
-    );
+    await expect(
+      deleteAppDatabase('example', 'APP_EXAMPLE', 'Example App'),
+    ).rejects.toThrow('confirmation does not match');
 
+    expect(mocks.drop).not.toHaveBeenCalled();
+    expect(mocks.updateValues).not.toHaveBeenCalled();
+  });
+  it('rejects a stale or incorrect App name before deleting resources', async () => {
+    await expect(
+      deleteAppDatabase('example', 'app_example', 'example app'),
+    ).rejects.toThrow('App name confirmation does not match');
     expect(mocks.drop).not.toHaveBeenCalled();
     expect(mocks.updateValues).not.toHaveBeenCalled();
   });

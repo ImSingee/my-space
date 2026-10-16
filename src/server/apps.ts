@@ -215,20 +215,32 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
 
 export const deleteAppDatabaseFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; dbName: string }) =>
-    z.object({ id: idSchema, dbName: z.string().min(1) }).parse(input),
+  .validator((input: { id: string; dbName: string; appName: string }) =>
+    z
+      .object({
+        id: idSchema,
+        dbName: z.string().min(1),
+        appName: z.string().min(1),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
-    return deleteAppDatabase(data.id, data.dbName);
+    return deleteAppDatabase(data.id, data.dbName, data.appName);
   });
 
 export const deleteAppDataDatabaseFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .validator((input: { id: string; dbName: string }) =>
-    z.object({ id: idSchema, dbName: z.string().min(1) }).parse(input),
+  .validator((input: { id: string; dbName: string; appName: string }) =>
+    z
+      .object({
+        id: idSchema,
+        dbName: z.string().min(1),
+        appName: z.string().min(1),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
-    return deleteAppDataDatabase(data.id, data.dbName);
+    return deleteAppDataDatabase(data.id, data.dbName, data.appName);
   });
 
 export const setAppSlugFn = createServerFn({ method: 'POST' })

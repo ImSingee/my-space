@@ -1,110 +1,21 @@
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Group,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
+import { ActionIcon, Box, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { useMutation } from '@tanstack/react-query';
 import { IconTable, IconTrash } from '@tabler/icons-react';
-import { useState } from 'react';
+import { DeleteDatabaseForm } from './delete-database-form';
 import { SectionHeader, StatusDot } from './section-header';
-
-function DeleteDataTableForm({
-  dbName,
-  modalId,
-  onDelete,
-}: {
-  dbName: string;
-  modalId: string;
-  onDelete: () => Promise<void>;
-}) {
-  const [confirmation, setConfirmation] = useState('');
-  const remove = useMutation({
-    mutationFn: onDelete,
-    onSuccess: () => modals.close(modalId),
-  });
-  const confirmed = confirmation === dbName;
-
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (confirmed && !remove.isPending) remove.mutate();
-      }}
-    >
-      <Stack gap="sm">
-        <Text size="sm">
-          This permanently deletes{' '}
-          <Text
-            span
-            fw={600}
-            ff="monospace"
-            style={{ overflowWrap: 'anywhere' }}
-          >
-            {dbName}
-          </Text>
-          , including every managed table, row, and migration record. This
-          cannot be undone.
-        </Text>
-        <Text size="sm" c="dimmed">
-          To use Data Tables again, deploy a new release with the capability
-          enabled. The platform will create an empty database and apply its
-          schema.
-        </Text>
-        <TextInput
-          label={`Type ${dbName} to confirm`}
-          value={confirmation}
-          onChange={(event) => setConfirmation(event.currentTarget.value)}
-          ff="monospace"
-          styles={{ label: { overflowWrap: 'anywhere' } }}
-          autoComplete="off"
-          data-autofocus
-        />
-        {remove.isError ? (
-          <Text size="sm" c="red" role="alert">
-            {remove.error instanceof Error
-              ? remove.error.message
-              : 'Failed to delete the Data Table database.'}
-          </Text>
-        ) : null}
-        <Group justify="flex-end" gap="sm">
-          <Button
-            type="button"
-            variant="default"
-            disabled={remove.isPending}
-            onClick={() => modals.close(modalId)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            color="red"
-            loading={remove.isPending}
-            disabled={!confirmed}
-          >
-            Delete Data Table data
-          </Button>
-        </Group>
-      </Stack>
-    </form>
-  );
-}
 
 export function RetainedDataTableSection({
   appId,
+  appName,
   dbName,
   schemaHash,
   onDelete,
 }: {
   appId: string;
+  appName: string;
   dbName: string;
   schemaHash: string | null;
-  onDelete: (dbName: string) => Promise<void>;
+  onDelete: (dbName: string, appName: string) => Promise<void>;
 }) {
   const confirmDelete = () => {
     const modalId = `delete-app-data-database-${appId}`;
@@ -113,10 +24,11 @@ export function RetainedDataTableSection({
       title: 'Delete retained Data Table data?',
       centered: true,
       children: (
-        <DeleteDataTableForm
-          dbName={dbName}
+        <DeleteDatabaseForm
+          appName={appName}
+          managed
           modalId={modalId}
-          onDelete={() => onDelete(dbName)}
+          onDelete={(confirmation) => onDelete(dbName, confirmation)}
         />
       ),
     });

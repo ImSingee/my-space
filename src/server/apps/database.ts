@@ -19,6 +19,7 @@ import {
 export async function deleteAppDatabase(
   id: string,
   expectedDbName: string,
+  expectedAppName: string,
 ): Promise<{ ok: true }> {
   return appDeployLock.withLock(id, () =>
     withAppDataCutoverLock(id, () =>
@@ -26,6 +27,7 @@ export async function deleteAppDatabase(
         const app = await db.query.apps.findFirst({
           where: { id },
           columns: {
+            name: true,
             status: true,
             capabilities: true,
             dbName: true,
@@ -47,6 +49,10 @@ export async function deleteAppDatabase(
         }
         if (app.dbName !== expectedDbName) {
           throw new Error('Database name confirmation does not match.');
+        }
+
+        if (app.name !== expectedAppName) {
+          throw new Error('App name confirmation does not match.');
         }
 
         await database.drop();

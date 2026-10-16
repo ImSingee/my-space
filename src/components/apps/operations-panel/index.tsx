@@ -151,17 +151,21 @@ function PersistentStorageSection() {
 
 export function OperationsPanel({
   appId,
+  appName,
   runtimeSupported = true,
 }: {
   appId: string;
+  appName: string;
   /** Whether controls that invoke App code may run. */
   runtimeSupported?: boolean;
 }) {
   const query = useQuery(appOpsQueryOptions(appId));
   const queryClient = useQueryClient();
 
-  const deleteDatabase = async (dbName: string) => {
-    await deleteAppDatabaseFn({ data: { id: appId, dbName } });
+  const deleteDatabase = async (dbName: string, confirmation: string) => {
+    await deleteAppDatabaseFn({
+      data: { id: appId, dbName, appName: confirmation },
+    });
     toast.success('Database deleted');
     await Promise.allSettled([
       queryClient.invalidateQueries(appOpsQueryOptions(appId)),
@@ -169,8 +173,10 @@ export function OperationsPanel({
     ]);
   };
 
-  const deleteDataDatabase = async (dbName: string) => {
-    await deleteAppDataDatabaseFn({ data: { id: appId, dbName } });
+  const deleteDataDatabase = async (dbName: string, confirmation: string) => {
+    await deleteAppDataDatabaseFn({
+      data: { id: appId, dbName, appName: confirmation },
+    });
     toast.success('Data Table data deleted');
     await Promise.allSettled([
       queryClient.invalidateQueries(appOpsQueryOptions(appId)),
@@ -229,6 +235,7 @@ export function OperationsPanel({
           {databaseVisible ? (
             <DatabaseSection
               appId={appId}
+              appName={appName}
               database={ops.database}
               onDelete={deleteDatabase}
             />
@@ -239,6 +246,7 @@ export function OperationsPanel({
           ) : ops.dataTable.dbName ? (
             <RetainedDataTableSection
               appId={appId}
+              appName={appName}
               dbName={ops.dataTable.dbName}
               schemaHash={ops.dataTable.schemaHash}
               onDelete={deleteDataDatabase}

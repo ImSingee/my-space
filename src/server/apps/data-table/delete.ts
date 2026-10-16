@@ -20,12 +20,14 @@ export const APP_DATA_DATABASE_NOT_PROVISIONED_ERROR =
 export async function deleteAppDataDatabase(
   id: string,
   expectedDbName: string,
+  expectedAppName: string,
 ): Promise<{ ok: true }> {
   return appDeployLock.withLock(id, () =>
     withAppDataCutoverLock(id, async () => {
       const app = await db.query.apps.findFirst({
         where: { id },
         columns: {
+          name: true,
           status: true,
           capabilities: true,
           dataDbName: true,
@@ -56,6 +58,10 @@ export async function deleteAppDataDatabase(
         throw new Error(
           'Data Table database name confirmation does not match.',
         );
+      }
+
+      if (app.name !== expectedAppName) {
+        throw new Error('App name confirmation does not match.');
       }
 
       await closeDataRealtime(id);

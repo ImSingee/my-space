@@ -10,11 +10,15 @@ const fixtures = vi.hoisted(() => ({
   ops: null as AppOps | null,
   deleteDatabase:
     vi.fn<
-      (input: { data: { id: string; dbName: string } }) => Promise<{ ok: true }>
+      (input: {
+        data: { id: string; dbName: string; appName: string };
+      }) => Promise<{ ok: true }>
     >(),
   deleteDataDatabase:
     vi.fn<
-      (input: { data: { id: string; dbName: string } }) => Promise<{ ok: true }>
+      (input: {
+        data: { id: string; dbName: string; appName: string };
+      }) => Promise<{ ok: true }>
     >(),
 }));
 
@@ -102,7 +106,7 @@ async function renderPanel(ops: AppOps) {
     <QueryClientProvider client={queryClient}>
       <MantineProvider>
         <ModalsProvider>
-          <OperationsPanel appId="app-1" />
+          <OperationsPanel appId="app-1" appName="Demo App" />
         </ModalsProvider>
       </MantineProvider>
     </QueryClientProvider>,
@@ -162,7 +166,7 @@ test('shows a disabled retained database with a delete action', async () => {
     .toBeVisible();
 });
 
-test('requires the exact database name before permanent deletion', async () => {
+test('requires the exact App name and supports click-to-fill before permanent deletion', async () => {
   const screen = await renderPanel(
     appOps(false, { enabled: false, dbName: 'app_app_1' }),
   );
@@ -171,16 +175,17 @@ test('requires the exact database name before permanent deletion', async () => {
     .click();
 
   const input = screen.getByRole('textbox', {
-    name: 'Type app_app_1 to confirm',
+    name: 'Type Demo App to confirm',
   });
   const submit = screen.getByRole('button', {
     name: 'Delete database',
     exact: true,
   });
   await expect.element(submit).toBeDisabled();
-  await input.fill('APP_APP_1');
+  await input.fill('demo app');
   await expect.element(submit).toBeDisabled();
-  await input.fill('app_app_1');
+  await screen.getByRole('button', { name: 'Fill app name Demo App' }).click();
+  await expect.element(input).toHaveValue('Demo App');
   await expect.element(submit).toBeEnabled();
 });
 
@@ -192,15 +197,15 @@ test('deletes a retained database and hides the row', async () => {
     .getByRole('button', { name: 'Delete database app_app_1' })
     .click();
   await screen
-    .getByRole('textbox', { name: 'Type app_app_1 to confirm' })
-    .fill('app_app_1');
+    .getByRole('textbox', { name: 'Type Demo App to confirm' })
+    .fill('Demo App');
   await screen
     .getByRole('button', { name: 'Delete database', exact: true })
     .click();
 
   await vi.waitFor(() =>
     expect(fixtures.deleteDatabase).toHaveBeenCalledWith({
-      data: { id: 'app-1', dbName: 'app_app_1' },
+      data: { id: 'app-1', dbName: 'app_app_1', appName: 'Demo App' },
     }),
   );
   await expect
@@ -227,8 +232,8 @@ test('keeps a failed deletion open and allows retrying', async () => {
     .getByRole('button', { name: 'Delete database app_app_1' })
     .click();
   await screen
-    .getByRole('textbox', { name: 'Type app_app_1 to confirm' })
-    .fill('app_app_1');
+    .getByRole('textbox', { name: 'Type Demo App to confirm' })
+    .fill('Demo App');
   const submit = screen.getByRole('button', {
     name: 'Delete database',
     exact: true,
@@ -294,7 +299,7 @@ test('shows retained Data Table metadata while access is disabled', async () => 
     .toBeVisible();
 });
 
-test('requires the exact retained Data Table database name', async () => {
+test('requires the exact App name for retained Data Table deletion', async () => {
   const screen = await renderPanel(
     appOps(false, undefined, {
       enabled: false,
@@ -309,16 +314,17 @@ test('requires the exact retained Data Table database name', async () => {
     .click();
 
   const input = screen.getByRole('textbox', {
-    name: 'Type hatch_data_app_1 to confirm',
+    name: 'Type Demo App to confirm',
   });
   const submit = screen.getByRole('button', {
     name: 'Delete Data Table data',
     exact: true,
   });
   await expect.element(submit).toBeDisabled();
-  await input.fill('HATCH_DATA_APP_1');
+  await input.fill('demo app');
   await expect.element(submit).toBeDisabled();
-  await input.fill('hatch_data_app_1');
+  await screen.getByRole('button', { name: 'Fill app name Demo App' }).click();
+  await expect.element(input).toHaveValue('Demo App');
   await expect.element(submit).toBeEnabled();
 });
 
@@ -336,15 +342,15 @@ test('deletes retained Data Table data and hides its section', async () => {
     })
     .click();
   await screen
-    .getByRole('textbox', { name: 'Type hatch_data_app_1 to confirm' })
-    .fill('hatch_data_app_1');
+    .getByRole('textbox', { name: 'Type Demo App to confirm' })
+    .fill('Demo App');
   await screen
     .getByRole('button', { name: 'Delete Data Table data', exact: true })
     .click();
 
   await vi.waitFor(() =>
     expect(fixtures.deleteDataDatabase).toHaveBeenCalledWith({
-      data: { id: 'app-1', dbName: 'hatch_data_app_1' },
+      data: { id: 'app-1', dbName: 'hatch_data_app_1', appName: 'Demo App' },
     }),
   );
   await expect
@@ -369,8 +375,8 @@ test('keeps a failed Data Table deletion open for retry', async () => {
     })
     .click();
   await screen
-    .getByRole('textbox', { name: 'Type hatch_data_app_1 to confirm' })
-    .fill('hatch_data_app_1');
+    .getByRole('textbox', { name: 'Type Demo App to confirm' })
+    .fill('Demo App');
   await screen
     .getByRole('button', { name: 'Delete Data Table data', exact: true })
     .click();

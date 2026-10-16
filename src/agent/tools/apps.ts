@@ -47,6 +47,11 @@ import {
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
+const DATABASE_DATA_GUIDANCE =
+  'Database persists across deployments and capability disable/re-enable. It may contain historical data; inspect its schema and rows with query_app_db before initializing or changing data.';
+const DATA_TABLE_DATA_GUIDANCE =
+  'Data Tables persist across capability disable/re-enable unless explicitly deleted. Inspect the existing schema and rows with query_app_data_table before initializing or changing data.';
+
 const APP_COMPATIBILITY_COPY = {
   resourceName: 'App',
   skillName: 'app-compatibility',
@@ -198,6 +203,10 @@ export function createAppTools(options: {
           : null,
         `Database: ${databaseStatus}`,
         `Data Tables: ${dataTableStatus}`,
+        databaseEnabled && detail.dbName ? DATABASE_DATA_GUIDANCE : null,
+        dataTableEnabled && detail.ops.dataTable.dbName
+          ? DATA_TABLE_DATA_GUIDANCE
+          : null,
         detail.ops.storage.enabled
           ? 'Persistent storage: enabled (backend STORAGE_DIR)'
           : null,
@@ -534,6 +543,12 @@ export function createAppTools(options: {
           });
           const lines = [
             `Deployed "${detail.id}" (v${res.version}, compatibility v${res.compatibilityVersion}).`,
+            res.normalized.capabilities.database
+              ? DATABASE_DATA_GUIDANCE
+              : null,
+            res.normalized.capabilities.dataTable
+              ? DATA_TABLE_DATA_GUIDANCE
+              : null,
             res.normalized.app ? `App URL: ${res.normalized.app.url}` : null,
             res.normalized.widgets.length > 0
               ? `Widgets: ${res.normalized.widgets.map((w) => w.id).join(', ')}`

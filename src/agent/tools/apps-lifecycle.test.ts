@@ -208,6 +208,48 @@ describe('Agent App lifecycle URLs', () => {
     );
   });
 
+  it('warns the Agent to inspect persistent data after a database-capable deployment', async () => {
+    const response = deployResponse(true);
+    response.normalized.capabilities.database = true;
+    response.normalized.capabilities.dataTable = true;
+    const deploy = appTool('deploy_app', {
+      getApp: vi
+        .fn<PlatformClient['getApp']>()
+        .mockResolvedValue(appDetail(true)),
+      associateSessionApp: vi
+        .fn<PlatformClient['associateSessionApp']>()
+        .mockResolvedValue({ appId: 'immutable-app-id' }),
+      deployApp: vi
+        .fn<PlatformClient['deployApp']>()
+        .mockResolvedValue(response),
+    } as unknown as PlatformClient);
+    const output = toolText(
+      await deploy.execute('deploy', {
+        id: 'immutable-app-id',
+        source_path: 'apps/human-slug',
+        message: 'Re-enable databases',
+      }),
+    );
+    expect(output).toContain('may contain historical data');
+    expect(output).toContain('query_app_db');
+    expect(output).toContain('query_app_data_table');
+    expect(output).toContain('Inspect the existing schema and rows');
+  });
+
+  it('tells the Agent to inspect retained data when reading an enabled App', async () => {
+    const detail = appDetail(true);
+    detail.dbName = 'app_existing';
+    detail.capabilities.push('database', 'dataTable');
+    detail.ops.dataTable.dbName = 'hatch_data_existing';
+    const get = appTool('get_app', {
+      getApp: vi.fn<PlatformClient['getApp']>().mockResolvedValue(detail),
+    } as unknown as PlatformClient);
+    const output = toolText(await get.execute('inspect', { id: detail.id }));
+    expect(output).toContain('may contain historical data');
+    expect(output).toContain('query_app_db');
+    expect(output).toContain('query_app_data_table');
+  });
+
   it('omits an App URL when no frontend is deployed', async () => {
     const getApp = vi
       .fn<PlatformClient['getApp']>()

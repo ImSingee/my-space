@@ -270,7 +270,11 @@ function AppDetailPage() {
 
         <Divider />
 
-        <OperationsPanel appId={app.id} runtimeSupported={runtimeSupported} />
+        <OperationsPanel
+          appId={app.id}
+          appName={app.name}
+          runtimeSupported={runtimeSupported}
+        />
 
         {capabilities?.backend ? (
           <>

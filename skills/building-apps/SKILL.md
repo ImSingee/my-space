@@ -402,6 +402,12 @@ provisions or recreates a database. It can query a retained database after the
 capability is disabled until the user permanently deletes it. Create tables
 idempotently on backend startup. Each App database is isolated.
 
+Re-enabling Database or Data Tables after a capability disable reuses the retained
+database, schema, and rows. Only explicit permanent deletion causes a later
+enabled deployment to create an empty database. Before initializing data after
+a deployment, inspect the existing schema and rows with `query_app_db` or
+`query_app_data_table`; never assume the database is empty.
+
 ## KV secrets
 
 Newly created or overwritten KV values marked `secret` are encrypted at rest
