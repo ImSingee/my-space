@@ -178,77 +178,95 @@ export function KvSection({ appId }: { appId: string }) {
           No keys yet.
         </Text>
       ) : (
-        <Table withTableBorder verticalSpacing={6} highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Key</Table.Th>
-              <Table.Th>Value</Table.Th>
-              <Table.Th w={110}>Updated</Table.Th>
-              <Table.Th w={76} />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {entries.map((entry) => (
-              <Table.Tr key={entry.key}>
-                <Table.Td>
-                  <Group gap={6} wrap="nowrap">
-                    <Text size="sm" ff="monospace" lineClamp={1}>
-                      {entry.key}
-                    </Text>
-                    {entry.secret ? (
-                      <Badge size="xs" variant="light" color="orange">
-                        secret
-                      </Badge>
-                    ) : null}
-                  </Group>
-                </Table.Td>
-                <Table.Td>
-                  {entry.secret ? (
-                    <Text size="sm" c="dimmed">
-                      ••••••••
-                    </Text>
-                  ) : (
-                    <Text size="sm" ff="monospace" lineClamp={1}>
-                      {entry.value}
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="dimmed" truncate>
-                    {formatRelative(entry.updatedAt)}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Group gap={2} justify="flex-end" wrap="nowrap">
-                    <Tooltip label="Edit" withArrow position="top">
-                      <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        aria-label={`Edit ${entry.key}`}
-                        onClick={() => openEditor(entry)}
-                      >
-                        <IconPencil size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="Delete" withArrow position="top">
-                      <ActionIcon
-                        variant="subtle"
-                        color="red"
-                        aria-label={`Delete ${entry.key}`}
-                        loading={
-                          remove.isPending && remove.variables === entry.key
-                        }
-                        onClick={() => confirmDelete(entry.key)}
-                      >
-                        <IconTrash size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </Group>
-                </Table.Td>
+        <Table.ScrollContainer minWidth={640}>
+          <Table
+            layout="fixed"
+            withTableBorder
+            verticalSpacing={6}
+            highlightOnHover
+          >
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th w={240}>Key</Table.Th>
+                <Table.Th>Value</Table.Th>
+                <Table.Th w={110}>Updated</Table.Th>
+                <Table.Th w={76} />
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {entries.map((entry) => (
+                <Table.Tr key={entry.key}>
+                  <Table.Td>
+                    <Group gap={6} wrap="nowrap">
+                      <Text
+                        size="sm"
+                        ff="monospace"
+                        truncate
+                        miw={0}
+                        style={{ flex: 1 }}
+                      >
+                        {entry.key}
+                      </Text>
+                      {entry.secret ? (
+                        <Badge
+                          size="xs"
+                          variant="light"
+                          color="orange"
+                          style={{ flexShrink: 0 }}
+                        >
+                          secret
+                        </Badge>
+                      ) : null}
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    {entry.secret ? (
+                      <Text size="sm" c="dimmed">
+                        ••••••••
+                      </Text>
+                    ) : (
+                      <Text size="sm" ff="monospace" truncate>
+                        {entry.value}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="dimmed" truncate>
+                      {formatRelative(entry.updatedAt)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap={2} justify="flex-end" wrap="nowrap">
+                      <Tooltip label="Edit" withArrow position="top">
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          aria-label={`Edit ${entry.key}`}
+                          onClick={() => openEditor(entry)}
+                        >
+                          <IconPencil size={15} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Delete" withArrow position="top">
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          aria-label={`Delete ${entry.key}`}
+                          loading={
+                            remove.isPending && remove.variables === entry.key
+                          }
+                          onClick={() => confirmDelete(entry.key)}
+                        >
+                          <IconTrash size={15} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       )}
     </Stack>
   );

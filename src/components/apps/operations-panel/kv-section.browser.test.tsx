@@ -123,3 +123,73 @@ test('edits a secret as a blank overwrite-only encrypted value', async () => {
     .element(modal.getByRole('button', { name: 'Save' }))
     .toBeDisabled();
 });
+
+test('contains long KV content and keeps every column reachable', async () => {
+  const longKey = `token-${'x'.repeat(200)}`;
+  const longValue = JSON.stringify({ profile: 'x'.repeat(2000) });
+  fixtures.entries = [
+    { ...fixtures.entries[0], key: longKey },
+    { ...fixtures.entries[1], value: longValue },
+  ];
+  const queryClient = new QueryClient();
+  const screen = await render(
+    provider(
+      <div data-testid="kv-content" style={{ width: 1180, maxWidth: '100%' }}>
+        <KvSection appId="app-1" />
+      </div>,
+      queryClient,
+    ),
+  );
+  await expect.element(screen.getByText(longValue)).toBeVisible();
+  const content = screen.getByTestId('kv-content').element();
+  const table = screen.getByRole('table').element();
+  const badge = screen.getByText('secret', { exact: true }).element();
+  const keyCell = badge.closest('td')!;
+  const badgeBounds = badge.getBoundingClientRect();
+  expect(table.getBoundingClientRect().right).toBeLessThanOrEqual(
+    content.getBoundingClientRect().right + 1,
+  );
+  expect(badge.scrollWidth).toBeLessThanOrEqual(badge.clientWidth);
+  expect(badgeBounds.right).toBeLessThanOrEqual(
+    keyCell.getBoundingClientRect().right,
+  );
+  await expect
+    .element(screen.getByRole('button', { name: 'Edit mode', exact: true }))
+    .toBeVisible();
+
+  await screen.getByRole('button', { name: 'Edit mode', exact: true }).click();
+  const modal = await renderLastModal(queryClient);
+  await expect
+    .element(modal.getByRole('textbox', { name: 'Value', exact: true }))
+    .toHaveValue(longValue);
+  await modal.unmount();
+
+  content.style.width = '360px';
+  await vi.waitFor(() => {
+    expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth + 1);
+    expect(table.getBoundingClientRect().width).toBeGreaterThan(
+      content.clientWidth,
+    );
+  });
+  // Find the scrollable ancestor by behavior, independent of Mantine markup.
+  let scrollable = table.parentElement!;
+  while (
+    scrollable !== content &&
+    !['auto', 'scroll'].includes(getComputedStyle(scrollable).overflowX)
+  ) {
+    scrollable = scrollable.parentElement!;
+  }
+  expect(scrollable).not.toBe(content);
+  scrollable.scrollLeft = scrollable.scrollWidth;
+  const action = screen
+    .getByRole('button', { name: 'Edit mode', exact: true })
+    .element();
+  await vi.waitFor(() => {
+    expect(action.getBoundingClientRect().right).toBeLessThanOrEqual(
+      content.getBoundingClientRect().right + 1,
+    );
+    expect(action.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+      content.getBoundingClientRect().left,
+    );
+  });
+});
