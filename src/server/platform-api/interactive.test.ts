@@ -37,7 +37,7 @@ vi.stubEnv('APP_URL', 'https://hatch.example.test');
 await import('~/db');
 const { db, schema } = fixture.database!;
 const { auth } = await import('~auth/server');
-const { handleMobileRequest } = await import('./http');
+const { handlePlatformApiRequest } = await import('./http');
 const { authenticateSessionRequest } = await import('../session-http-auth');
 const origin = 'https://hatch.example.test';
 let cookie = '';
@@ -72,8 +72,8 @@ function call(
     origin?: string;
   } = {},
 ) {
-  return handleMobileRequest(
-    new Request(`${options.origin ?? origin}/api/mobile/v1/${path}`, {
+  return handlePlatformApiRequest(
+    new Request(`${options.origin ?? origin}/api/v1/${path}`, {
       method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
       headers: {
         authorization: `Bearer ${token}`,
@@ -86,7 +86,7 @@ function call(
   );
 }
 async function handoff() {
-  const response = await call('handoffs', { body: { appId: 'app-one' } });
+  const response = await call('apps/app-one/handoffs', { body: {} });
   expect(response.status).toBe(200);
   return (await response.json()) as {
     ticket: string;
@@ -104,8 +104,8 @@ function consume(
     method?: string;
   } = {},
 ) {
-  return handleMobileRequest(
-    new Request(`${options.origin ?? origin}/api/mobile/v1/handoffs/consume`, {
+  return handlePlatformApiRequest(
+    new Request(`${options.origin ?? origin}/api/v1/auth/handoffs/consume`, {
       method: options.method ?? 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -169,7 +169,104 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe('native API contracts and authority', () => {
+describe('interactive Platform API contracts and authority', () => {
+  it('keeps API-key and live Run authority out of user-session resources', async () => {
+    const keyResponse = await authCall(
+      'api-key/create',
+      { name: 'Interactive boundary test' },
+      { cookie },
+    );
+    expect(keyResponse.status).toBe(200);
+    const key = ((await keyResponse.json()) as { key: string }).key;
+    const runSession = randomUUID();
+    const runId = randomUUID();
+    const runnerId = 'interactive-test-runner';
+    await db.insert(schema.agentSessions).values({ id: runSession });
+    await db.insert(schema.agentRuns).values({
+      id: runId,
+      sessionId: runSession,
+      runnerId,
+      providerId: 'fixture',
+      modelId: 'fixture',
+      input: { text: 'fixture' },
+      leaseExpiresAt: new Date(Date.now() + 90_000),
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = await auth.api.signJWT({
+      body: {
+        payload: {
+          sub: runId,
+          sid: runSession,
+          rnr: runnerId,
+          iat: now,
+          exp: now + 90,
+          jti: randomUUID(),
+        },
+      },
+    });
+    for (const headers of [
+      { 'x-api-key': key, cookie },
+      { authorization: `Bearer ${jwt.token}`, cookie },
+    ] as Record<string, string>[]) {
+      // Existing resource access remains unchanged for both real credential types.
+      expect((await call('apps', { headers })).status).toBe(200);
+      for (const [path, body] of [
+        ['agent/models', undefined],
+        ['agent/sessions', undefined],
+        [`agent/sessions/${runSession}`, undefined],
+        ['agent/sessions', {}],
+        ['apps/app-one/handoffs', {}],
+      ] as const) {
+        const response = await call(path, { headers, body });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({
+          code: 'SESSION_REQUIRED',
+        });
+      }
+    }
+    const browser = await handlePlatformApiRequest(
+      new Request(`${origin}/api/v1/agent/sessions`, {
+        headers: { cookie, origin, 'sec-fetch-site': 'same-origin' },
+      }),
+    );
+    expect(browser.status).toBe(200);
+    expect(
+      (
+        await call('agent/models', {
+          headers: { cookie, authorization: 'Bearer invalid' },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await call('agent/models', {
+          headers: { 'sec-fetch-site': 'cross-site' },
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  it('publishes resource contracts and the exceptional ticket transport in the existing OpenAPI', async () => {
+    const { generatePlatformOpenApi } = await import('./openapi');
+    const spec = await generatePlatformOpenApi();
+    for (const [path, method] of [
+      ['/agent/models', 'get'],
+      ['/agent/sessions', 'get'],
+      ['/agent/sessions', 'post'],
+      ['/agent/sessions/{id}', 'get'],
+      ['/apps/{id}/handoffs', 'post'],
+    ] as const) {
+      expect(spec.paths?.[path]?.[method]?.security).toEqual([
+        { sessionCookie: [] },
+        { sessionBearer: [] },
+      ]);
+    }
+    const consume = spec.paths?.['/auth/handoffs/consume']?.post;
+    expect(consume?.security).toEqual([]);
+    expect(consume?.responses?.['303']).toBeDefined();
+    expect(JSON.stringify(spec.paths)).not.toContain('/mobile');
+  });
+
   it('returns safe App projections, real session snapshots, and enabled model defaults', async () => {
     for (const path of ['apps', 'apps/app-one']) {
       const response = await call(path);
@@ -182,18 +279,23 @@ describe('native API contracts and authority', () => {
       );
     }
     expect((await call('apps/missing')).status).toBe(404);
-    const created = await call('sessions', { body: { title: 'From mobile' } });
+    const created = await call('agent/sessions', {
+      body: { title: 'From mobile' },
+    });
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
-    const list = await call('sessions');
-    expect(await list.json()).toMatchObject({
-      sessions: [{ id, title: 'From mobile', messageCount: 0, appIds: [] }],
-    });
-    const detail = await call(`sessions/${id}`);
+    const list = await call('agent/sessions');
+    expect(await list.json()).toMatchObject([
+      { id, title: 'From mobile', messageCount: 0, appIds: [] },
+    ]);
+    const detail = await call(`agent/sessions/${id}`);
     expect(await detail.json()).toMatchObject({
-      session: { id, messages: [], activeRun: null, runs: [] },
+      id,
+      messages: [],
+      activeRun: null,
+      runs: [],
     });
-    expect((await call('sessions/missing')).status).toBe(404);
+    expect((await call('agent/sessions/missing')).status).toBe(404);
     await db.insert(schema.agentProviders).values([
       {
         id: 'enabled',
@@ -232,9 +334,8 @@ describe('native API contracts and authority', () => {
         modelId: 'model-other',
       },
     ]);
-    const config = await (await call('config')).json();
+    const config = await (await call('agent/models')).json();
     expect(config).toMatchObject({
-      apiVersion: 1,
       providers: [{ id: 'enabled', models: [{ modelId: 'model-good' }] }],
       defaultModel: { providerId: 'enabled', modelId: 'model-good' },
     });
@@ -243,7 +344,7 @@ describe('native API contracts and authority', () => {
     );
   });
 
-  it('requires session Bearer credentials with no Cookie fallback or API-key/Runner authority', async () => {
+  it('reuses public App auth without falling back from explicit invalid credentials', async () => {
     for (const headers of [
       { authorization: '', cookie },
       { authorization: 'Bearer invalid', cookie },
@@ -256,10 +357,10 @@ describe('native API contracts and authority', () => {
       },
     ] as Record<string, string>[])
       expect((await call('apps', { headers })).status).toBe(401);
-    const cookieOnly = await handleMobileRequest(
-      new Request(`${origin}/api/mobile/v1/apps`, { headers: { cookie } }),
+    const cookieOnly = await handlePlatformApiRequest(
+      new Request(`${origin}/api/v1/apps`, { headers: { cookie } }),
     );
-    expect(cookieOnly.status).toBe(401);
+    expect(cookieOnly.status).toBe(200);
     // Browser Agent routes continue to support their existing Cookie session.
     expect(
       await authenticateSessionRequest(
@@ -283,7 +384,7 @@ describe('native API contracts and authority', () => {
       { origin: 'null' },
       { 'sec-fetch-site': 'cross-site' },
     ] as Record<string, string>[]) {
-      const response = await call('sessions', { body: {}, headers });
+      const response = await call('agent/sessions', { body: {}, headers });
       expect(response.status).toBe(403);
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
     }
@@ -299,11 +400,12 @@ describe('native API contracts and authority', () => {
 
   it('enforces bounded JSON bodies and rejects unrequested fields', async () => {
     expect(
-      (await call('sessions', { body: { title: 'x', extra: true } })).status,
+      (await call('agent/sessions', { body: { title: 'x', extra: true } }))
+        .status,
     ).toBe(400);
     expect(
       (
-        await call('sessions', {
+        await call('agent/sessions', {
           body: {},
           headers: { 'content-type': 'text/plain' },
         })
@@ -311,7 +413,7 @@ describe('native API contracts and authority', () => {
     ).toBe(415);
     expect(
       (
-        await call('sessions', {
+        await call('agent/sessions', {
           body: { title: 'x'.repeat(20_000) },
           headers: { 'content-length': '1' },
         })
@@ -447,7 +549,7 @@ describe('one-use WebView handoff', () => {
         })
       ).status,
     ).toBe(400);
-    expect((await consume(ticket.ticket, { method: 'GET' })).status).toBe(401);
+    expect((await consume(ticket.ticket, { method: 'GET' })).status).toBe(405);
     expect(
       (await consume(ticket.ticket, { origin: 'https://hatch.example.ts.net' }))
         .status,
@@ -455,8 +557,8 @@ describe('one-use WebView handoff', () => {
     expect((await consume(ticket.ticket)).status).toBe(401);
     expect(
       (
-        await call('handoffs', {
-          body: { appId: 'app-one', targetPath: 'https://evil.example' },
+        await call('apps/app-one/handoffs', {
+          body: { targetPath: 'https://evil.example' },
         })
       ).status,
     ).toBe(400);
@@ -473,9 +575,9 @@ describe('one-use WebView handoff', () => {
       .update(schema.apps)
       .set({ slug: 'example-app', status: 'archived' })
       .where(eq(schema.apps.id, 'app-one'));
-    expect(
-      (await call('handoffs', { body: { appId: 'app-one' } })).status,
-    ).toBe(409);
+    expect((await call('apps/app-one/handoffs', { body: {} })).status).toBe(
+      409,
+    );
     await db
       .update(schema.apps)
       .set({ status: 'deployed' })
@@ -483,9 +585,9 @@ describe('one-use WebView handoff', () => {
     await db
       .update(schema.deployments)
       .set({ compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION + 1 });
-    expect(
-      (await call('handoffs', { body: { appId: 'app-one' } })).status,
-    ).toBe(409);
+    expect((await call('apps/app-one/handoffs', { body: {} })).status).toBe(
+      409,
+    );
   });
 
   it('invalidates browser cookies and pending tickets when the native session signs out', async () => {
@@ -497,10 +599,10 @@ describe('one-use WebView handoff', () => {
     const otherToken = ((await signedIn.json()) as { token: string }).token;
     const headers = { authorization: `Bearer ${otherToken}` };
     const first = (await (
-      await call('handoffs', { body: { appId: 'app-one' }, headers })
+      await call('apps/app-one/handoffs', { body: {}, headers })
     ).json()) as { ticket: string };
     const pending = (await (
-      await call('handoffs', { body: { appId: 'app-one' }, headers })
+      await call('apps/app-one/handoffs', { body: {}, headers })
     ).json()) as { ticket: string };
     const browser = await consume(first.ticket);
     expect(browser.status).toBe(303);

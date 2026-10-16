@@ -11,11 +11,39 @@ import {
   isTrustedSessionOrigin,
   sessionOriginError,
 } from '~server/session-http-auth';
-import { getMobileApp } from './data';
-import { readMobileBody } from './body';
+import { appCompatibility } from '~/app-compatibility';
+import { readBoundedText } from './platform-api/body';
+
+async function getHandoffApp(id: string) {
+  const app = await db.query.apps.findFirst({
+    where: { id },
+    columns: {
+      id: true,
+      slug: true,
+      status: true,
+      capabilities: true,
+      currentDeploymentId: true,
+    },
+  });
+  if (!app) return null;
+  const { currentDeploymentId, ...details } = app;
+  const deployment = currentDeploymentId
+    ? await db.query.deployments.findFirst({
+        where: { id: currentDeploymentId },
+        columns: { compatibilityVersion: true },
+      })
+    : null;
+  return {
+    ...details,
+    deploymentRevision: currentDeploymentId,
+    compatibility: deployment
+      ? appCompatibility(deployment.compatibilityVersion)
+      : null,
+  };
+}
 
 const TICKET_LIFETIME_MS = 60_000;
-const PREFIX = 'mobile-handoff:';
+const PREFIX = 'app-handoff:';
 const payloadSchema = z.strictObject({
   sessionId: z.string().min(1),
   appId: z.string().min(1),
@@ -41,12 +69,12 @@ function requestOrigin(request: Request) {
   return origin;
 }
 
-export async function createMobileHandoff(
+export async function createAppHandoff(
   request: Request,
   session: { id: string; expiresAt: Date },
   appId: string,
 ) {
-  const app = await getMobileApp(appId);
+  const app = await getHandoffApp(appId);
   if (!app) throw new AppError('App not found', 404);
   if (
     !app.deploymentRevision ||
@@ -80,7 +108,7 @@ export async function createMobileHandoff(
     expiresAt,
   });
   return {
-    url: `${origin}/api/mobile/v1/handoffs/consume`,
+    url: `${origin}/api/v1/auth/handoffs/consume`,
     ticket,
     expiresAt: expiresAt.toISOString(),
     targetPath,
@@ -92,9 +120,9 @@ export async function createMobileHandoff(
  * same server-side session as native, so sign-out/revocation ends both. The
  * ticket is only sent in the POST body, never a URL, redirect, or JS bridge.
  */
-export async function consumeMobileHandoff(request: Request) {
+export async function consumeAppHandoff(request: Request) {
   const originError = sessionOriginError(request);
-  if (originError) return originError;
+  if (originError) throw new AppError('Cross-origin request denied', 403);
   const origin = requestOrigin(request);
   if (
     request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !==
@@ -102,7 +130,7 @@ export async function consumeMobileHandoff(request: Request) {
   ) {
     throw new AppError('Expected application/x-www-form-urlencoded', 415);
   }
-  const params = new URLSearchParams(await readMobileBody(request, 1024));
+  const params = new URLSearchParams(await readBoundedText(request, 1024));
   if (
     params.size !== 1 ||
     !/^[A-Za-z0-9_-]{43}$/.test(params.get('ticket') ?? '')
@@ -128,7 +156,7 @@ export async function consumeMobileHandoff(request: Request) {
     db.query.session.findFirst({
       where: { id: payload.sessionId, expiresAt: { gt: new Date() } },
     }),
-    getMobileApp(payload.appId),
+    getHandoffApp(payload.appId),
   ]);
   if (!session) throw new AppError('Session has ended', 401);
   if (

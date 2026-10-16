@@ -1,4 +1,4 @@
-/** Shared database operations for browser server functions and the mobile HTTP API. */
+/** Shared database operations for browser server functions and interactive HTTP clients. */
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import type { JsonValue } from '~/db/schema';
