@@ -12,6 +12,8 @@ const apiTypeSchema = z.enum([
   'openai-completions',
 ]);
 
+const modelInputSchema = z.array(z.enum(['text', 'image'])).min(1);
+
 export type ProviderModel = {
   id: string;
   modelId: string;
@@ -161,7 +163,7 @@ const createModelSchema = z.object({
   reasoning: z.boolean().default(false),
   contextWindow: z.number().int().positive().default(128000),
   maxTokens: z.number().int().positive().default(8192),
-  input: z.array(z.string()).default(['text']),
+  input: modelInputSchema.default(['text', 'image']),
 });
 
 export const createModel = createServerFn({ method: 'POST' })
@@ -192,6 +194,7 @@ const updateModelSchema = z.object({
   reasoning: z.boolean().optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
+  input: modelInputSchema.optional(),
 });
 
 export const updateModel = createServerFn({ method: 'POST' })
@@ -207,6 +210,7 @@ export const updateModel = createServerFn({ method: 'POST' })
     if (data.contextWindow !== undefined)
       patch.contextWindow = data.contextWindow;
     if (data.maxTokens !== undefined) patch.maxTokens = data.maxTokens;
+    if (data.input !== undefined) patch.input = data.input;
 
     await db
       .update(schema.agentModels)
