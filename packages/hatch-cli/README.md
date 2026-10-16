@@ -220,12 +220,6 @@ inspection. No durable operation service or fake async operation IDs are added.
 ## Output, errors and unsupported commands
 
 `hatch help`, `help app deploy`, `--help`, `version` and `--version` work offline.
-
-`hatch version` and `hatch --version` show the CLI package version, source
-commit and commit time. `hatch version --json` preserves `version` and adds
-`commit` (full SHA) and `commitTime` (ISO 8601 with timezone). These identify
-the CLI binary itself, independently of the connected platform. Missing build
-metadata is displayed as `Unknown` and represented as `null` in JSON.
 `--json` writes a single JSON result or `{ok:false,error:{code,message}}` to
 stdout; progress/device instructions use stderr. Branch on code, not prose.
 Secrets are redacted; raw exception/auth response diagnostics are not printed.
