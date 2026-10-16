@@ -1,5 +1,4 @@
-import { Button, Group, Stack, Text } from '@mantine/core';
-import { IconCopy } from '@tabler/icons-react';
+import { Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import copy from 'copy-to-clipboard';
 import { toast } from 'sonner';
 import { buildInfo } from '~/build-info';
@@ -12,26 +11,30 @@ export function AboutPanel() {
         <Text size="sm" fw={600}>
           Commit
         </Text>
-        <Group gap="sm">
-          <Text size="sm" ff="monospace" style={{ overflowWrap: 'anywhere' }}>
-            {commit ?? 'Unknown'}
-          </Text>
-          {commit && (
-            <Button
+        {commit ? (
+          <Tooltip label="Copy commit SHA" withArrow>
+            <UnstyledButton
               type="button"
-              variant="subtle"
-              size="compact-xs"
-              leftSection={<IconCopy size={14} />}
+              aria-label={`Copy commit SHA ${commit}`}
+              ff="monospace"
+              fz="sm"
+              w="fit-content"
+              maw="100%"
+              style={{ overflowWrap: 'anywhere' }}
               onClick={async () => {
                 if (await copy(commit).catch(() => false))
                   toast.success('Commit SHA copied');
                 else toast.error('Could not copy commit SHA');
               }}
             >
-              Copy SHA
-            </Button>
-          )}
-        </Group>
+              {commit}
+            </UnstyledButton>
+          </Tooltip>
+        ) : (
+          <Text size="sm" ff="monospace">
+            Unknown
+          </Text>
+        )}
       </Stack>
       <Stack gap="xs">
         <Text size="sm" fw={600}>
