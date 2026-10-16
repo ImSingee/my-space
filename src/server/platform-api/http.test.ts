@@ -51,6 +51,40 @@ function call(body: string, headers: Record<string, string> = {}) {
 }
 afterEach(() => vi.restoreAllMocks());
 describe('public RPC error transport', () => {
+  it('classifies unsupported or missing content types with a public error detail', async () => {
+    for (const contentType of [
+      'text/plain',
+      'application/x-www-form-urlencoded',
+      'multipart/form-data',
+      undefined,
+    ]) {
+      const headers = new Headers({ 'connect-protocol-version': '1' });
+      if (contentType) headers.set('content-type', contentType);
+      const response = await handlePlatformApiRequest(
+        new Request(endpoint, {
+          method: 'POST',
+          headers,
+          body: new TextEncoder().encode('{"id":"fixture-private-input"}'),
+        }),
+      );
+      expect(response.status).toBe(415);
+      expect(response.headers.get('content-type')).toContain(
+        'application/json',
+      );
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      const text = await response.text();
+      expect(text).not.toContain('fixture-private-input');
+      const error = errorFromJson(
+        JSON.parse(text),
+        undefined,
+        new ConnectError('Invalid error'),
+      );
+      expect(error.code).toBe(Code.InvalidArgument);
+      expect(error.findDetails(PublicErrorSchema)).toMatchObject([
+        { code: 'UNSUPPORTED_MEDIA_TYPE', httpStatus: 415 },
+      ]);
+    }
+  });
   it('preserves business errors after actual gzip compression without stale framing', async () => {
     const compressed = vi.spyOn(compressionGzip, 'compress');
     const response = await call('{"id":"conflict"}', {

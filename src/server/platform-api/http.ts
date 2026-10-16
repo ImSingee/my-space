@@ -85,6 +85,14 @@ export async function handlePlatformApiRequest(
         }),
       );
     let response = await handler(request);
+    // Protocol negotiation rejects media types before interceptors, without JSON.
+    if (response.status === 415)
+      return secureResponse(
+        Response.json(
+          errorToJson(publicApiError('UNSUPPORTED_MEDIA_TYPE'), undefined),
+          { status: 415 },
+        ),
+      );
     // Decoder failures happen outside interceptors and may quote request values.
     if (
       response.status >= 400 &&
