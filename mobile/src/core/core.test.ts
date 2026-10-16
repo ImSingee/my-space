@@ -87,6 +87,60 @@ afterEach(() => {
 });
 
 describe('instance and credential boundaries', () => {
+  it('uses existing v1 App shapes and generic Agent resources without a mobile namespace', async () => {
+    const app = {
+      id: 'app-1',
+      slug: 'example',
+      name: 'Example',
+      description: null,
+      status: 'deployed',
+      createdAt: '2026-10-16T00:00:00Z',
+      updatedAt: '2026-10-16T00:00:00Z',
+    };
+    const session = {
+      id: 'session-1',
+      title: 'Example',
+      messages: [],
+      activeRun: null,
+      runs: [],
+      appIds: [],
+      providerId: null,
+      modelId: null,
+      updatedAt: app.updatedAt,
+      serverTime: app.updatedAt,
+    };
+    const handoff = {
+      ticket: 'a'.repeat(43),
+      url: `${origin}/api/v1/auth/handoffs/consume`,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      targetPath: '/app/example/embed/',
+    };
+    const fetcher = vi
+      .fn<FetchLike>()
+      .mockResolvedValueOnce(json([app]))
+      .mockResolvedValueOnce(json(app))
+      .mockResolvedValueOnce(json([]))
+      .mockResolvedValueOnce(json({ id: session.id }, 201))
+      .mockResolvedValueOnce(json(session))
+      .mockResolvedValueOnce(json(handoff));
+    const { client, vault } = setup(fetcher);
+    await vault.set(origin, 'fixture-token');
+    expect(await client.apps()).toEqual([app]);
+    expect(await client.app(app.id)).toEqual(app);
+    expect(await client.sessions(app.id)).toEqual([]);
+    expect(await client.createSession()).toEqual({ id: session.id });
+    expect(await client.session(session.id)).toEqual(session);
+    expect(await client.handoff(app.id)).toEqual(handoff);
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${origin}/api/v1/apps`,
+      `${origin}/api/v1/apps/app-1`,
+      `${origin}/api/v1/agent/sessions?appId=app-1`,
+      `${origin}/api/v1/agent/sessions`,
+      `${origin}/api/v1/agent/sessions/session-1`,
+      `${origin}/api/v1/apps/app-1/handoffs`,
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[5][1].body as string)).toEqual({});
+  });
   it('canonicalizes HTTPS origins while rejecting normalized path tricks and credential-bearing URLs', () => {
     expect(canonicalizeInstanceUrl('https://HATCH.example.test:443/')).toBe(
       origin,
@@ -139,7 +193,7 @@ describe('instance and credential boundaries', () => {
   it('hands off through an origin-checked form POST without URL or cookie credentials', () => {
     const handoff = {
       ticket: 'a'.repeat(32),
-      url: `${origin}/api/mobile/v1/handoffs/consume`,
+      url: `${origin}/api/v1/auth/handoffs/consume`,
       targetPath: '/app/example-app/embed/',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
@@ -170,7 +224,7 @@ describe('instance and credential boundaries', () => {
       expect(() => apiPath(origin, path)).toThrow(MobileError);
     }
     const valid = {
-      url: `${origin}/api/mobile/v1/handoffs/consume`,
+      url: `${origin}/api/v1/auth/handoffs/consume`,
       ticket: 'a'.repeat(32),
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
       targetPath: '/app/demo/embed/',
@@ -179,7 +233,7 @@ describe('instance and credential boundaries', () => {
     expect(() =>
       validateHandoff(origin, {
         ...valid,
-        url: 'https://evil.test/api/mobile/v1/handoffs/consume',
+        url: 'https://evil.test/api/v1/auth/handoffs/consume',
       }),
     ).toThrow(MobileError);
     expect(() =>
@@ -237,7 +291,7 @@ describe('instance and credential boundaries', () => {
       code: 'redirect_blocked',
     });
     const [url, options] = fetcher.mock.calls[0];
-    expect(url).toBe(`${origin}/api/mobile/v1/apps`);
+    expect(url).toBe(`${origin}/api/v1/apps`);
     expect(url).not.toContain('fixture-token');
     expect(options.redirect).toBe('error');
     expect(options.credentials).toBe('omit');
@@ -255,7 +309,7 @@ describe('instance and credential boundaries', () => {
     const fetcher = vi
       .fn<FetchLike>()
       .mockResolvedValueOnce(json({ access_token: 'fixture-token' }))
-      .mockResolvedValueOnce(json({ apps: [] }))
+      .mockResolvedValueOnce(json([]))
       .mockResolvedValueOnce(stream([event(1, { type: 'done' })]));
     const { client, vault } = setup(fetcher);
     const signal = new AbortController().signal;
@@ -477,14 +531,12 @@ describe('request lifecycle races', () => {
     expect(await vault.get(origin)).toBe('fixture-token');
     expect(vi.getTimerCount()).toBe(0);
   });
-  it('rejects incompatible API versions before a client enters the app', async () => {
+  it('rejects missing interactive APIs and malformed model catalogs before entering the app', async () => {
     const fetcher = vi
       .fn<FetchLike>()
+      .mockResolvedValueOnce(json({ code: 'NOT_FOUND' }, 404))
       .mockResolvedValueOnce(
-        json({ apiVersion: 2, providers: [], defaultModel: null }),
-      )
-      .mockResolvedValueOnce(
-        json({ apiVersion: 1, providers: 'invalid', defaultModel: null }),
+        json({ providers: 'invalid', defaultModel: null }),
       );
     const { client, vault } = setup(fetcher);
     await vault.set(origin, 'fixture-token');

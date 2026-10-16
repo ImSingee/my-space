@@ -7,48 +7,25 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export type AppCapabilities = {
-  database: boolean;
-  frontend: boolean;
-  widgets: boolean;
-  backend: boolean;
-  cron: boolean;
-  webhook: boolean;
-  storage?: boolean;
-  kv: boolean;
-  dataTable?: boolean;
-};
 export type AppSummary = {
   id: string;
   slug: string;
   name: string;
   description: string | null;
   status: string;
-  capabilities: AppCapabilities | null;
   createdAt: string;
   updatedAt: string;
 };
-export type AppDetail = AppSummary & {
-  deploymentRevision: string | null;
-  compatibility: {
-    version: number;
-    latestVersion: number;
-    minimumSupportedVersion: number;
-    isSupported: boolean;
-    isLatest: boolean;
-  } | null;
-};
+export type AppDetail = AppSummary;
 export type Model = {
   id: string;
   modelId: string;
   name: string;
   reasoning: boolean;
-  input: string[];
   contextWindow: number;
   maxTokens: number;
 };
-export type MobileConfig = {
-  apiVersion: 1;
+export type AgentModelCatalog = {
   providers: { id: string; name: string; models: Model[] }[];
   defaultModel: { providerId: string; modelId: string } | null;
 };
