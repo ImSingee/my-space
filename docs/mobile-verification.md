@@ -1,5 +1,68 @@
 # Mobile verification
 
+## SDK 58 follow-up on macOS — 2026-10-16 UTC
+
+This follow-up upgrades the mobile project from `664ab2f` to Expo 58.0.12,
+React 19.3.0, React Native 0.88.0, Router 58.0.21, `@expo/ui` 58.0.19 and
+WebView 14.0.1 using Expo's compatibility metadata. The SDK 57 record below
+remains historical; its media is not described as SDK 58 execution.
+
+The ignored iOS project was regenerated with the new scene lifecycle and the
+private-networking plugin, then compiled through Xcode 27 beta 5 (`27A5237l`).
+The Expo wrapper exited without producing a new binary, so the generated
+`Hatch.xcworkspace`/`Hatch` scheme was built directly with `xcodebuild`.
+The final Simulator build used normal ad-hoc signing (`CODE_SIGN_IDENTITY=-`)
+and was installed on both dedicated iPhone 17 Pro/iOS 27 (402×874 points) and
+iPhone SE 3/iOS 26 (375×667 points). An earlier unsigned diagnostic build could
+not read its saved Keychain session; the final signed build restored the
+existing session without resetting authentication data. No Apple signing
+credential, physical-device, Android, distribution, or Expo Go test is claimed.
+
+Actual Computer Use and Simulator interactions found and repaired Router 58
+layout changes: the transparent default header covered Home's segmented control
+and short conversation history. These screens and the App WebView now use the
+supported opaque system header. Home assigns safe-area ownership to React Native
+so its SwiftUI form does not intercept segmented-control touches. Left/right
+safe areas avoid double-counting the top navigation inset. Both Home segments,
+short histories, WebView, compact keyboard and large text were retested.
+
+Fresh SDK 58 evidence covers saved-session/cold restore, invalid-origin rejection,
+browser cancellation, normal A/B device authorization with matched codes and
+explicit approval, return to the native app, separate App lists, sign-out and
+cleared drafts on returning to A. Existing fixture credentials were used only
+in the normal local login forms; password entry was excluded from recordings.
+The test App used the real one-use POST handoff and prompted before an external
+link. No production data or external message delivery was used.
+
+The real Runner and deterministic local provider exercised native model choice,
+streaming, single-choice/Other in both directions, multiple answers, accepted
+answer waiting while the Runner was paused, and tool output. The answer request
+contained only `Orange` for the single-choice question, returned HTTP 200 once,
+and resumed after the Runner continued. Photos and Files were selected through
+the system pickers. An unsupported image model retained the draft; selecting a
+supported model sent the photo and 64-byte file. Navigation retained the draft,
+successful sending cleared it, and logout/source switching removed it.
+
+Client offline/background recovery, Runner TCP loss/reconnect, and cold history
+were exercised. The recovered server transcript contained all 200 unique tokens
+from `token-000` through `token-199`. Stop addressed its actual run ID and returned
+200; a real injected provider 503 offered manual Retry, which completed after
+restoration. Compact default and large Dynamic Type, light/dark mode, native
+model menus, visible software keyboard, and a return-key/newline plus continued
+input were inspected. The model received `SDK58 compact\nQ` unchanged.
+
+Expo doctor passed 20/20; frozen-lockfile installation, iOS bundle export,
+root/mobile types, formatting/lint and all 33 mobile tests passed. The full local
+unit run had 1,442 passes, 26 skips and two timeouts while native builds and host
+disconnections competed for resources; both affected files passed a serial
+rerun (38 tests). Exact-SHA remote CI is reported separately on the Draft PR.
+
+This SDK upgrade adds no schema, compatibility/protocol version, telemetry or
+product feature. Earlier boundary-fault probes are retained with their original
+provenance only where the underlying pure client/server behavior is unchanged;
+they are not fresh SDK 58 runtime evidence. See the same acceptance history:
+<https://app.lobehub.com/acceptance/f2e97780-8df7-4fe9-b081-f921932239fe>.
+
 ## Native follow-up on macOS — 2026-10-15/16
 
 The earlier Linux-only record below is historical. The development client was
