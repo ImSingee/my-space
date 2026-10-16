@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert, View } from 'react-native';
+import { Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { webViewHandoffSource } from '../../src/core';
 import { useSession } from '../../src/state/session';
@@ -43,10 +44,11 @@ export default function AppScreen() {
   };
   const data = handoff.data;
   return (
-    <View style={styles.screen}>
+    <SafeAreaView style={styles.screen} edges={['left', 'right']}>
       <Stack.Screen
         options={{
           title: app.data?.name ?? 'App',
+          headerTransparent: false,
           headerRight: () => (
             <Action compact secondary label="Reload" onPress={retry} />
           ),
@@ -127,6 +129,6 @@ export default function AppScreen() {
           style={{ flex: 1, backgroundColor: c.background }}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
