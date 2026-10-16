@@ -88,6 +88,18 @@ scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
 is behind a domain or reverse proxy, set `APP_URL` to that external origin
 (for example, `https://hatch.example.com`).
 
+**Settings → About** shows the platform's source commit and commit time.
+The CLI bundled in the same image reports that revision with `hatch version`
+or `hatch version --json`. GitHub Actions passes the checked-out SHA and
+committer timestamp into the Docker build; these values are embedded at build
+time and cannot be overridden by container runtime environment variables.
+
+For manual image builds, pass both `--build-arg HATCH_BUILD_COMMIT=<full-sha>`
+and `--build-arg HATCH_BUILD_COMMIT_TIME=<ISO-8601-time-with-timezone>`.
+Ordinary local platform and CLI builds read the local Git checkout automatically.
+Source archives without Git or explicit metadata display `Unknown`. Supplying
+only one build argument or invalid metadata fails the build.
+
 Passkeys use the `APP_URL` hostname as their relying-party ID. Keep that
 hostname stable after users register passkeys, and use HTTPS in production
 (`http://localhost` is supported for local development). Password sign-in

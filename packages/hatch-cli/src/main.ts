@@ -1,4 +1,5 @@
 import manifest from '../package.json' with { type: 'json' };
+import { buildInfo } from '../../../src/build-info';
 import { commandDefinitions, globalOptions } from './commands';
 import { runAuth } from './auth';
 import { runLifecycle } from './lifecycle';
@@ -57,7 +58,10 @@ try {
   } else if (name === 'version' || name === '--version') {
     if (args.some((arg) => !['version', '--version', '--json'].includes(arg)))
       throw new CliError('invalid_arguments', 'Version accepts only --json.');
-    output({ version: manifest.version }, manifest.version);
+    output(
+      { version: manifest.version, ...buildInfo },
+      `${manifest.version}\nCommit: ${buildInfo.commit?.slice(0, 12) ?? 'Unknown'}\nCommit time: ${buildInfo.commitTime ?? 'Unknown'}`,
+    );
   } else if (name === 'auth') {
     if (!['login', 'status', 'logout'].includes(operation))
       throw new CliError(

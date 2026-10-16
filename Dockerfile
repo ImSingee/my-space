@@ -31,8 +31,11 @@ RUN pnpm install --frozen-lockfile
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+ARG HATCH_BUILD_COMMIT
+ARG HATCH_BUILD_COMMIT_TIME
 # Migrations run at server startup (nitro plugin), not during the build.
-RUN pnpm build
+RUN HATCH_BUILD_COMMIT="$HATCH_BUILD_COMMIT" \
+    HATCH_BUILD_COMMIT_TIME="$HATCH_BUILD_COMMIT_TIME" pnpm build
 
 # --- Runtime image -----------------------------------------------------------
 FROM base AS runner
