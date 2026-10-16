@@ -1,4 +1,5 @@
-import { Stack } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { useColorScheme } from 'react-native';
 import { SessionProvider, useSession } from '../src/state/session';
 import { Busy, usePalette } from '../src/ui/primitives';
 
@@ -10,10 +11,7 @@ function Navigation() {
     <Stack
       key={epoch}
       screenOptions={{
-        headerTintColor: c.accent,
-        headerStyle: { backgroundColor: c.background },
         contentStyle: { backgroundColor: c.background },
-        headerShadowVisible: false,
         statusBarStyle: c.dark ? 'light' : 'dark',
       }}
     >
@@ -40,9 +38,12 @@ function Navigation() {
 }
 
 export default function RootLayout() {
+  const dark = useColorScheme() === 'dark';
   return (
-    <SessionProvider>
-      <Navigation />
-    </SessionProvider>
+    <ThemeProvider value={dark ? DarkTheme : DefaultTheme}>
+      <SessionProvider>
+        <Navigation />
+      </SessionProvider>
+    </ThemeProvider>
   );
 }

@@ -1,3 +1,5 @@
+import { AttachmentMenu, Choice } from '../../src/ui/native-controls';
+import { NativeField } from '../../src/ui/native-field';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
@@ -10,16 +12,11 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
-  Modal,
   Platform,
-  Pressable,
   ScrollView,
   View,
 } from 'react-native';
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AskAnswer, JsonValue } from '../../src/core';
 import { useSession } from '../../src/state/session';
 import { useChatDraft, type Picked } from '../../src/state/use-chat-draft';
@@ -32,7 +29,6 @@ import {
   Busy,
   Notice,
   Text,
-  TextInput,
   errorText,
   styles,
   usePalette,
@@ -51,7 +47,6 @@ export default function ChatScreen() {
     providerId: string;
     modelId: string;
   } | null>(null);
-  const [showModels, setShowModels] = useState(false);
   const [submittedAnswer, setSubmittedAnswer] = useState<{
     runId: string;
     askId: string;
@@ -213,7 +208,8 @@ export default function ChatScreen() {
     },
   });
   const cancel = useMutation({
-    mutationFn: () => api!.cancelRun(runId!, lifetimeSignal()),
+    mutationFn: (targetRunId: string) =>
+      api!.cancelRun(targetRunId, lifetimeSignal()),
     onSuccess: refresh,
     onError: (error) => {
       if (!lifetimeSignal().aborted) setProblem(errorText(error));
@@ -509,37 +505,62 @@ export default function ChatScreen() {
             keyboardShouldPersistTaps="handled"
           >
             {problem ? (
-              <Pressable onPress={() => setProblem(null)}>
+              <View>
                 <Text
                   accessibilityRole="alert"
                   style={[styles.caption, { color: c.danger }]}
                 >
                   {problem}
                 </Text>
-              </Pressable>
+                <Action
+                  compact
+                  secondary
+                  label="Dismiss message"
+                  onPress={() => setProblem(null)}
+                />
+              </View>
             ) : null}
             <View style={styles.row}>
-              <Pressable
+              <Choice
+                label="Model"
+                value={
+                  selectedModel
+                    ? `${selectedModel.providerId}:${selectedModel.modelId}`
+                    : ''
+                }
+                options={
+                  choices.length
+                    ? choices.map((item) => ({
+                        label: `${item.providerName} · ${item.name}`,
+                        value: `${item.providerId}:${item.modelId}`,
+                      }))
+                    : [
+                        {
+                          label: 'Configure a provider in Hatch web',
+                          value: '',
+                        },
+                      ]
+                }
                 disabled={Boolean(runId) || busy}
-                onPress={() => setShowModels(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Choose model"
-                style={{ flex: 1, minHeight: 34, justifyContent: 'center' }}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[styles.caption, { color: c.accent }]}
-                >
-                  {choice
-                    ? `${choice.providerName} · ${choice.name}`
-                    : (selectedModel?.modelId ?? 'Choose a model')}{' '}
-                  ⌄
-                </Text>
-              </Pressable>
+                onChange={(value) => {
+                  const item = choices.find(
+                    (option) =>
+                      `${option.providerId}:${option.modelId}` === value,
+                  );
+                  if (item)
+                    setModel({
+                      providerId: item.providerId,
+                      modelId: item.modelId,
+                    });
+                }}
+              />
               {runId ? (
-                <Pressable
+                <Action
+                  compact
+                  secondary
+                  danger
+                  label={cancel.isPending ? 'Stopping…' : 'Stop'}
                   disabled={cancel.isPending}
-                  accessibilityRole="button"
                   onPress={() =>
                     Alert.alert(
                       'Stop this run?',
@@ -549,86 +570,63 @@ export default function ChatScreen() {
                         {
                           text: 'Stop',
                           style: 'destructive',
-                          onPress: () => cancel.mutate(),
+                          onPress: () => cancel.mutate(runId),
                         },
                       ],
                     )
                   }
-                >
-                  <Text style={{ color: c.danger }}>
-                    {cancel.isPending ? 'Stopping…' : 'Stop'}
-                  </Text>
-                </Pressable>
+                />
               ) : null}
             </View>
+            {config.error ? (
+              <Notice
+                title="Couldn’t load models"
+                detail={errorText(config.error)}
+                action={{
+                  label: 'Try again',
+                  onPress: () => void config.refetch(),
+                }}
+              />
+            ) : null}
             {files.length ? (
               <ScrollView horizontal contentContainerStyle={{ gap: 8 }}>
                 {files.map((file) => (
-                  <Pressable
+                  <Action
                     key={file.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${file.name}`}
+                    compact
+                    secondary
+                    label={`Remove ${file.image ? 'photo' : file.name}`}
                     disabled={busy}
                     onPress={() =>
                       setFiles((value) =>
                         value.filter((item) => item.id !== file.id),
                       )
                     }
-                    style={{
-                      backgroundColor: c.subtle,
-                      padding: 10,
-                      borderRadius: 10,
-                    }}
-                  >
-                    <Text style={[styles.caption, { color: c.text }]}>
-                      {file.image ? 'Photo' : file.name} ×
-                    </Text>
-                  </Pressable>
+                  />
                 ))}
               </ScrollView>
             ) : null}
-            <TextInput
-              accessibilityLabel="Message your Agent"
+            <NativeField
+              label="Message your Agent"
               maxLength={50000}
               multiline
               value={draft}
-              onChangeText={setDraft}
-              editable={!busy}
+              onChange={setDraft}
+              unavailable={busy}
               placeholder={
                 runId
                   ? 'Draft your next message…'
                   : 'What would you like to make?'
               }
-              placeholderTextColor={c.muted}
-              style={[
-                styles.input,
-                {
-                  color: c.text,
-                  borderColor: c.border,
-                  maxHeight: 150,
-                  minHeight: 52,
-                },
-              ]}
             />
           </ScrollView>
           <View style={styles.row}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy || files.length >= 6}
-              onPress={() =>
-                Alert.alert('Attach to this message', undefined, [
-                  {
-                    text: 'Photo library',
-                    onPress: () => void choose('photo'),
-                  },
-                  { text: 'Choose files', onPress: () => void choose('file') },
-                  { text: 'Cancel', style: 'cancel' },
-                ])
-              }
-              style={{ flex: 1, minHeight: 44, justifyContent: 'center' }}
-            >
-              <Text style={{ color: c.accent }}>＋ Attach</Text>
-            </Pressable>
+            <View style={{ flex: 1 }}>
+              <AttachmentMenu
+                disabled={busy || files.length >= 6}
+                onChoose={(kind) => void choose(kind)}
+              />
+            </View>
             <Action
               label={send.isPending ? 'Sending…' : 'Send'}
               disabled={
@@ -641,53 +639,6 @@ export default function ChatScreen() {
             />
           </View>
         </View>
-        <Modal
-          visible={showModels}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setShowModels(false)}
-        >
-          <SafeAreaView
-            style={[styles.screen, { backgroundColor: c.background }]}
-          >
-            <ScrollView contentContainerStyle={styles.content}>
-              <Text style={[styles.heading, { color: c.text }]}>
-                Choose a model
-              </Text>
-              {config.error ? (
-                <Notice
-                  title="Couldn’t load models"
-                  detail={errorText(config.error)}
-                  action={{
-                    label: 'Try again',
-                    onPress: () => void config.refetch(),
-                  }}
-                />
-              ) : null}
-              {!choices.length ? (
-                <Text style={[styles.body, { color: c.muted }]}>
-                  Configure and enable a provider model in Hatch web to start a
-                  conversation.
-                </Text>
-              ) : null}
-              {choices.map((item) => (
-                <Action
-                  key={`${item.providerId}:${item.modelId}`}
-                  secondary
-                  label={`${item.providerName} · ${item.name}`}
-                  onPress={() => {
-                    setModel({
-                      providerId: item.providerId,
-                      modelId: item.modelId,
-                    });
-                    setShowModels(false);
-                  }}
-                />
-              ))}
-              <Action label="Done" onPress={() => setShowModels(false)} />
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
       </KeyboardAvoidingView>
     </View>
   );

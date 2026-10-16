@@ -13,6 +13,9 @@ allowBuilds:
   prisma: false
   protobufjs: false
 
+minimumReleaseAgeExclude:
+  - '@expo/ui@57.0.25'
+
 overrides:
   'protobufjs@7.6.4': 7.6.5
   'seroval@<=1.5.2': ^1.5.3

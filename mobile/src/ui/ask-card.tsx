@@ -1,15 +1,10 @@
+import { Choice, OptionToggle } from './native-controls';
+import { NativeField } from './native-field';
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import type { AskAnswer, PendingAsk } from '../core';
 import { updateAskAnswer } from '../core/ask-answer';
-import {
-  Action,
-  Card,
-  Text,
-  TextInput,
-  styles,
-  usePalette,
-} from './primitives';
+import { Action, Card, Text, styles, usePalette } from './primitives';
 
 export function AskCard({
   ask,
@@ -34,53 +29,58 @@ export function AskCard({
           <Text style={[styles.body, { color: c.text, fontWeight: '600' }]}>
             {question.prompt}
           </Text>
-          {question.options.map((option) => {
-            const selected = get(question.id).selectedOptionIds.includes(
-              option.id,
-            );
-            return (
-              <Pressable
+          {question.allowMultiple ? (
+            question.options.map((option) => (
+              <OptionToggle
                 key={option.id}
-                accessibilityRole={
-                  question.allowMultiple ? 'checkbox' : 'radio'
-                }
-                accessibilityState={{ checked: selected, disabled: busy }}
-                disabled={busy}
-                onPress={() => {
+                label={option.label}
+                selected={get(question.id).selectedOptionIds.includes(
+                  option.id,
+                )}
+                unavailable={busy}
+                onChange={() =>
                   setAnswers((value) => ({
                     ...value,
                     [question.id]: updateAskAnswer(
                       question,
                       value[question.id],
-                      {
-                        optionId: option.id,
-                      },
+                      { optionId: option.id },
+                    ),
+                  }))
+                }
+              />
+            ))
+          ) : question.options.length ? (
+            <Choice
+              label="Choose an answer"
+              value={get(question.id).selectedOptionIds[0] ?? ''}
+              options={[
+                { label: 'Choose an option or write below', value: '' },
+                ...question.options.map((option) => ({
+                  label: option.label,
+                  value: option.id,
+                })),
+              ]}
+              disabled={busy}
+              onChange={(optionId) => {
+                if (optionId)
+                  setAnswers((value) => ({
+                    ...value,
+                    [question.id]: updateAskAnswer(
+                      question,
+                      value[question.id],
+                      { optionId },
                     ),
                   }));
-                }}
-                style={{
-                  minHeight: 46,
-                  padding: 13,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: selected ? c.accent : c.border,
-                  backgroundColor: selected ? c.subtle : c.card,
-                }}
-              >
-                <Text style={{ color: c.text }}>
-                  {selected ? '✓  ' : ''}
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-          <TextInput
-            accessibilityLabel={`Other answer: ${question.prompt}`}
+              }}
+            />
+          ) : null}
+          <NativeField
+            label={`Other answer: ${question.prompt}`}
             placeholder="Or write your own answer…"
-            placeholderTextColor={c.muted}
-            value={get(question.id).customText}
-            editable={!busy}
-            onChangeText={(customText) =>
+            value={get(question.id).customText ?? ''}
+            unavailable={busy}
+            onChange={(customText) =>
               setAnswers((value) => ({
                 ...value,
                 [question.id]: updateAskAnswer(question, value[question.id], {
@@ -88,7 +88,6 @@ export function AskCard({
                 }),
               }))
             }
-            style={[styles.input, { color: c.text, borderColor: c.border }]}
           />
         </View>
       ))}
