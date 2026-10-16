@@ -63,7 +63,6 @@ async function seedModel(providerId: string, modelId: string, name: string) {
     modelId,
     name: `${name} Model`,
     reasoning: true,
-    input: ['text', 'image'],
     contextWindow: 128_000,
     maxTokens: 8_192,
   });

@@ -115,14 +115,15 @@ async function deviceLogin(
   let interval =
     typeof grant.interval === 'number' ? grant.interval * 1000 : 5000;
   while (Date.now() < expires) {
+    const remaining = expires - Date.now();
     try {
-      await delay(Math.min(interval, expires - Date.now()), undefined, {
+      await delay(Math.min(interval, remaining), undefined, {
         signal,
       });
     } catch {
       throw new CliError('cancelled', 'Cancelled.', 130);
     }
-    if (Date.now() >= expires) break;
+    if (interval >= remaining || Date.now() >= expires) break;
     const result = await request(url, '/api/auth/device/token', {
       body: {
         client_id: 'hatch-cli',

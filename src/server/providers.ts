@@ -19,7 +19,6 @@ export type ProviderModel = {
   reasoning: boolean;
   contextWindow: number;
   maxTokens: number;
-  input: string[];
   enabled: boolean;
   sortOrder: number;
 };
@@ -77,7 +76,6 @@ export const listProviders = createServerFn({ method: 'GET' })
           reasoning: m.reasoning,
           contextWindow: m.contextWindow,
           maxTokens: m.maxTokens,
-          input: m.input,
           enabled: m.enabled,
           sortOrder: m.sortOrder,
         })),
@@ -161,7 +159,6 @@ const createModelSchema = z.object({
   reasoning: z.boolean().default(false),
   contextWindow: z.number().int().positive().default(128000),
   maxTokens: z.number().int().positive().default(8192),
-  input: z.array(z.string()).default(['text']),
 });
 
 export const createModel = createServerFn({ method: 'POST' })
@@ -179,7 +176,6 @@ export const createModel = createServerFn({ method: 'POST' })
         reasoning: data.reasoning,
         contextWindow: data.contextWindow,
         maxTokens: data.maxTokens,
-        input: data.input,
       })
       .returning();
     return { id: row.id };

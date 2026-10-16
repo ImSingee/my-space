@@ -494,8 +494,6 @@ export const agentModels = snakeCase.table('agent_models', {
   modelId: text().notNull(),
   name: text().notNull(),
   reasoning: boolean().notNull().default(false),
-  /** Supported input modalities, e.g. ["text"] or ["text","image"]. */
-  input: jsonb().$type<string[]>().notNull().default(['text']),
   contextWindow: integer().notNull().default(128000),
   maxTokens: integer().notNull().default(8192),
   enabled: boolean().notNull().default(true),

@@ -76,7 +76,8 @@ Then open [http://localhost:3700](http://localhost:3700) and:
    and turn off **Allow sign-up**. It takes effect immediately, no redeploy
    needed — and you can reopen it from the same place to invite someone.
 3. **Connect your AI** — go to **Settings → Providers** and add your model
-   provider API key.
+   provider API key. Attached images are sent to every model without a separate
+   image-capability setting.
 4. **Build your first app** — open the agent and ask for something you have
    always wanted.
 

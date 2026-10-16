@@ -47,7 +47,6 @@ const fixtures = vi.hoisted(() => ({
           reasoning: true,
           contextWindow: 128_000,
           maxTokens: 8_192,
-          input: ['text'],
           enabled: true,
           sortOrder: 0,
         },

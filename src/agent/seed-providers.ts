@@ -20,7 +20,6 @@ type SeedProvider = {
     modelId: string;
     name: string;
     reasoning: boolean;
-    input: Array<'text' | 'image'>;
     contextWindow: number;
     maxTokens: number;
   }>;
@@ -40,7 +39,6 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'gpt-5.6-sol',
         name: 'GPT-5.6 Sol',
         reasoning: true,
-        input: ['text', 'image'],
         contextWindow: 1050000,
         maxTokens: 128000,
       },
@@ -48,7 +46,6 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'gpt-5.5',
         name: 'GPT-5.5',
         reasoning: true,
-        input: ['text', 'image'],
         contextWindow: 1050000,
         maxTokens: 128000,
       },
@@ -67,7 +64,6 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'claude-fable-5',
         name: 'Claude Fable 5',
         reasoning: true,
-        input: ['text', 'image'],
         contextWindow: 1000000,
         maxTokens: 128000,
       },
@@ -75,7 +71,6 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'claude-opus-4-8',
         name: 'Claude Opus 4.8',
         reasoning: true,
-        input: ['text', 'image'],
         contextWindow: 1000000,
         maxTokens: 128000,
       },
@@ -83,7 +78,6 @@ const DEFAULTS: SeedProvider[] = [
         modelId: 'claude-sonnet-5',
         name: 'Claude Sonnet 5',
         reasoning: true,
-        input: ['text', 'image'],
         contextWindow: 1000000,
         maxTokens: 128000,
       },
@@ -124,7 +118,6 @@ export async function seedDefaultProviders(): Promise<boolean> {
           reasoning: m.reasoning,
           contextWindow: m.contextWindow,
           maxTokens: m.maxTokens,
-          input: m.input,
           sortOrder: index,
         })),
       );
