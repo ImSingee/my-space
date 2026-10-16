@@ -1,20 +1,15 @@
+import { FormButton } from '../src/ui/form-button';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert, ScrollView } from 'react-native';
+import { Alert } from 'react-native';
+import { FieldGroup, Host, Text } from '@expo/ui';
+import { textSelection } from '@expo/ui/swift-ui/modifiers';
 import { useSession } from '../src/state/session';
-import {
-  Action,
-  Card,
-  Text,
-  errorText,
-  styles,
-  usePalette,
-} from '../src/ui/primitives';
+import { errorText, styles } from '../src/ui/primitives';
 
 export default function SettingsScreen() {
   const { origin, disconnect } = useSession();
-  const c = usePalette();
   const [busy, setBusy] = useState(false);
   const signOut = () =>
     Alert.alert(
@@ -37,54 +32,54 @@ export default function SettingsScreen() {
       ],
     );
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      contentInsetAdjustmentBehavior="automatic"
-    >
-      <Card>
-        <Text style={[styles.label, { color: c.muted }]}>
-          CONNECTED INSTANCE
-        </Text>
-        <Text selectable style={[styles.body, { color: c.text }]}>
-          {origin}
-        </Text>
-        <Text style={[styles.body, { color: c.muted }]}>
-          Your session is stored securely on this phone. Hatch accounts have
-          full access to their instance.
-        </Text>
-      </Card>
-      <Card>
-        <Text style={[styles.heading, { color: c.text }]}>
-          Keep building, anywhere
-        </Text>
-        <Text style={[styles.body, { color: c.muted }]}>
-          Your Agent runs on your Hatch server. You can leave the app and return
-          to catch up. No background execution on your phone is required.
-        </Text>
-        <Text style={[styles.caption, { color: c.muted }]}>
-          Provider setup, secrets, dashboards, and account management remain in
-          the Hatch web app.
-        </Text>
-      </Card>
-      <Action
-        label="Open Hatch web"
-        secondary
-        onPress={() => {
-          if (origin)
-            void WebBrowser.openBrowserAsync(origin).catch((error: unknown) =>
-              Alert.alert('Couldn’t open browser', errorText(error)),
-            );
-        }}
-      />
-      <Action
-        label={busy ? 'Signing out…' : 'Sign out'}
-        onPress={signOut}
-        disabled={busy}
-        secondary
-        danger
-      />
-      <Action label="Done" onPress={() => router.back()} secondary />
-    </ScrollView>
+    <Host style={styles.screen}>
+      <FieldGroup>
+        <FieldGroup.Section title="Connected instance">
+          <Text modifiers={[textSelection(true)]}>{origin ?? ''}</Text>
+          <FieldGroup.SectionFooter>
+            <Text>
+              Your session is stored securely on this phone. Hatch accounts have
+              full access to their instance.
+            </Text>
+          </FieldGroup.SectionFooter>
+        </FieldGroup.Section>
+        <FieldGroup.Section title="Keep building, anywhere">
+          <Text>
+            Your Agent runs on your Hatch server. You can leave the app and
+            return to catch up. No background execution on your phone is
+            required.
+          </Text>
+          <FieldGroup.SectionFooter>
+            <Text>
+              Provider setup, secrets, dashboards, and account management remain
+              in the Hatch web app.
+            </Text>
+          </FieldGroup.SectionFooter>
+        </FieldGroup.Section>
+        <FieldGroup.Section>
+          <FormButton
+            label="Open Hatch web"
+
+            onPress={() => {
+              if (origin)
+                void WebBrowser.openBrowserAsync(origin).catch(
+                  (error: unknown) =>
+                    Alert.alert('Couldn’t open browser', errorText(error)),
+                );
+            }}
+          />
+          <FormButton
+            label={busy ? 'Signing out…' : 'Sign out'}
+
+            unavailable={busy}
+            danger
+            onPress={signOut}
+          />
+        </FieldGroup.Section>
+        <FieldGroup.Section>
+          <FormButton label="Done" onPress={() => router.back()} />
+        </FieldGroup.Section>
+      </FieldGroup>
+    </Host>
   );
 }
