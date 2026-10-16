@@ -151,7 +151,8 @@ Interactive resources require an ordinary user session; API keys and Run JWTs
 cannot acquire conversation or browser sessions. No database migration or
 Platform/Runner, App, or Workflow compatibility-version bump is required.
 
-Deploy backend #189 before this client. Previously issued tickets expire within
+Use a backend revision including the Connect migration (#194) and the merged
+mobile API work (#189). Previously issued tickets expire within
 60 seconds; request a fresh handoff after upgrading. Rollback must pair the
 client and backend protocol revisions. See [the API contract](../docs/platform-api.md#interactive-agent-and-app-resources).
 
@@ -176,6 +177,9 @@ layout or session isolation.
 Native text fields keep their text binding on the native side. JavaScript updates
 external changes (such as selecting a recent instance or clearing a sent draft)
 without replaying each delayed edit over newer input or moving its caret.
+Submission reads the current native text snapshot. The compact composer keeps
+its text in view as the keyboard or Dynamic Type changes its available height;
+the native paperclip menu retains the accessible Attach label.
 
 Re-run prebuild and compile/install the development client after adding `@expo/ui`.
 A Metro reload cannot add a native module.
@@ -193,12 +197,13 @@ pnpm test:browser src/components/cli-auth/device-approval.browser.test.tsx
 ```
 
 The iOS export verifies Metro and Hermes bundling, not native runtime behavior.
-The Connect migration is verified with unit/contract tests, type checks and
-builds only; no Simulator or UI acceptance was run for this revision. Earlier
-macOS acceptance compiled and installed SDK58 on dedicated iOS 26/27 Simulators
-and exercised the old generic-v1 protocol. That evidence remains historical and
-does not verify Connect. Physical-device and Android acceptance remain
-unverified. See [the verification record](../docs/mobile-verification.md).
+Fresh local Connect acceptance prebuilt, compiled and installed the development
+client on dedicated iPhone 17 Pro / iOS 27 and SE 3 / iOS 26 Simulators. It covers
+browser authorization, sessions, handoffs, chat, questions, attachments, recovery
+and compact software-keyboard/Dynamic Type behavior. The evidence is retained
+locally and has not been published as round 4. Earlier generic-v1 evidence remains
+historical. Physical-device and Android acceptance remain unverified. See
+[the verification record](../docs/mobile-verification.md).
 
 ## Deliberate first-version limits
 
@@ -213,5 +218,5 @@ unverified. See [the verification record](../docs/mobile-verification.md).
   replicated. Generated application UIs remain WebViews.
 - App downloads, custom URL schemes, and arbitrary in-WebView browsing are not
   implemented. Use Hatch web for these flows.
-- No simulator/device screenshot, recording, TestFlight build, or store release
-  is claimed. The manual device checks below remain required before distribution.
+- Physical-device/Android acceptance, TestFlight builds and store distribution
+  remain separate, unperformed steps.
