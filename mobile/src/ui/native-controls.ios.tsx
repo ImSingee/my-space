@@ -13,7 +13,10 @@ import {
   disabled,
   font,
   foregroundStyle,
+  frame,
   lineLimit,
+  labelStyle,
+  accessibilityLabel,
   pickerStyle,
   tag,
   textSelection,
@@ -127,7 +130,12 @@ export function AttachmentMenu({
       <Menu
         label="Attach"
         systemImage="paperclip"
-        modifiers={[disabled(unavailable)]}
+        modifiers={[
+          disabled(unavailable),
+          labelStyle('iconOnly'),
+          accessibilityLabel('Attach'),
+          frame({ minWidth: 44, minHeight: 44 }),
+        ]}
       >
         <Button
           label="Photo library"
