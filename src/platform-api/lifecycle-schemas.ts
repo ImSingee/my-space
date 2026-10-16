@@ -1,4 +1,4 @@
-/** Neutral source lifecycle inputs shared by public API and Runner transport. */
+/** Runner and Agent tool lifecycle inputs. Public RPC uses Protovalidate. */
 import { z } from 'zod';
 import {
   APP_NAME_MAX_LENGTH,

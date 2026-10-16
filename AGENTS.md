@@ -91,6 +91,20 @@ Tests that only exercise helper internals, exact copy or DOM structure, framewor
 
 Before declaring any Agent task complete, re-run `pnpm check:types` and `pnpm format` and ensure both commands pass cleanly.
 
+## Public Platform API
+
+- CLI and native/mobile business clients use Connect RPC at `/api/rpc`.
+  Platform Web UI uses TanStack Server Functions; user App Connect and the
+  internal Platform/Runner protocol are separate contracts.
+- Edit the shared proto in `packages/hatch-platform-api/proto/`; use Buf
+  Protovalidate annotations for public request validation. Keep stateful release,
+  authorization and data-migration checks in domain services.
+- Run `pnpm platform-api:generate` after proto changes and
+  `pnpm platform-api:check` to verify formatting, lint and generated consistency.
+  Commit generated descriptors and the locked Buf dependencies.
+- Keep native Better Auth login/device/logout HTTP endpoints. Do not add REST
+  aliases, oRPC contracts or an OpenAPI endpoint for public business RPCs.
+
 ## App Compatibility Versions
 
 `src/app-compatibility.ts` owns the platform compatibility constants.

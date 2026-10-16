@@ -1,6 +1,6 @@
 # CLI authentication
 
-The installable CLI implements device/headless login, local profiles, native API key authentication, online status and explicit logout semantics. See [CLI README](../packages/hatch-cli/README.md) for env/config source priority, commands, safety, packaging and SDK preparation. `GET /api/v1/auth/status` reuses public API credential validation and projects safe session/key/Run metadata; it never accepts a locally decoded JWT as proof. CLI environment mode never persists credentials or reads `AGENT_RUNNER_TOKEN`.
+The installable CLI implements device/headless login, local profiles, native API key authentication, online status and explicit logout semantics. See [CLI README](../packages/hatch-cli/README.md) for env/config source priority, commands, safety, packaging and SDK preparation. `hatch.platform.v1.AuthService/GetStatus` reuses public API credential validation and projects safe session/key/Run metadata; it never accepts a locally decoded JWT as proof. CLI environment mode never persists credentials or reads `AGENT_RUNNER_TOKEN`.
 
 How scripts, the future `hatch` CLI and Agent Runs authenticate to the platform.
 The platform provides device authorization, user-managed API keys and Run JWTs;
@@ -39,7 +39,7 @@ in **`x-api-key`**, never in
 a URL or `Authorization: Bearer`. Bearer retains its existing device session
 and Run JWT meaning. When `x-api-key` is present it takes precedence; an invalid,
 expired, disabled, orphaned or revoked key fails with 401 even if another valid
-credential accompanies it. API keys are accepted by `/api/v1` and do
+credential accompanies it. API keys are accepted by `/api/rpc` and do
 not authenticate Settings, Better Auth, data queries or internal Runner APIs.
 
 For example, with an API key already provided in the process environment:
@@ -47,7 +47,8 @@ For example, with an API key already provided in the process environment:
 ```sh
 curl --fail --silent --show-error \
   --header "x-api-key: ${HATCH_API_KEY}" \
-  https://hatch.example.com/api/v1/apps
+  -X POST -H 'Content-Type: application/json' -H 'Connect-Protocol-Version: 1' \
+  --data '{}' https://hatch.example.com/api/rpc/hatch.platform.v1.AppService/ListApps
 ```
 
 `HATCH_API_KEY` is an example script variable, not a new platform configuration
@@ -197,66 +198,18 @@ App/Workflow compatibility versions do not change.
 Host consumption is an interface only: a trusted Host may later provide the token
 to its Agent environment. No environment injection is implemented here.
 
-## Public platform API (`/api/v1`)
+## Public platform API (`/api/rpc`)
 
-`src/server/platform-api/http.ts`. Callers authenticate with a session (Cookie or Bearer),
-a Run token, or an API key (`x-api-key`); a Bearer value with three dot-separated
-parts is treated as a Run token. An invalid Run token is rejected without falling
-back to a Cookie session. Responses are JSON with `Cache-Control: no-store` and
-`Referrer-Policy: no-referrer`. POST bodies must be `application/json` (Git
-deployment bundles up to 256 MiB, others 16 KiB), which a cross-site form cannot
-send.
+CLI and mobile business operations use the versioned Connect services; the
+platform Web UI uses TanStack Server Functions, and user App Connect remains
+separate. Better Auth device/login/logout stays on `/api/auth/*`.
 
-| Method and route                                     | Result                                              |
-| ---------------------------------------------------- | --------------------------------------------------- |
-| `GET /apps`, `/workflows`                            | Minimal inventory                                   |
-| `GET /apps/:id`, `/workflows/:id`                    | Minimal metadata including creation/generation time |
-| `GET /apps/:id/source`, `/workflows/:id/source`      | Git master commit and source bundle                 |
-| `POST /apps`, `/workflows`                           | Existing scaffold result                            |
-| `POST /apps/:id/deploy`, `/workflows/:id/deploy`     | Deployment ID, version and compatibility version    |
-| `POST /apps/:id/rollback`, `/workflows/:id/rollback` | Existing version restore result                     |
+Public RPC authentication accepts session Cookie/Bearer, API key and live Run
+JWT with explicit-key, Authorization, Cookie precedence. Invalid explicit
+credentials never fall back to a valid Cookie. Same-origin restrictions, request
+limits and credential redaction remain enforced. Calls use Connect JSON or
+binary messages and Buf Protovalidate input rules.
 
-`:id` is matched as an exact immutable ID first and only then as a slug, so a slug
-equal to another object's legacy ID cannot redirect a request. Create uses the
-existing scaffold input (`slug`, `name`, optional `description`/`pin`). Deploy uses
-`message`, `generation` (the observed metadata `createdAt`), `bundleBase64` and the
-optional data-migration approval fields. Rollback uses `{"version":1}`.
-The generated contract, strict request/output DTOs, status codes, error envelope,
-and authentication examples are documented in [platform-api.md](platform-api.md).
-No data queries, KV, secrets, providers, users or Runner controls are public.
-
-## Rollout
-
-Apply the additive migration (`pnpm migrations:apply`); it creates Better Auth's
-`device_code` table and leaves existing users, accounts and sessions untouched.
-The API key migration `20261011102409_giant_colossus` adds `apikey` and its
-lookup indexes without modifying existing tables. Apply migrations before
-deploying the updated server; the migration journal makes repeated applies
-safe. This API migration requires no new environment variables, database migration,
-or App/Workflow compatibility bump. Platform/Runner protocol stays at 18.
-Keep the new table if reverting the server; keys remain hashed and
-cannot authenticate an older server that has no key support.
-There is no feature flag. To sign every CLI out at once, delete the sessions you
-want to end; Run tokens end with their Runs or their five-minute expiry.
-
-## Verification
-
-Run `pnpm check:types`, `pnpm format`, `pnpm test:unit` and `pnpm test:browser`,
-plus the real-Postgres suite against a disposable database:
-
-```sh
-HATCH_AUTH_TEST_DATABASE_URL=postgres://... pnpm exec vitest run --project unit \
-  src/server/platform-api/auth.integration.test.ts
-```
-
-It drives real Better Auth device login, bearer sessions and sign-out, denial and
-another account's claim, the public API's authentication and ID-before-slug
-resolution, and Run tokens through an actual protocol-18 WebSocket Runner and the
-internal HTTP server. Without the variable it is skipped, never reported as
-acceptance. Browser acceptance must additionally load the built approval page,
-log in, approve and deny real requests, and inspect screenshots and network
-outcomes; `src/components/cli-auth/device-approval.browser.test.tsx` covers the
-page's decision boundaries with a stubbed `fetch` and does not replace it.
-
-Full browser acceptance additionally drives the real Account page and calls
-the public API with the very key it creates, before and after UI revocation.
+The contract, methods, errors and examples are in [platform-api.md](platform-api.md).
+Former REST URLs and `openapi.json` are removed without aliases. No database,
+App/Workflow deployment compatibility or Runner protocol migration is required.

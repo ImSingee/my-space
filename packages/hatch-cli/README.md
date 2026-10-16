@@ -1,7 +1,7 @@
 # Hatch CLI
 
-Authentication and App/Workflow source lifecycles, over the typed public oRPC
-OpenAPI contract at `/api/v1`. Requires Node >=22.19, Git and pnpm. Deno is
+Authentication and App/Workflow source lifecycles, over the public Connect RPC
+contract at `/api/rpc`. Requires Node >=22.19, Git and pnpm. Deno is
 needed to check/run authored App/Workflow code locally. No platform repository
 checkout, current-working-directory dependency, or runtime npm dependencies
 are needed by the CLI executable.
@@ -161,7 +161,7 @@ the canonical immutable ID; generation is checked locally and at deployment.
   returned compatibility object and App `dataSchemaMismatch`. Data schema and
   contents are forward-only; rollback does not undo a destructive migration.
 
-SDK preparation uses authenticated `GET /api/v1/sdk/app|workflow`: compiled
+SDK preparation uses authenticated `hatch.platform.v1.SdkService/GetSdk`: compiled
 `@hatch/app`, legacy `@hatch/data`, or `@hatch/workflow` payloads and import maps
 from the **running platform build**. Install into generated `.hatch/` atomically;
 never commit it. `pnpm install --ignore-scripts --lockfile=false` installs authored

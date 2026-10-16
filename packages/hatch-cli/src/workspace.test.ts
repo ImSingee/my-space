@@ -1,3 +1,11 @@
+import { connectNodeAdapter } from '@connectrpc/connect-node';
+import { Code, ConnectError } from '@connectrpc/connect';
+import {
+  AppService,
+  type CreateAppRequest,
+} from '../../hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import { WorkflowService } from '../../hatch-platform-api/gen/hatch/platform/v1/workflow_pb';
+import { SdkService } from '../../hatch-platform-api/gen/hatch/platform/v1/sdk_pb';
 /** Durable CLI source/data boundaries through real child processes and Git. */
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
@@ -28,107 +36,103 @@ let sdkDelay: (() => Promise<void>) | undefined;
 let resourceSlug: string;
 let createRequests: unknown[];
 const token = 'private-workspace-test-secret';
-const server = createServer(async (request, response) => {
-  const body: Buffer[] = [];
-  for await (const chunk of request) body.push(chunk);
-  const data = body.length ? JSON.parse(Buffer.concat(body).toString()) : {};
-  const row = {
+const getResource = () => ({
+  id: 'immutable',
+  slug: resourceSlug,
+  name: 'Fixture',
+  status: 'draft',
+  createdAt: generation,
+  updatedAt: generation,
+});
+function createResource(
+  data: Pick<CreateAppRequest, 'slug' | 'name' | 'pin' | 'description'>,
+) {
+  createRequests.push({
+    slug: data.slug,
+    name: data.name,
+    ...(data.pin === undefined ? {} : { pin: data.pin }),
+    ...(data.description === undefined
+      ? {}
+      : { description: data.description }),
+  });
+  resourceSlug = data.slug;
+  return {
     id: 'immutable',
     slug: resourceSlug,
     name: 'Fixture',
-    description: null,
-    status: 'draft',
-    createdAt: generation,
-    updatedAt: generation,
-  };
-  const send = (value: unknown, status = 200) => {
-    response.writeHead(status, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(value));
-  };
-  if (request.headers.authorization !== `Bearer ${token}`) {
-    send(
+    files: [
       {
-        defined: true,
-        code: 'UNAUTHORIZED',
-        status: 401,
-        message: 'Authentication required.',
+        path: 'package.json',
+        content: Buffer.from('{"type":"module","dependencies":{}}'),
       },
-      401,
-    );
+      {
+        path: 'manifest.ts',
+        content: Buffer.from(
+          'export default {id:"immutable", compatibilityVersion:1};',
+        ),
+      },
+    ],
+  };
+}
+const rpc = connectNodeAdapter({
+  requestPathPrefix: '/api/rpc',
+  requestGate: (context) => {
+    if (context.requestHeader.get('authorization') !== `Bearer ${token}`)
+      throw new ConnectError('Unauthorized', Code.Unauthenticated);
+  },
+  routes: (router) => {
+    router.service(AppService, {
+      createApp: createResource,
+      getApp: () => ({ resource: getResource() }),
+    });
+    router.service(WorkflowService, {
+      createWorkflow: createResource,
+      getWorkflow: () => ({ resource: getResource() }),
+      getWorkflowSource: () => ({
+        source: {
+          id: 'immutable',
+          masterCommit: master ?? undefined,
+          bundle: bundle === null ? undefined : Buffer.from(bundle, 'base64'),
+        },
+      }),
+      deployWorkflow: async (data) => {
+        deploys++;
+        const file = join(directory, 'uploaded.bundle');
+        await writeFile(file, data.bundle);
+        const refs = execFileSync('git', ['bundle', 'list-heads', file], {
+          encoding: 'utf8',
+        });
+        master = refs.trim().split(' ')[0];
+        return {
+          deployment: {
+            deploymentId: 'release-1',
+            version: 1,
+            compatibilityVersion: 1,
+          },
+        };
+      },
+    });
+    router.service(SdkService, {
+      getSdk: async () => {
+        await sdkDelay?.();
+        return {
+          files: [
+            { path: 'import-map.json', content: Buffer.from('{"imports":{}}') },
+          ],
+        };
+      },
+    });
+  },
+});
+const server = createServer(async (request, response) => {
+  if (loseResponse && request.url?.endsWith('/DeployWorkflow')) {
+    deploys++;
+    request.socket.destroy();
     return;
   }
-  if (
-    ['/api/v1/apps', '/api/v1/workflows'].includes(request.url ?? '') &&
-    request.method === 'POST'
-  ) {
-    createRequests.push(data);
-    resourceSlug = data.slug;
-    send(
-      {
-        id: row.id,
-        slug: resourceSlug,
-        name: row.name,
-        files: [
-          {
-            path: 'package.json',
-            contentBase64: Buffer.from(
-              '{"type":"module","dependencies":{}}',
-            ).toString('base64'),
-          },
-          {
-            path: 'manifest.ts',
-            contentBase64: Buffer.from(
-              'export default {id:"immutable", compatibilityVersion:1};',
-            ).toString('base64'),
-          },
-        ],
-      },
-      201,
-    );
-  } else if (
-    ['/api/v1/apps/immutable', '/api/v1/workflows/immutable'].includes(
-      request.url ?? '',
-    )
-  )
-    send(row);
-  else if (request.url === '/api/v1/workflows/immutable/source')
-    send({ id: row.id, masterCommit: master, bundleBase64: bundle });
-  else if (
-    ['/api/v1/sdk/app', '/api/v1/sdk/workflow'].includes(request.url ?? '')
-  ) {
-    await sdkDelay?.();
-    send({
-      files: [
-        {
-          path: 'import-map.json',
-          contentBase64: Buffer.from('{"imports":{}}').toString('base64'),
-        },
-      ],
-    });
-  } else if (request.url === '/api/v1/workflows/immutable/deploy') {
-    deploys++;
-    if (loseResponse) {
-      request.socket.destroy();
-      return;
-    }
-    const file = join(directory, 'uploaded.bundle');
-    await writeFile(file, Buffer.from(data.bundleBase64, 'base64'));
-    const refs = execFileSync('git', ['bundle', 'list-heads', file], {
-      encoding: 'utf8',
-    });
-    master = refs.trim().split(' ')[0];
-    send({ deploymentId: 'release-1', version: 1, compatibilityVersion: 1 });
-  } else
-    send(
-      {
-        defined: true,
-        code: 'NOT_FOUND',
-        status: 404,
-        message: 'Resource not found.',
-      },
-      404,
-    );
+  await rpc(request, response);
 });
+
 function run(args: string[], extra: NodeJS.ProcessEnv = {}) {
   const env = {
     ...process.env,
@@ -281,6 +285,21 @@ describe('CLI workspace safety', { timeout: 30_000 }, () => {
       expect(await readdir(directory)).toEqual(['input.json']);
     },
   );
+  it('rejects malformed create field types before a remote mutation', async () => {
+    const file = join(directory, 'input.json');
+    await writeFile(file, JSON.stringify({ slug: 'valid-slug', name: 42 }));
+    const result = await run([
+      'workflow',
+      'create',
+      '--file',
+      file,
+      '--workdir',
+      directory,
+    ]).result;
+    expect(result.code).toBe(2);
+    expect(result.data.error.code).toBe('invalid_input');
+    expect(createRequests).toEqual([]);
+  });
   it('protects existing directories, dirty trees, generation and instance bindings', async () => {
     const root = await create();
     await publish(root);

@@ -1,6 +1,6 @@
 /** Credential validity only: every authenticated caller has full public access. */
-import type { AuthStatus } from '~/platform-api/auth-schemas';
-import { ORPCError } from '@orpc/server';
+import type { AuthStatus } from '../../../packages/hatch-platform-api/auth';
+import { publicApiError } from './errors';
 import { auth } from '~auth/server';
 import { db } from '~/db';
 import {
@@ -22,12 +22,12 @@ export async function authenticatePublicApi(
     const result = await auth.api.verifyApiKey({
       body: { key: headers.get('x-api-key') ?? '', configId: 'default' },
     });
-    if (!result.valid || !result.key) throw new ORPCError('UNAUTHORIZED');
+    if (!result.valid || !result.key) throw publicApiError('UNAUTHORIZED');
     const owner = await db.query.user.findFirst({
       where: { id: result.key.referenceId },
       columns: { id: true, email: true, name: true },
     });
-    if (!owner) throw new ORPCError('UNAUTHORIZED');
+    if (!owner) throw publicApiError('UNAUTHORIZED');
     return {
       run: null,
       status: {
@@ -44,7 +44,7 @@ export async function authenticatePublicApi(
     const token = /^Bearer\s+(\S+)$/i.exec(
       headers.get('authorization') ?? '',
     )?.[1];
-    if (!token) throw new ORPCError('UNAUTHORIZED');
+    if (!token) throw publicApiError('UNAUTHORIZED');
     if (token.split('.').length === 3) {
       const { expiresAt, ...run } = await verifyRunToken(token);
       return {
@@ -61,18 +61,18 @@ export async function authenticatePublicApi(
     // Do not let the bearer plugin ignore invalid credentials and use a Cookie.
     const bearerOnly = new Headers({ authorization: `Bearer ${token}` });
     const session = await auth.api.getSession({ headers: bearerOnly });
-    if (!session) throw new ORPCError('UNAUTHORIZED');
+    if (!session) throw publicApiError('UNAUTHORIZED');
     return sessionContext(session);
   }
   const session = await auth.api.getSession({ headers });
-  if (!session) throw new ORPCError('UNAUTHORIZED');
+  if (!session) throw publicApiError('UNAUTHORIZED');
   return sessionContext(session);
 }
 
 function sessionContext(
   value: Awaited<ReturnType<typeof auth.api.getSession>>,
 ): PublicApiContext {
-  if (!value) throw new ORPCError('UNAUTHORIZED');
+  if (!value) throw publicApiError('UNAUTHORIZED');
   return {
     run: null,
     status: {

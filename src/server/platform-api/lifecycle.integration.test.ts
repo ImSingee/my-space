@@ -19,11 +19,17 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { eq, sql } from 'drizzle-orm';
-import { createORPCClient } from '@orpc/client';
-import type { ContractRouterClient } from '@orpc/contract';
-import { OpenAPILink } from '@orpc/openapi-client/fetch';
-import { platformApiContract } from '~/platform-api/contract';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { rpcCall } from './test-client';
+import { cliClient } from '../../../packages/hatch-cli/src/client';
+import { createConnectTransport } from '@connectrpc/connect-web';
+import { Code, ConnectError } from '@connectrpc/connect';
+import { create, toBinary } from '@bufbuild/protobuf';
+import { errorFromJson } from '@connectrpc/connect/protocol-connect';
+import { CreateAppRequestSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import { PublicErrorSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/error_pb';
+import { ViolationsSchema } from '@bufbuild/protovalidate/gen/buf/validate/validate_pb.js';
+import { gzipSync } from 'node:zlib';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION, RUNNER_WS_PATH } from '~agent/protocol';
 
 const cliExecutable = fileURLToPath(
@@ -83,7 +89,7 @@ const api = (
   endpoint: string,
   headers: Record<string, string>,
   body?: unknown,
-) => call(`${origin}/api/v1/${endpoint}`, headers, body);
+) => rpcCall(origin, endpoint, headers, body);
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 function git(dir: string, ...args: string[]) {
   return execFileSync('git', args, {
@@ -201,13 +207,13 @@ describe.runIf(Boolean(databaseUrl))(
         if (runtime.exitCode !== null)
           throw new Error(`Production server exited: ${log}`);
         try {
-          if ((await fetch(`${origin}/api/v1/openapi.json`)).ok) break;
+          if ((await fetch(`${origin}/api/auth/ok`)).ok) break;
         } catch {
           /* wait for boot */
         }
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      if (!(await fetch(`${origin}/api/v1/openapi.json`)).ok)
+      if (!(await fetch(`${origin}/api/auth/ok`)).ok)
         throw new Error('Production server failed to start.');
       const signup = await call(
         `${origin}/api/auth/sign-up/email`,
@@ -282,6 +288,23 @@ describe.runIf(Boolean(databaseUrl))(
         bearer(signup.data.token),
       ];
     }, 30000);
+    beforeEach(async () => {
+      // Every case starts with a live Run; long builds must not consume another
+      // case's five-minute credential lifetime. Expiry cases still mint their
+      // own deliberately expired JWTs.
+      await database.db
+        .update(database.schema.agentRuns)
+        .set({ leaseExpiresAt: new Date(Date.now() + 600000) })
+        .where(eq(database.schema.agentRuns.id, runId));
+      const minted = await mint();
+      assert.equal(
+        minted.response.status,
+        200,
+        'Could not refresh the fixture Run token.',
+      );
+      runToken = minted.data.token;
+      credentials[2] = bearer(runToken);
+    });
     afterAll(async () => {
       socket?.terminate();
       if (runtime && runtime.exitCode === null) {
@@ -317,7 +340,7 @@ describe.runIf(Boolean(databaseUrl))(
             name: 'Public lifecycle',
             pin: false,
           });
-          expect(created.response.status).toBe(201);
+          expect(created.response.status).toBe(200);
           const id = created.data.id as string;
           expect(Object.keys(created.data).sort()).toEqual([
             'files',
@@ -534,7 +557,7 @@ describe.runIf(Boolean(databaseUrl))(
               });
         expect(deployments).toHaveLength(4);
       }
-    }, 60000);
+    }, 180000);
 
     it('rechecks App generation after waiting for the live cutover lock', async () => {
       const { id, generation } = resources.find(
@@ -747,7 +770,7 @@ describe.runIf(Boolean(databaseUrl))(
         )[0].value,
       ).toBe(41);
       await dataDb.end();
-    }, 60000);
+    }, 180000);
 
     it('logs in with a real device session, stores/uses API keys and distinguishes logout from revocation', async () => {
       const config = path.join(root, 'device-config.json');
@@ -1064,14 +1087,20 @@ describe.runIf(Boolean(databaseUrl))(
       }
     }, 240000);
 
-    it('uses the same HTTP surface with an oRPC OpenAPILink typed client', async () => {
-      const client: ContractRouterClient<typeof platformApiContract> =
-        createORPCClient(
-          new OpenAPILink(platformApiContract, {
-            url: `${origin}/api/v1`,
-            headers: credentials[1],
-          }),
-        );
+    it('uses Connect binary clients with the same domain behavior as JSON', async () => {
+      const client = cliClient(
+        createConnectTransport({
+          baseUrl: `${origin}/api/rpc`,
+          useBinaryFormat: true,
+          interceptors: [
+            (next) => (req) => {
+              for (const [key, value] of Object.entries(credentials[1]))
+                req.header.set(key, value);
+              return next(req);
+            },
+          ],
+        }),
+      );
       const result = await client.workflows.create({
         slug: `typed-${randomUUID()}`,
         name: 'Typed client fixture',
@@ -1084,10 +1113,123 @@ describe.runIf(Boolean(databaseUrl))(
         (await client.workflows.source({ id: result.id })).bundleBase64,
       ).toBeNull();
       await expect(client.apps.get({ id: 'missing' })).rejects.toMatchObject({
-        code: 'NOT_FOUND',
-        status: 404,
+        code: Code.NotFound,
       });
     });
+
+    it('validates the proto contract in JSON and binary and preserves optional false', async () => {
+      const endpoint = `${origin}/api/rpc/hatch.platform.v1.AppService/CreateApp`;
+      for (const binary of [false, true]) {
+        const invalid = { slug: 'INVALID-SLUG', name: 'Private input value' };
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            cookie,
+            'connect-protocol-version': '1',
+            'content-type': binary ? 'application/proto' : 'application/json',
+          },
+          body: binary
+            ? new Uint8Array(
+                toBinary(
+                  CreateAppRequestSchema,
+                  create(CreateAppRequestSchema, invalid),
+                ),
+              )
+            : JSON.stringify(invalid),
+        });
+        expect(response.status).toBe(400);
+        const json = await response.json();
+        expect(JSON.stringify(json)).not.toContain('Private input value');
+        const error = errorFromJson(
+          json,
+          undefined,
+          new ConnectError('Invalid Connect error'),
+        );
+        expect(error.code).toBe(Code.InvalidArgument);
+        expect(error.findDetails(PublicErrorSchema)[0].code).toBe(
+          'BAD_REQUEST',
+        );
+        expect(
+          error.findDetails(ViolationsSchema)[0].violations[0].ruleId,
+        ).toBe('string.pattern');
+      }
+      const invalidType = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          cookie,
+          'connect-protocol-version': '1',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ slug: 'invalid-type', name: 123 }),
+      });
+      expect(invalidType.status).toBe(400);
+      const workflow = await api(
+        'workflows',
+        { cookie },
+        {
+          slug: `presence-${randomUUID()}`,
+          name: 'Optional false',
+          pin: false,
+        },
+      );
+      expect(workflow.response.status).toBe(200);
+      expect(
+        (
+          await database.db.query.workflows.findFirst({
+            where: { id: workflow.data.id },
+          })
+        )?.pinned,
+      ).toBe(false);
+      const sdk = await api('sdk/app', { cookie });
+      expect(
+        sdk.data.files.some(
+          (file: { path: string }) => file.path === 'buf.gen.yaml',
+        ),
+      ).toBe(true);
+      expect(sdk.data.tooling.bufVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    });
+
+    it('keeps deployed App Connect independent from Platform RPC', async () => {
+      const directory = path.join(root, `app-connect-${randomUUID()}`);
+      const input = `${directory}.json`;
+      await writeFile(
+        input,
+        JSON.stringify({
+          slug: `app-connect-${randomUUID()}`,
+          name: 'Existing App Connect',
+          pin: false,
+        }),
+      );
+      const created = await cliInvoke(
+        ['app', 'create', '--file', input, '--directory', directory],
+        credentials[3],
+      );
+      assert.equal(created.code, 0, JSON.stringify(created));
+      const release = await cliInvoke(
+        ['app', 'deploy', '--directory', directory],
+        credentials[3],
+      );
+      assert.equal(release.code, 0, JSON.stringify(release));
+      const base = `${origin}/api/app/${created.data.id}/rpc/app.v1.CounterService`;
+      const increment = await call(
+        `${base}/Increment`,
+        { cookie, 'connect-protocol-version': '1' },
+        { amount: 2 },
+      );
+      assert.equal(
+        increment.response.status,
+        200,
+        JSON.stringify(increment.data),
+      );
+      expect(increment.data.count).toBe(2);
+      const count = await call(
+        `${base}/GetCount`,
+        { cookie, 'connect-protocol-version': '1' },
+        {},
+      );
+      expect(count.response.status).toBe(200);
+      expect(count.data.count).toBe(2);
+    }, 120000);
 
     it('bounds actual streamed JSON bytes at 16 KiB and 256 MiB', async () => {
       async function streamed(endpoint: string, size: number, json = '{}') {
@@ -1106,12 +1248,19 @@ describe.runIf(Boolean(databaseUrl))(
             }
           },
         });
-        const response = await fetch(`${origin}/api/v1/${endpoint}`, {
-          method: 'POST',
-          headers: { cookie, 'content-type': 'application/json' },
-          body,
-          duplex: 'half',
-        } as RequestInit);
+        const response = await fetch(
+          `${origin}/api/rpc/hatch.platform.v1.AppService/${endpoint.includes('/deploy') ? 'DeployApp' : 'CreateApp'}`,
+          {
+            method: 'POST',
+            headers: {
+              cookie,
+              'content-type': 'application/json',
+              'connect-protocol-version': '1',
+            },
+            body,
+            duplex: 'half',
+          } as RequestInit,
+        );
         return { response, data: await response.json() };
       }
       const ordinary = await streamed(
@@ -1123,15 +1272,16 @@ describe.runIf(Boolean(databaseUrl))(
           pin: false,
         }),
       );
-      expect(ordinary.response.status).toBe(201);
-      expect((await streamed('apps', 16 * 1024 + 1)).response.status).toBe(413);
+      expect(ordinary.response.status).toBe(200);
+      expect((await streamed('apps', 16 * 1024 + 1)).response.status).toBe(429);
       const below = await streamed(
         'apps/absent/deploy',
         20 * 1024,
         JSON.stringify({
           message: 'Boundary',
           generation: 'absent',
-          bundleBase64: 'a',
+          id: 'absent',
+          bundle: 'YQ==',
         }),
       );
       expect(below.response.status).toBe(404);
@@ -1141,75 +1291,26 @@ describe.runIf(Boolean(databaseUrl))(
         'apps/absent/deploy',
         256 * 1024 * 1024 + 1,
       );
-      expect(excessive.response.status).toBe(413);
-      expect(excessive.data.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(excessive.response.status).toBe(429);
+      expect(excessive.data.code).toBe('resource_exhausted');
     }, 60000);
 
-    it('publishes lifecycle, auth status and SDK contracts and removes old/public-internal surfaces', async () => {
-      const spec = (await call(`${origin}/api/v1/openapi.json`)).data;
-      if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
-        await writeFile(
-          path.join(
-            process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR,
-            'openapi.json',
-          ),
-          JSON.stringify(spec, null, 2),
-        );
-      expect(spec.servers).toEqual([{ url: '/api/v1' }]);
-      expect(spec.security).toEqual([
-        { sessionCookie: [] },
-        { bearer: [] },
-        { apiKey: [] },
-      ]);
-      expect(spec.components.securitySchemes.apiKey).toMatchObject({
-        type: 'apiKey',
-        in: 'header',
-        name: 'x-api-key',
-      });
-      expect(
-        spec.paths['/apps'].post.requestBody.content['application/json'].schema
-          .properties.name.maxLength,
-      ).toBe(64);
-      expect(
-        Object.values(spec.paths).flatMap((item) =>
-          Object.keys(item as object),
-        ),
-      ).toHaveLength(14);
-      for (const collection of ['apps', 'workflows']) {
-        expect(Object.keys(spec.paths[`/${collection}`])).toEqual([
-          'get',
-          'post',
-        ]);
-        expect(
-          spec.paths[`/${collection}`].post.responses['201'],
-        ).toBeDefined();
-        expect(
-          spec.paths[`/${collection}/{id}/deploy`].post.requestBody.content[
-            'application/json'
-          ].schema.required,
-        ).toEqual(['message', 'generation', 'bundleBase64']);
-        expect(
-          spec.paths[`/${collection}/{id}/source`].get.responses['200'].content[
-            'application/json'
-          ].schema.required,
-        ).toEqual(['id', 'masterCommit', 'bundleBase64']);
-        for (const [method, suffix] of [
-          ['GET', ''],
-          ['POST', ''],
-          ['GET', '/absent'],
-          ['GET', '/absent/source'],
-          ['POST', '/absent/deploy'],
-          ['POST', '/absent/rollback'],
-        ]) {
-          const response = await fetch(
-            `${origin}/api/cli/v1/${collection}${suffix}`,
-            {
-              method,
-              headers: { cookie, 'content-type': 'application/json' },
-              body: method === 'POST' ? '{}' : undefined,
-            },
-          );
+    it('removes REST/OpenAPI and keeps public and internal credentials separate', async () => {
+      for (const endpoint of [
+        'openapi.json',
+        'apps',
+        'workflows',
+        'auth/status',
+        'sdk/app',
+        'apps/absent/source',
+        'workflows/absent/deploy',
+      ]) {
+        for (const prefix of ['/api/v1', '/api/cli/v1']) {
+          const response = await fetch(`${origin}${prefix}/${endpoint}`);
           expect(response.status).toBe(404);
+          expect(response.headers.get('content-type')).toContain(
+            'application/json',
+          );
           expect((await response.json()).code).toBe('NOT_FOUND');
         }
       }
@@ -1344,31 +1445,72 @@ describe.runIf(Boolean(databaseUrl))(
       ).toBe(3);
     });
 
-    it('enforces strict JSON, body caps, same-origin Cookie policy and safe error transport', async () => {
+    it('enforces Protovalidate, body caps, same-origin Cookie policy and safe errors', async () => {
       for (const contentType of [
         'text/plain',
         'application/x-www-form-urlencoded',
         'multipart/form-data',
       ]) {
-        const response = await fetch(`${origin}/api/v1/apps`, {
-          method: 'POST',
-          headers: { cookie, 'content-type': contentType },
-          body: '{"slug":"unwanted","name":"unwanted"}',
-        });
+        const response = await fetch(
+          `${origin}/api/rpc/hatch.platform.v1.AppService/CreateApp`,
+          {
+            method: 'POST',
+            headers: {
+              cookie,
+              'content-type': contentType,
+              'connect-protocol-version': '1',
+            },
+            body: '{"slug":"unwanted","name":"unwanted"}',
+          },
+        );
         expect(response.status).toBe(415);
-        expect((await response.json()).code).toBe('UNSUPPORTED_MEDIA_TYPE');
+        expect(await response.text()).not.toContain('unwanted');
       }
-      const malformed = await fetch(`${origin}/api/v1/apps`, {
-        method: 'POST',
-        headers: { cookie, 'content-type': 'application/json' },
-        body: '{"secret":"fixture-secret-value",',
-      });
+      const compressed = await fetch(
+        `${origin}/api/rpc/hatch.platform.v1.AppService/CreateApp`,
+        {
+          method: 'POST',
+          headers: {
+            cookie,
+            'content-type': 'application/json',
+            'content-encoding': 'gzip',
+            'connect-protocol-version': '1',
+          },
+          body: new Uint8Array(
+            gzipSync(
+              JSON.stringify({
+                slug: 'compressed',
+                name: 'Compressed',
+                description: 'a'.repeat(16384),
+              }),
+            ),
+          ),
+        },
+      );
+      expect(compressed.status).toBe(429);
+      expect(JSON.stringify(await compressed.json())).not.toContain('aaaaaaa');
+      const malformed = await fetch(
+        `${origin}/api/rpc/hatch.platform.v1.AppService/CreateApp`,
+        {
+          method: 'POST',
+          headers: {
+            cookie,
+            'content-type': 'application/json',
+            'connect-protocol-version': '1',
+          },
+          body: '{"secret":"fixture-secret-value",',
+        },
+      );
       expect(malformed.status).toBe(400);
       expect(await malformed.text()).not.toContain('fixture-secret-value');
       const invalid = await api(
         'apps',
         { cookie },
-        { slug: 'bad-slug', name: 'Invalid', extra: 'fixture-secret-value' },
+        {
+          slug: 'INVALID-SLUG',
+          name: 'Invalid',
+          description: 'fixture-secret-value',
+        },
       );
       expect(invalid.response.status).toBe(400);
       expect(invalid.data).toMatchObject({ code: 'BAD_REQUEST', status: 400 });
@@ -1391,20 +1533,23 @@ describe.runIf(Boolean(databaseUrl))(
           )
         ).response.status,
       ).toBe(403);
-      const preflight = await fetch(`${origin}/api/v1/apps`, {
-        method: 'OPTIONS',
-        headers: {
-          origin: 'https://cross-origin.test',
-          'access-control-request-method': 'POST',
+      const preflight = await fetch(
+        `${origin}/api/rpc/hatch.platform.v1.AppService/CreateApp`,
+        {
+          method: 'OPTIONS',
+          headers: {
+            origin: 'https://cross-origin.test',
+            'access-control-request-method': 'POST',
+          },
         },
-      });
+      );
       expect(preflight.headers.get('access-control-allow-origin')).toBeNull();
       const big = await api(
         'apps',
         { cookie },
         { slug: 'too-big', name: 'Too big', description: 'a'.repeat(16384) },
       );
-      expect(big.response.status).toBe(413);
+      expect(big.response.status).toBe(429);
       expect(big.data.code).toBe('PAYLOAD_TOO_LARGE');
       const notFound = await api('apps/absent', { cookie });
       expect(notFound.response.status).toBe(404);

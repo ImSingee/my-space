@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+import "buf/validate/validate.proto";
+import "hatch/platform/v1/file.proto";
+import "hatch/platform/v1/lifecycle.proto";
+
+// Public API for CLI and native clients. Platform Web UI uses Server Functions.
+service AppService {
+  rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+  rpc CreateApp(CreateAppRequest) returns (CreateAppResponse);
+  rpc GetApp(GetAppRequest) returns (GetAppResponse);
+  rpc GetAppSource(GetAppSourceRequest) returns (GetAppSourceResponse);
+  rpc DeployApp(DeployAppRequest) returns (DeployAppResponse);
+  rpc RollbackApp(RollbackAppRequest) returns (RollbackAppResponse);
+}
+
+message ListAppsRequest {}
+
+message ListAppsResponse {
+  repeated Resource resources = 1;
+}
+
+message CreateAppRequest {
+  string slug = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+  }];
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+  optional string description = 3;
+  optional bool pin = 4;
+}
+
+message CreateAppResponse {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  repeated File files = 4;
+}
+
+message GetAppRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+
+message GetAppResponse {
+  Resource resource = 1;
+}
+
+message GetAppSourceRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+
+message GetAppSourceResponse {
+  Source source = 1;
+}
+
+message DeployAppRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+  // Creation timestamp fetched before bundling; checked again under deploy lock.
+  string generation = 3 [(buf.validate.field).string.min_len = 1];
+  bytes bundle = 4 [(buf.validate.field).bytes.min_len = 1];
+  optional bool allow_destructive_data_migration = 5;
+  optional string data_migration_approval_token = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+message DeployAppResponse {
+  Deployment deployment = 1;
+}
+
+message RollbackAppRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  uint32 version = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
+message RollbackAppResponse {
+  RestoredVersion restored = 1;
+}

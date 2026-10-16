@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+import "buf/validate/validate.proto";
+
+service AuthService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+}
+
+message SessionCredential {
+  User user = 1;
+}
+
+message ApiKeyCredential {
+  User user = 1;
+  string id = 2;
+  optional string name = 3;
+}
+
+message RunCredential {
+  string run_id = 1;
+  string session_id = 2;
+  string runner_id = 3;
+}
+
+message GetStatusRequest {}
+
+// All successfully authenticated public callers have full platform authority.
+message GetStatusResponse {
+  optional string expires_at = 1;
+  oneof credential {
+    option (buf.validate.oneof).required = true;
+    SessionCredential session = 2;
+    ApiKeyCredential api_key = 3;
+    RunCredential run = 4;
+  }
+}

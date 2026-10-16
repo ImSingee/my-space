@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+// Stable business classification attached to Connect errors; not an HTTP envelope.
+message PublicError {
+  string code = 1;
+  uint32 http_status = 2;
+}

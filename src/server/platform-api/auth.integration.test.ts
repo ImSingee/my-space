@@ -1,4 +1,5 @@
 /** Real Better Auth + PostgreSQL + Runner HTTP/WS contracts. Never substitute mocks. */
+import { rpcCall } from './test-client';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
@@ -55,14 +56,9 @@ async function cli<T = Record<string, unknown>>(
   headers: Record<string, string>,
   body?: unknown,
 ) {
-  const response = await api(
-    new Request(`${origin}/api/v1/${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }),
+  return rpcCall<T>(origin, path, headers, body, (input, init) =>
+    api(new Request(input, init)),
   );
-  return { response, data: (await response.json()) as T };
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 

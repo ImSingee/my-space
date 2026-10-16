@@ -1,9 +1,8 @@
 import { CliError } from './error';
 
 import { platformClient } from './client';
-import { authStatusSchema } from '../../../src/platform-api/auth-schemas';
 import type { Profile } from './config';
-export type { AuthStatus } from '../../../src/platform-api/auth-schemas';
+export type { AuthStatus } from '../../hatch-platform-api/auth';
 
 export async function request(
   url: string,
@@ -70,15 +69,5 @@ export async function getStatus(
   timeout: number,
   signal: AbortSignal,
 ) {
-  const value = await platformClient(credential, timeout, signal).auth.status(
-    {},
-  );
-  const result = authStatusSchema.safeParse(value);
-  if (!result.success)
-    throw new CliError(
-      'invalid_response',
-      'The platform returned invalid authorization metadata.',
-      7,
-    );
-  return result.data;
+  return platformClient(credential, timeout, signal).auth.status({});
 }
