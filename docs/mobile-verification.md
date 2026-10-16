@@ -1,5 +1,52 @@
 # Mobile verification
 
+## Generic v1 API follow-up on macOS — 2026-10-16 UTC
+
+Backend Draft #189 (`feat/hatch-mobile-api`, `b150ca77c52679c6a97ac2d9fd75317b95c2b00c`)
+exposes interactive resources through the existing public API. Mobile Draft #184
+is stacked above it; source `a944ca38b5c131380ad2431f172d776bddb74110` merges that
+backend without rewriting history. Latest master `b0ff5051` is preserved,
+including #187's all-model image support. This follow-up changes JavaScript and
+server routing; it uses the signed, freshly prebuilt/compiled SDK58 native binary
+from the preceding section. The concluding documentation-only commit does not
+change the tested runtime.
+
+The native client now uses the existing plain-array/object App endpoints and
+generic `/api/v1/agent/models`, `/api/v1/agent/sessions`, App handoff issuance and
+`/api/v1/auth/handoffs/consume`. The Draft-only `/api/mobile/v1` router and duplicate
+App DTOs are removed. Existing Agent run, answer, SSE, cancel and binary upload
+transports stay in place. See [the full API inventory, authentication, reuse
+analysis and rollout](platform-api.md#interactive-agent-and-app-resources).
+
+The production backend was rebuilt and the two owned disposable local platforms
+restarted. The dedicated iPhone 17 Pro/iOS27 Simulator was cold-started through
+Computer Use and the acceptance skill's AXe driver. Fresh runtime evidence shows
+200 responses for App/model/session reads; new session creation; a 200 handoff
+issuance followed by form POST 303 and an authenticated App page. An actually
+expired database ticket produced the native 401/retry screen; requesting a fresh
+ticket recovered. The old namespace returns 404.
+
+A new QA Alternate conversation streamed through the real Runner. Cold-launching
+while it awaited a question restored the question from the generic session
+snapshot. Blue then Other cleared the option; the actual accepted payload held
+only Orange for the single-choice answer and Read/Walk for the multiple-choice
+answer. Pausing the owned Runner displayed saved/waiting without another submit
+control; continuing it produced the matching tool output and completed reply.
+The system Photos picker supplied a stock fixture image to QA Alternate; the
+model receipt confirmed `imageCount: 1` and the native reply completed. The old
+unsupported-image-model observation below is historical and no longer applies
+after #187. Native sign-out, normal matching-code browser approval, and returning
+to the native App list also passed on the new paths, with no password entry.
+
+Final local root/mobile types, formatting/lint, 35 mobile tests, production
+backend build, 13 interactive/auth/security tests and 10 browser device-approval
+tests passed. The final full backend suite had 1,410 passes, 26 skips and five
+5-second host timeouts in `src/agent/runtime.test.ts`; all 27 tests in that file
+passed serially with a 30-second ceiling. Exact-head remote CI and CLI builds
+for both layers are linked in their PR descriptions. Earlier SDK58 layout,
+keyboard, attachment and recovery media retain their original source provenance;
+they are not relabeled as fresh execution of the generic API revision.
+
 ## SDK 58 follow-up on macOS — 2026-10-16 UTC
 
 Delivery is stacked: `master` → `feat/hatch-mobile-api` (server support) →
