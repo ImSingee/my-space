@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildRunModels } from '~agent/remote-models';
 
@@ -28,7 +26,7 @@ vi.mock('~/db', async () => {
 vi.mock('./auth', () => ({ authMiddleware: {} }));
 
 const { db, schema } = await import('~/db');
-const { createModel, updateModel } = await import('./providers');
+const { createModel } = await import('./providers');
 
 beforeEach(async () => {
   await db.delete(schema.agentModels);
@@ -46,13 +44,17 @@ async function modelById(id: string) {
   return db.query.agentModels.findFirst({ where: { id } });
 }
 
-describe('model image input', () => {
-  it('sends images through pi for a newly configured custom model', async () => {
-    const { id } = await createModel({
-      data: { providerId: 'provider', modelId: 'gpt-6.1-sol', name: 'Sol' },
-    });
+describe('unconditional model image input', () => {
+  it('sends custom-model images despite legacy text-only settings', async () => {
+    const legacySettings = {
+      providerId: 'provider',
+      modelId: 'gpt-6.1-sol',
+      name: 'Sol',
+      input: ['text'],
+    };
+    const { id } = await createModel({ data: legacySettings });
     const stored = (await modelById(id))!;
-    expect(stored.input).toEqual(['text', 'image']);
+    expect(stored).not.toHaveProperty('input');
 
     const { models, picked } = buildRunModels({
       providerId: 'provider',
@@ -63,7 +65,8 @@ describe('model image input', () => {
       model: {
         id: stored.modelId,
         name: stored.name,
-        input: stored.input as Array<'text' | 'image'>,
+        // Old Platforms may still send this metadata; the Runner ignores it.
+        input: ['text'],
         reasoning: stored.reasoning,
         contextWindow: stored.contextWindow,
         maxTokens: stored.maxTokens,
@@ -113,76 +116,5 @@ describe('model image input', () => {
         },
       ],
     });
-  });
-
-  it('persists explicit text-only choices and allows existing models to enable images', async () => {
-    const { id } = await createModel({
-      data: {
-        providerId: 'provider',
-        modelId: 'custom-model',
-        name: 'Custom',
-        input: ['text'],
-      },
-    });
-    await updateModel({ data: { id, name: 'Renamed' } });
-    expect((await modelById(id))?.input).toEqual(['text']);
-    await updateModel({ data: { id, input: ['text', 'image'] } });
-    expect((await modelById(id))?.input).toEqual(['text', 'image']);
-    await updateModel({ data: { id, input: ['text'] } });
-    expect((await modelById(id))?.input).toEqual(['text']);
-    await expect(updateModel({ data: { id, input: [] } })).rejects.toThrow(
-      /Too small/,
-    );
-    expect((await modelById(id))?.input).toEqual(['text']);
-  });
-
-  it('repairs historical text defaults once without changing other input declarations', async () => {
-    await db.insert(schema.agentModels).values([
-      {
-        id: 'legacy',
-        providerId: 'provider',
-        modelId: 'sol',
-        name: 'Sol',
-        input: ['text'],
-      },
-      {
-        id: 'vision',
-        providerId: 'provider',
-        modelId: 'vision',
-        name: 'Vision',
-        input: ['text', 'image'],
-      },
-      {
-        id: 'other',
-        providerId: 'provider',
-        modelId: 'other',
-        name: 'Other',
-        input: ['image'],
-      },
-    ]);
-    const migration = await readFile(
-      new URL(
-        '../../migrations/20261016161750_faulty_inhumans/migration.sql',
-        import.meta.url,
-      ),
-      'utf8',
-    );
-    for (let attempt = 0; attempt < 2; attempt++) {
-      for (const statement of migration.split('--> statement-breakpoint')) {
-        await db.execute(sql.raw(statement));
-      }
-      expect((await modelById('legacy'))?.input).toEqual(['text', 'image']);
-      expect((await modelById('vision'))?.input).toEqual(['text', 'image']);
-      expect((await modelById('other'))?.input).toEqual(['image']);
-    }
-    const [created] = await db
-      .insert(schema.agentModels)
-      .values({
-        providerId: 'provider',
-        modelId: 'new-default',
-        name: 'New default',
-      })
-      .returning();
-    expect(created.input).toEqual(['text', 'image']);
   });
 });

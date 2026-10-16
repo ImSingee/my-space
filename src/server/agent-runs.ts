@@ -457,7 +457,8 @@ async function resolveRunModelConfig(
       id: model.modelId,
       name: model.name,
       reasoning: model.reasoning,
-      input: model.input as ('text' | 'image')[],
+      // Keep the wire field for existing Runners; it is not configurable.
+      input: ['text', 'image'],
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
     },

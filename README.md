@@ -76,8 +76,8 @@ Then open [http://localhost:3700](http://localhost:3700) and:
    and turn off **Allow sign-up**. It takes effect immediately, no redeploy
    needed — and you can reopen it from the same place to invite someone.
 3. **Connect your AI** — go to **Settings → Providers** and add your model
-   provider API key. Models accept images by default; disable **Image input**
-   in the model settings for text-only endpoints.
+   provider API key. Attached images are sent to every model without a separate
+   image-capability setting.
 4. **Build your first app** — open the agent and ask for something you have
    always wanted.
 
@@ -88,11 +88,6 @@ scheme, hostname, and optional port, with no path. If you set `HATCH_PORT` in
 `.env` to serve on a different host port, update `APP_URL` to match. When Hatch
 is behind a domain or reverse proxy, set `APP_URL` to that external origin
 (for example, `https://hatch.example.com`).
-
-The image-input migration enables images for models saved with the previous
-hardcoded text-only default. Check text-only endpoints after upgrading and
-disable **Image input** where needed. Choices saved after this migration persist
-across restarts.
 
 Passkeys use the `APP_URL` hostname as their relying-party ID. Keep that
 hostname stable after users register passkeys, and use HTTPS in production

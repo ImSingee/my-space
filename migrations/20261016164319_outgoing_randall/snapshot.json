@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "5d92dc44-70d1-490e-b59d-925adc1c283a",
+  "id": "6c2d7f57-5ac1-40f0-add2-40ea0edb8953",
   "prevIds": ["c1be042b-7b2e-4b0b-a38a-c2e3a3d08fbe"],
   "ddl": [
     {
@@ -336,19 +336,6 @@
       "generated": null,
       "identity": null,
       "name": "reasoning",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "agent_models"
-    },
-    {
-      "type": "jsonb",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "'[\"text\",\"image\"]'",
-      "generated": null,
-      "identity": null,
-      "name": "input",
       "entityType": "columns",
       "schema": "public",
       "table": "agent_models"

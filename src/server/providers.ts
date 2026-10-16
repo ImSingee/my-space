@@ -12,8 +12,6 @@ const apiTypeSchema = z.enum([
   'openai-completions',
 ]);
 
-const modelInputSchema = z.array(z.enum(['text', 'image'])).min(1);
-
 export type ProviderModel = {
   id: string;
   modelId: string;
@@ -21,7 +19,6 @@ export type ProviderModel = {
   reasoning: boolean;
   contextWindow: number;
   maxTokens: number;
-  input: string[];
   enabled: boolean;
   sortOrder: number;
 };
@@ -79,7 +76,6 @@ export const listProviders = createServerFn({ method: 'GET' })
           reasoning: m.reasoning,
           contextWindow: m.contextWindow,
           maxTokens: m.maxTokens,
-          input: m.input,
           enabled: m.enabled,
           sortOrder: m.sortOrder,
         })),
@@ -163,7 +159,6 @@ const createModelSchema = z.object({
   reasoning: z.boolean().default(false),
   contextWindow: z.number().int().positive().default(128000),
   maxTokens: z.number().int().positive().default(8192),
-  input: modelInputSchema.default(['text', 'image']),
 });
 
 export const createModel = createServerFn({ method: 'POST' })
@@ -181,7 +176,6 @@ export const createModel = createServerFn({ method: 'POST' })
         reasoning: data.reasoning,
         contextWindow: data.contextWindow,
         maxTokens: data.maxTokens,
-        input: data.input,
       })
       .returning();
     return { id: row.id };
@@ -194,7 +188,6 @@ const updateModelSchema = z.object({
   reasoning: z.boolean().optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
-  input: modelInputSchema.optional(),
 });
 
 export const updateModel = createServerFn({ method: 'POST' })
@@ -210,7 +203,6 @@ export const updateModel = createServerFn({ method: 'POST' })
     if (data.contextWindow !== undefined)
       patch.contextWindow = data.contextWindow;
     if (data.maxTokens !== undefined) patch.maxTokens = data.maxTokens;
-    if (data.input !== undefined) patch.input = data.input;
 
     await db
       .update(schema.agentModels)

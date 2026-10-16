@@ -200,7 +200,6 @@ type ModelFormValues = {
   modelId: string;
   name: string;
   reasoning: boolean;
-  imageInput: boolean;
   contextWindow: number;
   maxTokens: number;
 };
@@ -223,7 +222,6 @@ function ModelFormModal({
       modelId: model?.modelId ?? '',
       name: model?.name ?? '',
       reasoning: model?.reasoning ?? false,
-      imageInput: model ? model.input.includes('image') : true,
       contextWindow: model?.contextWindow ?? 128000,
       maxTokens: model?.maxTokens ?? 8192,
     },
@@ -234,20 +232,14 @@ function ModelFormModal({
 
   const mutation = useMutation({
     mutationFn: async (values: ModelFormValues) => {
-      const { imageInput, ...modelValues } = values;
-      const input: Array<'text' | 'image'> = imageInput
-        ? ['text', 'image']
-        : ['text'];
       // Display name is optional: fall back to the model ID when left blank.
       const name = values.name.trim() || values.modelId.trim();
       if (model) {
-        await updateModel({
-          data: { id: model.id, ...modelValues, name, input },
-        });
+        await updateModel({ data: { id: model.id, ...values, name } });
         return;
       }
       await createModel({
-        data: { providerId, ...modelValues, name, input },
+        data: { providerId, ...values, name },
       });
     },
     onSuccess: async () => {
@@ -295,11 +287,6 @@ function ModelFormModal({
               {...form.getInputProps('maxTokens')}
             />
           </Group>
-          <Switch
-            label="Image input"
-            description="Send attached images to this model. Disable for text-only models."
-            {...form.getInputProps('imageInput', { type: 'checkbox' })}
-          />
           <Switch
             label="Reasoning model"
             description="Enable extended thinking when supported"
