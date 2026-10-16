@@ -1,6 +1,72 @@
 # Mobile verification
 
-## Connect RPC migration — 2026-10-16 UTC
+## Connect native follow-up on macOS — 2026-10-16 UTC (local evidence)
+
+A fresh Expo SDK 58.0.12 development client was prebuilt, compiled and installed
+from `0f8ba6dd0372db36e8c5dda288029aaeb9c30af0`. Xcode 27 beta 5
+(`27A5237l`) produced an ad-hoc signed arm64 Simulator build with zero compilation
+errors. The dedicated devices were iPhone 17 Pro / iOS 27 and iPhone SE (3rd
+generation) / iOS 26. These were Simulators, not physical phones. Subsequent
+JavaScript-only repairs ran through Metro with the same newly built native binary;
+no native module or dependency was changed by these repairs.
+
+Fresh local recordings, screenshots and sanitized request/database records cover:
+
+- Origin validation, cancelled browser login, matching device-code review,
+  explicit browser approval, return to the App list, sign-out and reauthorization.
+- Connect App/model/session reads, session creation and cold detail restoration.
+  Real handoffs used `POST /api/auth/handoffs/consume` with a 303 response; an
+  expired test ticket produced the native 401/retry state. A fresh handoff after
+  reauthorization opened the protected test App again. External navigation
+  required confirmation and was cancelled.
+- Real Runner streaming, model selection, expanded tool results, single-choice
+  versus Other exclusivity, multiple-choice answers, and answer-sent restoration
+  while the owned Runner was briefly paused. Answer requests were accepted once.
+- A stock Simulator photo reached model image input; the 64-byte test note was
+  uploaded successfully. The 27.3 MB fixture was rejected by the 25 MiB limit.
+- An actual SSE disconnect, background/foreground transition and reconnection.
+  Cold Connect detail restoration contained exactly 200 ordered, unique tokens
+  from `token-000` through `token-199`. Stop was explicitly confirmed and the
+  persisted run became `cancelled`. An injected local provider 503 exposed manual
+  retry; retrying once completed the same user turn.
+- Native software-keyboard input, onscreen Return, default/largest accessibility
+  text, light/dark appearance, and native navigation on the compact Simulator.
+  The two-line `Hi\nOk` message was preserved in the database.
+
+Two mobile defects were found and repaired. The native field displayed `Orange`
+while a submitted answer contained `Orang`: JavaScript change events lagged the
+native binding. Submission now reads the native text snapshot for answers, chat
+and instance URLs. Fresh requests contained complete `Orange`, no single-choice
+option alongside Other, and both selected multiple-choice values. The earlier
+single-choice/Other 409 defect was not reproduced on this Connect revision.
+
+At the largest accessibility text size, the compact attachment label wrapped and
+crowded the composer. The native paperclip menu now retains the accessible
+`Attach` name without wrapping; the composer scrolls its text into view as its
+available height changes. The repaired two-line field and Send remain visible
+above the actual software keyboard without limiting Dynamic Type.
+
+The backend, database, Runner and deterministic model provider were isolated local
+fixtures. This proves client/Runner integration, not model quality or the App
+builder. Existing disposable credentials and databases were reused; no production
+payment, external message or production data deletion was performed. Database
+backups and raw evidence were retained privately.
+
+Computer Use MCP was unavailable in this execution environment. The acceptance
+skill's documented AXe/simctl workflow provided native HID input, accessibility
+inspection, framebuffer screenshots and recordings. A repeated AXe automation
+session timeout was recovered by restarting only the dedicated main Simulator,
+without erasing data or changing security permissions. Metro was separately
+restarted to ensure the current JavaScript bundle was loaded; changed native menu
+appearance confirmed it. Final validation logs and exact revision provenance are
+retained with the local report. Physical-device, Android, distribution, haptics
+and a complete VoiceOver audit remain unverified.
+
+This follow-up is prepared locally for the existing acceptance; it has not been
+published as round 4. No branch push or PR update was performed in this stage.
+Older evidence below remains historical and is not reused as Connect evidence.
+
+## Connect RPC migration (cloud checks before native follow-up) — 2026-10-16 UTC
 
 The backend branch was rebased onto master `ea3f974d` (#194) and migrated in
 `8bb65d0c15d99f7bd2461acb1067b366bc9e2150`. The mobile branch is rebased above
@@ -10,9 +76,9 @@ endpoint `/api/auth/handoffs/consume`. Run/SSE/attachment and Better Auth device
 transports remain separate. Native dependencies and UI behavior are preserved; the WebView allowlist now
 shares the handoff-consumption path with the client validator.
 
-This revision is a protocol migration verified through focused unit/contracts,
+At that stage, the protocol migration was verified through focused unit/contracts,
 root/mobile type checks, lint/format, generated-code consistency, frozen install
-and production/iOS bundle builds. It has **no new UI acceptance, Simulator
+and production/iOS bundle builds. Those cloud checks supplied **no new UI acceptance, Simulator
 execution, native compilation/install, physical-device or Android evidence**.
 The earlier evidence below retains its original commit/runtime provenance and
 must not be described as verification of Connect. Backend remote CI, CLI builds
