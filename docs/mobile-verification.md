@@ -2,6 +2,14 @@
 
 ## SDK 58 follow-up on macOS — 2026-10-16 UTC
 
+Delivery is stacked: `master` → `feat/hatch-mobile-api` (server support) →
+`feat/hatch-expo-mobile` (mobile client, existing Draft PR #184). Native execution
+used SDK58 source `64898cac4b401fbe6b4d157f96d25944427a06a6`; subsequent split
+commits preserve the runtime implementation and record the final layer SHAs in
+the acceptance. Server HTTP tests no longer import mobile source; the native
+POST-source assertions live with the mobile core tests. Each layer has its own
+CI, including explicit pull-request triggers for the stacked base.
+
 This follow-up upgrades the mobile project from `664ab2f` to Expo 58.0.12,
 React 19.3.0, React Native 0.88.0, Router 58.0.21, `@expo/ui` 58.0.19 and
 WebView 14.0.1 using Expo's compatibility metadata. The SDK 57 record below
