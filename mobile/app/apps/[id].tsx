@@ -88,7 +88,7 @@ export default function AppScreen() {
             const sameOrigin =
               url.origin === origin && !url.username && !url.password;
             const allowedPath =
-              url.pathname === '/api/mobile/v1/handoffs/consume' ||
+              url.pathname === '/api/v1/auth/handoffs/consume' ||
               url.pathname.startsWith(data.targetPath);
             if (sameOrigin && allowedPath) return true;
             if (request.isTopFrame === false) return sameOrigin;

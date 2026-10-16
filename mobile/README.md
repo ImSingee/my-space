@@ -129,10 +129,15 @@ a user choice before opening the browser. Android's WebView cookie behavior is
 platform-global rather than iOS's isolated nonpersistent store; this first pass
 is iPhone-first and does not claim Android session-isolation acceptance.
 
-The backend adds `/api/mobile/v1` without a database migration or a Platform/
-Runner, App, or Workflow compatibility-version bump. Existing web server
-functions reuse the extracted session store; they are not called by the phone.
-See [the API contract](../docs/mobile-api.md).
+The client reuses existing `/api/v1/apps` list/detail shapes and generic
+`/api/v1/agent/models`, `/api/v1/agent/sessions` and App handoff resources.
+There is no mobile API namespace or envelope adapter. Existing Agent run, SSE,
+answer, cancel and attachment transports stay at `/api/agent/...`. Interactive
+resources require an ordinary user session; API keys and Run JWTs cannot acquire
+conversation or browser sessions. No database migration or Platform/Runner, App,
+or Workflow compatibility-version bump is required. Browser server functions
+reuse the same session store; the phone uses the documented HTTP contract.
+See [the API contract](../docs/platform-api.md#interactive-agent-and-app-resources).
 
 ## Native-first UI
 
