@@ -1,3 +1,5 @@
+import { deleteAppDatabase } from './apps/database';
+import { deleteAppDataDatabase } from './apps/data-table/delete';
 /** Server functions for app management (list/detail, deployments, ops, KV). */
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
@@ -211,6 +213,36 @@ export const deleteAppFn = createServerFn({ method: 'POST' })
     return deleteApp(id);
   });
 
+export const deleteAppDatabaseFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; dbName: string; appName: string }) =>
+    z
+      .object({
+        id: idSchema,
+        dbName: z.string().min(1),
+        appName: z.string().min(1),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    return deleteAppDatabase(data.id, data.dbName, data.appName);
+  });
+
+export const deleteAppDataDatabaseFn = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; dbName: string; appName: string }) =>
+    z
+      .object({
+        id: idSchema,
+        dbName: z.string().min(1),
+        appName: z.string().min(1),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    return deleteAppDataDatabase(data.id, data.dbName, data.appName);
+  });
+
 export const setAppSlugFn = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .validator((input: { id: string; slug: string }) =>
@@ -250,6 +282,7 @@ export type AppOps = {
     /** Declaration from the active deployment; null before first deployment. */
     network: NetworkAccessView | null;
   };
+  database: { enabled: boolean; dbName: string | null };
   cron: { enabled: boolean; jobs: CronJobView[] };
   webhook: {
     enabled: boolean;
@@ -279,6 +312,7 @@ export const getAppOps = createServerFn({ method: 'GET' })
     if (!app) {
       return {
         backend: { capable: false, mode: null, network: null },
+        database: { enabled: false, dbName: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
         storage: { enabled: false },
@@ -297,6 +331,10 @@ export const getAppOps = createServerFn({ method: 'GET' })
         network: manifest?.backend
           ? networkAccessView(manifest.backend.network)
           : null,
+      },
+      database: {
+        enabled: Boolean(caps?.database),
+        dbName: app.dbName ?? null,
       },
       cron: { enabled: Boolean(caps?.cron), jobs: cronJobs },
       webhook: {

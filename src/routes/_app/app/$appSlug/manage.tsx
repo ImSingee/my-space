@@ -272,9 +272,8 @@ function AppDetailPage() {
 
         <OperationsPanel
           appId={app.id}
+          appName={app.name}
           runtimeSupported={runtimeSupported}
-          dbName={app.dbName ?? null}
-          dbEnabled={Boolean(capabilities?.database) || Boolean(app.dbName)}
         />
 
         {capabilities?.backend ? (

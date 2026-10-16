@@ -13,6 +13,8 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { ulid as genUlid0 } from 'ulid';
+import { user } from './auth-schema';
+import type { HomepageTarget } from '../homepage';
 
 export * from './auth-schema';
 
@@ -154,7 +156,10 @@ export const apps = snakeCase.table(
     currentSourceCommit: text(),
     /** Backend mode of the current successful deployment; null before one exists. */
     backendMode: text().$type<'serverless' | 'long-running'>(),
-    /** Provisioned per-app Postgres database name, when database capability is on. */
+    /**
+     * Registered per-app Postgres database. Retained when the capability is
+     * disabled, then cleared only after an explicit permanent deletion.
+     */
     dbName: text(),
     /**
      * Versioned authenticated ciphertext for the per-app database password.
@@ -494,8 +499,6 @@ export const agentModels = snakeCase.table('agent_models', {
   modelId: text().notNull(),
   name: text().notNull(),
   reasoning: boolean().notNull().default(false),
-  /** Supported input modalities, e.g. ["text"] or ["text","image"]. */
-  input: jsonb().$type<string[]>().notNull().default(['text']),
   contextWindow: integer().notNull().default(128000),
   maxTokens: integer().notNull().default(8192),
   enabled: boolean().notNull().default(true),
@@ -790,5 +793,14 @@ export const logs = snakeCase.table('logs', {
 export const platformConfig = snakeCase.table('platform_config', {
   key: text().primaryKey(),
   value: jsonb().$type<JsonValue>().notNull(),
+  updatedAt,
+});
+
+/** Personal account preferences; platform resources remain shared. */
+export const userPreferences = snakeCase.table('user_preferences', {
+  userId: text()
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  homepage: jsonb().$type<HomepageTarget>().notNull(),
   updatedAt,
 });

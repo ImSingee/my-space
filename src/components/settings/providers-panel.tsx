@@ -239,7 +239,7 @@ function ModelFormModal({
         return;
       }
       await createModel({
-        data: { providerId, ...values, name, input: ['text'] },
+        data: { providerId, ...values, name },
       });
     },
     onSuccess: async () => {

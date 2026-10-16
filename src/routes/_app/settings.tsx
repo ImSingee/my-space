@@ -7,6 +7,7 @@ import {
   IconUserCircle,
   IconUsers,
   IconNetwork,
+  IconInfoCircle,
 } from '@tabler/icons-react';
 import { Fragment } from 'react';
 import { Page } from '~components/app-shell/page';
@@ -31,6 +32,7 @@ const GROUPS = [
     items: [
       { to: '/settings/backends', label: 'Backends', icon: IconServerBolt },
       { to: '/settings/agent-runner', label: 'Agent Runner', icon: IconRobot },
+      { to: '/settings/about', label: 'About', icon: IconInfoCircle },
     ],
   },
 ] as const;

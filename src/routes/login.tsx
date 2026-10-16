@@ -28,7 +28,7 @@ import classes from './login.module.css';
  */
 function safeRedirect(target: string | undefined): string {
   if (target && /^\/(?![/\\])/.test(target)) return target;
-  return '/dashboard';
+  return '/';
 }
 
 export const Route = createFileRoute('/login')({

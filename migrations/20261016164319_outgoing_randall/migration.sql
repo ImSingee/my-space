@@ -1,0 +1,1 @@
+ALTER TABLE "agent_models" DROP COLUMN "input";

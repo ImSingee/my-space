@@ -47,7 +47,7 @@ export function buildRunModels(config: RunModelConfig): {
     provider: config.providerId,
     baseUrl: config.baseUrl,
     reasoning: config.model.reasoning,
-    input: config.model.input,
+    input: ['text', 'image'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: config.model.contextWindow,
     maxTokens: config.model.maxTokens,

@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   >(),
   findDeployment:
     vi.fn<() => Promise<{ compatibilityVersion: number | null } | undefined>>(),
-  ensureAppDatabase: vi.fn<() => Promise<string>>(),
+  resolveAppDatabaseUrl: vi.fn<() => Promise<string>>(),
 }));
 
 vi.mock('~/db', () => ({
@@ -40,7 +40,7 @@ vi.mock('~/db', () => ({
   schema: {},
 }));
 vi.mock('./provision', () => ({
-  ensureAppDatabase: mocks.ensureAppDatabase,
+  resolveAppDatabaseUrl: mocks.resolveAppDatabaseUrl,
 }));
 
 const {
@@ -91,7 +91,7 @@ describe('long-running backend compatibility checks', () => {
   beforeEach(() => {
     mocks.findApp.mockReset();
     mocks.findDeployment.mockReset();
-    mocks.ensureAppDatabase.mockReset();
+    mocks.resolveAppDatabaseUrl.mockReset();
     mocks.findApp.mockResolvedValue({
       status: 'deployed',
       capabilities: { backend: true },
@@ -143,7 +143,7 @@ describe('long-running backend compatibility checks', () => {
     });
     expect(mocks.findApp).toHaveBeenCalledOnce();
     expect(mocks.findDeployment).toHaveBeenCalledOnce();
-    expect(mocks.ensureAppDatabase).not.toHaveBeenCalled();
+    expect(mocks.resolveAppDatabaseUrl).not.toHaveBeenCalled();
     expect(getBackendRuntimeView(appId)).toMatchObject({
       state: 'stopped',
       pid: null,

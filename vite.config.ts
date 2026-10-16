@@ -5,12 +5,14 @@ import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { devtools } from '@tanstack/devtools-vite';
 import { resolvePlatformPort } from './src/platform-port.ts';
+import { resolveBuildInfo } from './scripts/build-info.ts';
 
 // Mirror src/agent/paths.ts: runtime data lives under HATCH_DATA_DIR (default
 // `workspace`). Keep it out of the dev watcher so agent writes don't reload.
 const dataDir = path.resolve(process.env.HATCH_DATA_DIR ?? 'workspace');
 
 const config = defineConfig(({ mode, isPreview }) => ({
+  define: { __HATCH_BUILD_INFO__: JSON.stringify(resolveBuildInfo()) },
   resolve: {
     alias: {
       tslib: 'tslib/tslib.es6.mjs',

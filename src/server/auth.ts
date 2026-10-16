@@ -48,10 +48,11 @@ export const requireSession = createServerOnlyFn(async () => {
  *
  * SINGLE-TENANT BY DESIGN: the platform is one person's personal space, so
  * authentication is the only boundary — once signed in, a session can see and
- * manage everything (apps, dashboards, agent chats, providers). No table
- * carries an owner column and no query filters by user id. If multi-user
- * support is ever added, every server function behind this middleware needs
- * per-user scoping, not just this comment updated.
+ * manage shared resources (apps, dashboards, agent chats, providers). Personal
+ * account preferences are the exception: their server functions resolve the
+ * caller through requireSession and scope every read/write to that user id.
+ * If resource-level multi-user support is added, the remaining server functions
+ * need per-user scoping, not just this comment updated.
  */
 export const authMiddleware = createMiddleware({ type: 'function' }).server(
   async ({ next }) => {
