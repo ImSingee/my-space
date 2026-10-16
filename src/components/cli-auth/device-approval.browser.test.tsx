@@ -225,3 +225,16 @@ test('a rate-limited review reports the server’s remaining wait', async () => 
     .element(screen.getByRole('alert'))
     .toHaveTextContent('Too many attempts. Try again in about 7 minutes.');
 });
+
+test('the verified mobile client identity is displayed before approval', async () => {
+  replies.claim = Response.json({ ...claimed, client_id: 'hatch-mobile' });
+  const screen = await renderPage();
+  await screen.getByRole('button', { name: 'Review request' }).click();
+  await expect
+    .element(screen.getByRole('heading', { name: 'Approve Hatch Mobile?' }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Approve' }))
+    .toBeDisabled();
+  expect(calls.map((call) => call.action)).toEqual(['claim']);
+});

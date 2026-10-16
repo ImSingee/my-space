@@ -553,7 +553,13 @@ async function prepareCheckout(
   try {
     if (bundle) {
       await writeFile(bundle, Buffer.from(source.bundleBase64!, 'base64'));
-      await runGit(sessionId, ['clone', bundle, worktree]);
+      await runGit(sessionId, [
+        'clone',
+        '--branch',
+        SOURCE_BRANCH,
+        bundle,
+        worktree,
+      ]);
       await runGit(sessionId, ['remote', 'set-url', 'origin', finalBundle], {
         cwd: worktree,
       });

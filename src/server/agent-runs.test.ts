@@ -13,6 +13,7 @@ vi.mock('~server/agent-runner/hub', () => {
   return {
     connectedRunnerCount: vi.fn<Hub['connectedRunnerCount']>(() => 1),
     dispatchRun: vi.fn<Hub['dispatchRun']>(async () => 'runner-test'),
+    sendRunAnswer: vi.fn<Hub['sendRunAnswer']>(),
     sendRunEnvAndWait: vi.fn<Hub['sendRunEnvAndWait']>(async () => ({
       ok: true,
     })),
@@ -23,6 +24,7 @@ const { db, schema } = await import('~/db');
 const hub = await import('~server/agent-runner/hub');
 const {
   assignRunToRunner,
+  answerAgentRun,
   completeRunFromRunner,
   finalizeRunWorkspaceAffinity,
   getActiveAgentRun,
@@ -101,6 +103,151 @@ async function seedEnvRun(runId = 'run-secret') {
     leaseExpiresAt: new Date(Date.now() + 60_000),
   });
 }
+
+describe('Runner text persistence', () => {
+  it('persists binary text tool output and completes the transcript without losing Unicode or JSON null', async () => {
+    await seedEnvRun('run-binary-text');
+    const output = 'note\n\0\ud800\udfff😀中文\\u0000';
+    const expected = 'note\n\\u0000\ud800\udfff😀中文\\u0000';
+    const details = { ['binary\0key']: output, empty: null, count: 0 };
+    const event = {
+      type: 'tool_end' as const,
+      id: 'read-one',
+      name: 'read_file',
+      isError: false,
+      output,
+      details,
+    };
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-binary-text',
+      runnerSeq: 7,
+      event,
+    });
+    const stored = await db.query.agentRunEvents.findFirst({
+      where: { runId: 'run-binary-text', runnerSeq: 7 },
+    });
+    expect(stored?.payload).toMatchObject({
+      output: expected,
+      details: { ['binary\\u0000key']: expected, empty: null, count: 0 },
+    });
+    const report = {
+      runId: 'run-binary-text',
+      status: 'completed' as const,
+      messages: [
+        {
+          role: 'toolResult',
+          content: [{ type: 'text', text: output }],
+          details,
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Read it. 😀中文' }],
+        },
+      ],
+    };
+    await completeRunFromRunner('runner-test', report);
+    await completeRunFromRunner('runner-test', report);
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: 'session-secret' },
+    });
+    expect(session?.messages).toMatchObject([
+      { role: 'toolResult', content: [{ type: 'text', text: expected }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Read it. 😀中文' }],
+      },
+    ]);
+    expect(await getActiveAgentRun('session-secret')).toBeNull();
+    const run = await db.query.agentRuns.findFirst({
+      where: { id: report.runId },
+    });
+    expect(run?.status).toBe('completed');
+    const terminal = await db.query.agentRunEvents.findMany({
+      where: { runId: report.runId, type: 'done' },
+    });
+    expect(terminal).toHaveLength(1);
+    expect(event.output).toBe(output);
+    expect(report.messages[0]?.content[0]?.text).toBe(output);
+  });
+
+  it('terminalizes failures even when their provider error contains unsupported text', async () => {
+    await seedEnvRun('run-binary-error');
+    await completeRunFromRunner('runner-test', {
+      runId: 'run-binary-error',
+      status: 'failed',
+      error: 'bad\0text\ud800 end\udfff',
+      messages: [],
+    });
+    const run = await db.query.agentRuns.findFirst({
+      where: { id: 'run-binary-error' },
+    });
+    expect(run).toMatchObject({
+      status: 'failed',
+      error: 'bad\\u0000text� end�',
+    });
+    const terminal = await db.query.agentRunEvents.findFirst({
+      where: { runId: 'run-binary-error', type: 'error' },
+    });
+    expect(terminal?.payload).toMatchObject({
+      message: 'bad\\u0000text� end�',
+    });
+  });
+});
+
+describe('durable question answers', () => {
+  it('stores exactly one concurrent answer and exposes it until Runner acknowledgement', async () => {
+    await seedEnvRun('run-question');
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-question',
+      runnerSeq: 1,
+      event: {
+        type: 'ask',
+        askId: 'ask-one',
+        questions: [
+          {
+            id: 'one',
+            prompt: 'Choose',
+            options: [{ id: 'yes', label: 'Yes' }],
+            allowMultiple: false,
+          },
+        ],
+      },
+    });
+    const answers = [{ questionId: 'one', selectedOptionIds: ['yes'] }];
+    const results = await Promise.allSettled([
+      answerAgentRun('run-question', 'ask-one', answers),
+      answerAgentRun('run-question', 'ask-one', answers),
+    ]);
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === 'rejected'),
+    ).toHaveLength(1);
+    expect(hub.sendRunAnswer).toHaveBeenCalledExactlyOnceWith(
+      'runner-test',
+      'run-question',
+      'ask-one',
+      answers,
+    );
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      pendingAsk: { askId: 'ask-one' },
+      answeredAskId: 'ask-one',
+    });
+    await expect(
+      answerAgentRun('run-question', 'ask-one', answers),
+    ).rejects.toMatchObject({ status: 409 });
+    await ingestRunnerEvent('runner-test', {
+      runId: 'run-question',
+      runnerSeq: 2,
+      event: { type: 'ask_answered', askId: 'ask-one' },
+    });
+    expect(await getActiveAgentRun('session-secret')).toMatchObject({
+      pendingAsk: null,
+      answeredAskId: null,
+    });
+  });
+});
 
 describe('session workspace affinity', () => {
   it('finalizes an unowned session only after the assigned runner accepts', async () => {

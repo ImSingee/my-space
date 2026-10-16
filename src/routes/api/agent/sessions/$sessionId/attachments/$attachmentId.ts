@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { auth } from '~auth/server';
+import { authenticateSessionRequest } from '~server/session-http-auth';
 import { errorResponse } from '~server/errors';
 import { uploadAgentAttachment } from '~server/agent-attachments';
 
@@ -23,8 +23,8 @@ export const Route = createFileRoute(
   server: {
     handlers: {
       PUT: async ({ request }: { request: Request }) => {
-        const session = await auth.api.getSession({ headers: request.headers });
-        if (!session) return new Response('Unauthorized', { status: 401 });
+        const session = await authenticateSessionRequest(request);
+        if (session instanceof Response) return session;
 
         const ids = parse(request);
         if (!ids) return new Response('Not found', { status: 404 });

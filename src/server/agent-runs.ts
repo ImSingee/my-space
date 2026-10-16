@@ -13,6 +13,7 @@
  *   Cancel/answer/environment flow platform → runner over the same channel.
  *   A sweeper interrupts active runs whose lease expired (runner died).
  */
+import { toUSVString } from 'node:util';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { db, schema, type DB, type TX } from '~/db';
@@ -54,6 +55,23 @@ import {
   sendRunEnvAndWait,
   waitForRunFinished,
 } from './agent-runner/hub';
+
+// PostgreSQL rejects NUL and unpaired surrogates, even inside JSON strings.
+function storageSafeJson<T>(value: T): T {
+  if (typeof value === 'string') {
+    return toUSVString(value.replaceAll('\0', '\\u0000')) as T;
+  }
+  if (Array.isArray(value)) return value.map(storageSafeJson) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        storageSafeJson(key),
+        storageSafeJson(item),
+      ]),
+    ) as T;
+  }
+  return value;
+}
 
 export type AgentRunInput =
   | {
@@ -100,6 +118,7 @@ export type ActiveAgentRun = {
    */
   userTurn: number | null;
   pendingAsk: PendingAskPayload | null;
+  answeredAskId?: string | null;
   pendingEnvRequest: PendingEnvRequestPayload | null;
 };
 
@@ -258,7 +277,8 @@ async function persistEvent(
   event: AgentStreamEvent,
   runnerSeq?: number,
 ): Promise<AgentRunStreamEvent | null> {
-  const payload = JSON.stringify(event);
+  const safeEvent = storageSafeJson(event);
+  const payload = JSON.stringify(safeEvent);
   const seq = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${runId}))`);
     const rows = await tx.execute<{ seq: number }>(sql`
@@ -274,7 +294,7 @@ async function persistEvent(
     return inserted ? Number(inserted.seq) : null;
   });
   if (seq == null) return null;
-  return { seq, event };
+  return { seq, event: safeEvent };
 }
 
 async function appendEvent(
@@ -339,6 +359,7 @@ export async function getActiveAgentRun(
     startedAt: row.createdAt.toISOString(),
     userTurn: parseUserTurn(row.input.userTurn),
     pendingAsk: asPendingAsk(row.pendingAsk ?? null),
+    answeredAskId: asPendingAnswer(row.pendingAnswer ?? null)?.askId ?? null,
     pendingEnvRequest: asPendingEnvRequest(row.pendingEnvRequest ?? null),
   };
 }
@@ -996,6 +1017,7 @@ export async function ingestRunnerEvent(
   runnerId: string,
   message: { runId: string; runnerSeq: number; event: AgentStreamEvent },
 ): Promise<IngestResult> {
+  const event = storageSafeJson(message.event);
   return enqueueRunTask(message.runId, async () => {
     const run = await getAgentRun(message.runId);
     if (!run || run.runnerId !== runnerId) return { status: 'stale' };
@@ -1013,18 +1035,14 @@ export async function ingestRunnerEvent(
 
     // Persist first, publish last: subscribers must not see an `ask` before
     // the run row records it as pending (a fast answer would 409 otherwise).
-    const stored = await persistEvent(
-      message.runId,
-      message.event,
-      message.runnerSeq,
-    );
+    const stored = await persistEvent(message.runId, event, message.runnerSeq);
 
     // Apply run-row side effects even when the event itself is a duplicate
     // resend: a crash between persistEvent and this update would otherwise
     // skip the effect forever (the resend dedupes on runnerSeq). Resends
     // replay as an in-order suffix (acks are cumulative), and each effect is
     // idempotent, so replaying converges to the correct state.
-    await applyRunnerEventSideEffects(message.runId, message.event);
+    await applyRunnerEventSideEffects(message.runId, event);
 
     // Duplicate resend — already persisted and published once.
     if (!stored) return { status: 'ok', sessionId };
@@ -1151,13 +1169,14 @@ async function applyRunnerEventSideEffects(
  */
 export async function completeRunFromRunner(
   runnerId: string,
-  message: {
+  report: {
     runId: string;
     status: 'completed' | 'failed' | 'cancelled';
     error?: string;
     messages: unknown[];
   },
 ): Promise<string | null> {
+  const message = storageSafeJson(report);
   return enqueueRunTask(message.runId, async () => {
     const run = await getAgentRun(message.runId);
     if (!run || run.runnerId !== runnerId) return null;
@@ -1328,11 +1347,16 @@ export async function answerAgentRun(
       and(
         eq(schema.agentRuns.id, runId),
         inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+        sql`${schema.agentRuns.pendingAsk}->>'askId' = ${askId}`,
+        isNull(schema.agentRuns.pendingAnswer),
       ),
     )
     .returning({ id: schema.agentRuns.id });
   if (updated.length === 0) {
-    throw new Error('Agent run is no longer active.');
+    throw new AppError(
+      'Answer already submitted or question is no longer waiting.',
+      409,
+    );
   }
 
   sendRunAnswer(run.runnerId, runId, askId, answers);
