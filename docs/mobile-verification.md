@@ -417,6 +417,79 @@ the lockfile records the compatible, policy-eligible resolutions. The online
 companions. Offline validation against the installed 57.0.28 metadata passes;
 that intentional patch lag is not reported as an online check pass.
 
+## Ember native follow-up on macOS — 2026-10-17 UTC
+
+The Ember revision at `88375b1520306f4b62757ae8a5b0e3d100e2e3cb` was
+prebuilt, compiled, installed, and exercised in a fresh Expo SDK 58.0.12
+development client. Xcode 27.0 beta 5 (27A5237l) built the native product with
+`UIUserInterfaceStyle=Light`. Dedicated iPhone 17 Pro / iOS 27 and iPhone SE
+(3rd generation) / iOS 26 Simulators were used. These were Simulator checks,
+not physical-device or Android acceptance. Computer Use was unavailable in
+this session; documented AXe HID/Accessibility commands drove the actual app,
+and `simctl` captured its framebuffer screenshots and recordings.
+
+The fresh native checks covered the four Ember pages, native navigation and
+menus, invalid origins, browser device approval and return, cold session and
+pending-answer restoration, App cards and protected WebView handoff, external
+link confirmation, expired-ticket HTTP 401 and fresh-ticket HTTP 303 recovery,
+model selection, actual Runner streaming, and expanded tool request/output.
+The isolated backend used retained QA accounts/data and a deterministic local
+OpenAI-compatible provider through the actual Runner. This proves integration,
+not model quality or the App deployment builder. The protected App is a retained
+static fixture; its older build label is not the mobile source revision.
+
+Both directions of single-choice/Other switching were exercised: Blue followed
+by Other `Orange` submitted an empty option list; Other `Amber` followed by
+Green submitted only Green and empty custom text. Multiple-choice Read/Walk
+was retained. Each answer had one accepted HTTP 200 request, and a paused
+Runner left the client in the restored, non-resubmittable waiting state before
+continuing. No HTTP 409 occurred in these fresh regressions.
+
+Actual software-keyboard Pinyin composition and candidate selection committed
+`你好`. After switching to English, focus changes and the Photos picker, the
+complete message `你好oranges123z` reached the model and persisted once with the
+selected flower photo. The keyboard's normal autocorrection from `orangez` to
+`oranges` was distinguished from app text loss. Files delivered a 64-byte
+`qa-note.txt`; a 27.3 MB fixture was rejected by the 25 MiB client limit without
+discarding the draft/photo. The SE keyboard Return submitted `Hi\nOk` intact.
+
+An actual defect was repaired in `AttachmentMenu`: applying a minimum frame to
+the SwiftUI Menu did not enlarge its approximately 20-by-21-point hit target.
+The paperclip now owns a 44-by-44-point native label and rectangular content
+shape. Accessibility reports the full 44-point target, and the same outer-edge
+touch opens the menu after the repair. Default and maximum Dynamic Type were
+checked on the compact Simulator, including the separate attachment/send row,
+composer scrolling, whole-card edge taps, multiline page actions, and scrolling
+settings/connection pages. The app stays light under device dark appearance.
+
+Recovery checks cut the active SSE transport, backgrounded/foregrounded the app,
+cold-launched it, and verified all 200 ordered, unique fixture tokens against the
+saved transcript. Cutting the Runner RPC connection produced a real reconnect
+and one resumed run. An injected provider 503 exposed its error and explicit
+retry; retry completed without duplicating the user turn. A separate slow run
+was stopped through the native confirmation and persisted as cancelled.
+Offline logout removed the local identity and displayed the explicit warning
+that server revocation could not be confirmed. Online logout returned HTTP 200;
+an already-held attachment upload subsequently returned HTTP 401 and could not
+start a run. No production account, payment, message, or data was used.
+
+Browser identity preparation for the first A login used the normal Better Auth
+sign-in API with an existing QA account; device-code comparison, approval, and
+return were performed in the real system browser. It does not prove manual
+password entry for that first login. Credentials and unrelated clipboard UI
+were excluded from published media; the raw diagnostic material remains private.
+The existing B QA account was subsequently signed in through the system
+browser's email/password form, with recording paused during credential entry.
+After its device approval and return, B showed no Apps and only its existing
+empty conversations, with no A attachment or draft carried into the new chat.
+
+Local quality checks after the touch-target repair passed: root/SDK/mobile type
+checks, repository format/lint, and all 43 mobile tests. The new native evidence
+belongs to the follow-up round in the existing
+[mobile acceptance](https://app.lobehub.com/acceptance/f2e97780-8df7-4fe9-b081-f921932239fe).
+Physical installation, haptics, camera capture, device performance, and Android
+remain unverified.
+
 ## Ember visual alignment (2026-10-17, after Connect acceptance)
 
 This presentation-only revision restores the repository's `DESIGN.md` visual
