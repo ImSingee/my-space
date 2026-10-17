@@ -470,6 +470,7 @@ export default function ChatScreen() {
                 ) : null}
                 {(detail?.appIds ?? []).map((appId) => (
                   <Action
+                    fullWidth
                     key={appId}
                     label={`Open ${apps.data?.find((app) => app.id === appId)?.name ?? 'app'}`}
                     secondary
@@ -490,7 +491,7 @@ export default function ChatScreen() {
             paddingHorizontal: 16,
             paddingTop: 10,
             paddingBottom: Math.max(insets.bottom, 12),
-            backgroundColor: c.card,
+            backgroundColor: c.panel,
             borderTopWidth: 1,
             borderTopColor: c.border,
             gap: 10,

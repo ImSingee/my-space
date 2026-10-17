@@ -1,3 +1,4 @@
+import { hatchPalette as c } from './theme';
 import { useState } from 'react';
 import { Alert, Button, Switch, Text, View } from 'react-native';
 import type {
@@ -13,7 +14,7 @@ export function Action({ label, onPress, disabled, danger }: ActionProps) {
       title={label}
       onPress={onPress}
       disabled={disabled}
-      color={danger ? '#c00' : undefined}
+      color={danger ? c.danger : c.accentText}
     />
   );
 }
@@ -26,6 +27,7 @@ export function Choice({
 }: ChoiceProps) {
   return (
     <Button
+      color={c.accentText}
       title={`${label}: ${options.find((option) => option.value === value)?.label ?? ''}`}
       disabled={disabled}
       onPress={() =>
@@ -53,8 +55,9 @@ export function OptionToggle({
 }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <Text style={{ flex: 1 }}>{label}</Text>
+      <Text style={{ flex: 1, color: c.text }}>{label}</Text>
       <Switch
+        trackColor={{ true: c.accentText }}
         accessibilityLabel={label}
         value={selected}
         onValueChange={onChange}
@@ -66,6 +69,7 @@ export function OptionToggle({
 export function AttachmentMenu({ disabled, onChoose }: AttachmentMenuProps) {
   return (
     <Button
+      color={c.accentText}
       title="Attach"
       disabled={disabled}
       onPress={() =>
@@ -82,8 +86,16 @@ export function Details({ title, text }: DetailProps) {
   const [expanded, setExpanded] = useState(false);
   return (
     <View>
-      <Button title={title} onPress={() => setExpanded(!expanded)} />
-      {expanded ? <Text selectable>{text}</Text> : null}
+      <Button
+        color={c.accentText}
+        title={title}
+        onPress={() => setExpanded(!expanded)}
+      />
+      {expanded ? (
+        <Text selectable style={{ color: c.muted }}>
+          {text}
+        </Text>
+      ) : null}
     </View>
   );
 }

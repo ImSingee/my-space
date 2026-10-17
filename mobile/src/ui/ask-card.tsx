@@ -22,7 +22,7 @@ export function AskCard({
     answers[id] ?? { questionId: id, selectedOptionIds: [], customText: '' };
   return (
     <Card>
-      <Text style={[styles.label, { color: c.accent }]}>
+      <Text style={[styles.label, { color: c.accentText }]}>
         YOUR AGENT HAS A QUESTION
       </Text>
       {ask.questions.map((question) => (
@@ -96,6 +96,7 @@ export function AskCard({
         </View>
       ))}
       <Action
+        fullWidth
         label={busy ? 'Sending answer…' : 'Send answer'}
         disabled={
           busy ||

@@ -6,7 +6,7 @@ const config: ExpoConfig = {
   version: '0.1.0',
   scheme: 'hatch',
   orientation: 'default',
-  userInterfaceStyle: 'automatic',
+  userInterfaceStyle: 'light',
   ios: {
     supportsTablet: false,
     deploymentTarget: '16.4',

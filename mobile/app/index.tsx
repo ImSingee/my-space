@@ -1,19 +1,28 @@
-import { FormButton } from '../src/ui/form-button';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { View } from 'react-native';
+import { FlatList, RefreshControl, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { FieldGroup, Host, ListItem, Text as FormText } from '@expo/ui';
 import SegmentedControl from '@expo/ui/community/segmented-control';
-import { refreshable } from '@expo/ui/swift-ui/modifiers';
 import type { AppSummary, SessionSummary } from '../src/core';
 import { useSession } from '../src/state/session';
 import { useLifetimeSignal } from '../src/state/use-lifetime-signal';
-import { Action, Busy, Notice, errorText, styles } from '../src/ui/primitives';
+import {
+  Action,
+  Brand,
+  Busy,
+  Notice,
+  PageHeading,
+  Text,
+  errorText,
+  styles,
+  usePalette,
+} from '../src/ui/primitives';
+import { ResourceRow } from '../src/ui/resource-row';
 
 export default function HomeScreen() {
   const { api, origin } = useSession();
+  const c = usePalette();
   const queryClient = useQueryClient();
   const lifetimeSignal = useLifetimeSignal();
   const [tab, setTab] = useState<'apps' | 'chats'>('apps');
@@ -63,73 +72,108 @@ export default function HomeScreen() {
           ),
         }}
       />
-      <View style={{ padding: 16 }}>
-        <SegmentedControl
-          values={['Your apps', 'Conversations']}
-          selectedIndex={tab === 'apps' ? 0 : 1}
-          onChange={({ nativeEvent }) =>
-            setTab(nativeEvent.selectedSegmentIndex === 0 ? 'apps' : 'chats')
-          }
-        />
-      </View>
-      <Host style={styles.screen} ignoreSafeArea="all">
-        <FieldGroup
-          modifiers={[
-            refreshable(async () => {
-              await (tab === 'apps' ? apps.refetch() : sessions.refetch());
-            }),
-          ]}
-        >
-          <FieldGroup.Section title={origin?.replace(/^https?:\/\//, '')}>
-            <FormButton
+      <FlatList<AppSummary | SessionSummary>
+        data={rows}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.content}
+        contentInsetAdjustmentBehavior="automatic"
+        refreshControl={
+          <RefreshControl
+            refreshing={
+              tab === 'apps' ? apps.isRefetching : sessions.isRefetching
+            }
+            onRefresh={refresh}
+            tintColor={c.accentText}
+            colors={[c.accentText]}
+          />
+        }
+        ListHeaderComponent={
+          <View style={{ gap: 20, paddingBottom: 20 }}>
+            <Brand />
+            <PageHeading
+              title={tab === 'apps' ? 'Your workspace.' : 'Keep building.'}
+              detail={
+                tab === 'apps'
+                  ? 'A home for the things you make.'
+                  : 'Pick up an idea, wherever you are.'
+              }
+            />
+            <Text selectable style={[styles.caption, { color: c.muted }]}>
+              {origin?.replace(/^https?:\/\//, '')}
+            </Text>
+            <Action
+              fullWidth
               label={create.isPending ? 'Creating…' : 'Start a conversation'}
-
-              unavailable={create.isPending}
+              disabled={create.isPending}
               onPress={() => create.mutate()}
             />
             {create.error ? (
-              <FormText>{errorText(create.error)}</FormText>
+              <Text accessibilityRole="alert" style={{ color: c.danger }}>
+                {errorText(create.error)}
+              </Text>
             ) : null}
-          </FieldGroup.Section>
-          <FieldGroup.Section
-            title={tab === 'apps' ? 'Your apps' : 'Conversations'}
-          >
-            {rows.map((item: AppSummary | SessionSummary) => (
-              <ListItem
-                key={item.id}
-                onPress={() =>
-                  router.push({
-                    pathname: tab === 'apps' ? '/apps/[id]' : '/chat/[id]',
-                    params: { id: item.id },
-                  })
-                }
-                supportingText={
-                  'description' in item
-                    ? item.description || item.status
-                    : `${item.messageCount} messages · ${new Date(item.updatedAt).toLocaleDateString()}`
-                }
-              >
-                {'name' in item ? item.name : item.title}
-              </ListItem>
-            ))}
-            {!rows.length && !loading && !failure ? (
-              <FormText>
-                {tab === 'apps'
+            <SegmentedControl
+              appearance="light"
+              values={['Your apps', 'Conversations']}
+              selectedIndex={tab === 'apps' ? 0 : 1}
+              onChange={({ nativeEvent }) =>
+                setTab(
+                  nativeEvent.selectedSegmentIndex === 0 ? 'apps' : 'chats',
+                )
+              }
+            />
+            {failure && rows.length ? (
+              <Notice
+                title="Couldn’t refresh your Hatch"
+                detail={errorText(failure)}
+                action={{ label: 'Try again', onPress: refresh }}
+              />
+            ) : null}
+          </View>
+        }
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        ListEmptyComponent={
+          loading ? (
+            <Busy />
+          ) : failure ? (
+            <Notice
+              title="Couldn’t load your Hatch"
+              detail={errorText(failure)}
+              action={{ label: 'Try again', onPress: refresh }}
+            />
+          ) : (
+            <Notice
+              title={
+                tab === 'apps'
+                  ? 'A little idea can become an app.'
+                  : 'What would you like to make?'
+              }
+              detail={
+                tab === 'apps'
                   ? 'Ask your Agent to build something. Your apps will appear here.'
-                  : 'Start a conversation, attach a photo or file, and keep building from your phone.'}
-              </FormText>
-            ) : null}
-          </FieldGroup.Section>
-        </FieldGroup>
-      </Host>
-      {loading ? <Busy /> : null}
-      {failure ? (
-        <Notice
-          title="Couldn’t load your Hatch"
-          detail={errorText(failure)}
-          action={{ label: 'Try again', onPress: refresh }}
-        />
-      ) : null}
+                  : 'Start a conversation, attach a photo or file, and keep building from your phone.'
+              }
+            />
+          )
+        }
+        renderItem={({ item }) => (
+          <ResourceRow
+            title={'name' in item ? item.name : item.title}
+            detail={
+              'description' in item
+                ? item.description || item.status
+                : `${item.messageCount} messages · ${new Date(item.updatedAt).toLocaleDateString()}`
+            }
+            kind={tab === 'apps' ? 'app' : 'conversation'}
+            onPress={() =>
+              router.push({
+                pathname: tab === 'apps' ? '/apps/[id]' : '/chat/[id]',
+                params: { id: item.id },
+              })
+            }
+          />
+        )}
+      />
     </SafeAreaView>
   );
 }
