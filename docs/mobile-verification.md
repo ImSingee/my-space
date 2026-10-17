@@ -544,3 +544,21 @@ last typed characters on submission, questions/Other, attachments, and chat
 stop/retry. Device dark appearance must still show the intentional light Hatch
 surfaces. Rebuild using the existing local setup when a Mac is available; do not
 infer a native pass from this cloud work.
+
+## Launcher icon packaging (2026-10-17)
+
+The mobile Expo config uses the existing shared Hatch brand asset at
+`public/logo512.png` as its application icon. iOS build 2 distinguishes the
+corrected artifact from build 1, whose missing `icon` configuration generated a
+plain-white AppIcon despite valid icon declarations in the packaged Info.plist.
+The shared brand artwork is reused without introducing a new logo.
+
+Regenerate the native project with Expo prebuild and compile/install it after
+changing the icon. Generated iOS asset catalogs are not tracked source. For
+release verification, inspect the decoded packaged icon pixels as well as
+Info.plist and the AppIcon rendition in Assets.car: the image must contain the
+Hatch colors and be opaque, rather than merely exist. Inspect an actual
+Simulator home-screen screenshot, then open Hatch from its icon. Keep the
+before/after captures and final IPA hash with the icon-specific acceptance
+round; the earlier business-flow acceptance remains historical evidence for
+the unchanged login, chat, and attachment behavior.
