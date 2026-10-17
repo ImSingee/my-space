@@ -3,6 +3,7 @@ import { hatchPalette as c, hatchRadii } from './theme';
 import {
   Button,
   DisclosureGroup,
+  Image,
   Menu,
   Picker,
   Text,
@@ -21,7 +22,6 @@ import {
   foregroundStyle,
   frame,
   lineLimit,
-  labelStyle,
   accessibilityLabel,
   pickerStyle,
   tag,
@@ -169,14 +169,18 @@ export function AttachmentMenu({
       style={{ minHeight: 44 }}
     >
       <Menu
-        label="Attach"
-        systemImage="paperclip"
-        modifiers={[
-          disabled(unavailable),
-          labelStyle('iconOnly'),
-          accessibilityLabel('Attach'),
-          frame({ minWidth: 44, minHeight: 44 }),
-        ]}
+        label={
+          <Image
+            systemName="paperclip"
+            modifiers={[
+              font({ textStyle: 'body' }),
+              foregroundStyle(c.accentText),
+              frame({ width: 44, height: 44 }),
+              contentShape(shapes.rectangle()),
+            ]}
+          />
+        }
+        modifiers={[disabled(unavailable), accessibilityLabel('Attach')]}
       >
         <Button
           label="Photo library"
