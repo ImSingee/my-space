@@ -5,6 +5,7 @@ export type ActionProps = {
   secondary?: boolean;
   danger?: boolean;
   compact?: boolean;
+  fullWidth?: boolean;
 };
 export type ChoiceProps = {
   label: string;

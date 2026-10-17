@@ -416,3 +416,58 @@ the lockfile records the compatible, policy-eligible resolutions. The online
 `expo install --check` recommends the same-day 57.0.29 patch and its three updated
 companions. Offline validation against the installed 57.0.28 metadata passes;
 that intentional patch lag is not reported as an online check pass.
+
+## Ember visual alignment (2026-10-17, after Connect acceptance)
+
+This presentation-only revision restores the repository's `DESIGN.md` visual
+system without reverting the Expo UI migration:
+
+- `mobile/src/ui/theme.ts` projects Ember/stone colors, the true-white canvas,
+  warm panel surface, accessible accent text, and flat 12/16-point radii. The
+  app follows the platform's documented light-only policy, including native
+  navigation and embedded Hosts. The app-config appearance change takes effect
+  in a regenerated native build; the running React tree also requests light
+  appearance. No SDK, dependency, native-module, or protocol version changed.
+- Connection, library, and instance settings regain Hatch's brand mark,
+  editorial heading hierarchy, custom page composition, and bordered resource
+  cards. Display text uses the system serif fallback from
+  `src/ui/ember-theme/style.css`; control/body typography keeps native scaling. The shared web logo
+  is bundled locally, with no runtime font or image request.
+- Actual buttons, fields, menus, choices, switches, disclosures, and navigation
+  remain native/`@expo/ui`. iOS resource cards use a native Button with a styled
+  SwiftUI label so the full padded card is its hit target. Android uses the
+  universal ListItem. iOS page actions constrain width and allow multiline
+  labels; intrinsic-width compact actions remain separate. Minimum tap size is
+  part of the native label rather than empty Host space.
+- Native input snapshots, non-echoing bindings, per-conversation drafts,
+  single-choice/Other semantics, query identity/cancellation, and all Connect,
+  device-auth, SSE, and WebView security boundaries are preserved. The compact
+  composer retains its 75% scrolling bound, keyboard ownership, and separate
+  accessible attachment/send row. Input padding belongs to the surrounding RN
+  focus-forwarding wrapper because the SDK58 SwiftUI Host fills its bounds rather than Yoga padding. The wrapper forwards edge taps to the native input
+  without becoming a separate accessibility element.
+
+Validation in the Linux cloud workspace:
+
+- Frozen-lockfile install using pnpm 12.11.2 passed without lockfile changes.
+- Root, SDK, and mobile type checks; repository format/lint; the 39 existing
+  mobile tests plus four readable-color contract checks; and the iOS Metro/Hermes
+  export are checked for this revision. The color checks protect normal-size
+  text contrast on every supported surface and on the primary button fill.
+- A temporary Web preview compiled the actual connection/library/settings
+  components with explicit fixture data. Chromium could not start because the
+  cloud sandbox blocks the required Unix socket; an approved execution attempt
+  also failed during environment mounting. No screenshots were produced.
+- **No new iOS/Android native compilation, installation, Simulator/device test,
+  keyboard/touch acceptance, or screenshot-based visual approval was performed.**
+  A bundle export and a compiled Web preview do not establish those outcomes.
+  No acceptance round was published. Earlier acceptance is historical for this
+  new presentation revision.
+
+Before native sign-off, recheck the changed connection/library/settings screens,
+page actions with long labels and maximum Dynamic Type on the small Simulator,
+whole-card and field-edge taps, safe areas, keyboard return/scrolling, first and
+last typed characters on submission, questions/Other, attachments, and chat
+stop/retry. Device dark appearance must still show the intentional light Hatch
+surfaces. Rebuild using the existing local setup when a Mac is available; do not
+infer a native pass from this cloud work.

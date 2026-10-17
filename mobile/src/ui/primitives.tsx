@@ -1,12 +1,12 @@
 import type { PropsWithChildren } from 'react';
+import { hatchPalette, hatchRadii } from './theme';
 import {
   ActivityIndicator,
+  Image,
   Platform,
-  PlatformColor,
   StyleSheet,
   Text as NativeText,
   type TextProps,
-  useColorScheme,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -17,59 +17,47 @@ export function Text(props: TextProps) {
   return <NativeText key={fontScale} {...props} />;
 }
 
+// Hatch uses the same light-only Ember appearance as the platform.
 export function usePalette() {
-  const dark = useColorScheme() === 'dark';
-  return {
-    dark,
-    background:
-      Platform.OS === 'ios'
-        ? PlatformColor('systemGroupedBackground')
-        : dark
-          ? '#101214'
-          : '#F4F5F7',
-    card:
-      Platform.OS === 'ios'
-        ? PlatformColor('secondarySystemGroupedBackground')
-        : dark
-          ? '#1B1E22'
-          : '#FFFFFF',
-    text:
-      Platform.OS === 'ios'
-        ? PlatformColor('label')
-        : dark
-          ? '#F4F6F8'
-          : '#15191E',
-    muted:
-      Platform.OS === 'ios'
-        ? PlatformColor('secondaryLabel')
-        : dark
-          ? '#A4ACB8'
-          : '#647080',
-    border:
-      Platform.OS === 'ios'
-        ? PlatformColor('separator')
-        : dark
-          ? '#343A44'
-          : '#DEE3EA',
-    accent:
-      Platform.OS === 'ios'
-        ? PlatformColor('systemBlue')
-        : dark
-          ? '#9FC4FF'
-          : '#245BB2',
-    subtle:
-      Platform.OS === 'ios'
-        ? PlatformColor('tertiarySystemFill')
-        : dark
-          ? '#25334B'
-          : '#E7EFFC',
-    danger:
-      Platform.OS === 'ios'
-        ? PlatformColor('systemRed')
-        : dark
-          ? '#FF9A9A'
-          : '#B52D35',
-  };
+  return hatchPalette;
+}
+
+export function Brand() {
+  return (
+    <View style={styles.row}>
+      <Image
+        source={require('../../../public/logo192.png')}
+        accessible={false}
+        style={{ width: 36, height: 36 }}
+      />
+      <Text
+        style={{ color: hatchPalette.text, fontSize: 22, fontWeight: '600' }}
+      >
+        Hatch
+      </Text>
+    </View>
+  );
+}
+
+export function PageHeading({
+  title,
+  detail,
+}: {
+  title: string;
+  detail?: string;
+}) {
+  return (
+    <View style={styles.pageHeading}>
+      <Text accessibilityRole="header" style={styles.display}>
+        {title}
+      </Text>
+      {detail ? (
+        <Text style={[styles.body, { color: hatchPalette.muted }]}>
+          {detail}
+        </Text>
+      ) : null}
+    </View>
+  );
 }
 
 export { Action } from './native-controls';
@@ -86,7 +74,12 @@ export function Notice({
 }) {
   const c = usePalette();
   return (
-    <View style={[styles.notice, { backgroundColor: c.card }]}>
+    <View
+      style={[
+        styles.notice,
+        { backgroundColor: c.panel, borderColor: c.border },
+      ]}
+    >
       <Text
         accessibilityRole="header"
         style={[styles.heading, { color: c.text }]}
@@ -98,7 +91,7 @@ export function Notice({
           {detail}
         </Text>
       ) : null}
-      {action ? <Action {...action} secondary /> : null}
+      {action ? <Action {...action} secondary fullWidth /> : null}
     </View>
   );
 }
@@ -116,7 +109,11 @@ export function Busy({ label = 'Loading…' }: { label?: string }) {
 export function Card({ children }: PropsWithChildren) {
   const c = usePalette();
   return (
-    <View style={[styles.card, { backgroundColor: c.card }]}>{children}</View>
+    <View
+      style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
+    >
+      {children}
+    </View>
   );
 }
 
@@ -127,14 +124,32 @@ export function errorText(error: unknown): string {
 }
 
 export const styles = StyleSheet.create({
-  screen: { flex: 1 },
+  screen: { flex: 1, backgroundColor: hatchPalette.background },
   content: { padding: 20, gap: 16, paddingBottom: 36 },
-  card: { borderRadius: 20, padding: 18, gap: 12 },
-  heading: { fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
+  card: { borderRadius: hatchRadii.card, borderWidth: 1, padding: 16, gap: 12 },
+  heading: { fontSize: 20, fontWeight: '600', letterSpacing: -0.3 },
+  display: {
+    fontFamily: Platform.OS === 'ios' ? 'Iowan Old Style' : 'serif',
+    fontSize: 34,
+    fontWeight: '500',
+    letterSpacing: -0.34,
+    color: hatchPalette.text,
+  },
+  pageHeading: {
+    gap: 8,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: hatchPalette.border,
+  },
   body: { fontSize: 16, lineHeight: 24 },
   caption: { fontSize: 13, lineHeight: 19 },
   label: { fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
-  notice: { margin: 20, borderRadius: 20, padding: 22, gap: 14 },
+  notice: {
+    borderRadius: hatchRadii.card,
+    borderWidth: 1,
+    padding: 20,
+    gap: 12,
+  },
   busy: {
     flex: 1,
     minHeight: 140,

@@ -47,8 +47,10 @@ export function TranscriptMessage({ value }: { value: JsonValue }) {
         gap: 9,
         paddingVertical: 12,
         paddingHorizontal: role === 'user' ? 16 : 0,
-        borderRadius: 18,
-        backgroundColor: role === 'user' ? c.subtle : 'transparent',
+        borderRadius: 12,
+        backgroundColor: role === 'user' ? c.panel : 'transparent',
+        borderWidth: role === 'user' ? 1 : 0,
+        borderColor: c.border,
       }}
     >
       <Text style={[styles.label, { color: c.muted }]}>
@@ -101,7 +103,7 @@ export function TranscriptMessage({ value }: { value: JsonValue }) {
           );
         if (block.type === 'app' || block.type === 'workflow')
           return (
-            <Text key={index} style={[styles.body, { color: c.accent }]}>
+            <Text key={index} style={[styles.body, { color: c.accentText }]}>
               {typeof block.name === 'string'
                 ? block.name
                 : 'Referenced resource'}
@@ -126,7 +128,7 @@ export function LiveTranscript({ state }: { state: StreamState }) {
   const c = usePalette();
   return (
     <Card>
-      <Text style={[styles.label, { color: c.accent }]}>HATCH</Text>
+      <Text style={[styles.label, { color: c.accentText }]}>HATCH</Text>
       {state.blocks.map((block, index) => {
         if (block.kind === 'text')
           return (
