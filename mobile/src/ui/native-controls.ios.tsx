@@ -1,7 +1,8 @@
+import { Host } from '@expo/ui';
+import { hatchPalette as c, hatchRadii } from './theme';
 import {
   Button,
   DisclosureGroup,
-  Host,
   Menu,
   Picker,
   Text,
@@ -9,6 +10,11 @@ import {
 } from '@expo/ui/swift-ui';
 import {
   buttonStyle,
+  contentShape,
+  shapes,
+  multilineTextAlignment,
+  buttonBorderShape,
+  tint,
   controlSize,
   disabled,
   font,
@@ -22,7 +28,6 @@ import {
   textSelection,
 } from '@expo/ui/swift-ui/modifiers';
 import { useState } from 'react';
-import { PlatformColor } from 'react-native';
 import type {
   ActionProps,
   AttachmentMenuProps,
@@ -38,23 +43,50 @@ export function Action({
   secondary,
   danger,
   compact,
+  fullWidth,
 }: ActionProps) {
   return (
     <Host
-      matchContents
+      colorScheme="light"
+      seedColor={c.accentText}
+      matchContents={fullWidth ? { vertical: true } : true}
       ignoreSafeArea="all"
-      style={{ minHeight: compact ? 34 : 44, flexShrink: 1 }}
+      style={{
+        minHeight: 44,
+        flexShrink: 1,
+        ...(fullWidth ? { width: '100%' } : {}),
+      }}
     >
       <Button
-        label={label}
         onPress={onPress}
         role={danger ? 'destructive' : 'default'}
         modifiers={[
           buttonStyle(secondary ? 'borderless' : 'borderedProminent'),
+          buttonBorderShape('roundedRectangle', hatchRadii.card),
+          tint(danger ? c.danger : secondary ? c.accentText : c.accent),
+          ...(!danger
+            ? [foregroundStyle(secondary ? c.accentText : c.text)]
+            : []),
+          font({ textStyle: 'body', weight: 'semibold' }),
           controlSize(compact ? 'regular' : 'large'),
           disabled(Boolean(unavailable)),
         ]}
-      />
+      >
+        <Text
+          modifiers={[
+            font({ textStyle: 'body', weight: 'semibold' }),
+            multilineTextAlignment('center'),
+            lineLimit(),
+            frame({
+              minHeight: 44,
+              ...(fullWidth ? { maxWidth: Infinity } : {}),
+            }),
+            contentShape(shapes.rectangle()),
+          ]}
+        >
+          {label}
+        </Text>
+      </Button>
     </Host>
   );
 }
@@ -67,6 +99,8 @@ export function Choice({
 }: ChoiceProps) {
   return (
     <Host
+      colorScheme="light"
+      seedColor={c.accentText}
       matchContents={{ vertical: true }}
       ignoreSafeArea="all"
       style={{ minHeight: 44, flex: 1 }}
@@ -107,7 +141,12 @@ export function OptionToggle({
   unavailable: boolean;
 }) {
   return (
-    <Host matchContents={{ vertical: true }} ignoreSafeArea="all">
+    <Host
+      colorScheme="light"
+      seedColor={c.accentText}
+      matchContents={{ vertical: true }}
+      ignoreSafeArea="all"
+    >
       <Toggle
         label={label}
         isOn={selected}
@@ -123,6 +162,8 @@ export function AttachmentMenu({
 }: AttachmentMenuProps) {
   return (
     <Host
+      colorScheme="light"
+      seedColor={c.accentText}
       matchContents={{ vertical: true }}
       ignoreSafeArea="all"
       style={{ minHeight: 44 }}
@@ -154,7 +195,12 @@ export function AttachmentMenu({
 export function Details({ title, text, error }: DetailProps) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <Host matchContents={{ vertical: true }} ignoreSafeArea="all">
+    <Host
+      colorScheme="light"
+      seedColor={c.accentText}
+      matchContents={{ vertical: true }}
+      ignoreSafeArea="all"
+    >
       <DisclosureGroup
         label={title}
         isExpanded={expanded}
@@ -163,9 +209,7 @@ export function Details({ title, text, error }: DetailProps) {
         <Text
           modifiers={[
             font({ textStyle: 'caption', design: 'monospaced' }),
-            foregroundStyle(
-              PlatformColor(error ? 'systemRed' : 'secondaryLabel'),
-            ),
+            foregroundStyle(error ? c.danger : c.muted),
             textSelection(true),
             lineLimit(),
           ]}

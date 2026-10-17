@@ -1,5 +1,7 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { Appearance } from 'react-native';
+import { useEffect } from 'react';
+import { hatchPalette } from '../src/ui/theme';
 import { SessionProvider, useSession } from '../src/state/session';
 import { Busy, usePalette } from '../src/ui/primitives';
 
@@ -12,7 +14,11 @@ function Navigation() {
       key={epoch}
       screenOptions={{
         contentStyle: { backgroundColor: c.background },
-        statusBarStyle: c.dark ? 'light' : 'dark',
+        statusBarStyle: 'dark',
+        headerStyle: { backgroundColor: c.background },
+        headerTintColor: c.accentText,
+        headerTitleStyle: { color: c.text },
+        headerShadowVisible: false,
       }}
     >
       <Stack.Protected guard={!origin}>
@@ -38,9 +44,24 @@ function Navigation() {
 }
 
 export default function RootLayout() {
-  const dark = useColorScheme() === 'dark';
+  useEffect(() => {
+    Appearance.setColorScheme('light');
+    return () => Appearance.setColorScheme('auto');
+  }, []);
   return (
-    <ThemeProvider value={dark ? DarkTheme : DefaultTheme}>
+    <ThemeProvider
+      value={{
+        ...DefaultTheme,
+        colors: {
+          ...DefaultTheme.colors,
+          primary: hatchPalette.accentText,
+          background: hatchPalette.background,
+          card: hatchPalette.card,
+          text: hatchPalette.text,
+          border: hatchPalette.border,
+        },
+      }}
+    >
       <SessionProvider>
         <Navigation />
       </SessionProvider>
