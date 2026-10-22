@@ -501,36 +501,42 @@ describe('CLI authentication boundary', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('shows help without credentials and rejects removed commands as unknown', async () => {
+  it('shows help without credentials', async () => {
     const help = await invoke(['--json', '--help'], {
       env: { HATCH_CLI_TOKEN: 'partial-env' },
     });
     expect(help.code).toBe(0);
     expect(JSON.parse(help.stdout).version).toBe('0.1.0');
-    for (const args of [
-      ['auth', 'key', 'list'],
-      ['operation', 'get', 'operation-1'],
-      ['auth', 'key', '--help'],
-      ['operation', '--help'],
-      ['help', 'auth', 'key'],
-      ['help', 'operation'],
-    ]) {
-      const result = await invoke([...args, '--json']);
-      expect(result.code).toBe(2);
-      expect(JSON.parse(result.stdout).error.code).toBe('unknown_command');
-    }
-    const invalid = await invoke(['auth', 'login', '--token-stdin', '--json']);
-    expect(invalid.code).toBe(2);
-    const workdir = await invoke([
-      '--workdir',
-      '.',
-      'auth',
-      'status',
-      '--json',
-    ]);
-    expect(JSON.parse(workdir.stdout).error.code).toBe('invalid_arguments');
     expect(calls).toEqual([]);
   });
+
+  // Keep one CLI startup per case so slower hosts do not share a timeout.
+  it.each([
+    { args: ['auth', 'key', 'list'] },
+    { args: ['operation', 'get', 'operation-1'] },
+    { args: ['auth', 'key', '--help'] },
+    { args: ['operation', '--help'] },
+    { args: ['help', 'auth', 'key'] },
+    { args: ['help', 'operation'] },
+  ])('rejects removed command $args as unknown', async ({ args }) => {
+    const result = await invoke([...args, '--json']);
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stdout).error.code).toBe('unknown_command');
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    { args: ['auth', 'login', '--token-stdin'] },
+    { args: ['--workdir', '.', 'auth', 'status'] },
+  ])(
+    'rejects invalid arguments $args without authentication',
+    async ({ args }) => {
+      const result = await invoke([...args, '--json']);
+      expect(result.code).toBe(2);
+      expect(JSON.parse(result.stdout).error.code).toBe('invalid_arguments');
+      expect(calls).toEqual([]);
+    },
+  );
 
   it('reports a credential-type mismatch without saving or replacing a profile', async () => {
     await stored();
