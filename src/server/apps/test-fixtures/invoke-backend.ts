@@ -167,6 +167,11 @@ export default {
       return new Response('{invalid', {
         headers: { 'content-type': 'application/json' },
       });
+    if (path === '/fixture.v1.EchoService/NonConnectError')
+      return new Response(bytes, {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      });
     const headers = new Headers(request.headers);
     headers.set('x-fixture-observed', JSON.stringify(observed));
     return (

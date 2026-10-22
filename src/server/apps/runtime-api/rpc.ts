@@ -4,6 +4,7 @@ import {
 } from '~server/auth/credentials';
 import { RunTokenError } from '~server/agent-runner/run-auth';
 import { getPlatformEnv } from '~/env';
+import { getTailscaleManager } from '~server/tailscale-manager';
 import { parseAppApiPath } from './path';
 import { db } from '~/db';
 import { assertSupportedDeployment } from '~server/apps/compatibility';
@@ -25,7 +26,9 @@ export async function handleRpcRequest({
   const headers = request.headers;
   const origin = headers.get('origin');
   if (
-    (origin && origin !== getPlatformEnv().appUrl) ||
+    (origin &&
+      origin !== getPlatformEnv().appUrl &&
+      origin !== getTailscaleManager().trustedOrigin()) ||
     (!headers.has('authorization') &&
       !headers.has('x-api-key') &&
       headers.get('sec-fetch-site') === 'cross-site')

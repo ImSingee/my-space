@@ -32,6 +32,7 @@ const { db, schema } = (await import('~/db')) as unknown as Awaited<
   ReturnType<typeof import('~/db/test-db').createTestDb>
 >;
 const { auth } = await import('~auth/server');
+const { getTailscaleManager } = await import('~server/tailscale-manager');
 const { handleRpcRequest } = await import('./rpc');
 const { handle: webhook } = await import('~/routes/api/app/$appId/hook/$.ts');
 const { stopApp, proxyAppRequest, isAppRunning } = await import('../runtime');
@@ -323,6 +324,51 @@ describe('App backend shared native credential boundary', () => {
     ] as Record<string, string>[])
       expect((await call(headers)).status).toBe(403);
     expect((await call({ cookie, origin })).status).toBe(200);
+  });
+
+  it('accepts the active trusted Tailscale origin without weakening authentication or origin checks', async () => {
+    const tailscaleOrigin = 'https://hatch.fixture.ts.net';
+    const trustedOrigin = vi
+      .spyOn(getTailscaleManager(), 'trustedOrigin')
+      .mockReturnValue(tailscaleOrigin);
+    const tailscaleCall = (headers: Record<string, string>) =>
+      handleRpcRequest({
+        request: new Request(
+          `${tailscaleOrigin}/api/app/${id}/rpc/fixture.v1.EchoService/Echo`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'connect-protocol-version': '1',
+              'sec-fetch-site': 'same-origin',
+              origin: tailscaleOrigin,
+              ...headers,
+            },
+            body: '{}',
+          },
+        ),
+      });
+    try {
+      const response = await tailscaleCall({ cookie });
+      expect(response.status).toBe(200);
+      expect((await response.json()).observed.signatureValid).toBe(true);
+      expect(
+        (await tailscaleCall({ cookie, authorization: 'Bearer invalid' }))
+          .status,
+      ).toBe(401);
+      expect(
+        (await tailscaleCall({ cookie, origin: 'https://evil.test' })).status,
+      ).toBe(403);
+      expect(
+        (await tailscaleCall({ cookie, 'sec-fetch-site': 'cross-site' }))
+          .status,
+      ).toBe(403);
+      trustedOrigin.mockReturnValue(null);
+      expect((await tailscaleCall({ cookie })).status).toBe(403);
+      expect((await call({ cookie, origin })).status).toBe(200);
+    } finally {
+      trustedOrigin.mockRestore();
+    }
   });
 
   it('retains raw binary signatures, body limits and App errors', async () => {

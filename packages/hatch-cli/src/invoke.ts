@@ -183,11 +183,18 @@ export async function runBackendInvocation(
     }
     if (!response.ok) {
       const safe = redact(result, secrets);
-      const error = errorFromJson(
-        safe as JsonValue,
-        undefined,
-        new ConnectError('App backend request failed.', Code.Unknown),
+      const fallback = new ConnectError(
+        'App backend request failed.',
+        Code.Unknown,
       );
+      let error: ConnectError;
+      try {
+        error = errorFromJson(safe as JsonValue, undefined, fallback);
+      } catch {
+        // An answered request can have an invalid Connect error body. Keep its
+        // HTTP status and redacted body instead of treating it as a lost reply.
+        error = fallback;
+      }
       throw new BackendInvocationError(
         Code[error.code].replace(
           /[A-Z]/g,

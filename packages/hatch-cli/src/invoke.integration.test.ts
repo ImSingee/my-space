@@ -462,6 +462,37 @@ describe.runIf(Boolean(databaseUrl))(
       }
     });
 
+    it('retains HTTP status and redacted JSON when an error is not Connect-shaped', async () => {
+      for (const body of [
+        'denied',
+        [],
+        { message: 1, credential: token },
+        { code: 'permission_denied', message: 'denied', details: [null] },
+      ]) {
+        const result = await cli(invoke('NonConnectError', ['--file', '-']), {
+          input: JSON.stringify(body),
+        });
+        expect(result.code).toBe(7);
+        expect(result.data).toEqual({
+          ok: false,
+          error: {
+            code: 'unknown',
+            message: 'App backend request failed.',
+            httpStatus: 403,
+            response:
+              body &&
+              !Array.isArray(body) &&
+              typeof body === 'object' &&
+              'credential' in body
+                ? { ...body, credential: '[redacted]' }
+                : body,
+          },
+        });
+        expect(result.stdout).not.toContain(token);
+        expect(result.stderr).toBe('');
+      }
+    });
+
     it('rejects bad input/methods and invalid env pairs without invoking a method or downgrading to a profile', async () => {
       for (const method of [
         'https://evil.test/a',
