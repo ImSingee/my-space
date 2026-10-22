@@ -111,6 +111,13 @@ const definitions: readonly CliCommandDefinition[] = [
       'Associate with the verified current Run session, or report not-applicable.',
   },
   {
+    path: ['app', 'invoke', 'backend'],
+    usage:
+      'app invoke backend <id-or-slug> <package.Service/Method> [--file <path|->]',
+    description:
+      'Invoke an App backend using Connect unary JSON (default request: {}). No streaming or native gRPC.',
+  },
+  {
     path: ['app', 'kv', 'list'],
     usage:
       'app kv list <app-id> [--cursor <key>] [--limit <count>] [--reveal-secrets]',
@@ -185,6 +192,7 @@ const definitions: readonly CliCommandDefinition[] = [
 export const commandDefinitions = definitions.map((definition) => {
   const supported =
     ['help', 'version'].includes(definition.path[0]) ||
+    definition.path.join(' ') === 'app invoke backend' ||
     (definition.path[0] === 'app' &&
       definition.path.length === 3 &&
       ['kv', 'data-table', 'db'].includes(definition.path[1])) ||

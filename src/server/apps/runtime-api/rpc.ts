@@ -1,23 +1,48 @@
-import { auth } from '~auth/server';
+import {
+  authenticateCredential,
+  CredentialError,
+} from '~server/auth/credentials';
+import { RunTokenError } from '~server/agent-runner/run-auth';
+import { getPlatformEnv } from '~/env';
 import { parseAppApiPath } from './path';
 import { db } from '~/db';
 import { assertSupportedDeployment } from '~server/apps/compatibility';
-import { errorResponse } from '~server/errors';
 import { proxyAppRequest } from '~server/apps/runtime';
+
+/** Route-owned failures use Connect JSON, without management error envelopes. */
+function rpcError(status: number, code: string, message: string) {
+  return Response.json(
+    { code, message },
+    { status, headers: { 'cache-control': 'no-store' } },
+  );
+}
 
 export async function handleRpcRequest({
   request,
 }: {
   request: Request;
 }): Promise<Response> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) {
-    return new Response('Unauthorized', { status: 401 });
+  const headers = request.headers;
+  const origin = headers.get('origin');
+  if (
+    (origin && origin !== getPlatformEnv().appUrl) ||
+    (!headers.has('authorization') &&
+      !headers.has('x-api-key') &&
+      headers.get('sec-fetch-site') === 'cross-site')
+  ) {
+    return rpcError(403, 'permission_denied', 'Cross-origin request denied.');
+  }
+  try {
+    await authenticateCredential(request);
+  } catch (error) {
+    if (error instanceof CredentialError || error instanceof RunTokenError)
+      return rpcError(401, 'unauthenticated', 'Authentication required.');
+    return rpcError(503, 'unavailable', 'Authentication unavailable.');
   }
   const url = new URL(request.url);
   const parsed = parseAppApiPath(url.pathname);
   if (!parsed || (parsed.rest !== '/rpc' && !parsed.rest.startsWith('/rpc/'))) {
-    return new Response('Not found', { status: 404 });
+    return rpcError(404, 'not_found', 'App backend not found.');
   }
   const id = parsed.id;
   // Don't resurrect an archived/never-deployed app via a retained RPC URL:
@@ -33,12 +58,16 @@ export async function handleRpcRequest({
     !app.currentDeploymentId ||
     !app.capabilities?.backend
   ) {
-    return new Response('Not found', { status: 404 });
+    return rpcError(404, 'not_found', 'App backend not found.');
   }
   try {
     await assertSupportedDeployment(app.currentDeploymentId);
-  } catch (error) {
-    return errorResponse(error, 503);
+  } catch {
+    return rpcError(
+      503,
+      'unavailable',
+      'App deployment cannot run on this platform.',
+    );
   }
   try {
     // Sign the forward with the per-app key so the backend can distinguish
@@ -49,11 +78,9 @@ export async function handleRpcRequest({
     return await proxyAppRequest(id, request, `${parsed.prefix}/rpc`, '', {
       signWithSecret: app.signingSecret ?? undefined,
       expectedDeploymentId: app.currentDeploymentId,
+      platformAuthenticated: true,
     });
-  } catch (error) {
-    return new Response(
-      error instanceof Error ? error.message : 'App backend error',
-      { status: 502 },
-    );
+  } catch {
+    return rpcError(502, 'unavailable', 'App backend unavailable.');
   }
 }

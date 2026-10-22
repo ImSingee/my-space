@@ -16,8 +16,9 @@ const mocks = vi.hoisted(() => ({
     >(),
 }));
 
-vi.mock('~auth/server', () => ({
-  auth: { api: { getSession: mocks.getSession } },
+vi.mock('~server/auth/credentials', () => ({
+  authenticateCredential: mocks.getSession,
+  CredentialError: class extends Error {},
 }));
 vi.mock('~/db', () => ({
   db: {
@@ -29,6 +30,10 @@ vi.mock('~/db', () => ({
 }));
 vi.mock('~server/apps/runtime', () => ({
   proxyAppRequest: mocks.proxyAppRequest,
+}));
+
+vi.mock('~server/agent-runner/run-auth', () => ({
+  RunTokenError: class extends Error {},
 }));
 
 import { handleRpcRequest } from './rpc';
@@ -67,6 +72,7 @@ describe('public app RPC route', () => {
       {
         signWithSecret: 'signing-secret',
         expectedDeploymentId: 'deployment-1',
+        platformAuthenticated: true,
       },
     );
   });
