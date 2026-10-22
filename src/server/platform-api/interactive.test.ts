@@ -19,6 +19,7 @@ import {
 } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { LATEST_APP_COMPATIBILITY_VERSION } from '~/app-compatibility';
+import { cliClient } from '../../../packages/hatch-cli/src/client';
 
 const fixture = vi.hoisted(() => ({
   database: undefined as
@@ -114,6 +115,7 @@ function client(useBinaryFormat: boolean) {
   return {
     agent: createClient(AgentService, transport),
     apps: createClient(AppService, transport),
+    cli: cliClient(transport),
   };
 }
 async function handoff() {
@@ -203,6 +205,56 @@ afterAll(async () => {
 });
 
 describe('interactive Platform API contracts and authority', () => {
+  it.each([false, true])(
+    'inspects historical App manifests through API and CLI binary=%s without rewriting artifacts',
+    async (useBinaryFormat) => {
+      const manifest = {
+        id: 'app-one',
+        name: 'Historical App',
+        description: '',
+        capabilities: {
+          frontend: true,
+          widgets: false,
+          backend: false,
+          database: false,
+          cron: false,
+          webhook: false,
+          kv: true,
+        },
+        backendMode: 'serverless',
+        app: { url: '/api/apps/app-one/app/' },
+        widgets: [],
+        cron: [],
+      };
+      await db
+        .update(schema.deployments)
+        .set({ manifestNormalized: manifest, compatibilityVersion: 1 })
+        .where(eq(schema.deployments.id, 'deployment-one'));
+      const api = client(useBinaryFormat);
+      const detail = await api.apps.getApp({ id: 'app-one' });
+      const expected = {
+        compatibility: { version: 1, isSupported: true },
+        manifest: {
+          ...manifest,
+          app: { url: '/app/example-app' },
+          capabilities: {
+            ...manifest.capabilities,
+            storage: false,
+            dataTable: false,
+          },
+        },
+      };
+      expect(toJson(ValueSchema, detail.resource!.view!)).toMatchObject(
+        expected,
+      );
+      expect(await api.cli.apps.get({ id: 'app-one' })).toMatchObject(expected);
+      const stored = await db.query.deployments.findFirst({
+        where: { id: 'deployment-one' },
+      });
+      expect(stored!.manifestNormalized).toEqual(manifest);
+    },
+  );
+
   it.each([false, true])(
     'preserves data/inspection JSON through Connect binary=%s with native session authority',
     async (useBinaryFormat) => {

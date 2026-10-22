@@ -185,6 +185,9 @@ const definitions: readonly CliCommandDefinition[] = [
 export const commandDefinitions = definitions.map((definition) => {
   const supported =
     ['help', 'version'].includes(definition.path[0]) ||
+    (definition.path[0] === 'app' &&
+      definition.path.length === 3 &&
+      ['kv', 'data-table', 'db'].includes(definition.path[1])) ||
     (definition.path.length === 2 &&
       (['app', 'workflow'].includes(definition.path[0]) ||
         (definition.path[0] === 'auth' &&
