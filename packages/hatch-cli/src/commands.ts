@@ -105,6 +105,13 @@ const definitions: readonly CliCommandDefinition[] = [
       'Attach a verified Agent checkout without discarding source or history.',
   })),
   {
+    path: ['app', 'invoke', 'webhook'],
+    usage:
+      'app invoke webhook <id-or-slug> [--path <relative-suffix>] [--method <HTTP-method>] [--file <path|->] [--content-type <type>] [--header <Name:value>] [--query <name=value>] [--json]',
+    description:
+      'Call the existing App hook URL once with profile/env credentials. Default POST, empty body, application/octet-stream; --file sends exact bytes. GET/HEAD reject --file. Repeat --header for App-owned headers and --query for encoded query values. Authorization/x-api-key are stripped before App code and cannot carry private auth. Raw response bytes go to stdout (redirect to a file); --json returns ok/status/contentType/bodyEncoding=base64/body. Non-2xx exits nonzero; no retries or redirects.',
+  },
+  {
     path: ['app', 'associate'],
     usage: 'app associate <id>',
     description:
@@ -195,7 +202,9 @@ export const commandDefinitions = definitions.map((definition) => {
     definition.path.join(' ') === 'app invoke backend' ||
     (definition.path[0] === 'app' &&
       definition.path.length === 3 &&
-      ['kv', 'data-table', 'db'].includes(definition.path[1])) ||
+      (['kv', 'data-table', 'db'].includes(definition.path[1]) ||
+        (definition.path[1] === 'invoke' &&
+          definition.path[2] === 'webhook'))) ||
     (definition.path.length === 2 &&
       (['app', 'workflow'].includes(definition.path[0]) ||
         (definition.path[0] === 'auth' &&

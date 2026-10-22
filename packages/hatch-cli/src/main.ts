@@ -5,6 +5,7 @@ import { runAuth } from './auth';
 import { runLifecycle } from './lifecycle';
 import { runData } from './data';
 import { runBackendInvocation, BackendInvocationError } from './invoke';
+import { runWebhook } from './webhook';
 import { publicError } from './client';
 import { CliError } from './error';
 
@@ -46,6 +47,11 @@ try {
           ? [
               name,
               ...(operation && !operation.startsWith('--') ? [operation] : []),
+              ...(['invoke', 'kv', 'data-table', 'db'].includes(operation) &&
+              args[offset + 2] &&
+              !args[offset + 2].startsWith('--')
+                ? [args[offset + 2]]
+                : []),
             ]
           : [];
     const commands = commandDefinitions.filter((definition) =>
@@ -78,10 +84,18 @@ try {
       'Operation commands have no public API contract.',
       8,
     );
-  else if (name === 'app' && ['kv', 'data-table', 'db'].includes(operation))
+  else if (name === 'app' && operation === 'invoke') {
+    if (args[offset + 2] === 'backend')
+      await runBackendInvocation(args, offset, controller.signal);
+    else if (args[offset + 2] === 'webhook')
+      await runWebhook(args, offset, controller.signal);
+    else
+      throw new CliError(
+        'invalid_arguments',
+        'Use hatch app invoke backend or hatch app invoke webhook.',
+      );
+  } else if (name === 'app' && ['kv', 'data-table', 'db'].includes(operation))
     await runData(args, offset, controller.signal);
-  else if (name === 'app' && operation === 'invoke')
-    await runBackendInvocation(args, offset, controller.signal);
   else if (['app', 'workflow'].includes(name))
     await runLifecycle(args, offset, controller.signal);
   else

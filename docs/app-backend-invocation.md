@@ -89,11 +89,11 @@ client-supplied `x-hatch-*`, forwarding and hop-by-hop headers are removed; the
 platform supplies fresh per-App HMAC headers. Credentials never enter the App
 subprocess environment.
 
-Webhook mode-specific authentication and forwarding are owned by a separate
-change. Authorization and x-api-key must not be used for App-private webhook
-authentication; the required webhook policy strips both in every mode. This
-backend-only change does not implement that webhook policy, a webhook invocation
-command, or a new Invoke management API.
+Webhook invocation uses `hatch app invoke webhook` and the existing plain HTTP
+hook endpoint, with raw file/stdin bytes rather than Connect JSON. See
+[App webhooks](app-webhooks.md) for platform/none authentication and CLI options.
+Both modes strip Authorization and x-api-key; they cannot implement App-private
+authentication. Use a dedicated nonreserved header or raw-body provider signature.
 
 No database migration, public proto change, App/Workflow compatibility bump or
 Runner protocol bump is required.

@@ -234,15 +234,15 @@ const appWorkflowsSchema = z
  * Inbound-webhook configuration. The webhook itself is always plain HTTP (any
  * verb/body — never Connect RPC); this only controls platform-side auth:
  *
- * - `platform` (default): the platform mints a per-app secret, verifies it on
- *   every call (`?secret=` or `x-hatch-secret`), strips it, and forwards the
- *   request to the backend's `/__webhook` with an HMAC signature
- *   (`x-hatch-timestamp` + `x-hatch-signature` over the body) so the app can
- *   trust the call was vetted by the platform. The secret never reaches the app.
- *   Best for simple notifications from your own services.
- * - `none`: no platform secret and no signature. The raw request is forwarded
- *   untouched; the app must authenticate it itself (e.g. verify a GitHub/Stripe
- *   signature). Best for integrating third-party webhook providers.
+ * - `platform` (default): native platform credentials or the per-App shared
+ *   secret authenticate the call. Forwarding signs raw body bytes with the
+ *   per-App HMAC key; the credential itself never reaches the App.
+ * - `none`: no platform authentication or signature. The App verifies its own
+ *   dedicated nonreserved header or provider signature over raw bytes.
+ * Both modes strip Authorization and x-api-key (all casing), Cookie and
+ * x-hatch-* headers. These reserved headers cannot carry App-private auth;
+ * none mode is not full header passthrough. Existing integrations must migrate
+ * their caller and handler to a dedicated header/signature, without a bypass.
  */
 export const webhookConfigSchema = z.object({
   auth: z.enum(['platform', 'none']).default('platform'),
