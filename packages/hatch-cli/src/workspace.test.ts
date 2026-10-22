@@ -440,6 +440,21 @@ describe('CLI workspace safety', { timeout: 30_000 }, () => {
     ).toBe('non_fast_forward');
     expect(git(clone, 'rev-parse', 'HEAD')).toBe(local);
     expect(git(clone, 'rev-parse', 'FETCH_HEAD')).toBe(master);
+    // Follow the installed Skill's recovery guidance against the actual bundle
+    // fetch, without relying on an origin remote in a CLI-created checkout.
+    expect(git(clone, 'remote')).toBe('');
+    git(
+      clone,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'rebase',
+      'FETCH_HEAD',
+    );
+    expect(git(clone, 'rev-parse', 'HEAD^')).toBe(master);
+    expect(await readFile(join(clone, 'local.txt'), 'utf8')).toBe('local');
+    expect(await readFile(join(clone, 'other.txt'), 'utf8')).toBe('other');
   });
   it('replaces only explicit safe targets after preparation and restores existing work on failure', async () => {
     const source = await create();
