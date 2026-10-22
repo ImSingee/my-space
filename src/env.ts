@@ -33,6 +33,7 @@ export type PlatformEnv = Readonly<{
   agentRunnerToken: string;
   agentInternalHost: string;
   agentInternalPort: number;
+  runTokenLifetimeSeconds: number;
 }>;
 
 /** Immutable startup configuration for the Agent Runner process. */
@@ -41,6 +42,8 @@ export type AgentRunnerEnv = Readonly<{
   appUrl: string;
   /** Platform internal API base URL without a trailing slash. */
   platformUrl: string;
+  /** Business API origin reachable from Runner children, distinct from control API. */
+  cliUrl: string;
   /** WebSocket control-channel URL derived from `platformUrl`. */
   wsUrl: string;
   /** Shared bearer token sent to the Platform. */
@@ -101,6 +104,7 @@ function resolvePlatformEnv(): PlatformEnv {
       agentRunnerToken: PRERENDER_ONLY_TOKEN,
       agentInternalHost: '127.0.0.1',
       agentInternalPort: DEFAULT_INTERNAL_PORT,
+      runTokenLifetimeSeconds: 300,
     });
   }
 
@@ -123,7 +127,20 @@ function resolvePlatformEnv(): PlatformEnv {
   }
   const agentRunnerToken = configuredAgentRunnerToken || DEV_AGENT_RUNNER_TOKEN;
 
+  const runTokenLifetimeSeconds = Number(
+    process.env.HATCH_RUN_TOKEN_TTL_SECONDS ?? 300,
+  );
+  if (
+    !Number.isSafeInteger(runTokenLifetimeSeconds) ||
+    runTokenLifetimeSeconds < 5 ||
+    runTokenLifetimeSeconds > 300
+  )
+    throw new Error(
+      'HATCH_RUN_TOKEN_TTL_SECONDS must be an integer between 5 and 300.',
+    );
+
   return Object.freeze({
+    runTokenLifetimeSeconds,
     betaFeatures: parseBetaFeatures(process.env.HATCH_BETA),
     appUrl,
     secret,
@@ -158,6 +175,9 @@ function resolveAgentRunnerEnv(): AgentRunnerEnv {
   return Object.freeze({
     appUrl,
     platformUrl,
+    cliUrl: resolveHttpOrigin(
+      process.env.HATCH_RUNNER_CLI_URL?.trim() || appUrl,
+    ),
     wsUrl: platformUrl.replace(/^http/, 'ws') + RUNNER_WS_PATH,
     token,
     runnerId: configuredRunnerId || `runner-${os.hostname()}`,
@@ -177,4 +197,23 @@ export function getPlatformEnv(): PlatformEnv {
 export function getAgentRunnerEnv(): AgentRunnerEnv {
   agentRunnerEnv ??= resolveAgentRunnerEnv();
   return agentRunnerEnv;
+}
+
+/** Runner business endpoint may use HTTP on the trusted deployment network. */
+function resolveHttpOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      throw new Error();
+    return url.origin;
+  } catch {
+    throw new Error('HATCH_RUNNER_CLI_URL must be a valid HTTP(S) origin');
+  }
 }

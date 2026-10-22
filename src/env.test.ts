@@ -10,6 +10,8 @@ const ENV_KEYS = [
   'AGENT_INTERNAL_PORT',
   'NODE_ENV',
   'HATCH_PLATFORM_URL',
+  'HATCH_RUNNER_CLI_URL',
+  'HATCH_RUN_TOKEN_TTL_SECONDS',
   'HATCH_RUNNER_ID',
   'HATCH_BETA',
   'HATCH_ALLOW_UNSANDBOXED',
@@ -232,6 +234,7 @@ describe('getAgentRunnerEnv', () => {
 
     expect(getAgentRunnerEnv()).toEqual({
       appUrl: 'http://localhost:3700',
+      cliUrl: 'http://localhost:3700',
       platformUrl: 'http://127.0.0.1:3701',
       wsUrl: 'ws://127.0.0.1:3701/internal/agent/runner/ws',
       token: 'hatch-dev-runner-token',
@@ -254,6 +257,7 @@ describe('getAgentRunnerEnv', () => {
 
     expect(getAgentRunnerEnv()).toEqual({
       appUrl: 'https://app.example.test:8443',
+      cliUrl: 'https://app.example.test:8443',
       platformUrl: 'https://platform.example.test:4701',
       wsUrl: 'wss://platform.example.test:4701/internal/agent/runner/ws',
       token: 'runner-token',
@@ -344,3 +348,35 @@ it('caches platform and Agent Runner environments independently', async () => {
   expect(getPlatformEnv()).toBe(platform);
   expect(getAgentRunnerEnv()).toBe(runner);
 });
+
+it('uses a Runner-reachable business origin independently of the control and public origins', async () => {
+  vi.stubEnv('HATCH_RUNNER_CLI_URL', 'http://platform:3700/');
+  const { getAgentRunnerEnv } = await import('./env');
+  expect(getAgentRunnerEnv()).toMatchObject({
+    appUrl: 'http://localhost:3700',
+    cliUrl: 'http://platform:3700',
+    platformUrl: 'http://127.0.0.1:3701',
+  });
+});
+
+it.each([
+  'file:///tmp/hatch',
+  'http://user:secret@platform',
+  'https://platform/path',
+])('rejects invalid Runner business origin %s', async (value) => {
+  vi.stubEnv('HATCH_RUNNER_CLI_URL', value);
+  const { getAgentRunnerEnv } = await import('./env');
+  expect(() => getAgentRunnerEnv()).toThrow('HATCH_RUNNER_CLI_URL must be');
+});
+
+it.each(['0', '4', '301', 'NaN', '5.5'])(
+  'rejects unsafe Run credential lifetimes %s',
+  async (value) => {
+    vi.stubEnv('SECRET', 'platform-secret');
+    vi.stubEnv('HATCH_RUN_TOKEN_TTL_SECONDS', value);
+    const { getPlatformEnv } = await import('./env');
+    expect(() => getPlatformEnv()).toThrow(
+      'HATCH_RUN_TOKEN_TTL_SECONDS must be',
+    );
+  },
+);

@@ -12,7 +12,7 @@ type Config = {
   profiles: Record<string, Profile>;
 };
 
-export function normalizeUrl(value: string): string {
+export function normalizeUrl(value: string, allowNetworkHttp = false): string {
   try {
     const url = new URL(value.trim());
     if (
@@ -24,7 +24,8 @@ export function normalizeUrl(value: string): string {
       !(
         url.protocol === 'https:' ||
         (url.protocol === 'http:' &&
-          ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+          (allowNetworkHttp ||
+            ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
       )
     )
       throw new Error();
@@ -92,7 +93,7 @@ export function environmentCredential(env: NodeJS.ProcessEnv): Profile | null {
       'Supply HATCH_CLI_URL and exactly one nonempty HATCH_CLI_TOKEN or HATCH_CLI_API_KEY.',
     );
   return {
-    url: normalizeUrl(env.HATCH_CLI_URL),
+    url: normalizeUrl(env.HATCH_CLI_URL, !!env.HATCH_CLI_RUN_ENDPOINT),
     ...(tokenPresent
       ? { token: validateToken(env.HATCH_CLI_TOKEN!) }
       : { apiKey: validateToken(env.HATCH_CLI_API_KEY!) }),

@@ -6,6 +6,7 @@ import { runLifecycle } from './lifecycle';
 import { runData } from './data';
 import { runBackendInvocation, BackendInvocationError } from './invoke';
 import { publicError } from './client';
+import { refreshRunEnvironment } from './run-credential';
 import { CliError } from './error';
 
 const controller = new AbortController();
@@ -34,10 +35,13 @@ function commandOffset() {
   }
   return index;
 }
+const originalToken = process.env.HATCH_CLI_TOKEN;
 try {
   const offset = commandOffset();
   const name = args[offset];
   const operation = args[offset + 1];
+  if (['auth', 'app', 'workflow'].includes(name) && !args.includes('--help'))
+    await refreshRunEnvironment(process.env, controller.signal);
   if (!name || name === 'help' || args.includes('--help')) {
     const scope =
       name === 'help'
@@ -93,6 +97,8 @@ try {
 } catch (error) {
   const known = publicError(error);
   const secrets = [
+    originalToken,
+    process.env.HATCH_CLI_RUN_SECRET,
     process.env.HATCH_CLI_TOKEN,
     process.env.HATCH_CLI_API_KEY,
   ].filter((value): value is string => !!value);

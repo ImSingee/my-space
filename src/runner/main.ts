@@ -26,6 +26,7 @@ import {
 import { withSourceWorkspaceLock } from '~agent/local-sources';
 import { initializeAgentSandbox } from '~agent/shell-sandbox';
 import { getAgentRunnerEnv } from '~env';
+import { createCommandCredentials } from './command-credentials';
 import { RunnerExecutor } from './executor';
 import { createPlatformRestClient } from './platform-rest';
 import {
@@ -71,6 +72,17 @@ function send(message: RunnerMessage): boolean {
 
 const executor = new RunnerExecutor({
   appUrl: config.appUrl,
+  commandCredentials: (runId, sessionId, signal) =>
+    createCommandCredentials({
+      platformUrl: config.platformUrl,
+      cliUrl: config.cliUrl,
+      fleetToken: config.token,
+      runnerId: config.runnerId,
+      runId,
+      sessionId,
+      signal,
+      isConnected: () => helloAcked && ws?.readyState === WebSocket.OPEN,
+    }),
   tavilyApiKey: config.tavilyApiKey,
   getBetaFeatures: () => betaFeatures,
   platform,

@@ -5,10 +5,9 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '~/db';
+import { getPlatformEnv } from '~env';
 import { auth } from '~auth/server';
 import { listConnectedRunners } from '~server/agent-runner/hub';
-
-const LIFETIME_SECONDS = 300;
 
 export class RunTokenError extends Error {
   constructor(
@@ -72,8 +71,9 @@ export async function mintRunToken(runId: string, runnerId: string) {
   if (!run) throw new RunTokenError('run_ended');
   const context = { runId, sessionId: run.sessionId, runnerId };
   await requireLiveRun(context);
+  const lifetimeSeconds = getPlatformEnv().runTokenLifetimeSeconds;
   const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = new Date((issuedAt + LIFETIME_SECONDS) * 1000);
+  const expiresAt = new Date((issuedAt + lifetimeSeconds) * 1000);
   const { token } = await auth.api.signJWT({
     body: {
       payload: {
@@ -82,7 +82,7 @@ export async function mintRunToken(runId: string, runnerId: string) {
         rnr: runnerId,
         jti: randomUUID(),
         iat: issuedAt,
-        exp: issuedAt + LIFETIME_SECONDS,
+        exp: issuedAt + lifetimeSeconds,
       },
     },
   });

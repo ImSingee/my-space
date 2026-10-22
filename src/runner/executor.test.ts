@@ -70,6 +70,11 @@ function setupExecutor(
   const sent: RunnerMessage[] = [];
   const executor = new RunnerExecutor({
     appUrl: APP_URL,
+    commandCredentials: () => ({
+      withEnvironment: async () => {
+        throw new Error('No command expected.');
+      },
+    }),
     ...(tavilyApiKey ? { tavilyApiKey } : {}),
     getBetaFeatures,
     platform: stubPlatform,

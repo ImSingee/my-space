@@ -90,6 +90,8 @@ services:
       # Public origin shown to the Agent. Must match the platform value above.
       APP_URL: ${APP_URL:?set APP_URL in .env (e.g. http://localhost:3700)}
       HATCH_PLATFORM_URL: http://app:3701
+      # Business API reached inside the deployment network, not the host loopback.
+      HATCH_RUNNER_CLI_URL: http://app:3700
       # REQUIRED: stable identity permanently paired with agent_workspace
       # below. Keep it unchanged when recreating this service, and never reuse
       # it for another workspace volume.

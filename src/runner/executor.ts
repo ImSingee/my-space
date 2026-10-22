@@ -3,6 +3,7 @@
  * stream for at-least-once delivery to the platform, bridges ask/answer, and
  * reports the final transcript until the platform acknowledges it.
  */
+import type { CommandCredentials } from '~agent/command-credentials';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { submitAnswer, waitForAnswer } from '~agent/ask-registry';
 import { USER_CANCELLED_ASK_MESSAGE } from '~agent/ask-cancellation';
@@ -64,6 +65,11 @@ export class RunnerExecutor {
     private opts: {
       /** Public Hatch origin captured from the Runner's startup environment. */
       appUrl: string;
+      commandCredentials: (
+        runId: string,
+        sessionId: string,
+        signal: AbortSignal,
+      ) => CommandCredentials;
       /** Optional Tavily key; omission selects Tavily's keyless access mode. */
       tavilyApiKey?: string | null;
       /** Latest Platform-owned beta features, snapshotted for each new run. */
@@ -203,6 +209,11 @@ export class RunnerExecutor {
       };
 
       run.done = runAgentTurn({
+        commandCredentials: this.opts.commandCredentials(
+          run.runId,
+          run.sessionId,
+          run.controller.signal,
+        ),
         appUrl: this.opts.appUrl,
         betaFeatures: Object.freeze([...this.opts.getBetaFeatures()]),
         ...(this.opts.tavilyApiKey

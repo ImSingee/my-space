@@ -1,6 +1,10 @@
 /** The run_command shell tool with bounded, throttled live output. */
 import { Type } from '@earendil-works/pi-ai';
 import type { AgentTool, ExecutionEnv } from '@earendil-works/pi-agent-core';
+import type {
+  CommandCredentials,
+  CommandCredentialEnvironment,
+} from '../command-credentials';
 import { readEnvFile } from '../env-file';
 import { ENV_KEY_PATTERN, requireEnvKey } from '../env-keys';
 import { MAX_FILE_CHARS, text, tool } from './shared';
@@ -59,6 +63,7 @@ function commandTimeoutSeconds(value: number | undefined): number {
 export function createCommandTool(
   env: ExecutionEnv,
   sessionId?: string,
+  credentials?: CommandCredentials,
 ): AgentTool {
   return tool({
     name: 'run_command',
@@ -122,50 +127,63 @@ export function createCommandTool(
         );
       }
 
-      // Keep only a bounded tail of the live stream and throttle updates so a
-      // chatty command can't grow `live` (and every persisted update event)
-      // without bound. Past a hard total, throw from the callback:
-      // NodeExecutionEnv catches it, kills the whole process tree, and settles
-      // with that error — so a runaway command can't keep filling the env's
-      // internal stdout/stderr buffers either.
-      let live = '';
-      let total = 0;
-      let lastEmit = 0;
-      const stream = (chunk: string) => {
-        total += chunk.length;
-        if (total > HARD_OUTPUT_LIMIT) {
-          throw new Error(
-            `Command exceeded the ${HARD_OUTPUT_LIMIT}-byte output limit; ` +
-              'aborted. Redirect bulk output to a file instead.',
-          );
-        }
-        live = (live + chunk).slice(-MAX_LIVE_OUTPUT);
-        const now = Date.now();
-        if (now - lastEmit >= COMMAND_UPDATE_INTERVAL_MS) {
-          lastEmit = now;
-          onUpdate?.(live);
-        }
+      const execute = async (credential?: CommandCredentialEnvironment) => {
+        // Keep only a bounded tail of the live stream and throttle updates so a
+        // chatty command can't grow `live` (and every persisted update event)
+        // without bound. Past a hard total, throw from the callback:
+        // NodeExecutionEnv catches it, kills the whole process tree, and settles
+        // with that error — so a runaway command can't keep filling the env's
+        // internal stdout/stderr buffers either.
+        let live = '';
+        let total = 0;
+        let lastEmit = 0;
+        const stream = (chunk: string) => {
+          total += chunk.length;
+          if (total > HARD_OUTPUT_LIMIT) {
+            throw new Error(
+              `Command exceeded the ${HARD_OUTPUT_LIMIT}-byte output limit; ` +
+                'aborted. Redirect bulk output to a file instead.',
+            );
+          }
+          live = (live + chunk).slice(-MAX_LIVE_OUTPUT);
+          const now = Date.now();
+          if (now - lastEmit >= COMMAND_UPDATE_INTERVAL_MS) {
+            lastEmit = now;
+            onUpdate?.(live);
+          }
+        };
+        // wrapShellCommand adds the macOS seatbelt deny-list (platform env
+        // files, host credential dirs); the env allowlist alone doesn't stop a
+        // command from reading those by path.
+        const stdoutStream = credential?.stream(stream);
+        const stderrStream = credential?.stream(stream);
+        const redact = credential?.redact ?? ((value: string) => value);
+        const res = await env.exec(
+          wrapShellCommand(params.command, sessionId),
+          {
+            env: { ...selectedEnv, ...credential?.env },
+            timeout: timeoutSeconds,
+            abortSignal: credential?.signal ?? signal,
+            onStdout: stdoutStream?.write ?? stream,
+            onStderr: stderrStream?.write ?? stream,
+          },
+        );
+        stdoutStream?.flush();
+        stderrStream?.flush();
+        if (!res.ok) throw new Error(redact(res.error.message));
+        const { stdout, stderr, exitCode } = res.value;
+        const body = [
+          capCommandStream('stdout', redact(stdout)),
+          capCommandStream('stderr', redact(stderr)),
+          `exit code: ${exitCode}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        return text(body, { exitCode });
       };
-      // wrapShellCommand adds the macOS seatbelt deny-list (platform env
-      // files, host credential dirs); the env allowlist alone doesn't stop a
-      // command from reading those by path.
-      const res = await env.exec(wrapShellCommand(params.command, sessionId), {
-        ...(selectedEnv ? { env: selectedEnv } : {}),
-        timeout: timeoutSeconds,
-        abortSignal: signal,
-        onStdout: stream,
-        onStderr: stream,
-      });
-      if (!res.ok) throw new Error(res.error.message);
-      const { stdout, stderr, exitCode } = res.value;
-      const body = [
-        capCommandStream('stdout', stdout),
-        capCommandStream('stderr', stderr),
-        `exit code: ${exitCode}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      return text(body, { exitCode });
+      return credentials
+        ? credentials.withEnvironment(signal, execute)
+        : execute();
     },
   });
 }

@@ -3,6 +3,7 @@
  * the Agent Runner process: all platform state flows through the injected
  * PlatformClient, never through direct server imports.
  */
+import type { CommandCredentials } from './command-credentials';
 import { Buffer } from 'node:buffer';
 import {
   AgentHarness,
@@ -164,6 +165,7 @@ function addToolStartDetailsToTranscript(
 }
 
 export type RunAgentTurnOptions = {
+  commandCredentials?: CommandCredentials;
   appUrl: string;
   betaFeatures: readonly string[];
   tavilyApiKey?: string | null;
@@ -217,6 +219,7 @@ export async function runAgentTurn(
 
   const skills = await loadAgentSkills(env, { workflowBetaEnabled });
   const tools = createTools(env, {
+    commandCredentials: opts.commandCredentials,
     workflowBetaEnabled,
     platform: opts.platform,
     ...(opts.tavilyApiKey ? { tavilyApiKey: opts.tavilyApiKey } : {}),
