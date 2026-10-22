@@ -6,8 +6,8 @@ import {
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 
-/** Absolute local time a session or sign-in started. */
-export function formatSignInTime(iso: string): string {
+/** Absolute local time for session metadata. */
+export function formatSessionTime(iso: string): string {
   return dayjs(iso).format('MMM D, YYYY [at] h:mm A');
 }
 

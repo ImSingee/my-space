@@ -84,6 +84,7 @@ beforeEach(() => {
     session('session-current', 5, {
       userAgent: MAC_CHROME,
       ipAddress: '203.0.113.10',
+      updatedAt: new Date(Date.UTC(2026, 9, 12, 11, 30)).toISOString(),
       isCurrent: true,
     }),
     session('session-phone', 30, { userAgent: IPHONE_SAFARI, ipAddress: null }),
@@ -168,7 +169,9 @@ test('lists the current session first without a sign-out control and signs out o
     .getByRole('listitem')
     .first();
   await expect.element(current.getByText('Current session')).toBeVisible();
-  await expect.element(current.getByText('203.0.113.10')).toBeVisible();
+  await expect
+    .element(current.getByText('203.0.113.10'))
+    .not.toBeInTheDocument();
   await expect.element(current.getByRole('button')).not.toBeInTheDocument();
   // Sessions are signed out one at a time; there is no bulk entry point.
   await expect
@@ -176,12 +179,12 @@ test('lists the current session first without a sign-out control and signs out o
     .not.toBeInTheDocument();
   await expect
     .element(screen.getByText('IP address unavailable'))
-    .toBeVisible();
+    .not.toBeInTheDocument();
   expect(
     [...sessionList()!.querySelectorAll('time')].map((time) => time.dateTime),
   ).toEqual(
     ['session-current', 'session-edge', 'session-phone'].map(
-      (id) => serverSessions.find((item) => item.id === id)!.createdAt,
+      (id) => serverSessions.find((item) => item.id === id)!.updatedAt,
     ),
   );
 
@@ -275,14 +278,10 @@ function clippingAncestors(element: Element) {
   return clips;
 }
 
-test('narrow rows wrap sign-in metadata from the text column without clipping', async () => {
+test('narrow rows wrap session activity from the text column without clipping', async () => {
   const previous = { width: window.innerWidth, height: window.innerHeight };
   await page.viewport(320, 900);
   try {
-    serverSessions[2] = {
-      ...serverSessions[2],
-      ipAddress: '2001:db8:85a3:0000:0000:8a2e:0370:7334',
-    };
     await renderLoadedAccount();
     await expect
       .poll(() => document.querySelectorAll('li time').length)
@@ -302,11 +301,11 @@ test('narrow rows wrap sign-in metadata from the text column without clipping', 
         lines: [...range.getClientRects()],
       };
     });
-    // The long address must actually wrap for this check to mean anything.
+    // Activity metadata must actually wrap for this check to mean anything.
     expect(
       rows.some(
         ({ lines }) =>
-          new Set(lines.map((line) => Math.round(line.top))).size > 2,
+          new Set(lines.map((line) => Math.round(line.top))).size > 1,
       ),
     ).toBe(true);
     for (const { metadata, textStart, lines } of rows) {
