@@ -1217,9 +1217,6 @@ export async function proxyAppRequest(
   prependPath = '',
   options: {
     stripSecretParam?: boolean;
-    preserveAuthorization?: boolean;
-    /** Sanitize credentials and forwarding headers on authenticated backend RPC. */
-    platformAuthenticated?: boolean;
     signWithSecret?: string;
     expectedDeploymentId?: string;
   } = {},
@@ -1242,21 +1239,16 @@ export async function proxyAppRequest(
   const target = `http://127.0.0.1:${port}${rest}${search}`;
 
   const headers = new Headers(request.headers);
-  if (options.platformAuthenticated) {
-    // Connection can nominate additional hop-by-hop fields. Never allow clients
-    // to supply platform signing, routing or credential headers to App code.
-    const nominated = headers.get('connection')?.split(',') ?? [];
-    for (const name of nominated) if (name.trim()) headers.delete(name.trim());
-    const platformHeaders = [...headers.keys()].filter(
-      (name) =>
-        name.startsWith('x-hatch-') ||
-        name.startsWith('x-forwarded-') ||
-        name === 'x-real-ip' ||
-        name === 'proxy-connection',
-    );
-    for (const name of platformHeaders) headers.delete(name);
-    headers.delete('x-api-key');
+  // One policy for every App proxy, including public auth:none webhooks.
+  // Connection can nominate additional hop-by-hop headers. Snapshot names
+  // before deletion so adjacent reserved fields cannot escape sanitization.
+  for (const name of (headers.get('connection') ?? '').split(',')) {
+    if (name.trim()) headers.delete(name.trim());
   }
+  const reservedHeaders = [...headers.keys()].filter(
+    (name) => name.startsWith('x-hatch-') || name.startsWith('x-forwarded-'),
+  );
+  for (const name of reservedHeaders) headers.delete(name);
 
   // Strip platform credentials and client-controlled routing/secret headers so a
   // deployed app can neither read the platform's Better Auth session nor the
@@ -1264,6 +1256,10 @@ export async function proxyAppRequest(
   for (const header of [
     'host',
     'cookie',
+    'authorization',
+    'x-api-key',
+    'x-real-ip',
+    'proxy-connection',
     'x-hatch-secret',
     // Platform→backend signature headers. Strip them from inbound requests so
     // a client can never present forged signing headers; the platform re-signs
@@ -1289,14 +1285,9 @@ export async function proxyAppRequest(
   ]) {
     headers.delete(header);
   }
-  // Authenticated backend RPCs must not expose platform credentials.
-  // Other proxy callers retain their existing forwarding options.
-  if (options.platformAuthenticated || !options.preserveAuthorization) {
-    headers.delete('authorization');
-  }
-
   const init: RequestInit & { duplex?: 'half' } = {
     method: request.method,
+    redirect: 'manual',
     headers,
   };
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
@@ -1358,10 +1349,7 @@ export async function proxyAppRequest(
     BACKEND_RESPONSE_TIMEOUT_MS,
   );
   if (typeof headerTimer.unref === 'function') headerTimer.unref();
-  init.signal = options.platformAuthenticated
-    ? AbortSignal.any([request.signal, headerTimeout.signal])
-    : headerTimeout.signal;
-  if (options.platformAuthenticated) init.redirect = 'manual';
+  init.signal = AbortSignal.any([request.signal, headerTimeout.signal]);
   let upstream: Response;
   try {
     upstream = await fetch(target, init);
@@ -1376,14 +1364,10 @@ export async function proxyAppRequest(
     'grpc-message',
     'connect-protocol-version',
     // Per-message compression is part of backend RPC stream framing.
-    ...(options.platformAuthenticated
-      ? [
-          'connect-content-encoding',
-          'connect-accept-encoding',
-          'grpc-encoding',
-          'grpc-accept-encoding',
-        ]
-      : []),
+    'connect-content-encoding',
+    'connect-accept-encoding',
+    'grpc-encoding',
+    'grpc-accept-encoding',
   ]) {
     const value = upstream.headers.get(key);
     if (value) responseHeaders.set(key, value);

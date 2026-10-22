@@ -425,6 +425,16 @@ Read only the reference relevant to the requested capability:
   Connect clients, responsive widget sizing, and refresh behavior.
 - [Backend integrations](references/backend-integrations.md): Connect backend,
   cron authentication, webhooks, long-running mode, and workflow calls.
+  Webhooks always strip Authorization and x-api-key (all casing), including
+  `auth: none`; they cannot carry App-private authentication. Use a dedicated
+  nonreserved header such as X-App-Token or a raw-body provider signature.
+  None mode is public and unsigned at the platform layer, not full header
+  passthrough. Platform credentials never bypass an App-owned authentication
+  check. Use `hatch app invoke webhook <id-or-slug>`
+  for raw HTTP invocation; `hatch app invoke backend <id-or-slug> <Service/Method>`
+  uses Connect unary JSON. See the reference for credential precedence,
+  raw-byte handling, errors and transport limits.
+
 - [Data and storage](references/data-storage.md): Postgres, Storage, KV, runtime
   assets, and Data Table query/mutation details.
 

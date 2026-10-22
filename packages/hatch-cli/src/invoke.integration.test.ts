@@ -19,6 +19,9 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { build } from 'esbuild';
+import { gunzipSync } from 'node:zlib';
+import { toBinary, toJson, fromBinary, fromJson } from '@bufbuild/protobuf';
+import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const databaseUrl = process.env.HATCH_INVOKE_TEST_DATABASE_URL;
@@ -378,6 +381,110 @@ describe.runIf(Boolean(databaseUrl))(
         },
       );
       expect(response.status).toBe(200);
+    });
+
+    it('preserves native runtime credentials, binary HMAC and compressed Connect/gRPC-Web streams on production HTTP', async () => {
+      const raw = Buffer.from([0, 255, 128, 10]);
+      const base = `${origin}/api/app/${appId}/rpc/fixture.v1.EchoService/`;
+      for (const headers of [
+        { cookie },
+        { authorization: `Bearer ${token}` },
+        { 'x-api-key': key },
+        { authorization: `Bearer ${runToken}` },
+      ] as Record<string, string>[]) {
+        const response = await fetch(`${base}Raw`, {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'x-hatch-signature': 'forged',
+            'x-hatch-extra': 'forged',
+            'x-forwarded-host': 'evil.test',
+          },
+          body: raw,
+        });
+        expect(response.status).toBe(200);
+        const observed = await response.json();
+        expect(observed).toMatchObject({
+          rawBase64: raw.toString('base64'),
+          signatureValid: true,
+          platformEnvPresent: false,
+        });
+        for (const name of [
+          'authorization',
+          'x-api-key',
+          'cookie',
+          'x-hatch-extra',
+          'x-forwarded-host',
+        ])
+          expect(observed.headers[name]).toBeUndefined();
+      }
+      for (const headers of [
+        { cookie, 'x-api-key': 'invalid', authorization: `Bearer ${token}` },
+        { cookie, authorization: 'Bearer invalid' },
+        { cookie, authorization: 'Bearer a.b.c' },
+      ] as Record<string, string>[]) {
+        const response = await fetch(`${base}Raw`, {
+          method: 'POST',
+          headers,
+          body: raw,
+        });
+        expect(response.status).toBe(401);
+        expect(await response.json()).toMatchObject({
+          code: 'unauthenticated',
+        });
+      }
+      for (const protocol of ['connect', 'grpc-web']) {
+        const message =
+          protocol === 'connect'
+            ? Buffer.from('{}')
+            : Buffer.from(toBinary(ValueSchema, fromJson(ValueSchema, {})));
+        const frame = Buffer.alloc(5 + message.length);
+        frame.writeUInt32BE(message.length, 1);
+        message.copy(frame, 5);
+        const response = await fetch(`${base}Stream`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type':
+              protocol === 'connect'
+                ? 'application/connect+json'
+                : 'application/grpc-web+proto',
+            [protocol === 'connect'
+              ? 'connect-accept-encoding'
+              : 'grpc-accept-encoding']: 'gzip',
+          },
+          body: frame,
+        });
+        expect(response.status).toBe(200);
+        expect(
+          response.headers.get(
+            protocol === 'connect'
+              ? 'connect-content-encoding'
+              : 'grpc-encoding',
+          ),
+        ).toBe('gzip');
+        const bytes = Buffer.from(await response.arrayBuffer());
+        const messages = [];
+        let compressedFrames = 0;
+        for (let offset = 0; offset < bytes.length;) {
+          const flags = bytes[offset];
+          const size = bytes.readUInt32BE(offset + 1);
+          let data = bytes.subarray(offset + 5, offset + 5 + size);
+          offset += size + 5;
+          if (flags & 2 || flags & 128) continue;
+          if (flags & 1) {
+            compressedFrames++;
+            data = gunzipSync(data);
+          }
+          messages.push(
+            protocol === 'connect'
+              ? JSON.parse(data.toString())
+              : toJson(ValueSchema, fromBinary(ValueSchema, data)),
+          );
+        }
+        expect(compressedFrames).toBe(2);
+        expect(messages).toEqual([{ sequence: 1 }, { sequence: 2 }]);
+      }
     });
 
     it('preserves App JSON values and raw file/stdin bytes; resolves canonical IDs and workdir paths', async () => {

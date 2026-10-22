@@ -80,6 +80,31 @@ Keep backend imports statically bundleable. Computed dynamic imports, separate
 worker entries, native addons, FFI, runtime sidecars, and packages that expect
 their source-relative resources are unsupported.
 
+## Invoking a deployed backend
+
+Use the current CLI profile or complete environment credentials to call a deployed
+App method without local generated stubs:
+
+```sh
+hatch app invoke backend my-app app.v1.TodoService/ListTodos --json
+hatch app invoke backend my-app app.v1.TodoService/CreateTodo --file request.json --json
+```
+
+Backend invocation uses the existing `/api/app/<id>/rpc/<Service>/<Method>`
+Connect endpoint and unary JSON. The default request is `{}`; `--file <path|->`
+reads valid JSON while preserving its original bytes and meaningful JSON values.
+It accepts native Better Auth session credentials, user API keys or live Run JWTs.
+Explicit keys take precedence over Bearer credentials, then Cookie; an invalid
+explicit credential cannot fall back. Platform credentials are stripped before
+App code and the platform signs exact raw request bytes with the App HMAC key.
+Connect code, HTTP status and structured error details remain available in CLI
+JSON failures with platform credentials redacted.
+
+The CLI refuses streaming/non-JSON protocols and redirects and never retries;
+a timeout or cancellation may follow an App mutation. Direct Connect/gRPC-Web
+clients retain binary, compressed and streaming support through the runtime.
+Use `hatch app invoke webhook` below for plain HTTP/raw-byte handlers.
+
 ## Cron
 
 Enable `cron` and `backend`, then declare a proto RPC method for each job. The
@@ -124,15 +149,57 @@ Select the platform auth mode in the top-level manifest block:
 { "webhook": { "auth": "platform" } }
 ```
 
-- `platform`: the public caller supplies the platform-managed secret. Hatch
-  verifies and removes it, then signs the forwarded request with
-  `HATCH_SIGNING_SECRET`. Verify the HMAC over
-  `<timestamp>.<exact raw body bytes>`; use empty bytes for GET/HEAD.
-- `none`: Hatch forwards the request without platform authentication or
-  signature. Verify the third-party provider's own authentication in the App.
+- `platform`: accepts the existing App webhook secret or native platform
+  credentials (Better Auth Cookie/Bearer session, user API key in `x-api-key`,
+  or live Run JWT in Bearer). The platform verifies them and signs the forwarded
+  raw body with `HATCH_SIGNING_SECRET`; verify the HMAC over
+  `<timestamp>.<exact raw body bytes>` (empty bytes for GET/HEAD).
+- `none`: no platform authentication and no platform signature. Invalid incoming
+  Authorization/x-api-key values are ignored and stripped. The App must verify
+  its own provider signature or dedicated private token; possession of a
+  platform credential does not bypass that check.
+
+Both modes strip Authorization and x-api-key, in all casing, as well as
+Cookie, `x-hatch-*` and forwarding/hop-by-hop headers. `auth: none` does not mean
+full header passthrough. Authorization and x-api-key cannot implement App-private
+or third-party authentication. Use a dedicated nonreserved header such as
+`X-App-Token` or a provider signature header, or a signature over the raw body.
+Removed values are not copied to another header.
+
+In platform mode credential selection is fail-closed: explicit `x-api-key`
+wins over Authorization (Bearer session or Run JWT), with no Cookie/secret
+fallback on failure. Otherwise `x-hatch-secret` wins over `?secret=` (even an
+empty header wins). The `secret` query parameter is removed only when it actually
+authenticated the request. With no explicit credential or secret, a valid Cookie
+session requires trusted Origin or positive same-origin browser fetch metadata;
+cross-site and missing-origin/missing-metadata Cookie calls are denied, including
+GET. Native callers should use explicit credentials. No CORS access is added.
+
+Invoke through the existing endpoint using the CLI's current profile or complete
+environment credentials, without reading the App webhook secret:
+
+```sh
+hatch app invoke webhook my-app --path provider/events --file payload.bin \
+  --content-type application/octet-stream --header 'X-App-Token: <app-token>'
+hatch app invoke webhook my-app --file - --query 'delivery=one two' --json
+```
+
+Default: POST, empty raw body, `application/octet-stream`. `--file` streams exact
+file/stdin bytes. GET/HEAD reject `--file`. `--path` accepts relative segments,
+not URLs, percent escapes, traversal, query or fragments; repeat `--query name=value`
+for safely encoded query parameters. Repeat `--header` for nonreserved headers;
+platform credential/routing/signature headers cannot be overridden. The CLI sends
+platform credentials to the runtime endpoint, where they are stripped before App
+code. Non-JSON output is the exact response body (use shell redirection to save
+binary output). `--json` returns `ok`, `status`, `contentType`,
+`bodyEncoding: "base64"`, and the base64 `body`. Non-2xx exits nonzero. Calls are
+never retried and redirects are refused; a timeout may have an unknown outcome.
 
 Preserve exact raw bytes when verifying signatures; decoding and re-encoding a
-binary or non-canonical body changes the HMAC input.
+binary or non-canonical body changes the HMAC input. For example, in `none` mode
+verify a provider's `X-Provider-Signature` against `await request.arrayBuffer()`
+or compare `X-App-Token` with your App-owned secret before processing. Keep these
+checks in place when the caller also supplies a platform key.
 
 In a `"deno-serve"` backend, route the webhook before the Connect handler:
 

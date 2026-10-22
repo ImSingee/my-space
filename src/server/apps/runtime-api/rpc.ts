@@ -81,7 +81,6 @@ export async function handleRpcRequest({
     return await proxyAppRequest(id, request, `${parsed.prefix}/rpc`, '', {
       signWithSecret: app.signingSecret ?? undefined,
       expectedDeploymentId: app.currentDeploymentId,
-      platformAuthenticated: true,
     });
   } catch {
     return rpcError(502, 'unavailable', 'App backend unavailable.');

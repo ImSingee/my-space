@@ -501,19 +501,39 @@ describe('App backend shared native credential boundary', () => {
       });
     const provider = {
       'x-hatch-signature': 'forged',
+      AuThOrIzAtIoN: 'invalid',
+      'X-aPi-KeY': 'invalid',
     };
     let response = await hook(provider);
     let observation = (await response.json()) as Observation;
     expect(observation.headers['x-hatch-signature']).toBeUndefined();
+    expect(observation.headers.authorization).toBeUndefined();
+    expect(observation.headers['x-api-key']).toBeUndefined();
     expect(observation.rawBase64).toBe(raw.toString('base64'));
     await db
       .update(schema.deployments)
       .set({ manifestNormalized: { webhook: { auth: 'platform' } } })
       .where(eq(schema.deployments.id, deploymentId));
-    expect((await hook({ 'x-api-key': key, ...bearer(token) })).status).toBe(
-      403,
-    );
-    response = await hook({ ...provider, 'x-hatch-secret': 'hook-fixture' });
+    // Invalid explicit keys never fall back to a still-valid session.
+    expect(
+      (await hook({ 'x-api-key': 'invalid', ...bearer(token) })).status,
+    ).toBe(401);
+    const fresh = await auth.api.createApiKey({
+      body: { userId, name: 'Webhook credential fixture' },
+    });
+    response = await hook({ 'x-api-key': fresh.key, ...bearer('invalid') });
+    observation = (await response.json()) as Observation;
+    expect(response.status).toBe(200);
+    expect(observation.signatureValid).toBe(true);
+    expect(observation.headers.authorization).toBeUndefined();
+    expect(observation.headers['x-api-key']).toBeUndefined();
+    expect(
+      (await hook({ ...provider, 'x-hatch-secret': 'hook-fixture' })).status,
+    ).toBe(401);
+    response = await hook({
+      'x-hatch-signature': 'forged',
+      'x-hatch-secret': 'hook-fixture',
+    });
     observation = (await response.json()) as Observation;
     expect(observation.signatureValid).toBe(true);
     expect(observation.headers['x-hatch-secret']).toBeUndefined();
@@ -567,7 +587,6 @@ describe('App backend shared native credential boundary', () => {
     await expect(
       proxyAppRequest(id, new Request(endpoint), `/api/app/${id}/rpc`, '', {
         expectedDeploymentId: 'stale-deployment',
-        platformAuthenticated: true,
       }),
     ).rejects.toThrow('deployment changed');
     expect(isAppRunning(id)).toBe(false);

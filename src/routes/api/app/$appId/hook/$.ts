@@ -7,20 +7,16 @@ import type { NormalizedManifest } from '~server/apps/manifest';
 import { db } from '~/db';
 import { proxyAppRequest } from '~server/apps/runtime';
 import { secretsMatch } from '~server/secrets';
+import { authenticateCredential } from '~server/auth/credentials';
+import {
+  isTrustedSessionOrigin,
+  sessionOriginError,
+} from '~server/session-http-auth';
 
 /**
- * Public inbound webhook endpoint (plain HTTP — never Connect RPC). Forwards any
- * body and every HTTP verb TanStack Start can register (GET/POST/PUT/PATCH/
- * DELETE/HEAD/OPTIONS). Reachable without a platform session. Behaviour depends
- * on the app's declared webhook auth mode (from its live deployment manifest):
- *
- * - `platform` (default): the caller must present the per-app secret
- *   (`x-hatch-secret` header or `?secret=`). The platform verifies it, strips
- *   it, and forwards to the backend's `/__webhook` with an HMAC signature so the
- *   app can trust the call was vetted by the platform — the secret never reaches
- *   the app.
- * - `none`: no platform secret and no signature. The raw request is forwarded
- *   untouched; the app's `/__webhook` handler authenticates it itself.
+ * Plain HTTP webhook ingress. Platform mode accepts native platform credentials
+ * or the legacy per-App secret and signs raw bytes. None mode is public and
+ * unsigned. Both modes strip platform credentials before authored code runs.
  */
 export async function handle({
   request,
@@ -42,7 +38,7 @@ export async function handle({
   if (!app || app.status === 'archived' || !app.currentDeploymentId) {
     return new Response('Not found', { status: 404 });
   }
-  if (!app.capabilities?.webhook) {
+  if (!app.capabilities?.webhook || !app.capabilities.backend) {
     return new Response('Webhook not enabled', { status: 404 });
   }
 
@@ -50,7 +46,7 @@ export async function handle({
   // deployments predate the field, so default to 'platform' (the historical
   // behaviour, which always required a verified secret).
   const deployment = await db.query.deployments.findFirst({
-    where: { id: app.currentDeploymentId as string },
+    where: { id: app.currentDeploymentId, appId: id, status: 'deployed' },
     columns: { manifestNormalized: true, compatibilityVersion: true },
   });
   const compatibility = deployment
@@ -63,10 +59,10 @@ export async function handle({
   const base = `/api/app/${id}/hook`;
   // This endpoint is reachable without a session, so never echo internal error
   // detail (backend start failures embed the process log tail — stack traces,
-  // absolute paths, whatever the app printed). Log it server-side instead;
-  // the owner sees the full story on the authenticated manage surfaces.
-  const fail = (error: unknown) => {
-    console.error(`[app-hook] app ${id} webhook forward failed:`, error);
+  // absolute paths, whatever the app printed). Keep this diagnostic fixed;
+  // the owner sees backend details on authenticated management surfaces.
+  const fail = () => {
+    console.error(`[app-hook] app ${id} webhook forward failed`);
     return new Response('App backend error', { status: 502 });
   };
 
@@ -76,27 +72,55 @@ export async function handle({
         status: 503,
       });
     }
-    // Unauthenticated passthrough. The app self-secures; proxyAppRequest still
-    // strips platform headers (x-hatch-*) so a caller can't forge a signature,
-    // and leaves `?secret=` intact (here it would be the app's own parameter).
+    // Public at the platform layer, even with invalid incoming credentials.
+    // The App verifies its own dedicated header or raw-body provider signature.
+    // Reserved headers are always stripped; ?secret= remains App-owned here.
     try {
       return await proxyAppRequest(id, request, base, '/__webhook', {
-        preserveAuthorization: true,
         expectedDeploymentId: app.currentDeploymentId,
       });
-    } catch (error) {
-      return fail(error);
+    } catch {
+      return fail();
     }
   }
 
-  // platform mode: verify the shared secret before forwarding.
-  if (!app.webhookSecret) {
-    return new Response('Webhook not enabled', { status: 404 });
-  }
-  const headerSecret = request.headers.get('x-hatch-secret');
-  const provided = headerSecret ?? url.searchParams.get('secret');
-  if (!secretsMatch(provided, app.webhookSecret)) {
-    return new Response('Forbidden', { status: 403 });
+  // Explicit native credentials take precedence and must never fall back to
+  // Cookie or a shared secret. Secret header presence wins over the query even
+  // when empty. Only remove ?secret= when it actually authenticated the call.
+  let stripSecretParam = false;
+  const headers = request.headers;
+  if (headers.has('x-api-key') || headers.has('authorization')) {
+    try {
+      await authenticateCredential(request);
+    } catch {
+      return new Response('Unauthorized', { status: 401 });
+    }
+  } else if (headers.has('x-hatch-secret') || url.searchParams.has('secret')) {
+    const provided =
+      headers.get('x-hatch-secret') ?? url.searchParams.get('secret');
+    if (!app.webhookSecret || !secretsMatch(provided, app.webhookSecret))
+      return new Response('Forbidden', { status: 403 });
+    stripSecretParam = !headers.has('x-hatch-secret');
+  } else {
+    // Cookie authentication is ambient authority, including for GET webhooks
+    // that may mutate. Require positive same-origin browser evidence, not just
+    // absence of a hostile Origin. Native clients use explicit credentials.
+    const originError = sessionOriginError(request);
+    if (originError) return originError;
+    const origin = headers.get('origin');
+    if (
+      !(origin !== null && isTrustedSessionOrigin(origin)) &&
+      !(
+        headers.get('sec-fetch-site') === 'same-origin' &&
+        isTrustedSessionOrigin(url.origin)
+      )
+    )
+      return new Response('Forbidden', { status: 403 });
+    try {
+      await authenticateCredential(request);
+    } catch {
+      return new Response('Unauthorized', { status: 401 });
+    }
   }
   if (!compatibility?.isSupported) {
     return new Response(appCompatibilityRuntimeMessage(compatibility), {
@@ -106,22 +130,15 @@ export async function handle({
 
   try {
     return await proxyAppRequest(id, request, base, '/__webhook', {
-      // Only strip `?secret=` when it was the credential we just verified. If
-      // the caller authenticated via `x-hatch-secret`, then `?secret=` is an
-      // app/provider token the backend may need, so leave it intact.
-      stripSecretParam: !headerSecret,
-      // The webhook secret already authenticated this request; any
-      // `Authorization` header is the external caller's own credential for the
-      // app's webhook handler, not the platform session, so forward it.
-      preserveAuthorization: true,
+      stripSecretParam,
       expectedDeploymentId: app.currentDeploymentId,
       // Sign the forwarded request so the backend can verify the platform
       // vetted it (the secret itself is never forwarded). Absent only for apps
       // deployed before signing keys existed — they redeploy to gain one.
       signWithSecret: app.signingSecret ?? undefined,
     });
-  } catch (error) {
-    return fail(error);
+  } catch {
+    return fail();
   }
 }
 

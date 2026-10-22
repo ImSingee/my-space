@@ -72,7 +72,6 @@ describe('public app RPC route', () => {
       {
         signWithSecret: 'signing-secret',
         expectedDeploymentId: 'deployment-1',
-        platformAuthenticated: true,
       },
     );
   });

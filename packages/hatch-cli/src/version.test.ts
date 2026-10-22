@@ -78,7 +78,7 @@ it('reports the binary revision offline and ignores runtime build overrides', ()
   expect(invoke(['--version'])).toBe(invoke(['version']));
 });
 
-it('advertises implemented data commands in binary text and JSON help', () => {
+it('advertises implemented invocation and data commands in binary text and JSON help', () => {
   const expected = [
     'app kv list',
     'app kv get',
@@ -89,6 +89,8 @@ it('advertises implemented data commands in binary text and JSON help', () => {
     'app data-table mutate',
     'app data-table sql',
     'app db query',
+    'app invoke backend',
+    'app invoke webhook',
   ];
   const help = JSON.parse(invoke(['help', '--json'])) as {
     commands: { path: string[]; supported: boolean; description: string }[];
@@ -108,7 +110,7 @@ it('advertises implemented data commands in binary text and JSON help', () => {
   )) {
     expect(command.supported).toBe(false);
   }
-  for (const group of ['kv', 'data-table', 'db']) {
+  for (const group of ['kv', 'data-table', 'db', 'invoke']) {
     const text = invoke(['app', group, '--help']);
     for (const command of dataCommands.filter(
       (command) => command.path[1] === group,
@@ -117,5 +119,16 @@ it('advertises implemented data commands in binary text and JSON help', () => {
       expect(text).toContain(command.description);
     }
     expect(text).not.toContain('Unsupported;');
+  }
+});
+
+it('scopes three-part invocation help to the selected transport', () => {
+  for (const transport of ['backend', 'webhook']) {
+    const help = JSON.parse(
+      invoke(['app', 'invoke', transport, '--help', '--json']),
+    ) as { commands: { path: string[]; supported: boolean }[] };
+    expect(help.commands).toMatchObject([
+      { path: ['app', 'invoke', transport], supported: true },
+    ]);
   }
 });
