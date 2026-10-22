@@ -7,6 +7,7 @@ import { listDeployments } from './manage';
 import {
   type NormalizedManifest,
   type WebhookAuth,
+  capabilitiesSchema,
   projectAppManifestUrls,
 } from './manifest';
 import { countKv } from './kv';
@@ -181,7 +182,16 @@ export async function getAppDetailForAgent(
   const storedManifest = (currentDeployment?.manifestNormalized ??
     null) as NormalizedManifest | null;
   const manifest = storedManifest
-    ? projectAppManifestUrls(storedManifest, app.id, app.slug)
+    ? projectAppManifestUrls(
+        {
+          ...storedManifest,
+          // Historical artifacts omit capabilities introduced after deployment.
+          // Apply read defaults without modifying the immutable stored manifest.
+          capabilities: capabilitiesSchema.parse(storedManifest.capabilities),
+        },
+        app.id,
+        app.slug,
+      )
     : null;
 
   const caps = app.capabilities;

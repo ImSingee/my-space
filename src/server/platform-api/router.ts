@@ -1,4 +1,4 @@
-import { fromJson } from '@bufbuild/protobuf';
+import { fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { getAgentModelCatalog } from '~server/agent-model-catalog';
@@ -38,6 +38,29 @@ import {
 import { rollbackWorkflowToVersion } from '~server/workflows/manage';
 import { createWorkflow } from '~server/workflows/scaffold';
 import { authenticatePublicApi, type PublicApiContext } from './auth';
+import { listAppsForAgent, getAppDetailForAgent } from '~server/apps/inspect';
+import {
+  listWorkflowsForAgent,
+  getWorkflowDetailForAgent,
+} from '~server/workflows/inspect';
+import { projectAppManifestUrls } from '~server/apps/manifest';
+import { projectWorkflowManifestUrls } from '~server/workflows/manifest';
+import {
+  appSummarySchema,
+  workflowSummarySchema,
+  appDetailSchema,
+  workflowDetailSchema,
+  appManifestViewSchema,
+  workflowManifestViewSchema,
+} from '~/platform-api/views';
+import {
+  queryAppKvRequestSchema,
+  queryAppDataTableRequestSchema,
+} from '~/platform-api/data-schemas';
+import { queryAppKv } from '~server/apps/query-kv';
+import { queryAppDataTable } from '~server/apps/query-data-table';
+import { queryAppDatabase } from '~server/apps/query-db';
+import { associateAgentSessionApp } from '~server/agent-session-apps';
 
 export const publicApiContext = createContextKey<PublicApiContext>({
   run: null,
@@ -58,7 +81,49 @@ async function list(kind: Kind) {
     kind === 'apps'
       ? await db.query.apps.findMany({ columns })
       : await db.query.workflows.findMany({ columns });
-  return rows.map(project);
+  const summaries =
+    kind === 'apps' ? await listAppsForAgent() : await listWorkflowsForAgent();
+  const byId = new Map(summaries.map((summary) => [summary.id, summary]));
+  return rows.flatMap((row) => {
+    const summary = byId.get(row.id);
+    if (!summary) return [];
+    const view = {
+      ...row,
+      ...summary,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+    return [
+      {
+        ...project(row),
+        view: jsonValue(
+          (kind === 'apps' ? appSummarySchema : workflowSummarySchema).parse(
+            view,
+          ),
+        ),
+      },
+    ];
+  });
+}
+const jsonValue = (value: unknown) => fromJson(ValueSchema, value as JsonValue);
+async function associate(id: string, context: HandlerContext) {
+  const run = context.values.get(publicApiContext).run;
+  if (!run) return { appId: id, association: 'not-applicable' };
+  await associateAgentSessionApp(run.sessionId, id);
+  return { appId: id, association: 'associated' };
+}
+function dataInput(
+  value: Parameters<typeof toJson<typeof ValueSchema>>[1] | undefined,
+) {
+  if (!value) throw publicApiError('BAD_REQUEST');
+  return toJson(ValueSchema, value);
+}
+async function dataOperation<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    throw publicError(error, true);
+  }
 }
 function project(row: {
   id: string;
@@ -128,21 +193,34 @@ function lifecycle(kind: Kind) {
           : await createWorkflow(input);
       return { ...created, files: files(created) };
     },
-    get: async (input: { id: string }) => ({
-      resource: project(await find(kind, input.id)),
-    }),
+    get: async (input: { id: string }) => {
+      const row = await find(kind, input.id);
+      const detail =
+        kind === 'apps'
+          ? await getAppDetailForAgent(row.id)
+          : await getWorkflowDetailForAgent(row.id);
+      if (!detail) throw publicApiError('NOT_FOUND');
+      const view = (
+        kind === 'apps' ? appDetailSchema : workflowDetailSchema
+      ).parse({ ...detail, updatedAt: row.updatedAt.toISOString() });
+      return { resource: { ...project(row), view: jsonValue(view) } };
+    },
     source: async (input: { id: string }) => ({
       source: await source(kind, input.id),
     }),
-    deploy: async (input: {
-      id: string;
-      message: string;
-      generation: string;
-      bundle: Uint8Array;
-      allowDestructiveDataMigration?: boolean;
-      dataMigrationApprovalToken?: string;
-    }) => {
+    deploy: async (
+      input: {
+        id: string;
+        message: string;
+        generation: string;
+        bundle: Uint8Array;
+        allowDestructiveDataMigration?: boolean;
+        dataMigrationApprovalToken?: string;
+      },
+      context: HandlerContext,
+    ) => {
       const row = await find(kind, input.id);
+      if (kind === 'apps') await associate(row.id, context);
       if (input.generation !== row.createdAt.toISOString())
         throw publicApiError('RESOURCE_GENERATION_CONFLICT');
       const staged =
@@ -153,27 +231,56 @@ function lifecycle(kind: Kind) {
               Buffer.from(input.bundle),
             );
       try {
-        const deploy = kind === 'apps' ? deployApp : deployWorkflow;
-        const result = await deploy(row.id, {
+        const options = {
           message: input.message,
           allowDestructiveDataMigration: input.allowDestructiveDataMigration,
           dataMigrationApprovalToken: input.dataMigrationApprovalToken,
           sourceDir: staged.dir,
           expectedGeneration: input.generation,
-        });
+        };
+        const result =
+          kind === 'apps'
+            ? await deployApp(row.id, options)
+            : await deployWorkflow(row.id, options);
+        const released = await find(kind, row.id);
+        const normalized =
+          kind === 'apps'
+            ? appManifestViewSchema.parse(
+                projectAppManifestUrls(
+                  result.normalized as Parameters<
+                    typeof projectAppManifestUrls
+                  >[0],
+                  row.id,
+                  released.slug,
+                ),
+              )
+            : workflowManifestViewSchema.parse(
+                projectWorkflowManifestUrls(
+                  result.normalized as Parameters<
+                    typeof projectWorkflowManifestUrls
+                  >[0],
+                  row.id,
+                ),
+              );
         return {
           deployment: {
             deploymentId: result.deploymentId,
             version: result.version,
             compatibilityVersion: result.compatibilityVersion,
+            slug: kind === 'apps' ? released.slug : undefined,
+            normalized: jsonValue(normalized),
           },
         };
       } finally {
         await staged.cleanup();
       }
     },
-    rollback: async (input: { id: string; version: number }) => {
+    rollback: async (
+      input: { id: string; version: number },
+      context: HandlerContext,
+    ) => {
       const row = await find(kind, input.id);
+      if (kind === 'apps') await associate(row.id, context);
       const restored =
         kind === 'apps'
           ? await rollbackAppToVersion(row.id, input.version)
@@ -268,6 +375,58 @@ export function registerPlatformApi(
   );
   const apps = lifecycle('apps');
   const workflows = lifecycle('workflows');
+  router.rpc(
+    AppService.method.associateAppSession,
+    async (input, context) =>
+      associate((await find('apps', input.id)).id, context),
+    { jsonOptions: { ignoreUnknownFields: false } },
+  );
+  router.rpc(
+    AppService.method.queryAppKv,
+    async (input) =>
+      dataOperation(async () => {
+        const parsed = queryAppKvRequestSchema.safeParse(
+          dataInput(input.input),
+        );
+        if (!parsed.success) throw publicApiError('BAD_REQUEST');
+        return {
+          result: jsonValue(
+            await queryAppKv((await find('apps', input.id)).id, parsed.data),
+          ),
+        };
+      }),
+    { readMaxBytes: deployBodyLimit },
+  );
+  router.rpc(
+    AppService.method.queryAppDataTable,
+    async (input, context) =>
+      dataOperation(async () => {
+        context.signal.throwIfAborted();
+        const parsed = queryAppDataTableRequestSchema.safeParse(
+          dataInput(input.input),
+        );
+        if (!parsed.success) throw publicApiError('BAD_REQUEST');
+        const row = await find('apps', input.id);
+        context.signal.throwIfAborted();
+        return {
+          result: jsonValue(
+            await queryAppDataTable(row.id, parsed.data, context.signal),
+          ),
+        };
+      }),
+    { readMaxBytes: deployBodyLimit },
+  );
+  router.rpc(
+    AppService.method.queryAppDb,
+    async (input, context) =>
+      dataOperation(async () => {
+        context.signal.throwIfAborted();
+        const row = await find('apps', input.id);
+        context.signal.throwIfAborted();
+        return queryAppDatabase(row.id, input.sql, context.signal);
+      }),
+    { readMaxBytes: deployBodyLimit },
+  );
   router.rpc(AppService.method.listApps, apps.list);
   router.rpc(AppService.method.createApp, apps.create);
   router.rpc(AppService.method.getApp, apps.get);

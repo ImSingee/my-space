@@ -13,6 +13,8 @@ import {
   serviceDesc,
 } from '@bufbuild/protobuf/codegenv2';
 import { file_buf_validate_validate } from '@bufbuild/protovalidate/gen/buf/validate/validate_pb.js';
+import type { Value } from '@bufbuild/protobuf/wkt';
+import { file_google_protobuf_struct } from '@bufbuild/protobuf/wkt';
 import type { File } from './file_pb.js';
 import { file_hatch_platform_v1_file } from './file_pb.js';
 import type {
@@ -30,9 +32,10 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_hatch_platform_v1_app: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'ChtoYXRjaC9wbGF0Zm9ybS92MS9hcHAucHJvdG8SEWhhdGNoLnBsYXRmb3JtLnYxIhEKD0xpc3RBcHBzUmVxdWVzdCJCChBMaXN0QXBwc1Jlc3BvbnNlEi4KCXJlc291cmNlcxgBIAMoCzIbLmhhdGNoLnBsYXRmb3JtLnYxLlJlc291cmNlIp4BChBDcmVhdGVBcHBSZXF1ZXN0Ei0KBHNsdWcYASABKAlCH7pIHHIaEAEYQDIUXlthLXowLTldW2EtejAtOS1dKiQSFwoEbmFtZRgCIAEoCUIJukgGcgQQARhAEhgKC2Rlc2NyaXB0aW9uGAMgASgJSACIAQESEAoDcGluGAQgASgISAGIAQFCDgoMX2Rlc2NyaXB0aW9uQgYKBF9waW4iYwoRQ3JlYXRlQXBwUmVzcG9uc2USCgoCaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIMCgRuYW1lGAMgASgJEiYKBWZpbGVzGAQgAygLMhcuaGF0Y2gucGxhdGZvcm0udjEuRmlsZSInCg1HZXRBcHBSZXF1ZXN0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BIj8KDkdldEFwcFJlc3BvbnNlEi0KCHJlc291cmNlGAEgASgLMhsuaGF0Y2gucGxhdGZvcm0udjEuUmVzb3VyY2UiLQoTR2V0QXBwU291cmNlUmVxdWVzdBIWCgJpZBgBIAEoCUIKukgHcgUQARi/ASJBChRHZXRBcHBTb3VyY2VSZXNwb25zZRIpCgZzb3VyY2UYASABKAsyGS5oYXRjaC5wbGF0Zm9ybS52MS5Tb3VyY2UipQIKEERlcGxveUFwcFJlcXVlc3QSFgoCaWQYASABKAlCCrpIB3IFEAEYvwESGAoHbWVzc2FnZRgCIAEoCUIHukgEcgIQARIbCgpnZW5lcmF0aW9uGAMgASgJQge6SARyAhABEhcKBmJ1bmRsZRgEIAEoDEIHukgEegIQARItCiBhbGxvd19kZXN0cnVjdGl2ZV9kYXRhX21pZ3JhdGlvbhgFIAEoCEgAiAEBEjMKHWRhdGFfbWlncmF0aW9uX2FwcHJvdmFsX3Rva2VuGAYgASgJQge6SARyAhABSAGIAQFCIwohX2FsbG93X2Rlc3RydWN0aXZlX2RhdGFfbWlncmF0aW9uQiAKHl9kYXRhX21pZ3JhdGlvbl9hcHByb3ZhbF90b2tlbiJGChFEZXBsb3lBcHBSZXNwb25zZRIxCgpkZXBsb3ltZW50GAEgASgLMh0uaGF0Y2gucGxhdGZvcm0udjEuRGVwbG95bWVudCJGChJSb2xsYmFja0FwcFJlcXVlc3QSFgoCaWQYASABKAlCCrpIB3IFEAEYvwESGAoHdmVyc2lvbhgCIAEoDUIHukgEKgIgACJLChNSb2xsYmFja0FwcFJlc3BvbnNlEjQKCHJlc3RvcmVkGAEgASgLMiIuaGF0Y2gucGxhdGZvcm0udjEuUmVzdG9yZWRWZXJzaW9uIjEKF0NyZWF0ZUFwcEhhbmRvZmZSZXF1ZXN0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BImAKGENyZWF0ZUFwcEhhbmRvZmZSZXNwb25zZRILCgN1cmwYASABKAkSDgoGdGlja2V0GAIgASgJEhIKCmV4cGlyZXNfYXQYAyABKAkSEwoLdGFyZ2V0X3BhdGgYBCABKAkyjAUKCkFwcFNlcnZpY2USawoQQ3JlYXRlQXBwSGFuZG9mZhIqLmhhdGNoLnBsYXRmb3JtLnYxLkNyZWF0ZUFwcEhhbmRvZmZSZXF1ZXN0GisuaGF0Y2gucGxhdGZvcm0udjEuQ3JlYXRlQXBwSGFuZG9mZlJlc3BvbnNlElMKCExpc3RBcHBzEiIuaGF0Y2gucGxhdGZvcm0udjEuTGlzdEFwcHNSZXF1ZXN0GiMuaGF0Y2gucGxhdGZvcm0udjEuTGlzdEFwcHNSZXNwb25zZRJWCglDcmVhdGVBcHASIy5oYXRjaC5wbGF0Zm9ybS52MS5DcmVhdGVBcHBSZXF1ZXN0GiQuaGF0Y2gucGxhdGZvcm0udjEuQ3JlYXRlQXBwUmVzcG9uc2USTQoGR2V0QXBwEiAuaGF0Y2gucGxhdGZvcm0udjEuR2V0QXBwUmVxdWVzdBohLmhhdGNoLnBsYXRmb3JtLnYxLkdldEFwcFJlc3BvbnNlEl8KDEdldEFwcFNvdXJjZRImLmhhdGNoLnBsYXRmb3JtLnYxLkdldEFwcFNvdXJjZVJlcXVlc3QaJy5oYXRjaC5wbGF0Zm9ybS52MS5HZXRBcHBTb3VyY2VSZXNwb25zZRJWCglEZXBsb3lBcHASIy5oYXRjaC5wbGF0Zm9ybS52MS5EZXBsb3lBcHBSZXF1ZXN0GiQuaGF0Y2gucGxhdGZvcm0udjEuRGVwbG95QXBwUmVzcG9uc2USXAoLUm9sbGJhY2tBcHASJS5oYXRjaC5wbGF0Zm9ybS52MS5Sb2xsYmFja0FwcFJlcXVlc3QaJi5oYXRjaC5wbGF0Zm9ybS52MS5Sb2xsYmFja0FwcFJlc3BvbnNlYgZwcm90bzM',
+    'ChtoYXRjaC9wbGF0Zm9ybS92MS9hcHAucHJvdG8SEWhhdGNoLnBsYXRmb3JtLnYxIhEKD0xpc3RBcHBzUmVxdWVzdCJCChBMaXN0QXBwc1Jlc3BvbnNlEi4KCXJlc291cmNlcxgBIAMoCzIbLmhhdGNoLnBsYXRmb3JtLnYxLlJlc291cmNlIp4BChBDcmVhdGVBcHBSZXF1ZXN0Ei0KBHNsdWcYASABKAlCH7pIHHIaEAEYQDIUXlthLXowLTldW2EtejAtOS1dKiQSFwoEbmFtZRgCIAEoCUIJukgGcgQQARhAEhgKC2Rlc2NyaXB0aW9uGAMgASgJSACIAQESEAoDcGluGAQgASgISAGIAQFCDgoMX2Rlc2NyaXB0aW9uQgYKBF9waW4iYwoRQ3JlYXRlQXBwUmVzcG9uc2USCgoCaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIMCgRuYW1lGAMgASgJEiYKBWZpbGVzGAQgAygLMhcuaGF0Y2gucGxhdGZvcm0udjEuRmlsZSInCg1HZXRBcHBSZXF1ZXN0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BIj8KDkdldEFwcFJlc3BvbnNlEi0KCHJlc291cmNlGAEgASgLMhsuaGF0Y2gucGxhdGZvcm0udjEuUmVzb3VyY2UiLQoTR2V0QXBwU291cmNlUmVxdWVzdBIWCgJpZBgBIAEoCUIKukgHcgUQARi/ASJBChRHZXRBcHBTb3VyY2VSZXNwb25zZRIpCgZzb3VyY2UYASABKAsyGS5oYXRjaC5wbGF0Zm9ybS52MS5Tb3VyY2UipQIKEERlcGxveUFwcFJlcXVlc3QSFgoCaWQYASABKAlCCrpIB3IFEAEYvwESGAoHbWVzc2FnZRgCIAEoCUIHukgEcgIQARIbCgpnZW5lcmF0aW9uGAMgASgJQge6SARyAhABEhcKBmJ1bmRsZRgEIAEoDEIHukgEegIQARItCiBhbGxvd19kZXN0cnVjdGl2ZV9kYXRhX21pZ3JhdGlvbhgFIAEoCEgAiAEBEjMKHWRhdGFfbWlncmF0aW9uX2FwcHJvdmFsX3Rva2VuGAYgASgJQge6SARyAhABSAGIAQFCIwohX2FsbG93X2Rlc3RydWN0aXZlX2RhdGFfbWlncmF0aW9uQiAKHl9kYXRhX21pZ3JhdGlvbl9hcHByb3ZhbF90b2tlbiJGChFEZXBsb3lBcHBSZXNwb25zZRIxCgpkZXBsb3ltZW50GAEgASgLMh0uaGF0Y2gucGxhdGZvcm0udjEuRGVwbG95bWVudCJGChJSb2xsYmFja0FwcFJlcXVlc3QSFgoCaWQYASABKAlCCrpIB3IFEAEYvwESGAoHdmVyc2lvbhgCIAEoDUIHukgEKgIgACJLChNSb2xsYmFja0FwcFJlc3BvbnNlEjQKCHJlc3RvcmVkGAEgASgLMiIuaGF0Y2gucGxhdGZvcm0udjEuUmVzdG9yZWRWZXJzaW9uIjEKF0NyZWF0ZUFwcEhhbmRvZmZSZXF1ZXN0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BImAKGENyZWF0ZUFwcEhhbmRvZmZSZXNwb25zZRILCgN1cmwYASABKAkSDgoGdGlja2V0GAIgASgJEhIKCmV4cGlyZXNfYXQYAyABKAkSEwoLdGFyZ2V0X3BhdGgYBCABKAkiWgoRUXVlcnlBcHBLdlJlcXVlc3QSFgoCaWQYASABKAlCCrpIB3IFEAEYvwESLQoFaW5wdXQYAiABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWVCBrpIA8gBASI8ChJRdWVyeUFwcEt2UmVzcG9uc2USJgoGcmVzdWx0GAEgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlImEKGFF1ZXJ5QXBwRGF0YVRhYmxlUmVxdWVzdBIWCgJpZBgBIAEoCUIKukgHcgUQARi/ARItCgVpbnB1dBgCIAEoCzIWLmdvb2dsZS5wcm90b2J1Zi5WYWx1ZUIGukgDyAEBIkMKGVF1ZXJ5QXBwRGF0YVRhYmxlUmVzcG9uc2USJgoGcmVzdWx0GAEgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlIkEKEVF1ZXJ5QXBwRGJSZXF1ZXN0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BEhQKA3NxbBgCIAEoCUIHukgEcgIQASI1ChJRdWVyeUFwcERiUmVzcG9uc2USDAoEdGV4dBgBIAEoCRIRCglyb3dfY291bnQYAiABKA0iNAoaQXNzb2NpYXRlQXBwU2Vzc2lvblJlcXVlc3QSFgoCaWQYASABKAlCCrpIB3IFEAEYvwEiQgobQXNzb2NpYXRlQXBwU2Vzc2lvblJlc3BvbnNlEg4KBmFwcF9pZBgBIAEoCRITCgthc3NvY2lhdGlvbhgCIAEoCTKoCAoKQXBwU2VydmljZRJrChBDcmVhdGVBcHBIYW5kb2ZmEiouaGF0Y2gucGxhdGZvcm0udjEuQ3JlYXRlQXBwSGFuZG9mZlJlcXVlc3QaKy5oYXRjaC5wbGF0Zm9ybS52MS5DcmVhdGVBcHBIYW5kb2ZmUmVzcG9uc2USUwoITGlzdEFwcHMSIi5oYXRjaC5wbGF0Zm9ybS52MS5MaXN0QXBwc1JlcXVlc3QaIy5oYXRjaC5wbGF0Zm9ybS52MS5MaXN0QXBwc1Jlc3BvbnNlElYKCUNyZWF0ZUFwcBIjLmhhdGNoLnBsYXRmb3JtLnYxLkNyZWF0ZUFwcFJlcXVlc3QaJC5oYXRjaC5wbGF0Zm9ybS52MS5DcmVhdGVBcHBSZXNwb25zZRJNCgZHZXRBcHASIC5oYXRjaC5wbGF0Zm9ybS52MS5HZXRBcHBSZXF1ZXN0GiEuaGF0Y2gucGxhdGZvcm0udjEuR2V0QXBwUmVzcG9uc2USXwoMR2V0QXBwU291cmNlEiYuaGF0Y2gucGxhdGZvcm0udjEuR2V0QXBwU291cmNlUmVxdWVzdBonLmhhdGNoLnBsYXRmb3JtLnYxLkdldEFwcFNvdXJjZVJlc3BvbnNlElYKCURlcGxveUFwcBIjLmhhdGNoLnBsYXRmb3JtLnYxLkRlcGxveUFwcFJlcXVlc3QaJC5oYXRjaC5wbGF0Zm9ybS52MS5EZXBsb3lBcHBSZXNwb25zZRJcCgtSb2xsYmFja0FwcBIlLmhhdGNoLnBsYXRmb3JtLnYxLlJvbGxiYWNrQXBwUmVxdWVzdBomLmhhdGNoLnBsYXRmb3JtLnYxLlJvbGxiYWNrQXBwUmVzcG9uc2USWQoKUXVlcnlBcHBLdhIkLmhhdGNoLnBsYXRmb3JtLnYxLlF1ZXJ5QXBwS3ZSZXF1ZXN0GiUuaGF0Y2gucGxhdGZvcm0udjEuUXVlcnlBcHBLdlJlc3BvbnNlEm4KEVF1ZXJ5QXBwRGF0YVRhYmxlEisuaGF0Y2gucGxhdGZvcm0udjEuUXVlcnlBcHBEYXRhVGFibGVSZXF1ZXN0GiwuaGF0Y2gucGxhdGZvcm0udjEuUXVlcnlBcHBEYXRhVGFibGVSZXNwb25zZRJZCgpRdWVyeUFwcERiEiQuaGF0Y2gucGxhdGZvcm0udjEuUXVlcnlBcHBEYlJlcXVlc3QaJS5oYXRjaC5wbGF0Zm9ybS52MS5RdWVyeUFwcERiUmVzcG9uc2USdAoTQXNzb2NpYXRlQXBwU2Vzc2lvbhItLmhhdGNoLnBsYXRmb3JtLnYxLkFzc29jaWF0ZUFwcFNlc3Npb25SZXF1ZXN0Gi4uaGF0Y2gucGxhdGZvcm0udjEuQXNzb2NpYXRlQXBwU2Vzc2lvblJlc3BvbnNlYgZwcm90bzM',
     [
       file_buf_validate_validate,
+      file_google_protobuf_struct,
       file_hatch_platform_v1_file,
       file_hatch_platform_v1_lifecycle,
     ],
@@ -371,6 +374,186 @@ export const CreateAppHandoffResponseSchema: GenMessage<CreateAppHandoffResponse
   messageDesc(file_hatch_platform_v1_app, 13);
 
 /**
+ * Action-specific JSON data is validated by the shared domain contracts.
+ * Value retains explicit null/false/zero/empty values without coercion.
+ *
+ * @generated from message hatch.platform.v1.QueryAppKvRequest
+ */
+export type QueryAppKvRequest =
+  Message<'hatch.platform.v1.QueryAppKvRequest'> & {
+    /**
+     * @generated from field: string id = 1;
+     */
+    id: string;
+
+    /**
+     * @generated from field: google.protobuf.Value input = 2;
+     */
+    input?: Value | undefined;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.QueryAppKvRequest.
+ * Use `create(QueryAppKvRequestSchema)` to create a new message.
+ */
+export const QueryAppKvRequestSchema: GenMessage<QueryAppKvRequest> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 14);
+
+/**
+ * @generated from message hatch.platform.v1.QueryAppKvResponse
+ */
+export type QueryAppKvResponse =
+  Message<'hatch.platform.v1.QueryAppKvResponse'> & {
+    /**
+     * @generated from field: google.protobuf.Value result = 1;
+     */
+    result?: Value | undefined;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.QueryAppKvResponse.
+ * Use `create(QueryAppKvResponseSchema)` to create a new message.
+ */
+export const QueryAppKvResponseSchema: GenMessage<QueryAppKvResponse> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 15);
+
+/**
+ * @generated from message hatch.platform.v1.QueryAppDataTableRequest
+ */
+export type QueryAppDataTableRequest =
+  Message<'hatch.platform.v1.QueryAppDataTableRequest'> & {
+    /**
+     * @generated from field: string id = 1;
+     */
+    id: string;
+
+    /**
+     * @generated from field: google.protobuf.Value input = 2;
+     */
+    input?: Value | undefined;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.QueryAppDataTableRequest.
+ * Use `create(QueryAppDataTableRequestSchema)` to create a new message.
+ */
+export const QueryAppDataTableRequestSchema: GenMessage<QueryAppDataTableRequest> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 16);
+
+/**
+ * @generated from message hatch.platform.v1.QueryAppDataTableResponse
+ */
+export type QueryAppDataTableResponse =
+  Message<'hatch.platform.v1.QueryAppDataTableResponse'> & {
+    /**
+     * @generated from field: google.protobuf.Value result = 1;
+     */
+    result?: Value | undefined;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.QueryAppDataTableResponse.
+ * Use `create(QueryAppDataTableResponseSchema)` to create a new message.
+ */
+export const QueryAppDataTableResponseSchema: GenMessage<QueryAppDataTableResponse> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 17);
+
+/**
+ * @generated from message hatch.platform.v1.QueryAppDbRequest
+ */
+export type QueryAppDbRequest =
+  Message<'hatch.platform.v1.QueryAppDbRequest'> & {
+    /**
+     * @generated from field: string id = 1;
+     */
+    id: string;
+
+    /**
+     * @generated from field: string sql = 2;
+     */
+    sql: string;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.QueryAppDbRequest.
+ * Use `create(QueryAppDbRequestSchema)` to create a new message.
+ */
+export const QueryAppDbRequestSchema: GenMessage<QueryAppDbRequest> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 18);
+
+/**
+ * @generated from message hatch.platform.v1.QueryAppDbResponse
+ */
+export type QueryAppDbResponse =
+  Message<'hatch.platform.v1.QueryAppDbResponse'> & {
+    /**
+     * @generated from field: string text = 1;
+     */
+    text: string;
+
+    /**
+     * @generated from field: uint32 row_count = 2;
+     */
+    rowCount: number;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.QueryAppDbResponse.
+ * Use `create(QueryAppDbResponseSchema)` to create a new message.
+ */
+export const QueryAppDbResponseSchema: GenMessage<QueryAppDbResponse> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 19);
+
+/**
+ * @generated from message hatch.platform.v1.AssociateAppSessionRequest
+ */
+export type AssociateAppSessionRequest =
+  Message<'hatch.platform.v1.AssociateAppSessionRequest'> & {
+    /**
+     * @generated from field: string id = 1;
+     */
+    id: string;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.AssociateAppSessionRequest.
+ * Use `create(AssociateAppSessionRequestSchema)` to create a new message.
+ */
+export const AssociateAppSessionRequestSchema: GenMessage<AssociateAppSessionRequest> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 20);
+
+/**
+ * @generated from message hatch.platform.v1.AssociateAppSessionResponse
+ */
+export type AssociateAppSessionResponse =
+  Message<'hatch.platform.v1.AssociateAppSessionResponse'> & {
+    /**
+     * @generated from field: string app_id = 1;
+     */
+    appId: string;
+
+    /**
+     * @generated from field: string association = 2;
+     */
+    association: string;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.AssociateAppSessionResponse.
+ * Use `create(AssociateAppSessionResponseSchema)` to create a new message.
+ */
+export const AssociateAppSessionResponseSchema: GenMessage<AssociateAppSessionResponse> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_app, 21);
+
+/**
  * Public API for CLI and native clients. Platform Web UI uses Server Functions.
  *
  * @generated from service hatch.platform.v1.AppService
@@ -433,5 +616,37 @@ export const AppService: GenService<{
     methodKind: 'unary';
     input: typeof RollbackAppRequestSchema;
     output: typeof RollbackAppResponseSchema;
+  };
+  /**
+   * @generated from rpc hatch.platform.v1.AppService.QueryAppKv
+   */
+  queryAppKv: {
+    methodKind: 'unary';
+    input: typeof QueryAppKvRequestSchema;
+    output: typeof QueryAppKvResponseSchema;
+  };
+  /**
+   * @generated from rpc hatch.platform.v1.AppService.QueryAppDataTable
+   */
+  queryAppDataTable: {
+    methodKind: 'unary';
+    input: typeof QueryAppDataTableRequestSchema;
+    output: typeof QueryAppDataTableResponseSchema;
+  };
+  /**
+   * @generated from rpc hatch.platform.v1.AppService.QueryAppDb
+   */
+  queryAppDb: {
+    methodKind: 'unary';
+    input: typeof QueryAppDbRequestSchema;
+    output: typeof QueryAppDbResponseSchema;
+  };
+  /**
+   * @generated from rpc hatch.platform.v1.AppService.AssociateAppSession
+   */
+  associateAppSession: {
+    methodKind: 'unary';
+    input: typeof AssociateAppSessionRequestSchema;
+    output: typeof AssociateAppSessionResponseSchema;
   };
 }> = /*@__PURE__*/ serviceDesc(file_hatch_platform_v1_app, 0);

@@ -13,6 +13,18 @@ const commitTime = '2026-10-14T23:35:44+08:00';
 let directory: string;
 let binary: string;
 
+function invoke(args: string[]) {
+  return execFileSync(process.execPath, [binary, ...args], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HATCH_BUILD_COMMIT: 'runtime-must-not-override',
+      HATCH_BUILD_COMMIT_TIME: 'bad-runtime-time',
+    },
+  }).trim();
+}
+
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'hatch-cli-version-'));
   for (const name of [
@@ -57,16 +69,6 @@ afterAll(async () => {
 });
 
 it('reports the binary revision offline and ignores runtime build overrides', () => {
-  const invoke = (args: string[]) =>
-    execFileSync(process.execPath, [binary, ...args], {
-      cwd: directory,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        HATCH_BUILD_COMMIT: 'runtime-must-not-override',
-        HATCH_BUILD_COMMIT_TIME: 'bad-runtime-time',
-      },
-    }).trim();
   const expected = { version: manifest.version, commit, commitTime };
   expect(JSON.parse(invoke(['version', '--json']))).toEqual(expected);
   expect(JSON.parse(invoke(['--json', '--version']))).toEqual(expected);
@@ -74,4 +76,46 @@ it('reports the binary revision offline and ignores runtime build overrides', ()
     `${manifest.version}\nCommit: ${commit.slice(0, 12)}\nCommit time: ${commitTime}`,
   );
   expect(invoke(['--version'])).toBe(invoke(['version']));
+});
+
+it('advertises implemented data commands in binary text and JSON help', () => {
+  const expected = [
+    'app kv list',
+    'app kv get',
+    'app kv set',
+    'app kv delete',
+    'app data-table inspect',
+    'app data-table query',
+    'app data-table mutate',
+    'app data-table sql',
+    'app db query',
+  ];
+  const help = JSON.parse(invoke(['help', '--json'])) as {
+    commands: { path: string[]; supported: boolean; description: string }[];
+  };
+  const dataCommands = help.commands.filter((command) =>
+    expected.includes(command.path.join(' ')),
+  );
+  expect(dataCommands).toHaveLength(expected.length);
+  for (const command of dataCommands) {
+    expect(command.supported).toBe(true);
+    expect(command.description).not.toContain('Unsupported');
+  }
+  for (const command of help.commands.filter(
+    (command) =>
+      ['operation', 'auth'].includes(command.path[0]) &&
+      (command.path[0] === 'operation' || command.path[1] === 'key'),
+  )) {
+    expect(command.supported).toBe(false);
+  }
+  for (const group of ['kv', 'data-table', 'db']) {
+    const text = invoke(['app', group, '--help']);
+    for (const command of dataCommands.filter(
+      (command) => command.path[1] === group,
+    )) {
+      expect(text).toContain(command.path.join(' '));
+      expect(text).toContain(command.description);
+    }
+    expect(text).not.toContain('Unsupported;');
+  }
 });

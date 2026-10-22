@@ -1,7 +1,6 @@
 /** Generate and apply forward-only migrations for managed Data Tables. */
 import { createHash } from 'node:crypto';
 import postgres, { type TransactionSql } from 'postgres';
-import { AppError } from '~server/errors';
 import {
   appDataDatabaseExists,
   ensureAppDataDatabase,
@@ -20,19 +19,16 @@ import {
 
 const MIGRATION_LOCK_KEY = 0x4844544d;
 
-export type DataMigrationStep = {
-  description: string;
-  sql: string;
-  destructive: boolean;
-};
-
-export type DataMigrationPlan = {
-  fromHash: string | null;
-  toHash: string;
-  steps: DataMigrationStep[];
-  destructive: boolean;
-  approvalToken: string;
-};
+import {
+  DataMigrationApprovalRequired,
+  type DataMigrationPlan,
+  type DataMigrationStep,
+} from './migration-errors';
+export {
+  DataMigrationApprovalRequired,
+  type DataMigrationPlan,
+  type DataMigrationStep,
+} from './migration-errors';
 
 export type AppliedDataMigration = {
   hash: string;
@@ -40,26 +36,6 @@ export type AppliedDataMigration = {
   plan: DataMigrationPlan;
   applied: boolean;
 };
-
-export class DataMigrationApprovalRequired extends AppError {
-  constructor(readonly plan: DataMigrationPlan) {
-    super(
-      'Data Table migration contains destructive changes and requires ' +
-        'allow_destructive_data_migration=true with the matching preview ' +
-        'token.\n' +
-        plan.steps
-          .filter((step) => step.destructive)
-          .map((step) => `- ${step.description}`)
-          .join('\n') +
-        `\nApproval token: ${plan.approvalToken}` +
-        '\nRetry with data_migration_approval_token set to this exact value.' +
-        '\n\nGenerated migration SQL:\n' +
-        plan.steps.map((step) => `${step.sql};`).join('\n'),
-      409,
-    );
-    this.name = 'DataMigrationApprovalRequired';
-  }
-}
 
 /**
  * The migration transaction reached COMMIT, but a second connection could not

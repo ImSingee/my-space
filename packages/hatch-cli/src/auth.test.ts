@@ -507,10 +507,7 @@ describe('CLI authentication boundary', () => {
     });
     expect(help.code).toBe(0);
     expect(JSON.parse(help.stdout).version).toBe('0.1.0');
-    for (const args of [
-      ['app', 'kv', 'list'],
-      ['auth', 'key', 'rotate'],
-    ]) {
+    for (const args of [['auth', 'key', 'rotate']]) {
       const result = await invoke([...args, '--json']);
       expect(result.code).toBe(8);
       expect(JSON.parse(result.stdout).error.code).toBe('unsupported_command');

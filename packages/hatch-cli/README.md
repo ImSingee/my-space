@@ -1,7 +1,8 @@
 # Hatch CLI
 
-Authentication and App/Workflow source lifecycles, over the public Connect RPC
-contract at `/api/rpc`. Requires Node >=22.19, Git and pnpm. Deno is
+Authentication, App/Workflow source lifecycles and App data operations, over the
+public Connect RPC contract at `/api/rpc`. Requires Node >=22.19, Git and pnpm.
+Deno is
 needed to check/run authored App/Workflow code locally. No platform repository
 checkout, current-working-directory dependency, or runtime npm dependencies
 are needed by the CLI executable.
@@ -24,8 +25,8 @@ from any workdir with Node alone. The image also provides the pinned pnpm needed
 for workspace dependency installation/codegen. CLI/SDK outputs must be rebuilt
 before packing. On Windows, npm-global/Corepack pnpm shims are resolved to their
 Node entry point; standalone `pnpm.exe` is supported directly. Batch scripts
-are never executed through a shell. `--workdir` applies to source lifecycle
-commands; auth rejects it as an invalid argument.
+are never executed through a shell. `--workdir` resolves relative source and data
+input paths; auth rejects it as an invalid argument.
 
 ## Login, profiles and environment credentials
 
@@ -126,6 +127,9 @@ hatch app get <id-or-slug> --json
 hatch app create --file create.json --directory ./notes --json
 cat create.json | hatch app create --file - --workdir ./workspace --json
 hatch app clone <id-or-slug> --directory ./notes-copy --json
+hatch app clone <id-or-slug> --directory ./notes-copy --force --json
+hatch app adopt <id-or-slug> --directory ./agent-owned-checkout --json
+hatch app associate <id-or-slug> --json
 hatch app update --directory ./notes-copy --json
 # Edit source, then git add / git commit yourself.
 hatch app deploy --directory ./notes-copy --message 'Release notes' --json
@@ -146,8 +150,18 @@ the canonical immutable ID; generation is checked locally and at deployment.
   and journal; inspect the recorded request/ID and remote state before retrying.
   A created draft with metadata can resume preparation using `update`.
 - **Clone:** obtain detail and canonical `master` Git bundle, verify its commit,
-  validate the source tree, then create a new checkout. Empty/unpublished source
-  is an explicit error; use the original draft workspace for first publication.
+  validate the source tree, then create a new checkout. Empty canonical source
+  initializes an empty Git workspace; missing authored inputs report the failing
+  preparation stage and retain that checkout for repair. No template/resource
+  is silently created. `--force` requires an explicit directory, rejects roots,
+  symlink traversal and nested checkouts, and prepares before replacing. On
+  preparation failure the old directory remains intact; on swap failure it is
+  restored. Recoverable preparation work remains at the reported path.
+- **Adopt:** validate the existing Agent origin bundle path, immutable ID/kind,
+  manifest, current platform generation and source history before adding CLI
+  metadata. Local HEAD must contain platform master; dirty work and origin are
+  preserved. Empty canonical source is ambiguous unless an uncommitted checkout
+  belongs to the verified Run's session. Adoption never resets local history.
 - **Update:** require clean source; fetch into `FETCH_HEAD`; merge only when local
   HEAD is an ancestor of remote master. Local ahead/diverged/dirty work is
   retained and rejected. Explicitly merge/rebase from `FETCH_HEAD` yourself.
@@ -164,8 +178,12 @@ the canonical immutable ID; generation is checked locally and at deployment.
 SDK preparation uses authenticated `hatch.platform.v1.SdkService/GetSdk`: compiled
 `@hatch/app`, legacy `@hatch/data`, or `@hatch/workflow` payloads and import maps
 from the **running platform build**. Install into generated `.hatch/` atomically;
-never commit it. `pnpm install --ignore-scripts --lockfile=false` installs authored
-npm dependencies without changing authored lockfiles. App Connect codegen uses
+never commit it. Apps validate the shared dependency policy and run
+`deno install --no-config --package-json --node-modules-dir=auto --lock=deno.lock --frozen`,
+then validate the source manifest with permissions denied. App lifecycle-script
+dependencies remain unsupported; authored lockfiles are never rewritten.
+Workflow SDK preparation retains `pnpm install --ignore-scripts --lockfile=false`.
+App Connect codegen uses
 platform-pinned Buf/protoc-gen-es through pnpm dlx and the platform-owned
 `.hatch/buf.gen.yaml`, not an authored plugin configuration. Generated `gen/`
 and dependencies are Git-excluded. Commands receive a limited child environment,
@@ -189,8 +207,8 @@ unattended authored commit is performed after scaffold creation.
 
 ## Migration approval and uncertain outcomes
 
-A destructive App Data Table preview returns `CONFLICT`, readable SQL and an exact
-approval token. Review it, then retry the same committed change explicitly:
+A destructive App Data Table preview returns `CONFLICT` and an exact approval
+token. Review the authored schema diff, then retry the same committed change explicitly:
 
 ```sh
 hatch app deploy --directory notes-copy --message 'Reviewed migration' \
@@ -239,6 +257,60 @@ deploy 600s. `--timeout` accepts at most 3600s; subprocess preparation is bounde
 | 8    | Explicitly unsupported command                       |
 | 130  | Cancellation; inspect any in-flight mutation         |
 
-KV, Data Table queries, raw DB, operation commands and API key management are
-reserved/explicitly unsupported, with no platform calls. Platform Agent Tools
-remain intact; Tool-to-CLI/Skill migration and custom Agent systems are follow-up.
+Operation commands and API key management remain unsupported. Platform Agent
+Tools remain usable. Run credentials come from the caller; host injection and
+renewal are outside this feature.
+
+## Complete views and App data
+
+List/detail and deploy output retain the complete public DTO in both text and
+`--json` modes: compatibility, capabilities, normalized release URLs/triggers,
+runtime/network state, nonsecret data metadata and deployment history. Workflow
+detail also includes input JSON Schema and recent run summaries. Rollback adds
+warnings and source recovery instructions; forward-only data is retained.
+
+```sh
+hatch app kv list <id> --limit 10 --cursor '<nextCursor>' --json
+hatch app kv get <id> <key> --reveal-secrets --json
+hatch app kv set <id> <key> --file ./value.txt --secret --json
+hatch app kv set <id> <key> --file - --no-secret --json
+hatch app kv delete <id> <key> --json
+hatch app data-table inspect <id> --table records --json
+hatch app data-table query <id> --file ./query.json --json
+hatch app data-table mutate <id> --file ./mutations.json --json
+hatch app data-table sql <id> --file ./query.sql --statement-timeout-ms 30000 --json
+hatch app db query <id> --file ./query.sql --json
+```
+
+KV set reads raw UTF-8 (including empty strings and trailing whitespace), up to
+64 KiB. Omitting the secret option preserves an existing flag; `--no-secret`
+clears it and new keys default nonsecret. Secrets are masked unless requested.
+List retains `nextCursor`; no prefix filter exists. Limits remain 1–100.
+
+Query JSON contains `table`, optional `where`, `orderBy`, `cursor`, `limit`;
+mutation JSON contains `operations` with insert, patch (including `unset`),
+increment and delete. Omit `action`; the command chooses it. Arbitrary JSON
+records preserve null, empty strings/arrays/objects, false and zero. Responses
+retain schema/hash/row counts, cursor/revision/truncation, atomic batch results
+and per-statement SQL command/count/rows. Query limits remain 1–200 and cursors
+up to 60,000 characters. Prefer structured operations; avoid raw SQL DDL,
+TRUNCATE and system tables. Raw SQL has the existing domain behavior and no new
+permission/parser layer.
+
+Data Table SQL statement timeout defaults to 30,000 ms (1,000–1,800,000 allowed).
+HTTP `--timeout` is separate and defaults to statement timeout plus 30 seconds.
+App DB queries an already registered database under its lifecycle lock, supports
+DDL/DML, never provisions/recreates a database, and uses its existing 30-second
+statement timeout, 100-row display and character cap (HTTP default 60 seconds).
+SIGINT/HTTP timeout abort SQL connections; possibly mutating requests are never
+retried automatically. A cancellation around commit still requires inspecting
+platform data before retrying.
+
+Run-authenticated App create/clone/update/deploy/rollback associate with the
+verified current Agent session; `app associate` is idempotent. Ordinary sessions
+and keys return `not-applicable` and create no relation. A caller cannot supply
+a session ID. Workflows have no association feature.
+
+See [the 15-tool comparison](../../../docs/cli-tool-parity.md). Platform and CLI
+contracts/SDKs are built and released together; strict DTO validation does not
+promise compatibility with older CLI binaries.

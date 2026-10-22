@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package hatch.platform.v1;
 
+import "google/protobuf/struct.proto";
+
 // Safe resource projection, without secrets or raw database rows.
 message Resource {
   string id = 1;
@@ -11,6 +13,8 @@ message Resource {
   string status = 5;
   string created_at = 6;
   string updated_at = 7;
+  // Complete allowlisted JSON inspection/summary, including nullable values.
+  google.protobuf.Value view = 8;
 }
 
 message Source {
@@ -23,6 +27,8 @@ message Deployment {
   string deployment_id = 1;
   uint32 version = 2;
   uint32 compatibility_version = 3;
+  optional string slug = 4;
+  google.protobuf.Value normalized = 5;
 }
 
 message Compatibility {

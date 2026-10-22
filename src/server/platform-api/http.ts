@@ -76,6 +76,7 @@ const handlers = new Map(
 export async function handlePlatformApiRequest(
   request: Request,
 ): Promise<Response> {
+  void request.signal;
   try {
     const handler = handlers.get(new URL(request.url).pathname);
     if (!handler)

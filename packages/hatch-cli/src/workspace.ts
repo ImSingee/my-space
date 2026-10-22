@@ -1,23 +1,32 @@
 /** Standalone source workspaces. Locks survive crashes; no authored work is reset. */
-import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import {
-  access,
   lstat,
   mkdir,
   mkdtemp,
   open,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, join, resolve, basename } from 'node:path';
+import {
+  dirname,
+  join,
+  resolve,
+  basename,
+  parse,
+  relative,
+  isAbsolute,
+} from 'node:path';
 import { CliError } from './error';
 import type { Profile } from './config';
 import { platformClient } from './client';
 import { pnpmInvocation } from './pnpm';
+import { prepareApp } from './preparation';
 
 export type Kind = 'app' | 'workflow';
 export type Workspace = {
@@ -30,101 +39,43 @@ export type Workspace = {
   pending?: { command: string; commit: string; startedAt: string };
   lastDeployment?: { version: number; deploymentId: string };
 };
-export function childEnvironment(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of [
-    'PATH',
-    'HOME',
-    'USERPROFILE',
-    'APPDATA',
-    'LOCALAPPDATA',
-    'TMPDIR',
-    'TEMP',
-    'TMP',
-    'SYSTEMROOT',
-    'WINDIR',
-    'LANG',
-    'LC_ALL',
-    'HTTP_PROXY',
-    'HTTPS_PROXY',
-    'NO_PROXY',
-    'SSL_CERT_FILE',
-    'NODE_EXTRA_CA_CERTS',
-  ])
-    if (process.env[key]) env[key] = process.env[key];
-  env.GIT_CONFIG_NOSYSTEM = '1';
-  return env;
-}
-export async function command(
-  executable: string,
-  args: string[],
-  cwd: string,
-  signal: AbortSignal,
-  allowFailure = false,
-): Promise<{ code: number; stdout: string }> {
-  if (signal.aborted) throw new CliError('cancelled', 'Cancelled.', 130);
-  return new Promise((resolveResult, reject) => {
-    const child = spawn(executable, args, {
-      cwd,
-      env: childEnvironment(),
-      signal,
-      timeout: 300000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    child.stdout.on('data', (data) => {
-      stdout += data;
-      if (stdout.length > 300 * 1024 * 1024) child.kill();
-    });
-    child.stderr.resume();
-    child.once('error', () =>
-      reject(
-        new CliError(
-          signal.aborted ? 'cancelled' : 'tool_unavailable',
-          signal.aborted
-            ? 'Cancelled.'
-            : `Could not run ${executable}. Install the required tool and retry.`,
-          signal.aborted ? 130 : 7,
-        ),
-      ),
-    );
-    child.once('close', (code) => {
-      if (signal.aborted)
-        reject(
-          new CliError('cancelled', 'Cancelled; workspace retained.', 130),
-        );
-      else if ((code ?? 1) !== 0 && !allowFailure)
-        reject(
-          new CliError(
-            'local_command_failed',
-            `${executable} failed. Source was retained; inspect the workspace before retrying.`,
-            6,
-          ),
-        );
-      else resolveResult({ code: code ?? 1, stdout: stdout.trim() });
-    });
-  });
-}
-export const git = async (
-  root: string,
-  signal: AbortSignal,
-  args: string[],
-  allowFailure = false,
-) =>
-  command(
-    'git',
-    [
-      '-c',
-      'core.hooksPath=' + (process.platform === 'win32' ? 'NUL' : '/dev/null'),
-      ...args,
-    ],
-    root,
-    signal,
-    allowFailure,
-  );
+import { command, git } from './process';
+export { command, git, childEnvironment } from './process';
 
 export async function canonicalTarget(target: string) {
   const absolute = resolve(target);
+  if (
+    absolute
+      .split(/[\\/]/)
+      .some((part) =>
+        ['.git', '.hatch', 'node_modules'].includes(part.toLowerCase()),
+      )
+  )
+    throw new CliError(
+      'unsafe_target',
+      'Checkout target overlaps a managed directory.',
+      6,
+    );
+  if (absolute === parse(absolute).root)
+    throw new CliError(
+      'unsafe_target',
+      'Filesystem root cannot be a checkout.',
+      6,
+    );
+  let ancestor = absolute;
+  while (ancestor !== dirname(ancestor)) {
+    const info = await lstat(ancestor).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (info?.isSymbolicLink())
+      throw new CliError(
+        'unsafe_target',
+        'Checkout paths must not traverse symlinks.',
+        6,
+      );
+    ancestor = dirname(ancestor);
+  }
   const existing = await lstat(absolute).catch(
     (error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return null;
@@ -145,6 +96,71 @@ export async function canonicalTarget(target: string) {
     );
   });
   return join(parent, basename(absolute));
+}
+export async function assertReplacementSafe(root: string, workdir: string) {
+  const relativeWorkdir = relative(root, await realpath(workdir));
+  if (
+    relativeWorkdir === '' ||
+    (!isAbsolute(relativeWorkdir) &&
+      relativeWorkdir !== '..' &&
+      !relativeWorkdir.startsWith(
+        `..${process.platform === 'win32' ? '\\' : '/'}`,
+      )) ||
+    dirname(root) === parse(root).root ||
+    root === process.env.HOME
+  )
+    throw new CliError(
+      'unsafe_target',
+      'Workspace root cannot be replaced.',
+      6,
+    );
+  const info = await lstat(root).catch(() => null);
+  if (info && !info.isDirectory())
+    throw new CliError(
+      'unsafe_target',
+      'Replace only an explicitly identified directory.',
+      6,
+    );
+  async function inspect(path: string) {
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      if (entry.name === '.git') continue;
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const child = join(path, entry.name);
+      if (await lstat(join(child, '.git')).catch(() => null))
+        throw new CliError(
+          'unsafe_target',
+          'Target contains a nested Git checkout; identify that checkout explicitly.',
+          6,
+        );
+      await inspect(child);
+    }
+  }
+  if (info) await inspect(root);
+}
+export async function checkoutView(
+  root: string,
+  metadata: Workspace,
+  signal: AbortSignal,
+  extra: Record<string, unknown> = {},
+) {
+  const status = (await git(root, signal, ['status', '--short'])).stdout;
+  const head = await git(root, signal, ['rev-parse', '--verify', 'HEAD'], true);
+  return {
+    id: metadata.id,
+    directory: root,
+    path: root,
+    absolutePath: root,
+    generation: metadata.generation,
+    headCommit: head.code === 0 ? head.stdout : null,
+    masterCommit: metadata.masterCommit,
+    remoteCommit: metadata.masterCommit,
+    dirty: status.length > 0,
+    status,
+    replacedExisting: false,
+    synchronizedExisting: false,
+    preparation: 'ready',
+    ...extra,
+  };
 }
 export async function withWorkspaceLock<T>(
   target: string,
@@ -202,14 +218,15 @@ export async function workspace(
         'Use a standalone CLI checkout with a real .git directory.',
       );
   }
-  const file = await open(join(root, '.git', 'hatch-cli.json'), 'r').catch(
-    () => {
-      throw new CliError(
-        'invalid_workspace',
-        'Missing CLI workspace metadata. Clone/create with hatch first.',
-      );
-    },
-  );
+  const file = await open(
+    join(root, '.git', 'hatch-cli.json'),
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  ).catch(() => {
+    throw new CliError(
+      'invalid_workspace',
+      'Missing CLI workspace metadata. Clone/create with hatch first.',
+    );
+  });
   let value: Workspace;
   try {
     value = JSON.parse(await file.readFile('utf8'));
@@ -364,47 +381,63 @@ export async function installSdk(
     if (moved) await rm(backup, { recursive: true, force: true });
     const exclude = join(root, '.git', 'info', 'exclude');
     await mkdir(dirname(exclude), { recursive: true });
-    await writeFile(
+    const info = await lstat(dirname(exclude));
+    if (!info.isDirectory() || info.isSymbolicLink())
+      throw new CliError(
+        'invalid_workspace',
+        '.git/info must be a real directory.',
+        6,
+      );
+    const handle = await open(
       exclude,
-      '\n.hatch/\n.hatch-stage-*/\n.hatch-backup-*/\nnode_modules/\ngen/\n',
-      { flag: 'a' },
+      constants.O_WRONLY |
+        constants.O_APPEND |
+        constants.O_CREAT |
+        constants.O_NOFOLLOW |
+        constants.O_NONBLOCK,
+      0o600,
     );
-    const pnpm = await pnpmInvocation();
-    await command(
-      pnpm.executable,
-      [...pnpm.prefix, 'install', '--ignore-scripts', '--lockfile=false'],
-      root,
-      signal,
+    try {
+      if (!(await handle.stat()).isFile())
+        throw new CliError(
+          'invalid_workspace',
+          '.git/info/exclude must be a regular file.',
+          6,
+        );
+      await handle.writeFile(
+        '\n.hatch/\n.hatch-stage-*/\n.hatch-backup-*/\nnode_modules/\ngen/\n',
+      );
+    } finally {
+      await handle.close();
+    }
+    if (kind === 'app') {
+      await prepareApp(root, signal, payload.tooling);
+      return;
+    }
+    // pnpm can succeed in a directory with no package.json. That is not a
+    // prepared Workflow: keep an empty checkout recoverable and name the stage.
+    const packageFile = await lstat(join(root, 'package.json')).catch(
+      () => null,
     );
-    if (
-      kind === 'app' &&
-      payload.tooling &&
-      (await access(join(root, 'buf.yaml')).then(
-        () => true,
-        () => false,
-      ))
-    ) {
-      const gen = await lstat(join(root, 'gen')).catch(() => null);
-      if (gen?.isSymbolicLink())
-        throw new CliError('unsafe_codegen', 'gen must not be a symlink.', 6);
+    if (!packageFile?.isFile() || packageFile.isSymbolicLink())
+      throw new CliError(
+        'workflow_preparation_failed',
+        'Workflow preparation failed during dependency install: missing regular package.json. Add authored inputs and retry update.',
+        6,
+      );
+    try {
+      const pnpm = await pnpmInvocation();
       await command(
         pnpm.executable,
-        [
-          ...pnpm.prefix,
-          'dlx',
-          '--allow-build',
-          '@bufbuild/buf',
-          '--package',
-          `@bufbuild/buf@${payload.tooling.bufVersion}`,
-          '--package',
-          `@bufbuild/protoc-gen-es@${payload.tooling.protocGenEsVersion}`,
-          'buf',
-          'generate',
-          '--template',
-          '.hatch/buf.gen.yaml',
-        ],
+        [...pnpm.prefix, 'install', '--ignore-scripts', '--lockfile=false'],
         root,
         signal,
+      );
+    } catch (error) {
+      throw new CliError(
+        'workflow_preparation_failed',
+        `Workflow preparation failed during dependency install: ${error instanceof CliError ? error.message : 'Invalid source.'}`,
+        signal.aborted ? 130 : 6,
       );
     }
   } finally {
@@ -425,12 +458,13 @@ export async function importBundle(
   source: { masterCommit: string | null; bundleBase64: string | null },
   signal: AbortSignal,
 ) {
-  if (!source.masterCommit || !source.bundleBase64)
+  if (Boolean(source.masterCommit) !== Boolean(source.bundleBase64))
     throw new CliError(
-      'source_empty',
-      'Resource has no published source. Use its original create workspace to make the first deployment.',
+      'source_changed',
+      'Source commit and bundle disagree.',
       6,
     );
+  if (!source.masterCommit || !source.bundleBase64) return null;
   const file = join(root, '.git', `hatch-source-${randomUUID()}.bundle`);
   try {
     await writeFile(file, Buffer.from(source.bundleBase64, 'base64'), {

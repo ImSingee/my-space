@@ -30,6 +30,7 @@ export async function queryAppDatabase(
   statement: string,
   signal?: AbortSignal,
 ): Promise<AppDbQueryResult> {
+  signal?.throwIfAborted();
   // Reject an unregistered database before opening the APP_DATABASE_URL lock
   // connection so the stable product error wins even on a partial install.
   const registered = await db.query.apps.findFirst({
@@ -41,9 +42,11 @@ export async function queryAppDatabase(
   }
 
   return withAppDatabaseLifecycle(id, async (database) => {
+    signal?.throwIfAborted();
     // Resolve after taking the lock: manual deletion may have completed after
     // the optimistic precheck above.
     const url = await database.resolve();
+    signal?.throwIfAborted();
     // Bound the statement so a runaway query (e.g. an accidental cross join or
     // `pg_sleep`) can't hang the tool — and thus the whole agent turn — for
     // minutes. Abort tears the connection down promptly on cancel.
@@ -51,12 +54,12 @@ export async function queryAppDatabase(
       max: 1,
       connection: { statement_timeout: 30000 },
     });
-    const onAbort = () => {
-      void sql.end({ timeout: 0 }).catch(() => {});
-    };
+    const pending = sql.unsafe(statement);
+    const onAbort = () => pending.cancel();
     signal?.addEventListener('abort', onAbort);
+    if (signal?.aborted) onAbort();
     try {
-      const rows = await sql.unsafe(statement);
+      const rows = await pending;
       const full =
         rows.length > 0
           ? JSON.stringify(rows.slice(0, 100), null, 2)

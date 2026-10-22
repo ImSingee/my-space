@@ -3,6 +3,7 @@ import { create } from '@bufbuild/protobuf';
 import { PublicErrorSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/error_pb';
 import { AppError } from '~server/errors';
 import { RunTokenError } from '~server/agent-runner/run-auth';
+import { DataMigrationApprovalRequired } from '~server/apps/data-table/migration-errors';
 
 const definitions = {
   BAD_REQUEST: [Code.InvalidArgument, 400, 'Invalid request.'],
@@ -26,6 +27,11 @@ const definitions = {
   ],
   INTERNAL_SERVER_ERROR: [Code.Internal, 500, 'Internal server error.'],
   SERVICE_UNAVAILABLE: [Code.Unavailable, 503, 'Service unavailable.'],
+  GATEWAY_TIMEOUT: [
+    Code.DeadlineExceeded,
+    504,
+    'SQL operation timed out. Inspect affected data before retrying.',
+  ],
 } as const;
 export type PublicErrorCode = keyof typeof definitions;
 
@@ -40,7 +46,19 @@ export function publicApiError(code: PublicErrorCode, message?: string) {
 }
 
 /** Preserve declared business errors, never exception text or decoded input. */
-export function publicError(error: unknown): ConnectError {
+export function publicError(
+  error: unknown,
+  redactDomain = false,
+): ConnectError {
+  if (error instanceof DataMigrationApprovalRequired)
+    return publicApiError(
+      'CONFLICT',
+      `Destructive Data Table migration requires explicit approval.\nApproval token: ${error.plan.approvalToken}\nInspect schema changes before retrying with --allow-destructive-data-migration and --data-migration-approval-token.`,
+    );
+  if (error instanceof AppError && error.status === 504)
+    return publicApiError('GATEWAY_TIMEOUT');
+  if (error instanceof AppError && error.status === 503)
+    return publicApiError('SERVICE_UNAVAILABLE');
   if (error instanceof RunTokenError)
     return publicApiError(
       error.code === 'invalid_token' ? 'INVALID_TOKEN' : 'RUN_ENDED',
@@ -55,7 +73,10 @@ export function publicError(error: unknown): ConnectError {
       413: 'PAYLOAD_TOO_LARGE',
       415: 'UNSUPPORTED_MEDIA_TYPE',
     };
-    return publicApiError(codes[error.status] ?? 'BAD_REQUEST', error.message);
+    return publicApiError(
+      codes[error.status] ?? 'BAD_REQUEST',
+      redactDomain ? undefined : error.message,
+    );
   }
   if (error instanceof ConnectError) {
     if (error.findDetails(PublicErrorSchema).length) return error;

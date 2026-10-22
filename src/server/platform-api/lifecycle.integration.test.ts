@@ -1,7 +1,8 @@
 /** Durable public/security contract against the actual production build and DB. */
 import assert from 'node:assert/strict';
 import postgres from 'postgres';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import {
   mkdtemp,
@@ -11,6 +12,7 @@ import {
   rm,
   readdir,
   realpath,
+  chmod,
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -126,6 +128,8 @@ async function cliInvoke(
   args: string[],
   headers: Record<string, string>,
   extra: NodeJS.ProcessEnv = {},
+  executable = cliExecutable,
+  input?: string,
 ) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -135,11 +139,15 @@ async function cliInvoke(
     FORCE_COLOR: undefined,
     ...extra,
   };
-  const child = spawn(process.execPath, [cliExecutable, ...args, '--json'], {
+  const child = spawn(process.execPath, [executable, ...args, '--json'], {
     cwd: root,
     env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
+  child.stdin.on('error', () => {});
+  child.stdin.end(input);
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => {
@@ -351,15 +359,12 @@ describe.runIf(Boolean(databaseUrl))(
           const detail = await api(`${collection}/${id}`, headers);
           expect(detail.response.status).toBe(200);
           expect(detail.data.id).toBe(id);
-          expect(Object.keys(detail.data).sort()).toEqual([
-            'createdAt',
-            'description',
-            'id',
-            'name',
-            'slug',
-            'status',
-            'updatedAt',
-          ]);
+          expect(detail.data).toMatchObject({
+            id,
+            slug: created.data.slug,
+            createdAt: expect.any(String),
+            deployments: [],
+          });
           expect(
             (await api(collection, headers)).data.some(
               (row: { id: string }) => row.id === id,
@@ -393,7 +398,7 @@ describe.runIf(Boolean(databaseUrl))(
           await writeFile(
             path.join(dir, 'manifest.ts'),
             collection === 'apps'
-              ? `export default { id: '${id}', name: 'API deploy', compatibilityVersion: 2, capabilities: { frontend: true }, app: { entry: 'main.ts', html: 'index.html', routes: [] } };`
+              ? `export default { id: '${id}', name: 'API deploy', compatibilityVersion: 2, capabilities: { frontend: true, database: true }, app: { entry: 'main.ts', html: 'index.html', routes: [] } };`
               : `export default { id: '${id}', name: 'API deploy', compatibilityVersion: 1, entry: 'workflow.ts', network: [], triggers: { cron: [], webhook: false } };`,
           );
           if (collection === 'apps') {
@@ -433,6 +438,8 @@ describe.runIf(Boolean(databaseUrl))(
           expect(Object.keys(first.data).sort()).toEqual([
             'compatibilityVersion',
             'deploymentId',
+            'normalized',
+            ...(collection === 'apps' ? ['slug'] : []),
             'version',
           ]);
           const downloaded = await api(`${collection}/${id}/source`, headers);
@@ -662,7 +669,7 @@ describe.runIf(Boolean(databaseUrl))(
       await mkdir(path.join(dir, 'data'));
       await writeFile(
         path.join(dir, 'data/schema.ts'),
-        "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ label: t.string(), value: t.integer().default(0) }) });",
+        "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ label: t.string(), value: t.integer().default(0), payload: t.json().optional(), empty: t.string().optional(), flag: t.boolean().default(false) }) });",
       );
       const first = await api(`apps/${id}/deploy`, credentials[2], {
         generation,
@@ -678,7 +685,7 @@ describe.runIf(Boolean(databaseUrl))(
 
       await writeFile(
         path.join(dir, 'data/schema.ts'),
-        "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ value: t.integer().default(0) }) });",
+        "import { defineSchema, defineTable, t } from '@hatch/app/data'; export default defineSchema({ records: defineTable({ value: t.integer().default(0), payload: t.json().optional(), empty: t.string().optional(), flag: t.boolean().default(false) }) });",
       );
       const body = {
         generation,
@@ -1086,6 +1093,866 @@ describe.runIf(Boolean(databaseUrl))(
         }
       }
     }, 240000);
+
+    it('compares all fifteen real Tools with public CLI outputs and lifecycle side effects', async () => {
+      const { createPlatformRestClient } =
+        await import('~/runner/platform-rest');
+      const { createAppTools } = await import('~agent/tools/apps');
+      const { createWorkflowTools } = await import('~agent/tools/workflows');
+      const platform = createPlatformRestClient({
+        baseUrl: internal,
+        token: fleet,
+      });
+      const tools: AgentTool[] = [
+        ...createAppTools({ platform, sessionId }),
+        ...createWorkflowTools({ platform, sessionId }),
+      ];
+      const exercised = new Set<string>();
+      const execute = async (name: string, args: unknown) => {
+        const tool = tools.find((value) => value.name === name)!;
+        const result = await tool.execute(randomUUID(), args);
+        exercised.add(name);
+        if (name === 'query_app_db')
+          return {
+            ...(result.details as Record<string, unknown>),
+            text: result.content
+              .filter((value) => value.type === 'text')
+              .map((value) => value.text)
+              .join('\n'),
+          };
+        return result.details as Record<string, any>;
+      };
+      const records: Record<string, any>[] = [];
+      for (const kind of ['app', 'workflow']) {
+        const slug = `parity-${randomUUID()}`;
+        const created = await execute(`create_${kind}`, {
+          slug,
+          name: 'Tool parity',
+          pin: false,
+        });
+        expect(created).toMatchObject({
+          id: expect.any(String),
+          slug,
+          preparation: 'ready',
+          absolutePath: expect.any(String),
+        });
+        const dir = created.absolutePath as string;
+        if (kind === 'app') {
+          const file = path.join(dir, 'manifest.ts');
+          await writeFile(
+            file,
+            (await readFile(file, 'utf8'))
+              .replace('kv: false', 'kv: true')
+              .replace('database: false', 'database: true'),
+          );
+        }
+        await bundle(dir);
+        const release = await execute(`deploy_${kind}`, {
+          id: created.id,
+          source_path: dir,
+          message: 'Tool first release',
+        });
+        expect(release.version).toBe(1);
+        const view = await execute(`get_${kind}`, { id: created.id });
+        const publicView = await cliInvoke(
+          [kind, 'get', created.id],
+          credentials[1],
+        );
+        expect(publicView.code).toBe(0);
+        expect(publicView.data).toMatchObject(view);
+        const inventory = await execute(
+          kind === 'app' ? 'list_apps' : 'list_workflows',
+          {},
+        );
+        const listed = await cliInvoke([kind, 'list'], credentials[3]);
+        expect(
+          listed.data.find((row: { id: string }) => row.id === created.id),
+        ).toMatchObject(
+          inventory[kind === 'app' ? 'apps' : 'workflows'].find(
+            (row: { id: string }) => row.id === created.id,
+          ),
+        );
+        const checkout = await execute(`checkout_${kind}`, {
+          id: created.id,
+          clone: true,
+          source_path: `${kind}s/parity-clone`,
+        });
+        expect(checkout).toMatchObject({
+          headCommit: git(dir, 'rev-parse', 'HEAD'),
+        });
+        await execute(`checkout_${kind}`, {
+          id: created.id,
+          clone: false,
+          source_path: checkout.absolutePath,
+        });
+        await writeFile(
+          path.join(checkout.absolutePath, 'dirty.txt'),
+          'preserved dirty author work',
+        );
+        const originBefore = git(
+          checkout.absolutePath,
+          'remote',
+          'get-url',
+          'origin',
+        );
+        const lockBefore = await readFile(
+          path.join(checkout.absolutePath, 'deno.lock'),
+          'utf8',
+        );
+        if (process.platform !== 'win32')
+          await chmod(path.join(checkout.absolutePath, '.hatch'), 0o555);
+        const adopted = await cliInvoke(
+          [kind, 'adopt', created.id, '--directory', checkout.absolutePath],
+          credentials[1],
+        );
+        assert.equal(adopted.code, 0, JSON.stringify(adopted));
+        if (process.platform !== 'win32')
+          await chmod(path.join(checkout.absolutePath, '.hatch'), 0o755);
+        expect(
+          await readFile(path.join(checkout.absolutePath, 'deno.lock'), 'utf8'),
+        ).toBe(lockBefore);
+        expect(adopted.data.dirty).toBe(true);
+        expect(git(checkout.absolutePath, 'remote', 'get-url', 'origin')).toBe(
+          originBefore,
+        );
+        await bundle(checkout.absolutePath);
+        const second = await cliInvoke(
+          [kind, 'deploy', '--directory', checkout.absolutePath],
+          credentials[2],
+        );
+        assert.equal(second.code, 0, JSON.stringify(second));
+        expect(second.data.version).toBe(2);
+        expect(second.data.normalized).toMatchObject(release.normalized);
+        const rolled = await cliInvoke(
+          [kind, 'rollback', created.id, '--version', '1'],
+          credentials[3],
+        );
+        expect(rolled.code).toBe(0);
+        expect(rolled.data.sourceRecovery).toContain('ahead/diverged');
+        const toolRolled = await execute(`rollback_${kind}`, {
+          id: created.id,
+          version: 1,
+        });
+        expect(rolled.data).toMatchObject(toolRolled);
+        records.push({
+          kind,
+          id: created.id,
+          release: second.data,
+          detail: publicView.data,
+        });
+      }
+      const id = records[0].id as string;
+      const sqlFile = path.join(root, 'tool-parity.sql');
+      await writeFile(
+        sqlFile,
+        'create table if not exists parity (value integer); insert into parity values (0)',
+      );
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'db', 'query', id, '--file', sqlFile],
+            credentials[1],
+          )
+        ).code,
+      ).toBe(0);
+      await writeFile(sqlFile, 'select value from parity');
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'db', 'query', id, '--file', sqlFile],
+            credentials[3],
+          )
+        ).data,
+      ).toEqual(
+        await execute('query_app_db', { id, sql: 'select value from parity' }),
+      );
+      const value = path.join(root, 'parity-value');
+      await writeFile(value, '');
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'kv', 'set', id, 'empty', '--file', value],
+            credentials[2],
+          )
+        ).data.record.value,
+      ).toBe('');
+      expect(
+        (await cliInvoke(['app', 'kv', 'get', id, 'empty'], credentials[1]))
+          .data,
+      ).toEqual(
+        await execute('query_app_kv', { id, action: 'get', key: 'empty' }),
+      );
+      expect(
+        (await cliInvoke(['app', 'data-table', 'inspect', id], credentials[3]))
+          .data,
+      ).toEqual(
+        await execute('query_app_data_table', { id, action: 'inspect' }),
+      );
+      expect([...exercised].sort()).toEqual(
+        tools.map((tool) => tool.name).sort(),
+      );
+      if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
+        await writeFile(
+          path.join(
+            process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR,
+            'tool-parity.json',
+          ),
+          JSON.stringify({ tools: [...exercised].sort(), records }, null, 2),
+        );
+    }, 300000);
+
+    it('exercises KV masking, large and empty writes, pagination and Run association without spoofing', async () => {
+      const created = await api('apps', credentials[1], {
+        slug: `kv-${randomUUID()}`,
+        name: 'KV parity',
+        pin: false,
+      });
+      const id = created.data.id as string;
+      await database.db
+        .update(database.schema.apps)
+        .set({
+          capabilities: {
+            frontend: false,
+            widgets: false,
+            backend: false,
+            database: false,
+            storage: false,
+            cron: false,
+            webhook: false,
+            kv: true,
+            dataTable: false,
+          },
+        })
+        .where(eq(database.schema.apps.id, id));
+      const file = path.join(root, 'kv-values');
+      await writeFile(file, '');
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'kv', 'set', id, 'a', '--file', file, '--secret'],
+            credentials[1],
+          )
+        ).data.record,
+      ).toMatchObject({ value: null, secret: true });
+      await writeFile(file, '😀'.repeat(16384));
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'kv', 'set', id, 'a', '--file', file],
+            credentials[2],
+          )
+        ).data.record.secret,
+      ).toBe(true);
+      expect(
+        (await cliInvoke(['app', 'kv', 'get', id, 'a'], credentials[3])).data
+          .record.value,
+      ).toBeNull();
+      const revealed = (
+        await cliInvoke(
+          ['app', 'kv', 'get', id, 'a', '--reveal-secrets'],
+          credentials[1],
+        )
+      ).data.record.value as string;
+      expect(createHash('sha256').update(revealed).digest('hex')).toBe(
+        createHash('sha256').update('😀'.repeat(16384)).digest('hex'),
+      );
+      await writeFile(file, '');
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'kv', 'set', id, 'a', '--file', file, '--no-secret'],
+            credentials[1],
+          )
+        ).data.record,
+      ).toMatchObject({ value: '', secret: false });
+      for (const value of ['', '  \n😀\n']) {
+        const streamed = await cliInvoke(
+          ['app', 'kv', 'set', id, 'a', '--file', '-'],
+          credentials[1],
+          {},
+          cliExecutable,
+          value,
+        );
+        expect(streamed.code).toBe(0);
+        expect(streamed.data.record).toMatchObject({ value, secret: false });
+      }
+      await Promise.all(
+        ['b', 'c'].map((key) =>
+          api(`apps/${id}/kv`, credentials[3], {
+            action: 'set',
+            key,
+            value: ' ',
+          }),
+        ),
+      );
+      const racing = await Promise.all(
+        Array.from({ length: 12 }, (_, index) =>
+          api(`apps/${id}/kv`, credentials[1], {
+            action: 'set',
+            key: 'race',
+            value: String(index),
+            ...(index === 0 ? { secret: true } : {}),
+          }),
+        ),
+      );
+      expect(racing.every((result) => result.response.status === 200)).toBe(
+        true,
+      );
+      expect(
+        (
+          await api(`apps/${id}/kv`, credentials[2], {
+            action: 'get',
+            key: 'race',
+            revealSecrets: true,
+          })
+        ).data.record.secret,
+      ).toBe(true);
+      await api(`apps/${id}/kv`, credentials[1], {
+        action: 'delete',
+        key: 'race',
+      });
+      const page = await cliInvoke(
+        ['app', 'kv', 'list', id, '--limit', '1'],
+        credentials[2],
+      );
+      expect(page.data.items).toHaveLength(1);
+      expect(page.data.nextCursor).toBe('a');
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'kv', 'list', id, '--cursor', page.data.nextCursor],
+            credentials[1],
+          )
+        ).data.items.map((entry: { key: string }) => entry.key),
+      ).toEqual(['b', 'c']);
+      expect(
+        (await cliInvoke(['app', 'kv', 'delete', id, 'a'], credentials[3]))
+          .data,
+      ).toEqual({ action: 'delete', ok: true });
+      expect(
+        (await cliInvoke(['app', 'kv', 'delete', id, 'a'], credentials[3]))
+          .data,
+      ).toEqual({ action: 'delete', ok: false });
+      expect(
+        (await cliInvoke(['app', 'kv', 'get', id, 'a'], credentials[2])).data
+          .record,
+      ).toBeNull();
+      expect(
+        (
+          await api(`apps/${id}/kv`, credentials[1], {
+            action: 'get',
+            key: 'b',
+            value: 'inactive',
+          })
+        ).response.status,
+      ).toBe(400);
+      expect(
+        (
+          await api(`apps/${id}/associate-session`, credentials[2], {
+            sessionId: 'spoofed',
+          })
+        ).response.status,
+      ).toBe(400);
+      for (const headers of [credentials[1], credentials[3]])
+        expect(
+          (await api(`apps/${id}/associate-session`, headers, {})).data
+            .association,
+        ).toBe('not-applicable');
+      expect(
+        await database.db.query.agentSessionApps.findMany({
+          where: { appId: id },
+        }),
+      ).toHaveLength(0);
+      await Promise.all([
+        api(`apps/${id}/associate-session`, credentials[2], {}),
+        api(`apps/${id}/associate-session`, credentials[2], {}),
+      ]);
+      expect(
+        await database.db.query.agentSessionApps.findMany({
+          where: { appId: id },
+        }),
+      ).toHaveLength(1);
+      for (const invalid of [0, 101])
+        expect(
+          (
+            await api(`apps/${id}/kv`, credentials[3], {
+              action: 'list',
+              limit: invalid,
+            })
+          ).response.status,
+        ).toBe(400);
+    }, 60000);
+
+    it('preserves structured JSON, atomic mutations, query metadata and bounded raw SQL; cancelled statements stop in PostgreSQL', async () => {
+      const resource = resources.find((value) => value.collection === 'apps')!;
+      const id = resource.id;
+      const prefix = `apps/${id}/data-table`;
+      const file = path.join(root, 'data-input.json');
+      await writeFile(
+        file,
+        JSON.stringify({
+          operations: [
+            {
+              type: 'insert',
+              table: 'records',
+              value: {
+                value: 0,
+                payload: {
+                  false: false,
+                  zero: 0,
+                  null: null,
+                  empty: '',
+                  array: [],
+                  object: {},
+                },
+                empty: '',
+                flag: false,
+              },
+            },
+            {
+              type: 'insert',
+              table: 'records',
+              value: { value: 2, payload: null },
+            },
+          ],
+        }),
+      );
+      const inserted = await cliInvoke(
+        ['app', 'data-table', 'mutate', id, '--file', file],
+        credentials[1],
+      );
+      assert.equal(inserted.code, 0, JSON.stringify(inserted));
+      expect(inserted.data.results).toHaveLength(2);
+      const row = inserted.data.results[0];
+      expect(row).toMatchObject({
+        value: 0,
+        payload: {
+          false: false,
+          zero: 0,
+          null: null,
+          empty: '',
+          array: [],
+          object: {},
+        },
+        empty: '',
+        flag: false,
+      });
+      expect(inserted.data.results[1].payload).toBeNull();
+      const { resolveAppDataDatabaseUrl } =
+        await import('~server/apps/data-table/provision');
+      const { DATA_MIGRATION_LOCK_KEY } =
+        await import('~server/apps/data-table/migrate');
+      const fence = postgres(await resolveAppDataDatabaseUrl(id), { max: 1 });
+      try {
+        await fence`select pg_advisory_lock(${DATA_MIGRATION_LOCK_KEY})`;
+        for (const body of [
+          { action: 'query', table: 'records' },
+          {
+            action: 'mutate',
+            operations: [
+              {
+                type: 'increment',
+                table: 'records',
+                id: row.id,
+                field: 'value',
+                amount: 100,
+              },
+            ],
+          },
+          { action: 'raw_sql', sql: 'select * from records' },
+        ]) {
+          const blocked = await api(prefix, credentials[1], body);
+          expect(blocked.response.status).toBe(503);
+          expect(blocked.data.code).toBe('SERVICE_UNAVAILABLE');
+        }
+      } finally {
+        await fence`select pg_advisory_unlock(${DATA_MIGRATION_LOCK_KEY})`;
+        await fence.end();
+      }
+      const firstPage = await api(prefix, credentials[1], {
+        action: 'query',
+        table: 'records',
+        orderBy: { field: 'value', direction: 'asc' },
+        limit: 1,
+      });
+      expect(firstPage.data.items[0].id).toBe(row.id);
+      expect(firstPage.data.cursor).toEqual(expect.any(String));
+      const nextPage = await api(prefix, credentials[2], {
+        action: 'query',
+        table: 'records',
+        orderBy: { field: 'value', direction: 'asc' },
+        cursor: firstPage.data.cursor,
+        limit: 1,
+      });
+      expect(nextPage.data.items[0].id).toBe(inserted.data.results[1].id);
+      expect(nextPage.data.revision).toBe(inserted.data.revision);
+      const bad = await api(prefix, credentials[2], {
+        action: 'mutate',
+        operations: [
+          {
+            type: 'increment',
+            table: 'records',
+            id: row.id,
+            field: 'value',
+            amount: 1,
+          },
+          {
+            type: 'patch',
+            table: 'records',
+            id: row.id,
+            value: { unknown: 'sensitive-value' },
+          },
+        ],
+      });
+      expect(bad.response.status).toBe(400);
+      expect(JSON.stringify(bad.data)).not.toContain('sensitive-value');
+      await writeFile(
+        file,
+        JSON.stringify({
+          table: 'records',
+          where: [{ field: 'value', op: 'eq', value: 0 }],
+          orderBy: { field: 'value', direction: 'asc' },
+          limit: 1,
+        }),
+      );
+      const queried = await cliInvoke(
+        ['app', 'data-table', 'query', id, '--file', file],
+        credentials[3],
+      );
+      expect(queried.data.items[0].value).toBe(0);
+      expect(queried.data).toMatchObject({
+        revision: inserted.data.revision,
+        truncated: false,
+      });
+      await writeFile(
+        file,
+        JSON.stringify({
+          operations: [
+            {
+              type: 'patch',
+              table: 'records',
+              id: row.id,
+              value: { value: 0 },
+              unset: ['empty'],
+            },
+            {
+              type: 'increment',
+              table: 'records',
+              id: row.id,
+              field: 'value',
+              amount: 0,
+            },
+            {
+              type: 'delete',
+              table: 'records',
+              id: inserted.data.results[1].id,
+            },
+          ],
+        }),
+      );
+      const changed = await cliInvoke(
+        ['app', 'data-table', 'mutate', id, '--file', file],
+        credentials[2],
+      );
+      expect(changed.data.results).toHaveLength(3);
+      expect(changed.data.results[1].value).toBe(0);
+      expect(changed.data.results[0].empty).toBeNull();
+      expect(changed.data.revision).toBeGreaterThan(inserted.data.revision);
+      expect(
+        (
+          await api(prefix, credentials[1], {
+            action: 'query',
+            table: 'records',
+            cursor: 'x'.repeat(60000),
+          })
+        ).response.status,
+      ).toBe(400);
+      const sqlFile = path.join(root, 'raw-data.sql');
+      await writeFile(
+        sqlFile,
+        "select 0 as zero, false as flag, null as missing, '' as empty; select generate_series(1,300) as n",
+      );
+      const sqlResult = await cliInvoke(
+        ['app', 'data-table', 'sql', id, '--file', sqlFile],
+        credentials[3],
+      );
+      assert.equal(sqlResult.code, 0, JSON.stringify(sqlResult));
+      expect(sqlResult.data.results[0].rows[0]).toEqual({
+        zero: 0,
+        flag: false,
+        missing: null,
+        empty: '',
+      });
+      expect(sqlResult.data.results[0].command).toBe('SELECT');
+      expect(sqlResult.data.truncated).toBe(true);
+      await writeFile(sqlFile, "select 'raw-secret-fixture'::integer");
+      const sqlError = await cliInvoke(
+        ['app', 'data-table', 'sql', id, '--file', sqlFile],
+        credentials[1],
+      );
+      expect(sqlError.code).toBe(2);
+      expect(JSON.stringify(sqlError)).not.toContain('raw-secret-fixture');
+      await writeFile(
+        sqlFile,
+        "insert into records (id,value) values ('durable-row',1)",
+      );
+      expect(
+        (
+          await cliInvoke(
+            ['app', 'data-table', 'sql', id, '--file', sqlFile],
+            credentials[1],
+          )
+        ).code,
+      ).toBe(6);
+      await writeFile(sqlFile, 'select generate_series(1,200) as n');
+      const cappedDb = await cliInvoke(
+        ['app', 'db', 'query', id, '--file', sqlFile],
+        credentials[1],
+      );
+      expect(cappedDb.data.rowCount).toBe(200);
+      expect(JSON.parse(cappedDb.data.text)).toHaveLength(100);
+      await writeFile(sqlFile, "select repeat('x',65000) as huge");
+      const hugeDb = await cliInvoke(
+        ['app', 'db', 'query', id, '--file', sqlFile],
+        credentials[1],
+      );
+      expect(hugeDb.data.text.length).toBeLessThan(60100);
+      expect(hugeDb.data.text).toContain('(truncated)');
+      await writeFile(sqlFile, 'select pg_sleep(3)');
+      expect(
+        (
+          await cliInvoke(
+            [
+              'app',
+              'data-table',
+              'sql',
+              id,
+              '--file',
+              sqlFile,
+              '--statement-timeout-ms',
+              '1000',
+            ],
+            credentials[1],
+          )
+        ).code,
+      ).toBe(7);
+      const monitor = postgres(databaseUrl!, { max: 1 });
+      const cancellations: Record<string, unknown>[] = [];
+      try {
+        for (const surface of ['data-table', 'db']) {
+          for (const mode of ['sigint', 'timeout']) {
+            const marker = `parity_cancel_${surface.replace('-', '_')}_${mode}`;
+            await writeFile(sqlFile, `select pg_sleep(20) /* ${marker} */`);
+            const child = spawn(
+              process.execPath,
+              [
+                cliExecutable,
+                'app',
+                surface,
+                surface === 'db' ? 'query' : 'sql',
+                id,
+                '--file',
+                sqlFile,
+                '--json',
+                ...(mode === 'timeout' ? ['--timeout', '0.5'] : []),
+              ],
+              {
+                cwd: root,
+                env: {
+                  ...process.env,
+                  HATCH_CLI_URL: origin,
+                  HATCH_CLI_TOKEN: credentials[3].authorization.slice(7),
+                  HATCH_CLI_API_KEY: undefined,
+                },
+                stdio: ['ignore', 'pipe', 'pipe'],
+              },
+            );
+            let stdout = '';
+            child.stdout.on('data', (chunk) => {
+              stdout += chunk;
+            });
+            child.stderr.resume();
+            const done = once(child, 'close');
+            const active = async () =>
+              (
+                await monitor`select count(*)::int as count from pg_stat_activity where pid <> pg_backend_pid() and state = 'active' and query like ${'%' + marker + '%'}`
+              )[0].count as number;
+            for (
+              let attempt = 0;
+              attempt < 100 && (await active()) === 0;
+              attempt++
+            )
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(await active()).toBe(1);
+            if (mode === 'sigint') child.kill('SIGINT');
+            expect((await done)[0]).toBe(mode === 'sigint' ? 130 : 7);
+            expect(JSON.parse(stdout).error.code).toBe(
+              mode === 'sigint' ? 'cancelled' : 'outcome_unknown',
+            );
+            for (
+              let attempt = 0;
+              attempt < 100 && (await active()) !== 0;
+              attempt++
+            )
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(await active()).toBe(0);
+            cancellations.push({
+              surface,
+              mode,
+              activeBefore: 1,
+              activeAfter: await active(),
+              exitCode: mode === 'sigint' ? 130 : 7,
+            });
+          }
+        }
+      } finally {
+        await monitor.end();
+      }
+      if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
+        await writeFile(
+          path.join(
+            process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR,
+            'cancellation.json',
+          ),
+          JSON.stringify(cancellations, null, 2),
+        );
+    }, 60000);
+
+    it('retains recoverable empty canonical checkouts without silently creating another resource', async () => {
+      for (const kind of ['app', 'workflow']) {
+        const collection = kind === 'app' ? 'apps' : 'workflows';
+        const created = await api(collection, credentials[1], {
+          slug: `empty-${randomUUID()}`,
+          name: 'Empty canonical fixture',
+          pin: false,
+        });
+        const directory = path.join(root, `empty-checkout-${kind}`);
+        const cloned = await cliInvoke(
+          [kind, 'clone', created.data.id, '--directory', directory],
+          kind === 'app' ? credentials[2] : credentials[1],
+        );
+        expect(cloned.code).toBe(6);
+        expect(cloned.data.error.message).toContain(directory);
+        expect(git(directory, 'status', '--porcelain')).toBe('');
+        expect(
+          (await api(`${collection}/${created.data.id}/source`, credentials[1]))
+            .data,
+        ).toMatchObject({ masterCommit: null, bundleBase64: null });
+        expect(
+          JSON.parse(
+            await readFile(
+              path.join(directory, '.git', 'hatch-cli.json'),
+              'utf8',
+            ),
+          ),
+        ).toMatchObject({ id: created.data.id, masterCommit: null });
+        expect(
+          await database.db.query.agentSessionApps.findMany({
+            where: { appId: created.data.id, sessionId },
+          }),
+        ).toHaveLength(kind === 'app' ? 1 : 0);
+      }
+    }, 30000);
+
+    it('runs a tarball installed outside the repository and the same executable as a nonroot Docker user without config writes', async () => {
+      const packageDir = fileURLToPath(
+        new URL('../../../packages/hatch-cli', import.meta.url),
+      );
+      execFileSync(
+        'pnpm',
+        ['--dir', packageDir, 'pack', '--pack-destination', root],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      const archive = (await readdir(root)).find((file) =>
+        file.endsWith('.tgz'),
+      )!;
+      const installed = path.join(root, 'installed');
+      await mkdir(installed);
+      await writeFile(
+        path.join(installed, 'package.json'),
+        JSON.stringify({ private: true, type: 'module' }),
+      );
+      execFileSync(
+        'pnpm',
+        ['add', path.join(root, archive), '--ignore-scripts', '--offline'],
+        { cwd: installed, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      const executable = path.join(
+        installed,
+        'node_modules',
+        '@hatch',
+        'cli',
+        'dist',
+        'main.mjs',
+      );
+      const noConfig = path.join(root, 'no-package-config.json');
+      for (const headers of [credentials[1], credentials[3]]) {
+        const output = await cliInvoke(
+          ['auth', 'status', '--config', noConfig],
+          headers,
+          {},
+          executable,
+        );
+        expect(output.code).toBe(0);
+        expect(output.data.authority).toBe('platform');
+        expect(
+          (await cliInvoke(['app', 'list'], headers, {}, executable)).code,
+        ).toBe(0);
+      }
+      expect((await readdir(root)).includes('no-package-config.json')).toBe(
+        false,
+      );
+      // OrbStack/Linux host networking reaches the isolated production origin.
+      // The image is local acceptance infrastructure, not a production release.
+      const script = `import {spawnSync} from 'node:child_process'; import {existsSync} from 'node:fs';
+        const r=spawnSync(process.execPath,['/cli/dist/main.mjs','auth','status','--json'],{encoding:'utf8'});
+        if(r.status!==0) throw new Error('Container CLI request failed: '+r.stdout);
+        const result=JSON.parse(r.stdout); if(result.authority!=='platform'||existsSync('/tmp/hatch-config')) throw new Error('Container env-mode boundary failed');
+        const inventory=spawnSync(process.execPath,['/cli/dist/main.mjs','app','list','--json'],{encoding:'utf8'});
+        if(inventory.status!==0||!Array.isArray(JSON.parse(inventory.stdout))) throw new Error('Container inventory failed');
+        console.log(JSON.stringify({uid:process.getuid(),cwd:process.cwd(),authority:result.authority,configWritten:false,inventoryCount:JSON.parse(inventory.stdout).length}));`;
+      const docker = execFileSync(
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--network',
+          'host',
+          '--user',
+          '65534:65534',
+          '--workdir',
+          '/tmp',
+          '--mount',
+          `type=bind,source=${path.dirname(path.dirname(executable))},target=/cli,readonly`,
+          '-e',
+          `HATCH_CLI_URL=${origin}`,
+          '-e',
+          `HATCH_CLI_API_KEY=${credentials[1]['x-api-key']}`,
+          '-e',
+          'HATCH_CLI_CONFIG=/tmp/hatch-config',
+          'node:26-slim',
+          'node',
+          '--input-type=module',
+          '-e',
+          script,
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 },
+      );
+      expect(JSON.parse(docker)).toMatchObject({
+        uid: 65534,
+        cwd: '/tmp',
+        authority: 'platform',
+        configWritten: false,
+      });
+      if (process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR)
+        await writeFile(
+          path.join(
+            process.env.HATCH_PLATFORM_TEST_EVIDENCE_DIR,
+            'packaging.json',
+          ),
+          docker,
+        );
+    }, 90000);
 
     it('uses Connect binary clients with the same domain behavior as JSON', async () => {
       const client = cliClient(

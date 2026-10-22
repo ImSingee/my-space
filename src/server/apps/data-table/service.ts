@@ -1142,6 +1142,7 @@ export async function executeDataTableRawSql(
 
   const deadline = Date.now() + timeoutMs;
   let client: PgClient | undefined;
+  let databaseUrl: string | undefined;
   let clientEndPromise: Promise<void> | undefined;
   let commitPhase: 'before_commit' | 'commit_in_flight' | 'commit_confirmed' =
     'before_commit';
@@ -1161,7 +1162,27 @@ export async function executeDataTableRawSql(
       commitPhase === 'commit_in_flight'
         ? rawSqlOutcomeUnknownError(error)
         : error;
-    void endClient();
+    // Socket close is insufficient: PostgreSQL may keep executing until its
+    // next write. Cancel this role's backend while its connection is still
+    // alive, then close it. No broader database authority is required.
+    const pid = (client as (PgClient & { processID?: number }) | undefined)
+      ?.processID;
+    if (pid && databaseUrl) {
+      const cancellation = postgres(databaseUrl, {
+        max: 1,
+        connect_timeout: 2,
+        connection: { statement_timeout: 1000 },
+      });
+      void cancellation
+        .unsafe('select pg_cancel_backend($1)', [pid])
+        .catch(() => {})
+        .finally(async () => {
+          await cancellation.end({ timeout: 0 }).catch(() => {});
+          await endClient();
+        });
+    } else {
+      void endClient();
+    }
     rejectStop(stopError);
   };
   const timer = setTimeout(() => {
@@ -1170,14 +1191,15 @@ export async function executeDataTableRawSql(
   timer.unref?.();
   const onAbort = () => stop(rawSqlAbortError(signal!));
   signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
 
   const execute = async () => {
-    const databaseUrl = await resolveAppDataDatabaseUrl(id);
+    databaseUrl = await resolveAppDataDatabaseUrl(id);
     const connect = async (disableSsl = false): Promise<PgClient> => {
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) throw rawSqlTimeoutError(timeoutMs);
       const candidate = new pg.Client({
-        connectionString: rawSqlConnectionString(databaseUrl, { disableSsl }),
+        connectionString: rawSqlConnectionString(databaseUrl!, { disableSsl }),
         connectionTimeoutMillis: remainingMs,
         statement_timeout: timeoutMs,
       });
@@ -1212,7 +1234,7 @@ export async function executeDataTableRawSql(
       dataClient = await connect();
     } catch (error) {
       if (
-        rawSqlTlsPreference(databaseUrl) !== 'prefer' ||
+        rawSqlTlsPreference(databaseUrl!) !== 'prefer' ||
         !rawSqlServerHasNoTls(error) ||
         stopError
       ) {
@@ -1271,7 +1293,7 @@ export async function executeDataTableRawSql(
     signal?.removeEventListener('abort', onAbort);
     // Initiate cleanup without making the public timeout depend on a socket
     // close acknowledgement that may never arrive after a network failure.
-    void endClient();
+    if (!stopError) void endClient();
   }
 }
 

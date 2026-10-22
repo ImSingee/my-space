@@ -6,6 +6,8 @@ import {
 } from '../../hatch-platform-api/gen/hatch/platform/v1/app_pb';
 import { WorkflowService } from '../../hatch-platform-api/gen/hatch/platform/v1/workflow_pb';
 import { SdkService } from '../../hatch-platform-api/gen/hatch/platform/v1/sdk_pb';
+import { fromJson } from '@bufbuild/protobuf';
+import { ValueSchema } from '@bufbuild/protobuf/wkt';
 /** Durable CLI source/data boundaries through real child processes and Git. */
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
@@ -33,16 +35,70 @@ let master: string | null;
 let deploys: number;
 let loseResponse: boolean;
 let sdkDelay: (() => Promise<void>) | undefined;
+let sdkFailure: boolean;
 let resourceSlug: string;
 let createRequests: unknown[];
 const token = 'private-workspace-test-secret';
-const getResource = () => ({
+const getResource = (kind: 'app' | 'workflow') => ({
   id: 'immutable',
   slug: resourceSlug,
   name: 'Fixture',
   status: 'draft',
   createdAt: generation,
   updatedAt: generation,
+  view: fromJson(ValueSchema, {
+    id: 'immutable',
+    slug: resourceSlug,
+    name: 'Fixture',
+    description: null,
+    status: 'draft',
+    createdAt: generation,
+    updatedAt: generation,
+    compatibility: null,
+    deployments: [],
+    ...(kind === 'workflow'
+      ? {
+          liveVersion: null,
+          inputSchema: {},
+          network: null,
+          webhook: { enabled: false, url: null },
+          cron: [],
+          recentRuns: [],
+        }
+      : {
+          currentVersion: null,
+          capabilities: [],
+          backendMode: null,
+          dbName: null,
+          dataDbName: null,
+          currentDeploymentId: null,
+          currentSourceCommit: null,
+          manifest: null,
+          ops: {
+            backend: {
+              capable: false,
+              mode: null,
+              running: false,
+              network: null,
+            },
+            cron: { enabled: false, jobs: [] },
+            webhook: {
+              enabled: false,
+              url: null,
+              hasSecret: false,
+              auth: 'platform',
+            },
+            storage: { enabled: false },
+            kv: { enabled: false, url: null, entryCount: 0 },
+            dataTable: {
+              enabled: false,
+              url: null,
+              dbName: null,
+              schemaHash: null,
+            },
+          },
+        }),
+  }),
 });
 function createResource(
   data: Pick<CreateAppRequest, 'slug' | 'name' | 'pin' | 'description'>,
@@ -83,11 +139,15 @@ const rpc = connectNodeAdapter({
   routes: (router) => {
     router.service(AppService, {
       createApp: createResource,
-      getApp: () => ({ resource: getResource() }),
+      getApp: () => ({ resource: getResource('app') }),
+      associateAppSession: () => ({
+        appId: 'immutable',
+        association: 'not-applicable',
+      }),
     });
     router.service(WorkflowService, {
       createWorkflow: createResource,
-      getWorkflow: () => ({ resource: getResource() }),
+      getWorkflow: () => ({ resource: getResource('workflow') }),
       getWorkflowSource: () => ({
         source: {
           id: 'immutable',
@@ -108,12 +168,21 @@ const rpc = connectNodeAdapter({
             deploymentId: 'release-1',
             version: 1,
             compatibilityVersion: 1,
+            normalized: fromJson(ValueSchema, {
+              id: 'immutable',
+              name: 'Fixture',
+              description: '',
+              entry: 'workflow.ts',
+              triggers: { cron: [], webhook: { enabled: false, url: null } },
+            }),
           },
         };
       },
     });
     router.service(SdkService, {
       getSdk: async () => {
+        if (sdkFailure)
+          throw new ConnectError('SDK unavailable', Code.Unavailable);
         await sdkDelay?.();
         return {
           files: [
@@ -211,13 +280,16 @@ function commit(root: string, message: string) {
 // These tests launch real Git and package-manager processes, including on CI.
 describe('CLI workspace safety', { timeout: 30_000 }, () => {
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'hatch-cli-boundary-'));
+    directory = await realpath(
+      await mkdtemp(join(tmpdir(), 'hatch-cli-boundary-')),
+    );
     generation = new Date().toISOString();
     bundle = null;
     master = null;
     deploys = 0;
     loseResponse = false;
     sdkDelay = undefined;
+    sdkFailure = false;
     resourceSlug = 'fixture';
     createRequests = [];
     await new Promise<void>((resolve) =>
@@ -249,10 +321,14 @@ describe('CLI workspace safety', { timeout: 30_000 }, () => {
         directory,
       ]).result;
 
-      assert.equal(result.code, 0, JSON.stringify(result));
+      // This fixture intentionally has no authored Deno configuration. App
+      // registration must succeed, then preparation must retain its checkout.
+      assert.equal(result.code, kind === 'app' ? 6 : 0, JSON.stringify(result));
       expect(createRequests).toEqual([input]);
       const root = join(directory, input.slug);
-      expect(result.data.directory).toBe(await realpath(root));
+      expect(
+        kind === 'app' ? result.data.error.message : result.data.directory,
+      ).toContain(await realpath(root));
       expect(
         JSON.parse(await readFile(join(root, '.git/hatch-cli.json'), 'utf8')),
       ).toMatchObject({ kind, id: 'immutable' });
@@ -364,6 +440,83 @@ describe('CLI workspace safety', { timeout: 30_000 }, () => {
     ).toBe('non_fast_forward');
     expect(git(clone, 'rev-parse', 'HEAD')).toBe(local);
     expect(git(clone, 'rev-parse', 'FETCH_HEAD')).toBe(master);
+  });
+  it('replaces only explicit safe targets after preparation and restores existing work on failure', async () => {
+    const source = await create();
+    await publish(source);
+    const target = join(directory, 'replace');
+    await mkdir(target);
+    await writeFile(join(target, 'local.txt'), 'valuable work');
+    expect(
+      (await run(['workflow', 'clone', 'immutable', '--force']).result).data
+        .error.code,
+    ).toBe('invalid_arguments');
+    expect(
+      (
+        await run([
+          'workflow',
+          'clone',
+          'immutable',
+          '--directory',
+          directory,
+          '--workdir',
+          directory,
+          '--force',
+        ]).result
+      ).data.error.code,
+    ).toBe('unsafe_target');
+    expect(
+      (
+        await run([
+          'workflow',
+          'clone',
+          'immutable',
+          '--directory',
+          '/',
+          '--force',
+        ]).result
+      ).data.error.code,
+    ).toBe('unsafe_target');
+    const link = join(directory, 'linked');
+    await symlink(target, link);
+    expect(
+      (
+        await run([
+          'workflow',
+          'clone',
+          'immutable',
+          '--directory',
+          link,
+          '--force',
+        ]).result
+      ).data.error.code,
+    ).toBe('unsafe_target');
+    sdkFailure = true;
+    const failed = await run([
+      'workflow',
+      'clone',
+      'immutable',
+      '--directory',
+      target,
+      '--force',
+    ]).result;
+    expect(failed.code).not.toBe(0);
+    expect(await readFile(join(target, 'local.txt'), 'utf8')).toBe(
+      'valuable work',
+    );
+    sdkFailure = false;
+    const replaced = await run([
+      'workflow',
+      'clone',
+      'immutable',
+      '--directory',
+      target,
+      '--force',
+    ]).result;
+    expect(replaced.code).toBe(0);
+    expect(replaced.data.replacedExisting).toBe(true);
+    expect(git(target, 'rev-parse', 'HEAD')).toBe(master);
+    expect(await readdir(target)).not.toContain('local.txt');
   });
   it('records uncertain deploy outcomes and never blindly retries', async () => {
     const root = await create();

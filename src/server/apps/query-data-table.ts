@@ -2,7 +2,7 @@
 import type {
   ParsedQueryAppDataTableRequest,
   QueryAppDataTableResponse,
-} from '~agent/protocol';
+} from '~/platform-api/data-schemas';
 import { AppError } from '~server/errors';
 import {
   assertDataTableAccess,
@@ -18,10 +18,12 @@ export async function queryAppDataTable(
   input: ParsedQueryAppDataTableRequest,
   signal?: AbortSignal,
 ): Promise<QueryAppDataTableResponse> {
+  signal?.throwIfAborted();
   // Fail with the capability/deployment fence before trying to open a Data DB
   // that may not exist yet. Each service operation repeats this check while
   // holding the migration guard so a concurrent cutover cannot race it.
   await assertDataTableAccess(id, {});
+  signal?.throwIfAborted();
 
   switch (input.action) {
     case 'inspect': {
