@@ -241,8 +241,7 @@ const appWorkflowsSchema = z
  *   dedicated nonreserved header or provider signature over raw bytes.
  * Both modes strip Authorization and x-api-key (all casing), Cookie and
  * x-hatch-* headers. These reserved headers cannot carry App-private auth;
- * none mode is not full header passthrough. Existing integrations must migrate
- * their caller and handler to a dedicated header/signature, without a bypass.
+ * none mode is not full header passthrough.
  */
 export const webhookConfigSchema = z.object({
   auth: z.enum(['platform', 'none']).default('platform'),

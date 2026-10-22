@@ -164,9 +164,7 @@ Cookie, `x-hatch-*` and forwarding/hop-by-hop headers. `auth: none` does not mea
 full header passthrough. Authorization and x-api-key cannot implement App-private
 or third-party authentication. Use a dedicated nonreserved header such as
 `X-App-Token` or a provider signature header, or a signature over the raw body.
-No removed value is copied to another header and no legacy passthrough exists.
-Existing integrations using those headers must migrate both their caller and App
-handler to a dedicated header/signature; Hatch does not rewrite App source.
+Removed values are not copied to another header.
 
 In platform mode credential selection is fail-closed: explicit `x-api-key`
 wins over Authorization (Bearer session or Run JWT), with no Cookie/secret

@@ -5,18 +5,14 @@ Hatch invokes authored App HTTP handlers through the existing public runtime URL
 Management lookup remains Connect RPC at `/api/rpc`; there is no webhook invocation
 RPC or alternate REST endpoint. Backend invocation remains `hatch app invoke backend` using Connect unary JSON; webhook invocation sends raw HTTP bytes.
 
-## Authentication and header migration
+## Authentication and headers
 
-Both webhook modes now strip Authorization and x-api-key (case-insensitive),
+Both webhook modes strip Authorization and x-api-key (case-insensitive),
 Cookie, x-hatch-* signing/secret headers, routing headers and hop-by-hop headers.
-The shared App proxy enforces this policy. Removed values are never copied to an
-alternate header. This deliberately replaces Authorization passthrough and removes
-x-api-key passthrough, including on `auth: none` deployments.
-
-Existing integrations using these headers for App-private authentication must
-migrate the caller and authored handler to a dedicated nonreserved header such as
-X-App-Token, a provider signature header, or a raw-body signature. There is no
-legacy bypass. The platform does not rewrite App source or application data.
+The shared App proxy enforces this policy. Removed values are not copied to
+another header. Authorization and x-api-key cannot be used for App-private
+authentication, including with `auth: none`. Use a dedicated nonreserved header
+such as X-App-Token, a provider signature header, or a raw-body signature.
 
 - `platform`: explicit x-api-key, then Authorization (native Bearer session or
   live Better Auth Run JWT), then explicit x-hatch-secret or ?secret=, then Cookie.
@@ -85,5 +81,4 @@ App-owned authentication, raw-body HMAC, methods/subpaths/query/body caps, runti
 lifecycle fences and binary/non-JSON responses. Security/contract regressions,
 CLI/runtime/auth checks, types, format, lint and CLI/Platform/Runner builds must
 pass. Local evidence is redacted; no external report, publication or deployment.
-No database, wire protocol, historical-data or source migration steps are needed;
-caller/handler private-header migration is a deliberate integration requirement.
+No database, wire protocol, historical-data or source changes are required.
