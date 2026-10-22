@@ -81,17 +81,23 @@ An exclusive `.agents/.hatch-skills-install` transaction serializes cooperating
 installers; each Skill is published by a same-filesystem directory rename.
 This is a multi-directory transaction: a reader can briefly observe a mixed
 selection during publication, but success is reported only after every swap and
-an atomic committed journal marker. Ordinary failure or SIGINT/SIGTERM restores
-the previous directories. Uncatchable termination retains staged files, backups
-and a journal; subsequent normal installs refuse to proceed.
+an atomic committed journal marker. Failure or SIGINT/SIGTERM before that marker
+restores the previous directories. Cleanup removes backups and staged data before
+transaction metadata. If cleanup fails after commit, the new Skills stay published
+and the committed journal is retained with a `recovery_required` error. Correct
+the reported permissions or filesystem problem, then use `--recover` to finish
+cleanup without rolling back the committed installation. Uncatchable termination
+retains staged files, backups and a journal; subsequent normal installs refuse to proceed.
 
 After verifying the installer has stopped, retry with `--recover`. Recovery
-refuses live/foreign/unknown owners and changed destination or backup content.
+rechecks transaction identity and stopped ownership after acquiring its marker.
+It refuses live/foreign/unknown owners and changed destination or backup content.
 It never overwrites post-interruption edits. Preserve the transaction for manual
 inspection if recovery cannot safely restore it. A recovery that is itself
 killed may retain a `recovering` marker; verify all installers are stopped and
 inspect the journal/backups before removing only that marker and retrying.
-Likewise an incomplete/malformed owner file requires manual inspection. Do not
+Likewise an incomplete/malformed owner file or a missing journal with retained
+backups requires manual inspection. Do not
 blindly delete the transaction, as it can contain the only previous copy.
 The journal is process-crash recovery, not a guarantee against power loss or a
 hostile process concurrently replacing filesystem ancestors.

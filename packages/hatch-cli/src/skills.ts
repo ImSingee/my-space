@@ -1,5 +1,5 @@
 /** Offline, transactional installation of the bundled official product Skills. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import {
   lstat,
@@ -130,12 +130,20 @@ function validateBundle(bundle: SkillBundle) {
 
 type Change = { name: string; before: string | null; after: string };
 type Journal = { version: 1; changes: Change[]; committed: boolean };
-type Owner = { pid: number; host: string };
+type Owner = { pid: number; host: string; id?: string };
 async function regularJson(path: string): Promise<unknown> {
-  const stat = await lstat(path);
-  if (!stat.isFile() || stat.isSymbolicLink())
-    fail('unsafe_path', 'Transaction metadata must be a regular file.');
-  return JSON.parse(await readFile(path, 'utf8'));
+  try {
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.isSymbolicLink())
+      fail('unsafe_path', 'Transaction metadata must be a regular file.');
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    fail(
+      'recovery_required',
+      'Transaction metadata is missing, unreadable or malformed; retain the transaction for manual inspection.',
+    );
+  }
 }
 function parseJournal(value: unknown, allowed: string[]): Journal {
   const journal = value as Journal;
@@ -224,11 +232,21 @@ async function rollback(root: string, lock: string, journal: Journal) {
   }
 }
 
-async function recover(root: string, lock: string, allowed: string[]) {
-  const stat = await lstat(lock);
-  if (!stat.isDirectory() || stat.isSymbolicLink())
-    fail('unsafe_path', 'Install transaction must be a real directory.');
-  const owner = (await regularJson(join(lock, 'owner.json'))) as Owner;
+/** Keep ownership and the journal until all staged data and backups are gone. */
+async function cleanupTransaction(lock: string) {
+  try {
+    for (const name of ['backup', 'stage', 'journal.next'])
+      await rm(join(lock, name), { recursive: true, force: true });
+    await rm(lock, { recursive: true });
+  } catch {
+    fail(
+      'recovery_required',
+      'Transaction cleanup could not finish. Published Skills may already be committed; preserve .agents/.hatch-skills-install, inspect permissions and its journal, then retry with --recover.',
+    );
+  }
+}
+
+function stoppedOwner(owner: Owner) {
   if (
     !Number.isSafeInteger(owner?.pid) ||
     owner.pid <= 0 ||
@@ -247,6 +265,14 @@ async function recover(root: string, lock: string, allowed: string[]) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
   }
+}
+
+async function recover(root: string, lock: string, allowed: string[]) {
+  const stat = await lstat(lock);
+  if (!stat.isDirectory() || stat.isSymbolicLink())
+    fail('unsafe_path', 'Install transaction must be a real directory.');
+  const owner = (await regularJson(join(lock, 'owner.json'))) as Owner;
+  stoppedOwner(owner);
   // Serialize recovery as well as installation. Never let two stopped-owner
   // observers restore the same backup concurrently.
   const recovery = join(lock, 'recovering');
@@ -260,15 +286,43 @@ async function recover(root: string, lock: string, allowed: string[]) {
       );
     throw error;
   }
+  const recoveryStat = await lstat(recovery);
+  let cleaned = false;
   try {
+    // The observed dead transaction may have been removed and replaced while
+    // this recovery waited. The marker only protects the directory it entered.
+    const currentStat = await lstat(lock);
+    const currentOwner = (await regularJson(join(lock, 'owner.json'))) as Owner;
+    if (
+      currentStat.isSymbolicLink() ||
+      currentStat.dev !== stat.dev ||
+      currentStat.ino !== stat.ino ||
+      JSON.stringify(currentOwner) !== JSON.stringify(owner)
+    )
+      fail('skills_locked', 'Install transaction changed; retry recovery.');
+    stoppedOwner(currentOwner);
     const journalPath = join(lock, 'journal.json');
     if (await exists(journalPath)) {
       const journal = parseJournal(await regularJson(journalPath), allowed);
       if (!journal.committed) await rollback(root, lock, journal);
+    } else {
+      // No journal is normal only before publication starts. Never discard
+      // original content if metadata was lost after a backup was taken.
+      const backups = await tree(join(lock, 'backup'));
+      if (backups && Object.keys(backups).length)
+        fail(
+          'recovery_required',
+          'Install journal is missing but backups remain; retain the transaction for manual inspection.',
+        );
     }
-    await rm(lock, { recursive: true });
+    await cleanupTransaction(lock);
+    cleaned = true;
   } finally {
-    await rm(recovery, { recursive: true, force: true });
+    if (!cleaned) {
+      const current = await exists(recovery);
+      if (current?.dev === recoveryStat.dev && current.ino === recoveryStat.ino)
+        await rm(recovery, { recursive: true, force: true });
+    }
   }
 }
 
@@ -339,7 +393,7 @@ export async function installSkills(
   try {
     await writeFile(
       join(lock, 'owner.json'),
-      JSON.stringify({ pid: process.pid, host: hostname() }),
+      JSON.stringify({ pid: process.pid, host: hostname(), id: randomUUID() }),
       { flag: 'wx', mode: 0o600 },
     );
     check();
@@ -436,7 +490,7 @@ export async function installSkills(
       7,
     );
   } finally {
-    if (!retain) await rm(lock, { recursive: true, force: true });
+    if (!retain) await cleanupTransaction(lock);
   }
 }
 

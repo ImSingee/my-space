@@ -11,6 +11,7 @@ import {
   writeFile,
   access,
   cp,
+  chmod,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -398,6 +399,167 @@ const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b)
       cli(cwd, ['skills', 'install', 'building-apps', '--replace']).status,
     ).toBe(0);
   });
+
+  it('does not let a delayed recovery touch a replacement live transaction', async () => {
+    const cwd = await project();
+    const first = await interrupted(cwd, ['building-apps']);
+    const firstExit = once(first, 'exit');
+    first.kill('SIGKILL');
+    await firstExit;
+    const lock = join(cwd, '.agents/.hatch-skills-install');
+    const observed = join(cwd, 'observed-owner');
+    const release = join(cwd, 'release-stale-recovery');
+    const preload = join(cwd, 'stale-recovery.mjs');
+    await writeFile(
+      preload,
+      `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';
+const original=fs.mkdir;fs.mkdir=async(a,...args)=>{if(String(a).endsWith(${JSON.stringify(join('.agents', '.hatch-skills-install', 'recovering'))})){await fs.writeFile(${JSON.stringify(observed)},'paused');while(!await fs.access(${JSON.stringify(release)}).then(()=>true,()=>false)){await new Promise(resolve=>setTimeout(resolve,10));}}return original(a,...args)};syncBuiltinESMExports();`,
+    );
+    const stale = spawn(
+      process.execPath,
+      [
+        '--import',
+        pathToFileURL(preload).href,
+        binary,
+        'skills',
+        'install',
+        'building-apps',
+        '--recover',
+        '--json',
+      ],
+      { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    children.push(stale);
+    let output = '';
+    stale.stdout!.on('data', (chunk) => {
+      output += chunk;
+    });
+    await waitFor(observed);
+    // A second recovery finishes, then pauses in its new installation while
+    // the stale observer still holds the stopped owner's identity.
+    await rm(join(cwd, 'paused'));
+    const live = await interrupted(cwd, ['building-apps', '--recover']);
+    const owner = await readFile(join(lock, 'owner.json'), 'utf8');
+    const journal = await readFile(join(lock, 'journal.json'), 'utf8');
+    const staleExit = once(stale, 'exit');
+    await writeFile(release, 'continue');
+    expect((await staleExit)[0]).toBe(6);
+    expect(JSON.parse(output).error.code).toBe('skills_locked');
+    expect(await readFile(join(lock, 'owner.json'), 'utf8')).toBe(owner);
+    expect(await readFile(join(lock, 'journal.json'), 'utf8')).toBe(journal);
+    expect(await present(join(lock, 'stage/app-compatibility/SKILL.md'))).toBe(
+      true,
+    );
+    expect(
+      await present(join(cwd, '.agents/skills/building-apps/SKILL.md')),
+    ).toBe(true);
+    expect(await present(join(lock, 'recovering'))).toBe(false);
+    const liveExit = once(live, 'exit');
+    live.kill('SIGKILL');
+    await liveExit;
+    expect(
+      cli(cwd, ['skills', 'install', 'building-apps', '--recover']).status,
+    ).toBe(0);
+  });
+
+  it('reports damaged recovery metadata without discarding the transaction', async () => {
+    const cwd = await project();
+    const target = join(cwd, '.agents/skills/building-apps');
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'SKILL.md'), 'previous');
+    const child = await interrupted(cwd, ['building-apps', '--replace']);
+    const exited = once(child, 'exit');
+    child.kill('SIGKILL');
+    await exited;
+    const lock = join(cwd, '.agents/.hatch-skills-install');
+    for (const name of ['owner.json', 'journal.json']) {
+      const file = join(lock, name);
+      const original = await readFile(file, 'utf8');
+      for (const content of [null, '{']) {
+        if (content === null) {
+          await rm(file);
+        } else await writeFile(file, content);
+        const result = cli(cwd, ['skills', 'install', '--recover']);
+        expect(result.status).toBe(6);
+        expect(result.result.error.code).toBe('recovery_required');
+        expect(result.result.error.message).toContain('manual inspection');
+        expect(
+          await present(join(lock, 'stage/app-compatibility/SKILL.md')),
+        ).toBe(true);
+        await writeFile(file, original);
+      }
+      await rm(file);
+      await mkdir(file);
+      expect(
+        cli(cwd, ['skills', 'install', '--recover']).result.error.code,
+      ).toBe('unsafe_path');
+      await rm(file, { recursive: true });
+      await writeFile(file, original);
+    }
+    expect(cli(cwd, ['skills', 'install', '--recover']).result.error.code).toBe(
+      'skill_conflict',
+    );
+    expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe('previous');
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'retains a committed journal until read-only backup cleanup succeeds',
+    async () => {
+      const cwd = await project();
+      const target = join(cwd, '.agents/skills/building-apps');
+      const lock = join(cwd, '.agents/.hatch-skills-install');
+      const readonly = join(target, 'references');
+      await mkdir(readonly, { recursive: true });
+      await writeFile(join(readonly, 'local.txt'), 'previous');
+      await writeFile(join(target, 'SKILL.md'), 'previous');
+      await chmod(readonly, 0o555);
+      try {
+        const result = cli(cwd, [
+          'skills',
+          'install',
+          'building-apps',
+          '--replace',
+        ]);
+        expect(result.status).toBe(6);
+        expect(result.result.error.code).toBe('recovery_required');
+        expect(
+          JSON.parse(await readFile(join(lock, 'journal.json'), 'utf8'))
+            .committed,
+        ).toBe(true);
+        expect(
+          JSON.parse(await readFile(join(lock, 'owner.json'), 'utf8')).pid,
+        ).toBeGreaterThan(0);
+        const installed = await readFile(join(target, 'SKILL.md'), 'utf8');
+        expect(installed).not.toBe('previous');
+        expect(
+          cli(cwd, ['skills', 'install', '--recover']).result.error.code,
+        ).toBe('recovery_required');
+        expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe(
+          installed,
+        );
+        await chmod(join(lock, 'backup/building-apps/references'), 0o755);
+        const recovered = cli(cwd, [
+          'skills',
+          'install',
+          'building-apps',
+          '--recover',
+        ]);
+        expect(recovered.status).toBe(0);
+        expect(
+          recovered.result.skills.every(
+            (skill: { status: string }) => skill.status === 'unchanged',
+          ),
+        ).toBe(true);
+        expect(await present(lock)).toBe(false);
+      } finally {
+        for (const path of [
+          readonly,
+          join(lock, 'backup/building-apps/references'),
+        ])
+          if (await present(path)) await chmod(path, 0o755);
+      }
+    },
+  );
 
   it('restores an interrupted fresh installation and handles graceful cancellation', async () => {
     const cwd = await project();

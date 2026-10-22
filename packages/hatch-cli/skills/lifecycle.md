@@ -24,7 +24,9 @@
    `--allow-destructive-data-migration`. Never reuse approval after source changes.
 5. Inspect `hatch RESOURCE get <id> --json` after deployment and verify the
    requested behavior. Report actual URLs from the response. If master advanced,
-   refresh the same checkout, inspect Git state, rebase onto refreshed
-   `origin/master`, resolve conflicts and revalidate before deploying.
+   run `hatch RESOURCE update --directory <path> --json` in the same checkout.
+   If update reports diverged history, inspect Git state and the fetched commit
+   in `FETCH_HEAD`, then rebase onto that commit with `git rebase FETCH_HEAD`.
+   Resolve conflicts and revalidate before deploying.
    If deployment was interrupted, use `deploy --reconcile` first; follow CLI
    recovery guidance rather than blindly creating or deploying again.
