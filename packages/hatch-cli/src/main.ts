@@ -5,6 +5,7 @@ import { runAuth } from './auth';
 import { runLifecycle } from './lifecycle';
 import { runData } from './data';
 import { runSkills } from './skills';
+import { runBackendInvocation, BackendInvocationError } from './invoke';
 import { publicError } from './client';
 import { CliError } from './error';
 
@@ -82,6 +83,8 @@ try {
     );
   else if (name === 'app' && ['kv', 'data-table', 'db'].includes(operation))
     await runData(args, offset, controller.signal);
+  else if (name === 'app' && operation === 'invoke')
+    await runBackendInvocation(args, offset, controller.signal);
   else if (['app', 'workflow'].includes(name))
     await runLifecycle(args, offset, controller.signal);
   else
@@ -99,11 +102,19 @@ try {
   let message = known.message;
   for (const secret of secrets)
     message = message.replaceAll(secret, '[redacted]');
-  if (json)
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: known.code, message } })}\n`,
-    );
-  else process.stderr.write(`${message}\n`);
+  if (json) {
+    const detail = {
+      code: known.code,
+      message,
+      ...(known.httpStatus === undefined
+        ? {}
+        : { httpStatus: known.httpStatus }),
+      ...(known instanceof BackendInvocationError
+        ? { response: known.response }
+        : {}),
+    };
+    process.stdout.write(`${JSON.stringify({ ok: false, error: detail })}\n`);
+  } else process.stderr.write(`${message}\n`);
   process.exitCode = known.exitCode;
 } finally {
   process.removeListener('SIGINT', cancel);
