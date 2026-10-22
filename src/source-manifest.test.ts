@@ -1,5 +1,4 @@
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -9,6 +8,7 @@ import {
 import { loadSourceManifest, manifestRunner } from './source-manifest';
 import { parseSourceManifest } from './server/apps/manifest';
 import { parseSourceWorkflowManifest } from './server/workflows/manifest';
+import { createManifestFixtureRoot } from './test-manifest-fixture';
 
 let root: string;
 const app = {
@@ -40,7 +40,7 @@ const defined = (value: unknown) =>
   `import { defineAppManifest } from '@hatch/app';\nexport default defineAppManifest(${JSON.stringify(value)});`;
 
 beforeAll(async () => {
-  root = await fs.mkdtemp(path.join(os.tmpdir(), 'manifest-contract-'));
+  root = await createManifestFixtureRoot();
   for (const file of ['package.json', 'deno.json', 'deno.lock']) {
     await fs.copyFile(
       path.resolve('templates/default-workflow', file),
