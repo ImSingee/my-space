@@ -3,6 +3,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { resolveBuildInfo } from './build-info';
+import { buildCliSkills } from './cli-skills';
+import manifest from '../packages/hatch-cli/package.json' with { type: 'json' };
+
+const info = resolveBuildInfo();
+const skills = await buildCliSkills(
+  fileURLToPath(new URL('../', import.meta.url)),
+  manifest.version,
+  info.commit,
+);
 
 const entry = fileURLToPath(
   new URL('../packages/hatch-cli/src/main.ts', import.meta.url),
@@ -12,7 +21,10 @@ const output = fileURLToPath(
 );
 
 const result = await build({
-  define: { __HATCH_BUILD_INFO__: JSON.stringify(resolveBuildInfo()) },
+  define: {
+    __HATCH_BUILD_INFO__: JSON.stringify(info),
+    __HATCH_SKILL_BUNDLE__: JSON.stringify(skills),
+  },
   metafile: true,
   entryPoints: [entry],
   outfile: output,

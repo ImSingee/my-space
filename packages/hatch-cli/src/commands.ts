@@ -17,6 +17,19 @@ export const globalOptions = [
 
 const definitions: readonly CliCommandDefinition[] = [
   {
+    path: ['skills', 'list'],
+    usage: 'skills list [--json]',
+    description:
+      'List bundled official product Skills and required files offline.',
+  },
+  {
+    path: ['skills', 'install'],
+    usage:
+      'skills install [names...] [-s, --skill <name>] [--all] [-l, --list] [--replace] [--recover] [-y, --yes] [--workdir <path>] [--json]',
+    description:
+      'Install all (default) or selected official Skills and dependencies into .agents/skills. Noninteractive; --yes never implies --replace. --recover restores an interrupted local transaction.',
+  },
+  {
     path: ['help'],
     usage: 'help [command]',
     description: 'Show command help.',
@@ -184,7 +197,7 @@ const definitions: readonly CliCommandDefinition[] = [
 
 export const commandDefinitions = definitions.map((definition) => {
   const supported =
-    ['help', 'version'].includes(definition.path[0]) ||
+    ['help', 'version', 'skills'].includes(definition.path[0]) ||
     (definition.path[0] === 'app' &&
       definition.path.length === 3 &&
       ['kv', 'data-table', 'db'].includes(definition.path[1])) ||

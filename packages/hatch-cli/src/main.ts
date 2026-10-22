@@ -4,6 +4,7 @@ import { commandDefinitions, globalOptions } from './commands';
 import { runAuth } from './auth';
 import { runLifecycle } from './lifecycle';
 import { runData } from './data';
+import { runSkills } from './skills';
 import { publicError } from './client';
 import { CliError } from './error';
 
@@ -41,7 +42,7 @@ try {
     const scope =
       name === 'help'
         ? args.slice(offset + 1).filter((part) => !part.startsWith('--'))
-        : ['app', 'workflow', 'auth'].includes(name)
+        : ['app', 'workflow', 'auth', 'skills'].includes(name)
           ? [
               name,
               ...(operation && !operation.startsWith('--') ? [operation] : []),
@@ -63,6 +64,8 @@ try {
       { version: manifest.version, ...buildInfo },
       `${manifest.version}\nCommit: ${buildInfo.commit?.slice(0, 12) ?? 'Unknown'}\nCommit time: ${buildInfo.commitTime ?? 'Unknown'}`,
     );
+  } else if (name === 'skills') {
+    await runSkills(args, offset, controller.signal);
   } else if (name === 'auth') {
     if (!['login', 'status', 'logout'].includes(operation))
       throw new CliError(
