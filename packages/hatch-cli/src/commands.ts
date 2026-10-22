@@ -4,7 +4,7 @@ export type CliCommandDefinition = {
   description: string;
 };
 
-/** Public command descriptions; unsupported operation/auth surfaces are explicitly reserved. */
+/** Global options accepted by the CLI. */
 export const globalOptions = [
   '--json',
   '--profile <name>',
@@ -40,26 +40,6 @@ const definitions: readonly CliCommandDefinition[] = [
     path: ['auth', 'logout'],
     usage: 'auth logout [--local-only]',
     description: 'Revoke and remove the selected local login credential.',
-  },
-  {
-    path: ['auth', 'key', 'list'],
-    usage: 'auth key list',
-    description: 'Unsupported; list API keys in Settings.',
-  },
-  {
-    path: ['auth', 'key', 'create'],
-    usage: 'auth key create --file <path|->',
-    description: 'Unsupported; create API keys in Settings.',
-  },
-  {
-    path: ['auth', 'key', 'rotate'],
-    usage: 'auth key rotate <credential-id>',
-    description: 'Unsupported; there is no atomic key rotation API.',
-  },
-  {
-    path: ['auth', 'key', 'revoke'],
-    usage: 'auth key revoke <credential-id>',
-    description: 'Unsupported; revoke API keys in Settings.',
   },
   ...(['app', 'workflow'] as const).flatMap((resource) => [
     {
@@ -176,44 +156,9 @@ const definitions: readonly CliCommandDefinition[] = [
     description:
       'Execute the App data operation with domain limits and complete results.',
   },
-  {
-    path: ['operation', 'get'],
-    usage: 'operation get <operation-id>',
-    description:
-      'Execute the App data operation with domain limits and complete results.',
-  },
-  {
-    path: ['operation', 'wait'],
-    usage: 'operation wait <operation-id>',
-    description:
-      'Execute the App data operation with domain limits and complete results.',
-  },
-  {
-    path: ['operation', 'cancel'],
-    usage: 'operation cancel <operation-id>',
-    description:
-      'Execute the App data operation with domain limits and complete results.',
-  },
 ];
 
-export const commandDefinitions = definitions.map((definition) => {
-  const supported =
-    ['help', 'version'].includes(definition.path[0]) ||
-    definition.path.join(' ') === 'app invoke backend' ||
-    (definition.path[0] === 'app' &&
-      definition.path.length === 3 &&
-      (['kv', 'data-table', 'db'].includes(definition.path[1]) ||
-        (definition.path[1] === 'invoke' &&
-          definition.path[2] === 'webhook'))) ||
-    (definition.path.length === 2 &&
-      (['app', 'workflow'].includes(definition.path[0]) ||
-        (definition.path[0] === 'auth' &&
-          ['login', 'status', 'logout'].includes(definition.path[1]))));
-  return {
-    ...definition,
-    supported,
-    description: supported
-      ? definition.description
-      : 'Unsupported; use platform Settings where available. No CLI API contract is provided.',
-  };
-});
+export const commandDefinitions = definitions.map((definition) => ({
+  ...definition,
+  supported: true,
+}));

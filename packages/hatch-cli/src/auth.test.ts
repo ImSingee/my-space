@@ -501,16 +501,23 @@ describe('CLI authentication boundary', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('shows help without credentials and distinguishes unsupported commands and argument errors', async () => {
+  it('shows help without credentials and rejects removed commands as unknown', async () => {
     const help = await invoke(['--json', '--help'], {
       env: { HATCH_CLI_TOKEN: 'partial-env' },
     });
     expect(help.code).toBe(0);
     expect(JSON.parse(help.stdout).version).toBe('0.1.0');
-    for (const args of [['auth', 'key', 'rotate']]) {
+    for (const args of [
+      ['auth', 'key', 'list'],
+      ['operation', 'get', 'operation-1'],
+      ['auth', 'key', '--help'],
+      ['operation', '--help'],
+      ['help', 'auth', 'key'],
+      ['help', 'operation'],
+    ]) {
       const result = await invoke([...args, '--json']);
-      expect(result.code).toBe(8);
-      expect(JSON.parse(result.stdout).error.code).toBe('unsupported_command');
+      expect(result.code).toBe(2);
+      expect(JSON.parse(result.stdout).error.code).toBe('unknown_command');
     }
     const invalid = await invoke(['auth', 'login', '--token-stdin', '--json']);
     expect(invalid.code).toBe(2);

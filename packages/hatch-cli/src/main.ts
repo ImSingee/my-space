@@ -41,13 +41,22 @@ try {
   const offset = commandOffset();
   const name = args[offset];
   const operation = args[offset + 1];
+  const help = !name || name === 'help' || args.includes('--help');
+  if (
+    !help &&
+    !['version', '--version'].includes(name) &&
+    !commandDefinitions.some((definition) =>
+      definition.path.every((part, index) => args[offset + index] === part),
+    )
+  )
+    throw new CliError('unknown_command', 'Unknown command. Use hatch help.');
   if (['auth', 'app', 'workflow'].includes(name) && !args.includes('--help'))
     await refreshRunEnvironment(process.env, controller.signal);
-  if (!name || name === 'help' || args.includes('--help')) {
+  if (help) {
     const scope =
       name === 'help'
         ? args.slice(offset + 1).filter((part) => !part.startsWith('--'))
-        : ['app', 'workflow', 'auth'].includes(name)
+        : name && name !== '--help'
           ? [
               name,
               ...(operation && !operation.startsWith('--') ? [operation] : []),
@@ -65,7 +74,7 @@ try {
       throw new CliError('unknown_command', 'Unknown command. Use hatch help.');
     output(
       { name: 'hatch', version: manifest.version, commands, globalOptions },
-      `Hatch CLI ${manifest.version}\n\n${commands.map((definition) => `${definition.usage}\n  ${definition.description}`).join('\n')}\n\nGlobals: ${globalOptions.join(', ')}\nOperation and API key management are unsupported.`,
+      `Hatch CLI ${manifest.version}\n\n${commands.map((definition) => `${definition.usage}\n  ${definition.description}`).join('\n')}\n\nGlobals: ${globalOptions.join(', ')}`,
     );
   } else if (name === 'version' || name === '--version') {
     if (args.some((arg) => !['version', '--version', '--json'].includes(arg)))
@@ -75,20 +84,8 @@ try {
       `${manifest.version}\nCommit: ${buildInfo.commit?.slice(0, 12) ?? 'Unknown'}\nCommit time: ${buildInfo.commitTime ?? 'Unknown'}`,
     );
   } else if (name === 'auth') {
-    if (!['login', 'status', 'logout'].includes(operation))
-      throw new CliError(
-        'unsupported_command',
-        'API key management is available in Settings; this CLI only supports auth login/status/logout.',
-        8,
-      );
     await runAuth(args, offset, controller.signal);
-  } else if (name === 'operation')
-    throw new CliError(
-      'unsupported_command',
-      'Operation commands have no public API contract.',
-      8,
-    );
-  else if (name === 'app' && operation === 'invoke') {
+  } else if (name === 'app' && operation === 'invoke') {
     if (args[offset + 2] === 'backend')
       await runBackendInvocation(args, offset, controller.signal);
     else if (args[offset + 2] === 'webhook')

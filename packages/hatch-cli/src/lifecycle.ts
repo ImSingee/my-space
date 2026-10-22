@@ -50,11 +50,7 @@ export async function runLifecycle(
     'adopt',
   ];
   if (!available.includes(operation))
-    throw new CliError(
-      'unsupported_command',
-      'This command is not supported. Use hatch help for implemented commands.',
-      8,
-    );
+    throw new CliError('unknown_command', 'Unknown command. Use hatch help.');
   const common = {
     json: { type: 'boolean' },
     profile: { type: 'string' },

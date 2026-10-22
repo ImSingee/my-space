@@ -103,13 +103,17 @@ it('advertises implemented invocation and data commands in binary text and JSON 
     expect(command.supported).toBe(true);
     expect(command.description).not.toContain('Unsupported');
   }
-  for (const command of help.commands.filter(
-    (command) =>
-      ['operation', 'auth'].includes(command.path[0]) &&
-      (command.path[0] === 'operation' || command.path[1] === 'key'),
-  )) {
-    expect(command.supported).toBe(false);
-  }
+  expect(
+    help.commands.some(
+      (command) =>
+        command.path[0] === 'operation' ||
+        (command.path[0] === 'auth' && command.path[1] === 'key'),
+    ),
+  ).toBe(false);
+  const text = invoke(['help']);
+  expect(text).not.toContain('auth key');
+  expect(text).not.toMatch(/^operation /m);
+  expect(text).not.toContain('unsupported');
   for (const group of ['kv', 'data-table', 'db', 'invoke']) {
     const text = invoke(['app', group, '--help']);
     for (const command of dataCommands.filter(
