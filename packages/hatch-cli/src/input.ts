@@ -20,9 +20,10 @@ export async function readTextInput(
   path: string,
   signal: AbortSignal,
   maxBytes: number,
+  options: { preserveBOM?: boolean } = {},
 ): Promise<string> {
   if (!path) throw new CliError('input_required', 'Supply --file <path|->.');
-  let contents: string;
+  let bytes: Buffer;
   if (path === '-') {
     if (process.stdin.isTTY)
       throw new CliError(
@@ -37,18 +38,16 @@ export async function readTextInput(
     let size = 0;
     try {
       for await (const chunk of process.stdin) {
-        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        size += bytes.byteLength;
+        const chunkBytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += chunkBytes.byteLength;
         if (size > maxBytes)
           throw new CliError(
             'input_too_large',
             `Input exceeds ${maxBytes} bytes.`,
           );
-        chunks.push(bytes);
+        chunks.push(chunkBytes);
       }
-      contents = new TextDecoder('utf-8', { fatal: true }).decode(
-        Buffer.concat(chunks),
-      );
+      bytes = Buffer.concat(chunks);
     } catch (error) {
       if (error instanceof CliError) throw error;
       throw new CliError(
@@ -58,20 +57,17 @@ export async function readTextInput(
       );
     }
   } else
-    contents = await readFile(path, { signal })
-      .then((bytes) => {
-        if (bytes.byteLength > maxBytes)
-          throw new CliError(
-            'input_too_large',
-            `Input exceeds ${maxBytes} bytes.`,
-          );
-        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-      })
-      .catch((error) => {
-        if (error instanceof CliError) throw error;
-        throw new CliError('input_unreadable', 'Cannot read UTF-8 input file.');
-      });
-  if (Buffer.byteLength(contents) > maxBytes)
+    bytes = await readFile(path, { signal }).catch(() => {
+      throw new CliError('input_unreadable', 'Cannot read UTF-8 input file.');
+    });
+  if (bytes.byteLength > maxBytes)
     throw new CliError('input_too_large', `Input exceeds ${maxBytes} bytes.`);
-  return contents;
+  try {
+    return new TextDecoder('utf-8', {
+      fatal: true,
+      ignoreBOM: options.preserveBOM ?? false,
+    }).decode(bytes);
+  } catch {
+    throw new CliError('invalid_input', 'Input must be valid UTF-8.');
+  }
 }

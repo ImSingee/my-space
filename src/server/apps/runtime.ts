@@ -1218,6 +1218,8 @@ export async function proxyAppRequest(
   options: {
     stripSecretParam?: boolean;
     preserveAuthorization?: boolean;
+    /** Sanitize credentials and forwarding headers on authenticated backend RPC. */
+    platformAuthenticated?: boolean;
     signWithSecret?: string;
     expectedDeploymentId?: string;
   } = {},
@@ -1240,6 +1242,22 @@ export async function proxyAppRequest(
   const target = `http://127.0.0.1:${port}${rest}${search}`;
 
   const headers = new Headers(request.headers);
+  if (options.platformAuthenticated) {
+    // Connection can nominate additional hop-by-hop fields. Never allow clients
+    // to supply platform signing, routing or credential headers to App code.
+    const nominated = headers.get('connection')?.split(',') ?? [];
+    for (const name of nominated) if (name.trim()) headers.delete(name.trim());
+    const platformHeaders = [...headers.keys()].filter(
+      (name) =>
+        name.startsWith('x-hatch-') ||
+        name.startsWith('x-forwarded-') ||
+        name === 'x-real-ip' ||
+        name === 'proxy-connection',
+    );
+    for (const name of platformHeaders) headers.delete(name);
+    headers.delete('x-api-key');
+  }
+
   // Strip platform credentials and client-controlled routing/secret headers so a
   // deployed app can neither read the platform's Better Auth session nor the
   // webhook secret, nor spoof forwarding headers. Also drop hop-by-hop headers.
@@ -1271,11 +1289,9 @@ export async function proxyAppRequest(
   ]) {
     headers.delete(header);
   }
-  // On authenticated RPC/app routes `authorization` would carry the platform's
-  // credential, so strip it. On the public webhook path it is instead a
-  // caller-supplied header the app's `/__webhook` handler may need to validate,
-  // so the webhook proxy opts to preserve it.
-  if (!options.preserveAuthorization) {
+  // Authenticated backend RPCs must not expose platform credentials.
+  // Other proxy callers retain their existing forwarding options.
+  if (options.platformAuthenticated || !options.preserveAuthorization) {
     headers.delete('authorization');
   }
 
@@ -1342,7 +1358,10 @@ export async function proxyAppRequest(
     BACKEND_RESPONSE_TIMEOUT_MS,
   );
   if (typeof headerTimer.unref === 'function') headerTimer.unref();
-  init.signal = headerTimeout.signal;
+  init.signal = options.platformAuthenticated
+    ? AbortSignal.any([request.signal, headerTimeout.signal])
+    : headerTimeout.signal;
+  if (options.platformAuthenticated) init.redirect = 'manual';
   let upstream: Response;
   try {
     upstream = await fetch(target, init);
@@ -1356,6 +1375,15 @@ export async function proxyAppRequest(
     'grpc-status',
     'grpc-message',
     'connect-protocol-version',
+    // Per-message compression is part of backend RPC stream framing.
+    ...(options.platformAuthenticated
+      ? [
+          'connect-content-encoding',
+          'connect-accept-encoding',
+          'grpc-encoding',
+          'grpc-accept-encoding',
+        ]
+      : []),
   ]) {
     const value = upstream.headers.get(key);
     if (value) responseHeaders.set(key, value);
