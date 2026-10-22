@@ -14,12 +14,14 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout } from 'node:timers/promises';
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import { loadSkills } from '@earendil-works/pi-agent-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildCliSkills } from '../../../scripts/cli-skills';
+import {
+  buildCliSkills,
+  SkillValidationEnv,
+} from '../../../scripts/cli-skills';
 import { installSkills } from './skills';
 import { pnpmInvocation } from './pnpm';
 import manifest from '../package.json' with { type: 'json' };
@@ -42,7 +44,12 @@ describe('official Skill installation', { timeout: 30000 }, () => {
     try {
       const stdout = execFileSync(
         process.execPath,
-        [...(preload ? ['--import', preload] : []), binary, ...args, '--json'],
+        [
+          ...(preload ? ['--import', pathToFileURL(preload).href] : []),
+          binary,
+          ...args,
+          '--json',
+        ],
         { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
       );
       return { status: 0, result: JSON.parse(stdout) };
@@ -125,7 +132,10 @@ describe('official Skill installation', { timeout: 30000 }, () => {
     const installed = cli(cwd, ['skills', 'install']);
     expect(installed.status).toBe(0);
     const destination = join(cwd, '.agents/skills');
-    const loaded = await loadSkills(new NodeExecutionEnv({ cwd }), destination);
+    const loaded = await loadSkills(
+      new SkillValidationEnv({ cwd }),
+      destination,
+    );
     expect(loaded.diagnostics).toEqual([]);
     expect(loaded.skills).toHaveLength(6);
     for (const skill of listed.result.skills as {
@@ -273,7 +283,7 @@ describe('official Skill installation', { timeout: 30000 }, () => {
     await writeFile(
       preload,
       `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
-const original=fs.rename; fs.rename=async (a,b)=>{if(String(a).includes('/stage/app-compatibility'))throw Object.assign(new Error('injected disk failure'),{code:'EIO'}); return original(a,b)};syncBuiltinESMExports();`,
+const original=fs.rename; fs.rename=async (a,b)=>{if(String(a).includes(${JSON.stringify(join('stage', 'app-compatibility'))}))throw Object.assign(new Error('injected disk failure'),{code:'EIO'}); return original(a,b)};syncBuiltinESMExports();`,
     );
     const result = cli(
       cwd,
@@ -296,11 +306,19 @@ const original=fs.rename; fs.rename=async (a,b)=>{if(String(a).includes('/stage/
     await writeFile(
       preload,
       `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
-const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b);if(String(b).endsWith('/skills/building-apps')){await fs.writeFile(${JSON.stringify(marker)},'paused');await new Promise(()=>setInterval(()=>{},1000))}return value};syncBuiltinESMExports();`,
+const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b);if(String(b).endsWith(${JSON.stringify(join('skills', 'building-apps'))})){await fs.writeFile(${JSON.stringify(marker)},'paused');await new Promise(()=>setInterval(()=>{},1000))}return value};syncBuiltinESMExports();`,
     );
     const child = spawn(
       process.execPath,
-      ['--import', preload, binary, 'skills', 'install', ...args, '--json'],
+      [
+        '--import',
+        pathToFileURL(preload).href,
+        binary,
+        'skills',
+        'install',
+        ...args,
+        '--json',
+      ],
       { cwd, env, stdio: 'ignore' },
     );
     children.push(child);
@@ -350,13 +368,13 @@ const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b)
     const preloader = join(cwd, 'recover-pause.mjs');
     await writeFile(
       preloader,
-      `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';const original=fs.rename;fs.rename=async(a,b)=>{const value=await original(a,b);if(String(a).includes('/backup/building-apps')){await fs.writeFile(${JSON.stringify(recoveryMarker)},'paused');while(!await fs.access(${JSON.stringify(release)}).then(()=>true,()=>false)){await new Promise(resolve=>setTimeout(resolve,10));}}return value};syncBuiltinESMExports();`,
+      `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';const original=fs.rename;fs.rename=async(a,b)=>{const value=await original(a,b);if(String(a).includes(${JSON.stringify(join('backup', 'building-apps'))})){await fs.writeFile(${JSON.stringify(recoveryMarker)},'paused');while(!await fs.access(${JSON.stringify(release)}).then(()=>true,()=>false)){await new Promise(resolve=>setTimeout(resolve,10));}}return value};syncBuiltinESMExports();`,
     );
     const recovery = spawn(
       process.execPath,
       [
         '--import',
-        preloader,
+        pathToFileURL(preloader).href,
         binary,
         'skills',
         'install',
@@ -431,6 +449,30 @@ const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b)
     expect(await present(join(cwd, '.agents'))).toBe(false);
   });
 
+  it('builds the same official bundle from Windows checkout line endings', async () => {
+    const fixture = await project();
+    for (const name of ['skills', 'packages/hatch-cli/skills']) {
+      await mkdir(dirname(join(fixture, name)), { recursive: true });
+      await cp(join(repo, name), join(fixture, name), { recursive: true });
+    }
+    const expected = await buildCliSkills(fixture, manifest.version, null);
+    async function convert(directory: string) {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const file = join(directory, entry.name);
+        if (entry.isDirectory()) await convert(file);
+        else if (entry.name.endsWith('.md'))
+          await writeFile(
+            file,
+            (await readFile(file, 'utf8')).replace(/\r?\n/g, '\r\n'),
+          );
+      }
+    }
+    await convert(fixture);
+    expect(await buildCliSkills(fixture, manifest.version, null)).toEqual(
+      expected,
+    );
+  });
+
   it('packages supporting script and binary asset bytes without executing them and rejects unsafe official sources', async () => {
     const fixture = await project();
     for (const name of ['skills', 'packages/hatch-cli/skills']) {
@@ -465,13 +507,14 @@ const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b)
     ).toContain('MUST-NOT-EXECUTE');
     expect(await present(join(destination, 'MUST-NOT-EXECUTE'))).toBe(false);
     await symlink(
-      join(source, 'assets/payload.bin'),
-      join(source, 'assets/link.bin'),
+      join(source, 'assets'),
+      join(source, 'linked-assets'),
+      'junction',
     );
     await expect(
       buildCliSkills(fixture, manifest.version, null),
     ).rejects.toThrow('symlinks');
-    await rm(join(source, 'assets/link.bin'));
+    await rm(join(source, 'linked-assets'));
     await writeFile(
       join(source, 'SKILL.md'),
       '---\nname: building-apps\ndescription: []\n---\n',
@@ -488,30 +531,34 @@ const original=fs.rename; fs.rename=async(a,b)=>{const value=await original(a,b)
     ).rejects.toThrow('metadata');
   });
 
-  it('restores old content when SIGTERM arrives after the first published Skill', async () => {
-    const cwd = await project();
-    const target = join(cwd, '.agents/skills/building-apps');
-    await mkdir(target, { recursive: true });
-    await writeFile(join(target, 'SKILL.md'), 'previous');
-    const preload = join(cwd, 'cancel.mjs');
-    await writeFile(
-      preload,
-      `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
-const original=fs.rename; let fired=false; fs.rename=async(a,b)=>{const value=await original(a,b);if(!fired && String(b).endsWith('/skills/building-apps')){fired=true;process.kill(process.pid,'SIGTERM');await new Promise(resolve=>setTimeout(resolve,20));}return value;};syncBuiltinESMExports();`,
-    );
-    const result = cli(
-      cwd,
-      ['skills', 'install', 'building-apps', '--replace'],
-      preload,
-    );
-    expect(result.status).toBe(130);
-    expect(result.result.error.code).toBe('cancelled');
-    expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe('previous');
-    expect(await present(join(cwd, '.agents/skills/app-compatibility'))).toBe(
-      false,
-    );
-    expect(await present(join(cwd, '.agents/.hatch-skills-install'))).toBe(
-      false,
-    );
-  });
+  // Windows kill(SIGTERM) force-terminates; it cannot exercise a signal handler.
+  it.skipIf(process.platform === 'win32')(
+    'restores old content when SIGTERM arrives after the first published Skill',
+    async () => {
+      const cwd = await project();
+      const target = join(cwd, '.agents/skills/building-apps');
+      await mkdir(target, { recursive: true });
+      await writeFile(join(target, 'SKILL.md'), 'previous');
+      const preload = join(cwd, 'cancel.mjs');
+      await writeFile(
+        preload,
+        `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
+const original=fs.rename; let fired=false; fs.rename=async(a,b)=>{const value=await original(a,b);if(!fired && String(b).endsWith(${JSON.stringify(join('skills', 'building-apps'))})){fired=true;process.kill(process.pid,'SIGTERM');await new Promise(resolve=>setTimeout(resolve,20));}return value;};syncBuiltinESMExports();`,
+      );
+      const result = cli(
+        cwd,
+        ['skills', 'install', 'building-apps', '--replace'],
+        preload,
+      );
+      expect(result.status).toBe(130);
+      expect(result.result.error.code).toBe('cancelled');
+      expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe('previous');
+      expect(await present(join(cwd, '.agents/skills/app-compatibility'))).toBe(
+        false,
+      );
+      expect(await present(join(cwd, '.agents/.hatch-skills-install'))).toBe(
+        false,
+      );
+    },
+  );
 });

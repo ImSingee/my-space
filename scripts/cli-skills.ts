@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { loadSkills } from '@earendil-works/pi-agent-core';
+import { loadSkills, type FileInfo } from '@earendil-works/pi-agent-core';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import {
   LATEST_APP_COMPATIBILITY_VERSION,
@@ -17,6 +17,36 @@ import type {
   OfficialSkill,
   SkillBundle,
 } from '../packages/hatch-cli/src/skill-bundle';
+
+function skillFileInfo(info: FileInfo): FileInfo {
+  const portablePath = info.path.replaceAll('\\', '/');
+  return {
+    ...info,
+    path: portablePath,
+    name: path.posix.basename(portablePath),
+  };
+}
+
+/** The Skill loader's filesystem namespace uses forward slashes on every OS. */
+export class SkillValidationEnv extends NodeExecutionEnv {
+  override async fileInfo(file: string) {
+    const result = await super.fileInfo(file);
+    return result.ok
+      ? { ok: true as const, value: skillFileInfo(result.value) }
+      : result;
+  }
+
+  override async listDir(directory: string, signal?: AbortSignal) {
+    const result = await super.listDir(directory, signal);
+    return result.ok
+      ? { ok: true as const, value: result.value.map(skillFileInfo) }
+      : result;
+  }
+}
+
+async function readMarkdown(file: string) {
+  return (await readFile(file, 'utf8')).replace(/\r\n?/g, '\n');
+}
 
 const dependencies: Record<string, string[]> = {
   'building-apps': ['app-compatibility'],
@@ -57,7 +87,7 @@ function adapt(
   original: string,
   guide: string,
 ) {
-  let text = original;
+  let text = original.replace(/\r\n?/g, '\n');
   if (filename === 'SKILL.md') {
     if (name === 'building-apps') text = section(text, 'Core workflow', guide);
     if (name === 'building-workflows') {
@@ -200,7 +230,7 @@ export async function buildCliSkills(
       throw new Error('Invalid skill source directory.');
     const contents = await files(source);
     const parsed = await loadSkills(
-      new NodeExecutionEnv({ cwd: root }),
+      new SkillValidationEnv({ cwd: root }),
       source,
     );
     if (
@@ -209,14 +239,15 @@ export async function buildCliSkills(
       parsed.skills[0].name !== name
     )
       throw new Error(`Invalid official skill metadata: ${name}`);
-    const metadata = Buffer.from(contents['SKILL.md'], 'base64').toString();
+    const metadata = Buffer.from(contents['SKILL.md'], 'base64')
+      .toString()
+      .replace(/\r\n?/g, '\n');
     const description = metadata.match(/^description: (.+)$/m)?.[1];
     if (!metadata.startsWith(`---\nname: ${name}\n`) || !description)
       throw new Error(`Invalid official skill metadata: ${name}`);
     const kind = name.includes('workflow') ? 'workflow' : 'app';
-    const guide = await readFile(
+    const guide = await readMarkdown(
       path.join(root, 'packages/hatch-cli/skills/lifecycle.md'),
-      'utf8',
     );
     for (const [filename, encoded] of Object.entries(contents)) {
       if (!filename.endsWith('.md')) continue;
@@ -235,9 +266,8 @@ export async function buildCliSkills(
         ),
       ).toString('base64');
     }
-    const contract = await readFile(
+    const contract = await readMarkdown(
       path.join(root, 'packages/hatch-cli/skills/cli.md'),
-      'utf8',
     );
     contents['references/cli.md'] = Buffer.from(
       `${contract.replaceAll('APP_LATEST', String(LATEST_APP_COMPATIBILITY_VERSION)).replaceAll('APP_MINIMUM', String(MIN_SUPPORTED_APP_COMPATIBILITY_VERSION)).replaceAll('WORKFLOW_LATEST', String(LATEST_WORKFLOW_COMPATIBILITY_VERSION)).replaceAll('WORKFLOW_MINIMUM', String(MIN_SUPPORTED_WORKFLOW_COMPATIBILITY_VERSION))}\n## Bundled revision\n\nCLI ${version}; platform source ${commit ?? 'unknown'}.\n\n## Supported commands in this CLI\n\n${commandDefinitions
