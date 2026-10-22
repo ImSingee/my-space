@@ -500,6 +500,18 @@ button.stepHeader:hover {
   font-size: 0.9em;
 }
 
+/* Keep inline-code decoration off fenced/indented blocks. Mantine's later
+   :where(code) rule otherwise overrides its equally specific pre/code reset. */
+.markdown pre code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 /* ---------- chat layout ---------- */
 
 .root {
