@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   build-cli:
     name: Build CLI (${{ matrix.os }})
@@ -16,6 +19,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 26.x
@@ -31,3 +36,38 @@ jobs:
           node packages/hatch-cli/dist/main.mjs --help
       - name: Verify CLI authentication, stdin and workspace lifecycles
         run: pnpm exec vitest run --project unit packages/hatch-cli/src
+
+  publish-preview:
+    name: Publish CLI preview
+    needs: build-cli
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+      - uses: pnpm/action-setup@v6
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build standalone CLI
+        run: pnpm build:cli
+      - name: Verify standalone CLI entry point
+        run: node packages/hatch-cli/dist/main.mjs --version
+      - name: Prepare CLI manifest for preview publishing
+        # Keep the source package private; only this disposable checkout changes.
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'packages/hatch-cli/package.json';
+          const manifest = JSON.parse(readFileSync(path, 'utf8'));
+          delete manifest.private;
+          writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+      - name: Publish CLI preview
+        run: pnpm exec pkg-pr-new publish --pnpm --bin --no-compact --commentWithSha --no-template './packages/hatch-cli'
