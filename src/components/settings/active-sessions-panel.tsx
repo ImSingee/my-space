@@ -23,11 +23,10 @@ import {
   type AccountSession,
 } from '~queries/account-sessions';
 import classes from './active-sessions-panel.module.css';
-import metaClasses from './session-meta.module.css';
 import {
   DEVICE_ICONS,
   describeUserAgent,
-  formatSignInTime,
+  formatSessionTime,
 } from './session-device';
 
 const REVOKE_KEY = ['auth', 'account-sessions', 'revoke'];
@@ -76,8 +75,7 @@ export function ActiveSessionsPanel() {
       centered: true,
       children: (
         <Text size="sm">
-          The session that signed in {formatSignInTime(session.createdAt)}
-          {session.ipAddress ? ` from ${session.ipAddress}` : ''} ends
+          The session last active {formatSessionTime(session.updatedAt)} ends
           immediately and must sign in again. Other sessions on the same device
           are not affected.
         </Text>
@@ -162,7 +160,7 @@ function ActiveSessionRow({
 }) {
   const device = describeUserAgent(session.userAgent);
   const DeviceIcon = DEVICE_ICONS[device.kind];
-  const signedIn = formatSignInTime(session.createdAt);
+  const lastActive = formatSessionTime(session.updatedAt);
 
   return (
     <li className={classes.row}>
@@ -196,11 +194,8 @@ function ActiveSessionRow({
               </Badge>
             )}
           </Group>
-          <Text size="xs" c="dimmed" className={metaClasses.meta}>
-            <span>{session.ipAddress ?? 'IP address unavailable'}</span>
-            <span>
-              Signed in <time dateTime={session.createdAt}>{signedIn}</time>
-            </span>
+          <Text size="xs" c="dimmed">
+            Last active <time dateTime={session.updatedAt}>{lastActive}</time>
           </Text>
         </Stack>
       </Group>
@@ -211,7 +206,7 @@ function ActiveSessionRow({
           size="xs"
           variant="subtle"
           color="red"
-          aria-label={`Sign out ${device.label}, signed in ${signedIn}`}
+          aria-label={`Sign out ${device.label}, last active ${lastActive}`}
           loading={revoking}
           onClick={onRevoke}
           className={classes.action}
