@@ -3,6 +3,7 @@
  * platform's internal API (via the injected PlatformClient). Runs inside the
  * Agent Runner process — never import `~server/*` values here.
  */
+import type { CommandCredentials } from '../command-credentials';
 import type { ExecutionEnv } from '@earendil-works/pi-agent-core';
 import type { PlatformClient } from '../platform-client';
 import { createAppTools } from './apps';
@@ -19,6 +20,7 @@ export type { AskBridge, EnvBridge };
 
 export type CreateToolsOptions = {
   workflowBetaEnabled: boolean;
+  commandCredentials?: CommandCredentials;
   platform: PlatformClient;
   ask?: AskBridge;
   requestEnv?: EnvBridge;
@@ -40,7 +42,7 @@ export function createTools(
       env,
       options.readOnlyRoots ? { readOnlyRoots: options.readOnlyRoots } : {},
     ),
-    createCommandTool(env, options.sessionId),
+    createCommandTool(env, options.sessionId, options.commandCredentials),
     createAttachmentTool(shared),
     ...createAppTools(shared),
     ...(options.workflowBetaEnabled ? createWorkflowTools(shared) : []),

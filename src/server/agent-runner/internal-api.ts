@@ -193,7 +193,7 @@ export async function handleInternalApiRequest(
     const [, , resource, ...rest] = segments;
     const method = req.method ?? 'GET';
 
-    // POST /internal/api/runs/:runId/token {runnerId}: a fresh five-minute
+    // POST /internal/api/runs/:runId/token {runnerId}: a fresh short-lived
     // Agent Run credential, used by the public platform API. Renewal uses this call.
     if (
       resource === 'runs' &&
