@@ -6,6 +6,7 @@ import { db, schema } from '~/db';
 import { normalizeEntryHash } from './apps/sidebar';
 import { authMiddleware } from './auth';
 import { persistSortOrder } from './sort-order';
+import { readSidebarItems } from './workspace-read';
 import { idListSchema, idSchema, nameSchema } from './validation';
 
 // Advisory-lock namespace for the (int, int) form of pg_advisory_xact_lock.
@@ -14,43 +15,11 @@ import { idListSchema, idSchema, nameSchema } from './validation';
 // (apps/kv.ts), DASHBOARDS_LOCK_NS=5 (dashboards.ts).
 const SIDEBAR_PIN_LOCK_NS = 4;
 
-export type SidebarItem = {
-  id: string;
-  appId: string;
-  appSlug: string;
-  label: string;
-  /** Hash entry point within the app (no leading '#'); null opens the root. */
-  entryHash: string | null;
-  status: schema.AppStatus;
-};
+export type { SidebarItem } from './workspace-read';
 
 export const listSidebarItems = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .handler(async (): Promise<SidebarItem[]> => {
-    const pins = await db.query.sidebarItems.findMany({
-      orderBy: { sortOrder: 'asc', createdAt: 'asc' },
-    });
-    if (pins.length === 0) return [];
-    const apps = await db.query.apps.findMany({
-      where: { id: { in: [...new Set(pins.map((p) => p.appId))] } },
-      columns: { id: true, slug: true, name: true, status: true },
-    });
-    const appById = new Map(apps.map((app) => [app.id, app]));
-    const items: SidebarItem[] = [];
-    for (const pin of pins) {
-      const app = appById.get(pin.appId);
-      if (!app) continue;
-      items.push({
-        id: pin.id,
-        appId: pin.appId,
-        appSlug: app.slug,
-        label: pin.label || app.name,
-        entryHash: pin.entryHash ?? null,
-        status: app.status,
-      });
-    }
-    return items;
-  });
+  .handler(() => readSidebarItems());
 
 /** Next sidebar sortOrder: max+1, so deletions never cause collisions. */
 const nextSidebarSortOrder = sql`(select coalesce(max(${schema.sidebarItems.sortOrder}), -1) + 1 from ${schema.sidebarItems})`;

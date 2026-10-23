@@ -38,6 +38,7 @@ import { Route as AppWorkflowsIndexRouteImport } from './routes/_app/workflows/i
 import { Route as ApiAgentRunsRouteImport } from './routes/api/agent/runs'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiRpcSplatRouteImport } from './routes/api/rpc/$'
+import { Route as MobileDashboardDashboardIdRouteImport } from './routes/mobile/dashboard/$dashboardId'
 import { Route as AppAppAppSlugIndexRouteImport } from './routes/_app/app/$appSlug/index'
 import { Route as AppAppAppSlugManageRouteImport } from './routes/_app/app/$appSlug/manage'
 import { Route as AppWorkflowWorkflowSlugIndexRouteImport } from './routes/_app/workflow/$workflowSlug/index'
@@ -207,6 +208,12 @@ const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MobileDashboardDashboardIdRoute =
+  MobileDashboardDashboardIdRouteImport.update({
+    id: '/mobile/dashboard/$dashboardId',
+    path: '/mobile/dashboard/$dashboardId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AppAppAppSlugIndexRoute = AppAppAppSlugIndexRouteImport.update({
   id: '/app/$appSlug/',
   path: '/app/$appSlug/',
@@ -361,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/mobile/dashboard/$dashboardId': typeof MobileDashboardDashboardIdRoute
   '/agent/': typeof AppAgentIndexRoute
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
@@ -413,6 +421,7 @@ export interface FileRoutesByTo {
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/mobile/dashboard/$dashboardId': typeof MobileDashboardDashboardIdRoute
   '/agent': typeof AppAgentIndexRoute
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
@@ -469,6 +478,7 @@ export interface FileRoutesById {
   '/api/agent/runs': typeof ApiAgentRunsRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/mobile/dashboard/$dashboardId': typeof MobileDashboardDashboardIdRoute
   '/_app/agent/': typeof AppAgentIndexRoute
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
@@ -525,6 +535,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs'
     | '/api/auth/$'
     | '/api/rpc/$'
+    | '/mobile/dashboard/$dashboardId'
     | '/agent/'
     | '/apps/'
     | '/dashboard/'
@@ -577,6 +588,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs'
     | '/api/auth/$'
     | '/api/rpc/$'
+    | '/mobile/dashboard/$dashboardId'
     | '/agent'
     | '/apps'
     | '/dashboard'
@@ -632,6 +644,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs'
     | '/api/auth/$'
     | '/api/rpc/$'
+    | '/mobile/dashboard/$dashboardId'
     | '/_app/agent/'
     | '/_app/apps/'
     | '/_app/dashboard/'
@@ -675,6 +688,7 @@ export interface RootRouteChildren {
   ApiAgentRunsRoute: typeof ApiAgentRunsRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
+  MobileDashboardDashboardIdRoute: typeof MobileDashboardDashboardIdRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
   ApiAuthHandoffsCompleteRoute: typeof ApiAuthHandoffsCompleteRoute
@@ -894,6 +908,13 @@ declare module '@tanstack/react-router' {
       path: '/api/rpc/$'
       fullPath: '/api/rpc/$'
       preLoaderRoute: typeof ApiRpcSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobile/dashboard/$dashboardId': {
+      id: '/mobile/dashboard/$dashboardId'
+      path: '/mobile/dashboard/$dashboardId'
+      fullPath: '/mobile/dashboard/$dashboardId'
+      preLoaderRoute: typeof MobileDashboardDashboardIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/app/$appSlug/': {
@@ -1175,6 +1196,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAgentRunsRoute: ApiAgentRunsRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
+  MobileDashboardDashboardIdRoute: MobileDashboardDashboardIdRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
   ApiAuthHandoffsCompleteRoute: ApiAuthHandoffsCompleteRoute,

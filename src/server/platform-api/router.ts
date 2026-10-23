@@ -61,6 +61,8 @@ import { queryAppKv } from '~server/apps/query-kv';
 import { queryAppDataTable } from '~server/apps/query-data-table';
 import { queryAppDatabase } from '~server/apps/query-db';
 import { associateAgentSessionApp } from '~server/agent-session-apps';
+import { WorkspaceService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workspace_pb';
+import { readWorkspace } from '~server/workspace-read';
 
 export const publicApiContext = createContextKey<PublicApiContext>({
   run: null,
@@ -314,6 +316,11 @@ export function registerPlatformApi(
       }
     },
   };
+  router.service(
+    WorkspaceService,
+    { getWorkspace: () => readWorkspace() },
+    sessionOnly,
+  );
   router.service(
     AgentService,
     {
