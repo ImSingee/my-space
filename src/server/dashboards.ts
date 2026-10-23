@@ -18,6 +18,7 @@ import {
 import { liveAppManifests } from './apps/access';
 import { authMiddleware } from './auth';
 import { persistSortOrder } from './sort-order';
+import { readDashboards, type Dashboard } from './workspace-read';
 import { idListSchema, idSchema, nameSchema } from './validation';
 
 // Advisory-lock namespace for the (int, int) form of pg_advisory_xact_lock.
@@ -32,42 +33,11 @@ async function lockDashboard(tx: TX, dashboardId: string): Promise<void> {
   );
 }
 
-export type Dashboard = {
-  id: string;
-  name: string;
-  description: string | null;
-  pinned: boolean;
-  sortOrder: number;
-  /** Auto-refresh interval in seconds; 0 disables auto-refresh. */
-  autoRefreshSeconds: number;
-};
-
-/** Make sure at least one dashboard always exists for the UI to land on. */
-async function ensureDefaultDashboard(): Promise<void> {
-  const existing = await db.query.dashboards.findFirst();
-  if (existing) return;
-  await db
-    .insert(schema.dashboards)
-    .values({ id: 'default', name: 'My Dashboard', pinned: true, sortOrder: 0 })
-    .onConflictDoNothing();
-}
+export type { Dashboard } from './workspace-read';
 
 export const listDashboards = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
-  .handler(async (): Promise<Dashboard[]> => {
-    await ensureDefaultDashboard();
-    const rows = await db.query.dashboards.findMany({
-      orderBy: { sortOrder: 'asc', createdAt: 'asc' },
-    });
-    return rows.map((d) => ({
-      id: d.id,
-      name: d.name,
-      description: d.description,
-      pinned: d.pinned,
-      sortOrder: d.sortOrder,
-      autoRefreshSeconds: d.autoRefresh,
-    }));
-  });
+  .handler(() => readDashboards());
 
 export const createDashboard = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])

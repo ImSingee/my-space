@@ -6,3 +6,4 @@ export * from './gen/hatch/platform/v1/lifecycle_pb.js';
 export * from './gen/hatch/platform/v1/file_pb.js';
 export * from './gen/hatch/platform/v1/error_pb.js';
 export * from './gen/hatch/platform/v1/agent_pb.js';
+export * from './gen/hatch/platform/v1/workspace_pb.js';

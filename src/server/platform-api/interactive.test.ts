@@ -7,6 +7,7 @@ import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
 import { AuthService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/auth_pb';
+import { WorkspaceService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workspace_pb';
 import { PublicErrorSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/error_pb';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
@@ -118,6 +119,7 @@ function client(useBinaryFormat: boolean) {
     agent: createClient(AgentService, transport),
     apps: createClient(AppService, transport),
     auth: createClient(AuthService, transport),
+    workspace: createClient(WorkspaceService, transport),
     cli: cliClient(transport),
   };
 }
@@ -181,6 +183,7 @@ beforeEach(async () => {
   await db.delete(schema.agentProviders);
   await db.delete(schema.verification);
   await db.delete(schema.dashboards);
+  await db.delete(schema.workflows);
   await db.insert(schema.dashboards).values({
     id: 'dashboard-one',
     name: 'Handoff dashboard',
@@ -409,6 +412,7 @@ describe('interactive Platform API contracts and authority', () => {
         ['AgentService/CreateSession', {}],
         ['AppService/CreateAppHandoff', { id: 'app-one' }],
         ['AuthService/CreateHandoff', {}],
+        ['WorkspaceService/GetWorkspace', {}],
       ] as const) {
         const response = await call(path, { headers, body });
         expect(response.status).toBe(403);
@@ -1350,5 +1354,195 @@ describe('one-use WebView handoff', () => {
       }),
     ).toBeNull();
     expect((await consume(pending.ticket)).status).toBe(401);
+  });
+});
+
+describe('session workspace navigation', () => {
+  it.each([false, true])(
+    'preserves web ordering, pin identity, names and hash entries binary=%s',
+    async (useBinaryFormat) => {
+      await db.delete(schema.dashboards);
+      await db.insert(schema.dashboards).values([
+        { id: 'last', name: 'Last', sortOrder: 5, pinned: false },
+        {
+          id: 'first',
+          name: 'Overview',
+          description: 'Daily view',
+          sortOrder: 1,
+          pinned: true,
+          autoRefresh: 30,
+          createdAt: new Date('2026-01-01'),
+        },
+        {
+          id: 'second',
+          name: 'Second',
+          sortOrder: 1,
+          createdAt: new Date('2026-02-01'),
+        },
+      ]);
+      await db.insert(schema.apps).values({
+        id: 'archived',
+        slug: 'archived',
+        name: 'Archived',
+        status: 'archived',
+      });
+      await db.insert(schema.sidebarItems).values([
+        { id: 'root', appId: 'app-one', label: '', sortOrder: 5 },
+        {
+          id: 'today',
+          appId: 'app-one',
+          label: 'Today',
+          entryHash: '/today?filter=mine',
+          sortOrder: 1,
+          createdAt: new Date('2026-01-01'),
+        },
+        {
+          id: 'archive',
+          appId: 'app-one',
+          label: 'Archive',
+          entryHash: '/archive',
+          sortOrder: 1,
+          createdAt: new Date('2026-02-01'),
+        },
+        { id: 'hidden', appId: 'archived', label: 'Hidden', sortOrder: 0 },
+      ]);
+      await db.insert(schema.workflows).values([
+        {
+          id: 'older',
+          slug: 'older',
+          name: 'Older',
+          pinned: true,
+          sortOrder: 0,
+          updatedAt: new Date('2026-01-01'),
+        },
+        {
+          id: 'newer',
+          slug: 'newer',
+          name: 'Newer',
+          pinned: true,
+          sortOrder: 9,
+          updatedAt: new Date('2026-02-01'),
+        },
+        {
+          id: 'hidden',
+          slug: 'hidden',
+          name: 'Hidden',
+          pinned: true,
+          status: 'archived',
+        },
+        { id: 'unpinned', slug: 'unpinned', name: 'Unpinned', pinned: false },
+      ]);
+      const workspace = await client(useBinaryFormat).workspace.getWorkspace(
+        {},
+      );
+      expect(workspace.dashboards.map((d) => d.id)).toEqual([
+        'first',
+        'second',
+        'last',
+      ]);
+      expect(workspace.dashboards[0]).toMatchObject({
+        name: 'Overview',
+        description: 'Daily view',
+        pinned: true,
+        autoRefreshSeconds: 30,
+      });
+      expect(workspace.dashboards[2]).toMatchObject({
+        pinned: false,
+        description: '',
+      });
+      expect(
+        workspace.appPins.map(({ id, appId, appSlug, label, entryHash }) => ({
+          id,
+          appId,
+          appSlug,
+          label,
+          entryHash,
+        })),
+      ).toEqual([
+        {
+          id: 'today',
+          appId: 'app-one',
+          appSlug: 'example-app',
+          label: 'Today',
+          entryHash: '/today?filter=mine',
+        },
+        {
+          id: 'archive',
+          appId: 'app-one',
+          appSlug: 'example-app',
+          label: 'Archive',
+          entryHash: '/archive',
+        },
+        {
+          id: 'root',
+          appId: 'app-one',
+          appSlug: 'example-app',
+          label: 'Example app',
+          entryHash: '',
+        },
+      ]);
+      expect(workspace.pinnedWorkflowIds).toEqual(['newer', 'older']);
+      const serialized = JSON.stringify(workspace);
+      expect(serialized).not.toContain('never-return');
+      expect(serialized).not.toContain('/private/repo');
+      const { readDashboards, readSidebarItems } =
+        await import('../workspace-read');
+      expect((await readDashboards()).map((d) => d.id)).toEqual(
+        workspace.dashboards.map((d) => d.id),
+      );
+      expect(
+        (await readSidebarItems())
+          .filter((p) => p.status !== 'archived')
+          .map((p) => p.id),
+      ).toEqual(workspace.appPins.map((p) => p.id));
+    },
+  );
+
+  it('uses the same default dashboard when web and native initialize an empty instance concurrently', async () => {
+    await db.delete(schema.dashboards);
+    await db.delete(schema.apps);
+    const { readDashboards } = await import('../workspace-read');
+    const [web, native, repeated] = await Promise.all([
+      readDashboards(),
+      client(false).workspace.getWorkspace({}),
+      client(true).workspace.getWorkspace({}),
+    ]);
+    expect(web.map((d) => d.id)).toEqual(['default']);
+    for (const value of [native, repeated]) {
+      expect(value.dashboards).toMatchObject([
+        { id: 'default', name: 'My Dashboard', pinned: true },
+      ]);
+      expect(value.appPins).toEqual([]);
+      expect(value.pinnedWorkflowIds).toEqual([]);
+    }
+    expect(await db.query.dashboards.findMany()).toHaveLength(1);
+  });
+
+  it('requires a valid session, rejects explicit invalid credentials and cross-origin reads before initialization', async () => {
+    await db.delete(schema.dashboards);
+    for (const [headers, status] of [
+      [{}, 401],
+      [{ authorization: 'Bearer invalid', cookie }, 401],
+      [{ 'x-api-key': 'invalid', cookie }, 401],
+      [{ cookie, origin: 'https://evil.example' }, 403],
+      [{ cookie, origin: 'null' }, 403],
+      [{ cookie, 'sec-fetch-site': 'cross-site' }, 403],
+    ] as const) {
+      const response = await call('WorkspaceService/GetWorkspace', {
+        cookieOnly: true,
+        headers,
+      });
+      expect(response.status).toBe(status);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect(await db.query.dashboards.findMany()).toEqual([]);
+    }
+    const response = await call('WorkspaceService/GetWorkspace', {
+      cookieOnly: true,
+      headers: { cookie, origin, 'sec-fetch-site': 'same-origin' },
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).dashboards).toMatchObject([
+      { id: 'default' },
+    ]);
   });
 });
