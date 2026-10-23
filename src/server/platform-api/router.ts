@@ -2,7 +2,7 @@ import { fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { getAgentModelCatalog } from '~server/agent-model-catalog';
-import { createAppHandoff } from '~server/app-handoffs';
+import { createHandoff } from '~server/handoffs';
 import {
   insertAgentSession,
   listSessionSummaries,
@@ -362,13 +362,26 @@ export function registerPlatformApi(
     sessionOnly,
   );
   router.rpc(
+    AuthService.method.createHandoff,
+    (input, context) => {
+      const { target } = input;
+      if (!target.case) throw publicApiError('BAD_REQUEST');
+      return createHandoff(
+        new Request(context.url, { headers: context.requestHeader }),
+        context.values.get(publicApiContext).session!,
+        { type: target.case, id: target.value.id },
+      );
+    },
+    { ...sessionOnly, jsonOptions: { ignoreUnknownFields: false } },
+  );
+  router.rpc(
     AppService.method.createAppHandoff,
     async (input, context) => {
       const app = await find('apps', input.id);
-      return createAppHandoff(
+      return createHandoff(
         new Request(context.url, { headers: context.requestHeader }),
         context.values.get(publicApiContext).session!,
-        app.id,
+        { type: 'app', id: app.id },
       );
     },
     sessionOnly,
@@ -443,30 +456,28 @@ export function registerPlatformApi(
   router.rpc(WorkflowService.method.deployWorkflow, workflows.deploy, {
     readMaxBytes: deployBodyLimit,
   });
-  router.service(AuthService, {
-    getStatus: (_input, context) => {
-      const status = context.values.get(publicApiContext).status;
-      if (!status) throw publicApiError('UNAUTHORIZED');
-      const expiresAt = status.expiresAt ?? undefined;
-      if (status.credentialType === 'session')
-        return {
-          expiresAt,
-          credential: { case: 'session', value: { user: status.user } },
-        };
-      if (status.credentialType === 'api-key')
-        return {
-          expiresAt,
-          credential: {
-            case: 'apiKey',
-            value: {
-              user: status.user,
-              id: status.key.id,
-              name: status.key.name ?? undefined,
-            },
+  router.rpc(AuthService.method.getStatus, (_input, context) => {
+    const status = context.values.get(publicApiContext).status;
+    if (!status) throw publicApiError('UNAUTHORIZED');
+    const expiresAt = status.expiresAt ?? undefined;
+    if (status.credentialType === 'session')
+      return {
+        expiresAt,
+        credential: { case: 'session', value: { user: status.user } },
+      };
+    if (status.credentialType === 'api-key')
+      return {
+        expiresAt,
+        credential: {
+          case: 'apiKey',
+          value: {
+            user: status.user,
+            id: status.key.id,
+            name: status.key.name ?? undefined,
           },
-        };
-      return { expiresAt, credential: { case: 'run', value: status.context } };
-    },
+        },
+      };
+    return { expiresAt, credential: { case: 'run', value: status.context } };
   });
   router.service(SdkService, {
     getSdk: async (input) => {

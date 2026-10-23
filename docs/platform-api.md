@@ -38,7 +38,8 @@ resource and release messages; `file.proto` shares file payloads; `error.proto`
 owns business error details. All files retain the `hatch.platform.v1` package.
 The contract defines `hatch.platform.v1.AppService`, `WorkflowService`, `AuthService` and
 `SdkService`, plus session-only `AgentService`. Both lifecycle services provide list, create, get, get-source,
-deploy and rollback RPCs. Auth provides `GetStatus`; Sdk provides `GetSdk`.
+deploy and rollback RPCs. Auth provides `GetStatus` and session-only
+`CreateHandoff`; Sdk provides `GetSdk`.
 There are no REST aliases or OpenAPI endpoint. Former `/api/v1/*`, including
 `openapi.json`, and `/api/cli/v1/*` return JSON 404 rather than the SPA shell.
 
@@ -111,7 +112,8 @@ artifact/data fences. Deployment requests include the resource's observed
 
 Every valid Better Auth session (Cookie or Bearer session token), user API key
 (`x-api-key`), or Agent Run JWT has full access to the existing lifecycle, auth
-status and SDK procedures. Interactive Agent methods and `CreateAppHandoff`
+status and SDK procedures. Interactive Agent methods, `CreateHandoff`, and the
+legacy `CreateAppHandoff`
 require a Better Auth user session; API keys and Run JWTs receive
 `permission_denied` with `SESSION_REQUIRED`, even alongside a valid Cookie.
 There are no added scopes or roles. A Run's context associates newly created Apps with
@@ -156,7 +158,8 @@ REST `null`. Timestamps remain ISO strings.
 | `AgentService/ListSessions`    | Optional `appId` (1–200 characters)                                                        | `{sessions}` newest first; each includes `id`, `title`, `appIds`, optional `providerId`/`modelId`, `messageCount`, `updatedAt`. Reuses the browser store and association filter.                                                                                                               |
 | `AgentService/CreateSession`   | Optional `title` (≤200 characters), `providerId`/`modelId` (1–200 characters when present) | `{id}`. Blank title becomes `New chat`; omitted models remain unset. Availability is checked when a run starts.                                                                                                                                                                                |
 | `AgentService/GetSession`      | `id` (1–200 characters)                                                                    | `{session}` with transcript `google.protobuf.Value` messages, optional `activeRun`, run timings, `updatedAt` Retry CAS and `serverTime`. One repeatable-read snapshot; pending questions/environment requests and `answeredAskId` preserve reconnect behavior. Missing session is `not_found`. |
-| `AppService/CreateAppHandoff`  | App `id` or slug (1–191 characters)                                                        | `{url, ticket, expiresAt, targetPath}`. Rechecks a current supported frontend deployment and non-archived App; unavailable Apps are `aborted`/`CONFLICT`. No client redirect target.                                                                                                           |
+| `AuthService/CreateHandoff`    | Required `target` oneof: `app: {id}` or `dashboard: {id}`; immutable resource IDs          | `{url, ticket, expiresAt, targetPath}`. Rechecks the resource before issuance and consumption. No caller-supplied URL or path; unknown JSON fields fail. See [browser handoffs](browser-handoffs.md).                                                                                          |
+| `AppService/CreateAppHandoff`  | App `id` or slug (1–191 characters)                                                        | Deprecated compatibility adapter to the same handoff service. Existing response fields, ID-first lookup and App embed destination remain supported.                                                                                                                                            |
 
 ### Native authentication and one-use browser handoff
 
@@ -170,7 +173,7 @@ session token in secure storage scoped to the exact instance origin.
 The only added native auth transport is
 `POST /api/auth/handoffs/consume`: exactly one URL-encoded `ticket` form field,
 maximum 1 KiB, no substitute Cookie/API key/Bearer authorization. Successful
-consumption returns a 303 to the server-computed App embed path and sets a signed,
+consumption returns a 303 to the server-computed App embed or Dashboard path and sets a signed,
 host-only HttpOnly cookie for the **original session**. This form/redirect flow
 cannot be represented by a unary RPC. Other methods receive 405. Errors are
 plain HTTP JSON; no Connect request or header is required for this endpoint.
@@ -178,13 +181,17 @@ plain HTTP JSON; no Connect request or header is required for this endpoint.
 Open the form POST in an incognito WebView after validating its origin and
 fixed consume path. The random capability expires within 60 seconds or original
 session expiry, whichever is earlier. Only its SHA-256 identifier and bounded
-session/App/origin binding are stored in the existing verification table. Atomic
+session/typed-resource/origin binding are stored in the existing verification table. Atomic
 DELETE RETURNING prevents reuse across consumers. Consumption rechecks original
-session revocation, trusted origin, App identity/slug and deployment availability
-and compatibility. Sign-out/revocation ends pending tickets and WebView sessions.
+session revocation, the exact trusted origin and resource availability. Apps
+also recheck slug, frontend deployment and compatibility; Dashboards recheck
+existence. Sign-out/revocation ends pending tickets and WebView sessions.
 There is no token URL, arbitrary redirect, JavaScript credential bridge, new
 long-lived credential or permission scope. Responses are no-store and no CORS
 permissions are added.
+
+For request examples, the existing Dashboard destination, legacy ticket
+compatibility and rolling-deployment order, see [browser handoffs](browser-handoffs.md).
 
 ### Existing Agent run transport
 

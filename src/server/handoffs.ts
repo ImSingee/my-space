@@ -1,91 +1,65 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { and, eq, gt, like, lt } from 'drizzle-orm';
+import { and, gt, inArray, like, lt, or } from 'drizzle-orm';
 import { getCookies } from 'better-auth/cookies';
 import { z } from 'zod';
 import { auth } from '~auth/server';
 import { db, schema } from '~/db';
 import { getPlatformEnv } from '~/env';
-import { isValidAppSlug } from '~server/apps/manifest';
 import { AppError } from '~server/errors';
 import {
   isTrustedSessionOrigin,
   sessionOriginError,
 } from '~server/session-http-auth';
-import { appCompatibility } from '~/app-compatibility';
 import { readBoundedText } from './platform-api/body';
-
-async function getHandoffApp(id: string) {
-  const app = await db.query.apps.findFirst({
-    where: { id },
-    columns: {
-      id: true,
-      slug: true,
-      status: true,
-      capabilities: true,
-      currentDeploymentId: true,
-    },
-  });
-  if (!app) return null;
-  const { currentDeploymentId, ...details } = app;
-  const deployment = currentDeploymentId
-    ? await db.query.deployments.findFirst({
-        where: { id: currentDeploymentId },
-        columns: { compatibilityVersion: true },
-      })
-    : null;
-  return {
-    ...details,
-    deploymentRevision: currentDeploymentId,
-    compatibility: deployment
-      ? appCompatibility(deployment.compatibilityVersion)
-      : null,
-  };
-}
+import {
+  handoffTargetSchema,
+  resolveHandoffTarget,
+  type HandoffTarget,
+} from './handoff-targets';
 
 const TICKET_LIFETIME_MS = 60_000;
-const PREFIX = 'app-handoff:';
-const payloadSchema = z.strictObject({
+const PREFIX = 'handoff:';
+const LEGACY_PREFIX = 'app-handoff:';
+const commonPayload = {
   sessionId: z.string().min(1),
-  appId: z.string().min(1),
   origin: z.string(),
   targetPath: z.string(),
+};
+const payloadSchema = z.strictObject({
+  ...commonPayload,
+  target: handoffTargetSchema,
 });
-const ticketId = (ticket: string) =>
-  PREFIX + createHash('sha256').update(ticket).digest('hex');
-
-function appTarget(slug: string) {
-  // The target is computed from the platform App record, never client input.
-  // Also reject unsafe persisted identities rather than trusting URL encoding.
-  if (!isValidAppSlug(slug)) {
-    throw new AppError('App cannot be opened', 409);
-  }
-  return `/app/${slug}/embed/`;
-}
+// Tickets issued immediately before an upgrade still live for up to 60 seconds.
+const legacyPayloadSchema = z
+  .strictObject({ ...commonPayload, appId: z.string().min(1).max(191) })
+  .transform(({ appId, ...payload }) => ({
+    ...payload,
+    target: { type: 'app' as const, id: appId },
+  }));
+const ticketId = (ticket: string, prefix = PREFIX) =>
+  prefix + createHash('sha256').update(ticket).digest('hex');
 
 function requestOrigin(request: Request) {
   const origin = new URL(request.url).origin;
-  if (!isTrustedSessionOrigin(origin))
+  if (
+    !isTrustedSessionOrigin(origin) ||
+    sessionOriginError(request) ||
+    (request.headers.has('origin') && request.headers.get('origin') !== origin)
+  )
     throw new AppError('Wrong instance origin', 403);
   return origin;
 }
 
-export async function createAppHandoff(
+export async function createHandoff(
   request: Request,
   session: { id: string; expiresAt: Date },
-  appId: string,
+  target: HandoffTarget,
 ) {
-  const app = await getHandoffApp(appId);
-  if (!app) throw new AppError('App not found', 404);
-  if (
-    !app.deploymentRevision ||
-    !app.capabilities?.frontend ||
-    app.status === 'archived' ||
-    !app.compatibility?.isSupported
-  ) {
-    throw new AppError('App is not available to open', 409);
-  }
   const origin = requestOrigin(request);
-  const targetPath = appTarget(app.slug);
+  const parsedTarget = handoffTargetSchema.safeParse(target);
+  if (!parsedTarget.success) throw new AppError('Invalid handoff target', 400);
+  const targetPath = await resolveHandoffTarget(parsedTarget.data);
+  if (!targetPath) throw new AppError('Handoff target not found', 404);
   const now = new Date();
   const expiresAt = new Date(
     Math.min(now.getTime() + TICKET_LIFETIME_MS, session.expiresAt.getTime()),
@@ -97,14 +71,22 @@ export async function createAppHandoff(
     .delete(schema.verification)
     .where(
       and(
-        like(schema.verification.id, `${PREFIX}%`),
+        or(
+          like(schema.verification.id, `${PREFIX}%`),
+          like(schema.verification.id, `${LEGACY_PREFIX}%`),
+        ),
         lt(schema.verification.expiresAt, now),
       ),
     );
   await db.insert(schema.verification).values({
     id: ticketId(ticket),
     identifier: PREFIX + session.id,
-    value: JSON.stringify({ sessionId: session.id, appId, origin, targetPath }),
+    value: JSON.stringify({
+      sessionId: session.id,
+      target: parsedTarget.data,
+      origin,
+      targetPath,
+    }),
     expiresAt,
   });
   return {
@@ -120,9 +102,7 @@ export async function createAppHandoff(
  * same server-side session as native, so sign-out/revocation ends both. The
  * ticket is only sent in the POST body, never a URL, redirect, or JS bridge.
  */
-export async function consumeAppHandoff(request: Request) {
-  const originError = sessionOriginError(request);
-  if (originError) throw new AppError('Cross-origin request denied', 403);
+async function consumeHandoff(request: Request) {
   const origin = requestOrigin(request);
   if (
     request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !==
@@ -142,32 +122,40 @@ export async function consumeAppHandoff(request: Request) {
     .delete(schema.verification)
     .where(
       and(
-        eq(schema.verification.id, ticketId(params.get('ticket')!)),
+        inArray(schema.verification.id, [
+          ticketId(params.get('ticket')!),
+          ticketId(params.get('ticket')!, LEGACY_PREFIX),
+        ]),
         gt(schema.verification.expiresAt, new Date()),
       ),
     )
     .returning();
   if (!record) throw new AppError('Handoff expired or already used', 401);
-  const parsed = payloadSchema.safeParse(JSON.parse(record.value));
-  if (!parsed.success || parsed.data.origin !== origin)
+  let storedPayload: unknown;
+  try {
+    storedPayload = JSON.parse(record.value);
+  } catch {
+    throw new AppError('Invalid handoff', 403);
+  }
+  const legacy = record.id.startsWith(LEGACY_PREFIX);
+  const parsed = (legacy ? legacyPayloadSchema : payloadSchema).safeParse(
+    storedPayload,
+  );
+  if (
+    !parsed.success ||
+    parsed.data.origin !== origin ||
+    record.identifier !==
+      (legacy ? LEGACY_PREFIX : PREFIX) + parsed.data.sessionId
+  )
     throw new AppError('Invalid handoff', 403);
   const payload = parsed.data;
-  const [session, app] = await Promise.all([
-    db.query.session.findFirst({
-      where: { id: payload.sessionId, expiresAt: { gt: new Date() } },
-    }),
-    getHandoffApp(payload.appId),
-  ]);
+  const session = await db.query.session.findFirst({
+    where: { id: payload.sessionId, expiresAt: { gt: new Date() } },
+  });
   if (!session) throw new AppError('Session has ended', 401);
-  if (
-    !app ||
-    appTarget(app.slug) !== payload.targetPath ||
-    !app.deploymentRevision ||
-    !app.capabilities?.frontend ||
-    app.status === 'archived' ||
-    !app.compatibility?.isSupported
-  ) {
-    throw new AppError('App is no longer available', 409);
+  const targetPath = await resolveHandoffTarget(payload.target);
+  if (!targetPath || targetPath !== payload.targetPath) {
+    throw new AppError('Handoff target is no longer available', 409);
   }
   const cookie = getCookies(auth.options).sessionToken;
   // Better Auth/Better Call's signed-cookie wire format: percent-encoded
@@ -185,7 +173,7 @@ export async function consumeAppHandoff(request: Request) {
   return new Response(null, {
     status: 303,
     headers: {
-      location: payload.targetPath,
+      location: targetPath,
       'set-cookie': `${cookie.name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`,
       'cache-control': 'no-store',
       'referrer-policy': 'no-referrer',
@@ -195,7 +183,7 @@ export async function consumeAppHandoff(request: Request) {
 }
 
 /** Native auth transport: a form POST and redirect cannot be a unary RPC. */
-export async function handleAppHandoffRequest(
+export async function handleHandoffRequest(
   request: Request,
 ): Promise<Response> {
   let response: Response;
@@ -206,7 +194,7 @@ export async function handleAppHandoffRequest(
         headers: { allow: 'POST' },
       });
     } else {
-      response = await consumeAppHandoff(request);
+      response = await consumeHandoff(request);
     }
   } catch (error) {
     const status = error instanceof AppError ? error.status : 500;

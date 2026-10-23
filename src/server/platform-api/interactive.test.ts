@@ -6,8 +6,9 @@ import { fromJson, toJson } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import { AuthService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/auth_pb';
 import { PublicErrorSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/error_pb';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   afterAll,
   beforeAll,
@@ -47,7 +48,7 @@ await import('~/db');
 const { db, schema } = fixture.database!;
 const { auth } = await import('~auth/server');
 const { handlePlatformApiRequest } = await import('./http');
-const { handleAppHandoffRequest } = await import('../app-handoffs');
+const { createHandoff, handleHandoffRequest } = await import('../handoffs');
 const { authenticateSessionRequest } = await import('../session-http-auth');
 const origin = 'https://hatch.example.test';
 let cookie = '';
@@ -115,13 +116,17 @@ function client(useBinaryFormat: boolean) {
   return {
     agent: createClient(AgentService, transport),
     apps: createClient(AppService, transport),
+    auth: createClient(AuthService, transport),
     cli: cliClient(transport),
   };
 }
-async function handoff() {
-  const response = await call('AppService/CreateAppHandoff', {
-    body: { id: 'app-one' },
-  });
+async function handoff(target: 'legacy' | 'app' | 'dashboard' = 'legacy') {
+  const response =
+    target === 'legacy'
+      ? await call('AppService/CreateAppHandoff', { body: { id: 'app-one' } })
+      : await call('AuthService/CreateHandoff', {
+          body: { [target]: { id: `${target}-one` } },
+        });
   expect(response.status).toBe(200);
   return (await response.json()) as {
     ticket: string;
@@ -139,7 +144,7 @@ function consume(
     method?: string;
   } = {},
 ) {
-  return handleAppHandoffRequest(
+  return handleHandoffRequest(
     new Request(`${options.origin ?? origin}/api/auth/handoffs/consume`, {
       method: options.method ?? 'POST',
       headers: {
@@ -173,6 +178,11 @@ beforeEach(async () => {
   await db.delete(schema.apps);
   await db.delete(schema.agentProviders);
   await db.delete(schema.verification);
+  await db.delete(schema.dashboards);
+  await db.insert(schema.dashboards).values({
+    id: 'dashboard-one',
+    name: 'Handoff dashboard',
+  });
   await db.insert(schema.apps).values({
     id: 'app-one',
     slug: 'example-app',
@@ -396,6 +406,8 @@ describe('interactive Platform API contracts and authority', () => {
         ['AgentService/GetSession', { id: runSession }],
         ['AgentService/CreateSession', {}],
         ['AppService/CreateAppHandoff', { id: 'app-one' }],
+        ['AuthService/CreateHandoff', { app: { id: 'app-one' } }],
+        ['AuthService/CreateHandoff', { dashboard: { id: 'dashboard-one' } }],
       ] as const) {
         const response = await call(path, { headers, body });
         expect(response.status).toBe(403);
@@ -766,6 +778,373 @@ describe('interactive Platform API contracts and authority', () => {
       (await authCall('device/code', { client_id: 'unrecognized-client' }))
         .status,
     ).toBe(400);
+  });
+});
+
+describe.each(['app', 'dashboard'] as const)('unified %s handoff', (target) => {
+  const body = { [target]: { id: `${target}-one` } };
+  const targetPath =
+    target === 'app' ? '/app/example-app/embed/' : '/dashboard/dashboard-one';
+
+  it.each([false, true])(
+    'uses the same session through the generated client binary=%s',
+    async (useBinaryFormat) => {
+      const before = await db.query.session.findMany();
+      const result = await client(useBinaryFormat).auth.createHandoff({
+        target: { case: target, value: { id: `${target}-one` } },
+      });
+      expect(result.targetPath).toBe(targetPath);
+      expect(result.url).toBe(`${origin}/api/auth/handoffs/consume`);
+      expect(Date.parse(result.expiresAt) - Date.now()).toBeLessThanOrEqual(
+        60_000,
+      );
+      expect(JSON.stringify(result)).not.toContain(token);
+      const stored = JSON.stringify(await db.query.verification.findMany());
+      expect(stored).not.toContain(result.ticket);
+      expect(stored).not.toContain(token);
+      const response = await consume(result.ticket);
+      expect(response.status).toBe(303);
+      expect(response.headers.get('location')).toBe(targetPath);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      const setCookie = response.headers.get('set-cookie')!;
+      expect(setCookie).toContain('HttpOnly');
+      expect(setCookie).toContain('Secure');
+      expect(setCookie).toContain('SameSite=Lax');
+      expect(setCookie).not.toMatch(/Domain=/i);
+      const web = await auth.api.getSession({
+        headers: new Headers({ cookie: cookies(response) }),
+      });
+      expect(web?.session.id).toBe(sessionId);
+      expect((await db.query.session.findMany()).map((row) => row.id)).toEqual(
+        before.map((row) => row.id),
+      );
+      expect((await consume(result.ticket)).status).toBe(401);
+    },
+  );
+
+  it('accepts a browser session but never falls back from invalid explicit credentials', async () => {
+    const browser = await call('AuthService/CreateHandoff', {
+      body,
+      cookieOnly: true,
+      headers: { cookie, origin, 'sec-fetch-site': 'same-origin' },
+    });
+    expect(browser.status).toBe(200);
+    for (const headers of [
+      { authorization: 'Bearer invalid', cookie },
+      { authorization: '', cookie },
+      { 'x-api-key': 'invalid', cookie },
+    ] as Record<string, string>[]) {
+      expect(
+        (await call('AuthService/CreateHandoff', { body, headers })).status,
+      ).toBe(401);
+    }
+    expect(
+      (await call('AuthService/CreateHandoff', { body, cookieOnly: true }))
+        .status,
+    ).toBe(401);
+  });
+
+  it('permits one consumer under contention and rejects expired tickets', async () => {
+    const ticket = await handoff(target);
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () => consume(ticket.ticket)),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      303, 401, 401, 401,
+    ]);
+    const expired = await handoff(target);
+    await db
+      .update(schema.verification)
+      .set({ expiresAt: new Date(Date.now() - 1) });
+    expect((await consume(expired.ticket)).status).toBe(401);
+  });
+
+  it('binds issuance and consumption to the exact trusted instance origin', async () => {
+    const alternate = 'https://hatch.example.ts.net';
+    const attempts: { origin?: string; headers?: Record<string, string> }[] = [
+      { origin: 'https://evil.example' },
+      { headers: { origin: alternate } },
+      { headers: { origin: 'null' } },
+      { headers: { 'sec-fetch-site': 'cross-site' } },
+    ];
+    for (const options of attempts) {
+      expect(
+        (await call('AuthService/CreateHandoff', { body, ...options })).status,
+      ).toBe(403);
+    }
+    const ticket = await handoff(target);
+    expect(
+      (await consume(ticket.ticket, { headers: { origin: alternate } })).status,
+    ).toBe(403);
+    expect((await consume(ticket.ticket, { origin: alternate })).status).toBe(
+      403,
+    );
+    expect((await consume(ticket.ticket)).status).toBe(401);
+    const native = await call('AuthService/CreateHandoff', {
+      body,
+      origin: alternate,
+    });
+    expect(native.status).toBe(200);
+    const issued = (await native.json()) as { ticket: string; url: string };
+    expect(issued.url).toBe(`${alternate}/api/auth/handoffs/consume`);
+    expect((await consume(issued.ticket, { origin: alternate })).status).toBe(
+      303,
+    );
+  });
+
+  it('rejects injected redirects and invalid transport without setting a cookie', async () => {
+    const { ticket } = await handoff(target);
+    for (const [options, status] of [
+      [{ extra: '&redirect=https://evil.example' }, 400],
+      [{ extra: `&ticket=${ticket}` }, 400],
+      [{ method: 'GET' }, 405],
+      [{ headers: { 'content-type': 'application/json' } }, 415],
+      [{ headers: { origin: 'https://evil.example' } }, 403],
+    ] as const) {
+      const response = await consume(ticket, options);
+      expect(response.status).toBe(status);
+      expect(response.headers.has('set-cookie')).toBe(false);
+      expect(response.headers.has('location')).toBe(false);
+    }
+    expect((await consume(ticket)).status).toBe(303);
+  });
+
+  it('rechecks resource existence before issuing any browser cookie', async () => {
+    const ticket = await handoff(target);
+    await db.delete(target === 'app' ? schema.apps : schema.dashboards);
+    const response = await consume(ticket.ticket);
+    expect(response.status).toBe(409);
+    expect(response.headers.has('set-cookie')).toBe(false);
+    expect((await consume(ticket.ticket)).status).toBe(401);
+    expect((await call('AuthService/CreateHandoff', { body })).status).toBe(
+      404,
+    );
+  });
+
+  it('caps ticket lifetime at the original session expiry and rechecks that expiry', async () => {
+    const expiresAt = new Date(Date.now() + 30_000);
+    await db
+      .update(schema.session)
+      .set({ expiresAt })
+      .where(eq(schema.session.id, sessionId));
+    try {
+      // Better Auth refreshes sliding sessions during RPC authentication. Exercise
+      // the boundary with an already-authenticated, nearly-expired snapshot.
+      const ticket = await createHandoff(
+        new Request(
+          `${origin}/api/rpc/hatch.platform.v1.AuthService/CreateHandoff`,
+        ),
+        { id: sessionId, expiresAt },
+        { type: target, id: `${target}-one` },
+      );
+      expect(Date.parse(ticket.expiresAt)).toBeLessThanOrEqual(
+        expiresAt.getTime(),
+      );
+      await db
+        .update(schema.session)
+        .set({ expiresAt: new Date(Date.now() - 1) })
+        .where(eq(schema.session.id, sessionId));
+      const response = await consume(ticket.ticket);
+      expect(response.status).toBe(401);
+      expect(response.headers.has('set-cookie')).toBe(false);
+    } finally {
+      await db
+        .update(schema.session)
+        .set({ expiresAt: new Date(Date.now() + 86400_000) })
+        .where(eq(schema.session.id, sessionId));
+    }
+  });
+
+  it('revokes both pending tickets and the browser session on native sign-out', async () => {
+    const signedIn = await authCall('sign-up/email', {
+      name: 'Handoff device',
+      email: `${randomUUID()}@handoff.test`,
+      password: 'Handoff-test-password-94',
+    });
+    const other = (await signedIn.json()) as { token: string };
+    const headers = { authorization: `Bearer ${other.token}` };
+    const issue = async () => {
+      const response = await call('AuthService/CreateHandoff', {
+        body,
+        headers,
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as { ticket: string };
+    };
+    const first = await issue();
+    const pending = await issue();
+    const browser = await consume(first.ticket);
+    expect(browser.status).toBe(303);
+    expect((await authCall('sign-out', {}, headers)).status).toBe(200);
+    expect(
+      await auth.api.getSession({
+        headers: new Headers({ cookie: cookies(browser) }),
+      }),
+    ).toBeNull();
+    expect((await consume(pending.ticket)).status).toBe(401);
+  });
+});
+
+describe('handoff contract and upgrade boundaries', () => {
+  it('does not use another App deployment to authorize the target', async () => {
+    const ticket = await handoff('app');
+    await db.insert(schema.apps).values({
+      id: 'other-app',
+      slug: 'other-app',
+      name: 'Other app',
+    });
+    await db
+      .update(schema.deployments)
+      .set({ appId: 'other-app' })
+      .where(eq(schema.deployments.id, 'deployment-one'));
+    const response = await consume(ticket.ticket);
+    expect(response.status).toBe(409);
+    expect(response.headers.has('set-cookie')).toBe(false);
+    expect(
+      (
+        await call('AuthService/CreateHandoff', {
+          body: { app: { id: 'app-one' } },
+        })
+      ).status,
+    ).toBe(409);
+  });
+
+  it('prunes expired handoffs without deleting other authentication records', async () => {
+    const expired = new Date(Date.now() - 1);
+    await db.insert(schema.verification).values([
+      {
+        id: 'unrelated',
+        identifier: 'login',
+        value: 'untouched',
+        expiresAt: expired,
+      },
+      {
+        id: 'app-handoff:old',
+        identifier: 'old',
+        value: '{}',
+        expiresAt: expired,
+      },
+      { id: 'handoff:old', identifier: 'old', value: '{}', expiresAt: expired },
+    ]);
+    await handoff('dashboard');
+    const rows = await db.query.verification.findMany();
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.id === 'unrelated')?.value).toBe('untouched');
+    expect(rows.some((row) => row.id.endsWith(':old'))).toBe(false);
+  });
+
+  it('requires exactly one typed resource and rejects URLs, paths and unknown fields', async () => {
+    for (const body of [
+      {},
+      { app: {} },
+      { dashboard: {} },
+      { app: { id: 'app-one' }, dashboard: { id: 'dashboard-one' } },
+      { url: 'https://evil.example' },
+      { app: { id: 'app-one' }, targetPath: '//evil.example' },
+      { dashboard: { id: '../settings' } },
+      { dashboard: { id: '%2e%2e' } },
+      { dashboard: { id: 'https://evil.example' } },
+      { app: { id: 'app-one', url: 'https://evil.example' } },
+    ]) {
+      expect((await call('AuthService/CreateHandoff', { body })).status).toBe(
+        400,
+      );
+    }
+    expect(await db.query.verification.findMany()).toHaveLength(0);
+    expect(
+      (
+        await call('AuthService/CreateHandoff', {
+          body: { app: { id: 'example-app' } },
+        })
+      ).status,
+    ).toBe(404);
+    // The published adapter still accepts a slug, and resolves to an exact ID.
+    const legacy = await client(true).apps.createAppHandoff({
+      id: 'example-app',
+    });
+    expect((await consume(legacy.ticket)).status).toBe(303);
+  });
+
+  it.each([
+    'archived',
+    'frontend',
+    'deployment',
+    'compatibility',
+    'slug',
+  ] as const)(
+    'rechecks App %s availability at consumption and issuance',
+    async (change) => {
+      const ticket = await handoff('app');
+      if (change === 'archived')
+        await db.update(schema.apps).set({ status: 'archived' });
+      if (change === 'frontend')
+        await db.update(schema.apps).set({ capabilities: null });
+      if (change === 'deployment') await db.delete(schema.deployments);
+      if (change === 'compatibility')
+        await db
+          .update(schema.deployments)
+          .set({ compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION + 1 });
+      if (change === 'slug')
+        await db.update(schema.apps).set({ slug: '../outside' });
+      const response = await consume(ticket.ticket);
+      expect(response.status).toBe(409);
+      expect(response.headers.has('set-cookie')).toBe(false);
+      expect(
+        (
+          await call('AuthService/CreateHandoff', {
+            body: { app: { id: 'app-one' } },
+          })
+        ).status,
+      ).toBe(409);
+    },
+  );
+
+  it('consumes pre-upgrade App tickets once through the shared validation path', async () => {
+    const ticket = randomBytes(32).toString('base64url');
+    await db.insert(schema.verification).values({
+      id: 'app-handoff:' + createHash('sha256').update(ticket).digest('hex'),
+      identifier: 'app-handoff:' + sessionId,
+      value: JSON.stringify({
+        sessionId,
+        appId: 'app-one',
+        origin,
+        targetPath: '/app/example-app/embed/',
+      }),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const response = await consume(ticket);
+    expect(response.status).toBe(303);
+    expect(
+      (
+        await auth.api.getSession({
+          headers: new Headers({ cookie: cookies(response) }),
+        })
+      )?.session.id,
+    ).toBe(sessionId);
+    expect((await consume(ticket)).status).toBe(401);
+  });
+
+  it('fails closed for corrupt or substituted persisted targets', async () => {
+    for (const replacement of [
+      '{invalid',
+      { targetPath: '//evil.example' },
+      { target: { type: 'url', id: 'https://evil.example' } },
+      { target: { type: 'dashboard', id: 'dashboard-one' } },
+    ]) {
+      const { ticket } = await handoff('app');
+      const record = (await db.query.verification.findMany())[0];
+      await db.update(schema.verification).set({
+        value:
+          typeof replacement === 'string'
+            ? replacement
+            : JSON.stringify({ ...JSON.parse(record.value), ...replacement }),
+      });
+      const response = await consume(ticket);
+      expect([403, 409]).toContain(response.status);
+      expect(response.headers.has('set-cookie')).toBe(false);
+      expect(response.headers.has('location')).toBe(false);
+    }
   });
 });
 
