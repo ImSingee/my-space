@@ -121,17 +121,19 @@ export default function ConnectScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingTop: 32 }]}
+          contentContainerStyle={[styles.content, { paddingTop: 48, gap: 24 }]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
         >
           <Brand />
           <PageHeading
-            title="Your Hatch. In your pocket."
-            detail="Open your apps, talk with your Agent, and pick up where you left off."
+            title="Welcome to Hatch"
+            detail="Your apps and ideas, wherever you are."
           />
           <View style={{ gap: 12, paddingVertical: 8 }}>
-            <Text style={[styles.label, { color: c.muted }]}>INSTANCE URL</Text>
+            <Text style={[styles.label, { color: c.muted }]}>
+              Instance address
+            </Text>
             <NativeField
               ref={urlField}
               label="Hatch instance URL"
@@ -143,13 +145,13 @@ export default function ConnectScreen() {
               onSubmitEditing={() => void begin()}
             />
             <Text style={[styles.caption, { color: c.muted }]}>
-              Use your HTTPS Hatch address. Sign-in opens this instance in your
-              system browser. Approving grants this phone full account access.
+              Enter your Hatch address. You’ll sign in securely in your browser
+              and grant this phone access to your instance.
             </Text>
             {!pending ? (
               <Action
                 fullWidth
-                label="Continue in browser"
+                label="Connect to Hatch"
                 disabled={!url.trim()}
                 onPress={() => void begin()}
               />
@@ -217,7 +219,7 @@ export default function ConnectScreen() {
           {!pending && origins.length ? (
             <View style={{ gap: 8 }}>
               <Text style={[styles.label, { color: c.muted }]}>
-                RECENT INSTANCES
+                Recent instances
               </Text>
               {origins.map((item) => (
                 <Action

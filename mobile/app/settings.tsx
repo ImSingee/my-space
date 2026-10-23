@@ -6,7 +6,6 @@ import { useSession } from '../src/state/session';
 import {
   Action,
   Card,
-  PageHeading,
   Text,
   errorText,
   styles,
@@ -43,13 +42,9 @@ export default function SettingsScreen() {
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
     >
-      <PageHeading
-        title="Make yourself at home."
-        detail="Your connection to Hatch."
-      />
       <Card>
         <Text style={[styles.label, { color: c.accentText }]}>
-          CONNECTED INSTANCE
+          Connected instance
         </Text>
         <Text
           selectable
@@ -78,15 +73,15 @@ export default function SettingsScreen() {
           accessibilityRole="header"
           style={[styles.heading, { color: c.text }]}
         >
-          Keep building, anywhere
+          Your workspace, always with you
         </Text>
         <Text style={[styles.body, { color: c.muted }]}>
           Your Agent runs on your Hatch server. You can leave the app and return
           to catch up. No background execution on your phone is required.
         </Text>
         <Text style={[styles.caption, { color: c.muted }]}>
-          Provider setup, secrets, dashboards, and account management remain in
-          the Hatch web app.
+          Provider setup, secrets, dashboard editing, and account management
+          remain in the Hatch web app.
         </Text>
       </View>
       <Action

@@ -11,7 +11,7 @@ import {
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import { View } from 'react-native';
-import { hatchPalette as c, hatchRadii } from './theme';
+import { hatchPalette as c } from './theme';
 import type { ResourceRowProps } from './resource-row.types';
 
 // Size the label, not just its Host/Button: the entire card must be tappable.
@@ -24,9 +24,8 @@ export function ResourceRow({
   return (
     <View
       style={{
-        borderWidth: 1,
+        borderBottomWidth: 0.5,
         borderColor: c.border,
-        borderRadius: hatchRadii.card,
         backgroundColor: c.card,
       }}
     >
@@ -41,9 +40,9 @@ export function ResourceRow({
             spacing={12}
             alignment="center"
             modifiers={[
-              padding({ all: 16 }),
+              padding({ vertical: 14, horizontal: 0 }),
               frame({
-                minHeight: 76,
+                minHeight: 64,
                 maxWidth: Infinity,
                 alignment: 'leading',
               }),
@@ -51,10 +50,21 @@ export function ResourceRow({
             ]}
           >
             <Image
-              systemName={kind === 'app' ? 'square.grid.2x2' : 'bubble.left'}
+              systemName={
+                (
+                  {
+                    app: 'square.grid.2x2',
+                    conversation: 'bubble.left.and.bubble.right',
+                    workflow: 'arrow.triangle.branch',
+                    dashboard: 'rectangle.3.group',
+                    settings: 'slider.horizontal.3',
+                  } as const
+                )[kind]
+              }
               modifiers={[
                 font({ textStyle: 'title2' }),
-                foregroundStyle(c.accentText),
+                foregroundStyle(c.muted),
+                frame({ width: 32 }),
               ]}
             />
             <VStack

@@ -28,6 +28,6 @@ describe('mobile readable color contract', () => {
   );
 
   it('keeps the primary native button label readable on the brand fill', () => {
-    expect(contrast(c.text, c.accent)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('#ffffff', c.accentText)).toBeGreaterThanOrEqual(4.5);
   });
 });

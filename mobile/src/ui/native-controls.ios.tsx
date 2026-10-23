@@ -54,6 +54,7 @@ export function Action({
       style={{
         minHeight: 44,
         flexShrink: 1,
+        opacity: unavailable ? 0.45 : 1,
         ...(fullWidth ? { width: '100%' } : {}),
       }}
     >
@@ -63,9 +64,9 @@ export function Action({
         modifiers={[
           buttonStyle(secondary ? 'borderless' : 'borderedProminent'),
           buttonBorderShape('roundedRectangle', hatchRadii.card),
-          tint(danger ? c.danger : secondary ? c.accentText : c.accent),
+          tint(danger ? c.danger : c.accentText),
           ...(!danger
-            ? [foregroundStyle(secondary ? c.accentText : c.text)]
+            ? [foregroundStyle(secondary ? c.accentText : '#ffffff')]
             : []),
           font({ textStyle: 'body', weight: 'semibold' }),
           controlSize(compact ? 'regular' : 'large'),
@@ -78,7 +79,7 @@ export function Action({
             multilineTextAlignment('center'),
             lineLimit(),
             frame({
-              minHeight: 44,
+              minHeight: compact ? 20 : 26,
               ...(fullWidth ? { maxWidth: Infinity } : {}),
             }),
             contentShape(shapes.rectangle()),
@@ -108,7 +109,7 @@ export function Choice({
       <Menu
         label={
           <Text
-            modifiers={[lineLimit(1)]}
+            modifiers={[lineLimit(2)]}
           >{`${label}: ${options.find((option) => option.value === value)?.label ?? ''}`}</Text>
         }
         modifiers={[disabled(Boolean(unavailable))]}
