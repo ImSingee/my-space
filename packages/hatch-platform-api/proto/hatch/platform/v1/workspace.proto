@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package hatch.platform.v1;
+
+import "buf/validate/validate.proto";
+
+// Personal workspace navigation requires a signed-in user session.
+service WorkspaceService {
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+  rpc CreateDashboardHandoff(CreateDashboardHandoffRequest) returns (CreateDashboardHandoffResponse);
+}
+
+message GetWorkspaceRequest {}
+message DashboardSummary {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  bool pinned = 4;
+  uint32 auto_refresh_seconds = 5;
+}
+message AppPin {
+  string id = 1;
+  string app_id = 2;
+  string label = 3;
+  string entry_hash = 4;
+}
+message GetWorkspaceResponse {
+  repeated DashboardSummary dashboards = 1;
+  repeated AppPin app_pins = 2;
+  repeated string pinned_workflow_ids = 3;
+}
+message CreateDashboardHandoffRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+}
+
+message CreateDashboardHandoffResponse {
+  string url = 1;
+  string ticket = 2;
+  string expires_at = 3;
+  string target_path = 4;
+}

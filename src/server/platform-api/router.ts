@@ -2,7 +2,9 @@ import { fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { getAgentModelCatalog } from '~server/agent-model-catalog';
-import { createAppHandoff } from '~server/app-handoffs';
+import { createAppHandoff, createDashboardHandoff } from '~server/app-handoffs';
+import { readWorkspace } from '~server/workspace-read';
+import { WorkspaceService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workspace_pb';
 import {
   insertAgentSession,
   listSessionSummaries,
@@ -314,6 +316,19 @@ export function registerPlatformApi(
       }
     },
   };
+  router.service(
+    WorkspaceService,
+    {
+      getWorkspace: () => readWorkspace(),
+      createDashboardHandoff: (input, context) =>
+        createDashboardHandoff(
+          new Request(context.url, { headers: context.requestHeader }),
+          context.values.get(publicApiContext).session!,
+          input.id,
+        ),
+    },
+    sessionOnly,
+  );
   router.service(
     AgentService,
     {

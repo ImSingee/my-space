@@ -129,6 +129,7 @@ export function validateHandoff(
     expiresAt: string;
     targetPath: string;
   },
+  dashboardId?: string,
 ): void {
   let url: URL;
   try {
@@ -145,7 +146,10 @@ export function validateHandoff(
     url.hash ||
     forbidden.test(handoff.url) ||
     !/^[A-Za-z0-9_-]{20,512}$/.test(handoff.ticket) ||
-    !/^\/app\/[a-zA-Z0-9_-]+\/embed\/$/.test(handoff.targetPath) ||
+    (dashboardId !== undefined
+      ? handoff.targetPath !==
+        `/mobile/dashboard/${encodeURIComponent(dashboardId)}`
+      : !/^\/app\/[a-zA-Z0-9_-]+\/embed\/$/.test(handoff.targetPath)) ||
     !Number.isFinite(Date.parse(handoff.expiresAt)) ||
     Date.parse(handoff.expiresAt) <= Date.now()
   ) {

@@ -4,11 +4,16 @@ import { useEffect } from 'react';
 import { hatchPalette } from '../src/ui/theme';
 import { SessionProvider, useSession } from '../src/state/session';
 import { Busy, usePalette } from '../src/ui/primitives';
+import {
+  NavigationProvider,
+  useNavigationPreferences,
+} from '../src/state/navigation';
 
 function Navigation() {
   const { ready, origin, epoch } = useSession();
+  const navigation = useNavigationPreferences();
   const c = usePalette();
-  if (!ready) return <Busy label="Opening Hatch…" />;
+  if (!ready || !navigation.ready) return <Busy label="Opening Hatch…" />;
   return (
     <Stack
       key={epoch}
@@ -19,6 +24,7 @@ function Navigation() {
         headerTintColor: c.accentText,
         headerTitleStyle: { color: c.text },
         headerShadowVisible: false,
+        headerBackButtonDisplayMode: 'minimal',
       }}
     >
       <Stack.Protected guard={!origin}>
@@ -28,7 +34,11 @@ function Navigation() {
         />
       </Stack.Protected>
       <Stack.Protected guard={Boolean(origin)}>
-        <Stack.Screen name="index" options={{ title: 'Hatch' }} />
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="library" options={{ title: 'Library' }} />
+        <Stack.Screen name="navigation" options={{ title: 'Navigation' }} />
+        <Stack.Screen name="workflows/[id]" options={{ title: 'Workflow' }} />
         <Stack.Screen name="chat/[id]" options={{ title: 'Conversation' }} />
         <Stack.Screen name="apps/[id]" options={{ title: 'App' }} />
         <Stack.Screen
@@ -62,9 +72,11 @@ export default function RootLayout() {
         },
       }}
     >
-      <SessionProvider>
-        <Navigation />
-      </SessionProvider>
+      <NavigationProvider>
+        <SessionProvider>
+          <Navigation />
+        </SessionProvider>
+      </NavigationProvider>
     </ThemeProvider>
   );
 }

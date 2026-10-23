@@ -1,11 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
-import { APP_HANDOFF_PATH, webViewHandoffSource } from '../../src/core';
+import { SecureSurface } from '../../src/ui/secure-surface';
 import { useSession } from '../../src/state/session';
 import {
   Busy,
@@ -13,14 +10,15 @@ import {
   Action,
   errorText,
   styles,
-  usePalette,
 } from '../../src/ui/primitives';
 
 export default function AppScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, entryHash, label } = useLocalSearchParams<{
+    id: string;
+    entryHash?: string;
+    label?: string;
+  }>();
   const { api, origin, epoch } = useSession();
-  const c = usePalette();
-  const [problem, setProblem] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const app = useQuery({
     queryKey: [origin, 'app', id],
@@ -38,7 +36,6 @@ export default function AppScreen() {
     refetchOnReconnect: false,
   });
   const retry = () => {
-    setProblem(null);
     void app.refetch();
     setAttempt((value) => value + 1);
   };
@@ -47,86 +44,28 @@ export default function AppScreen() {
     <SafeAreaView style={styles.screen} edges={['left', 'right']}>
       <Stack.Screen
         options={{
-          title: app.data?.name ?? 'App',
+          title: label || app.data?.name || 'App',
           headerTransparent: false,
           headerRight: () => (
             <Action compact secondary label="Reload" onPress={retry} />
           ),
         }}
       />
-      {problem || app.error || handoff.error ? (
+      {app.error || handoff.error ? (
         <Notice
           title="Couldn’t open this app"
-          detail={problem ?? errorText(app.error ?? handoff.error)}
+          detail={errorText(app.error ?? handoff.error)}
           action={{ label: 'Try again', onPress: retry }}
         />
       ) : !data ? (
         <Busy label="Opening your app securely…" />
       ) : (
-        <WebView
+        <SecureSurface
           key={`${epoch}-${attempt}`}
-          source={webViewHandoffSource(origin!, data)}
-          incognito
-          sharedCookiesEnabled={false}
-          thirdPartyCookiesEnabled={false}
-          setSupportMultipleWindows={false}
-          javaScriptCanOpenWindowsAutomatically={false}
-          allowsBackForwardNavigationGestures
-          allowFileAccess={false}
-          allowFileAccessFromFileURLs={false}
-          allowUniversalAccessFromFileURLs={false}
-          mixedContentMode="never"
-          originWhitelist={['*']}
-          onShouldStartLoadWithRequest={(request) => {
-            if (request.url === 'about:blank') return true;
-            let url: URL;
-            try {
-              url = new URL(request.url);
-            } catch {
-              return false;
-            }
-            const sameOrigin =
-              url.origin === origin && !url.username && !url.password;
-            const allowedPath =
-              url.pathname === APP_HANDOFF_PATH ||
-              url.pathname.startsWith(data.targetPath);
-            if (sameOrigin && allowedPath) return true;
-            if (request.isTopFrame === false) return sameOrigin;
-            if (sameOrigin && url.pathname === '/login') {
-              setProblem(
-                'The app session expired. Reload to create a new secure session.',
-              );
-              return false;
-            }
-            if (url.protocol === 'https:' && !url.username && !url.password) {
-              Alert.alert('Open in your browser?', url.origin, [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Open',
-                  onPress: () =>
-                    void WebBrowser.openBrowserAsync(url.href).catch(() =>
-                      setProblem('Couldn’t open the browser.'),
-                    ),
-                },
-              ]);
-            }
-            return false;
-          }}
-          onError={() =>
-            setProblem(
-              'The app could not load. Check your connection and try again.',
-            )
-          }
-          onHttpError={(event) => {
-            if (event.nativeEvent.statusCode >= 400)
-              setProblem(
-                `The server returned ${event.nativeEvent.statusCode}. Reload to try again.`,
-              );
-          }}
-          onContentProcessDidTerminate={retry}
-          startInLoadingState
-          renderLoading={() => <Busy label="Loading app…" />}
-          style={{ flex: 1, backgroundColor: c.background }}
+          origin={origin!}
+          handoff={data}
+          retry={retry}
+          entryHash={entryHash}
         />
       )}
     </SafeAreaView>

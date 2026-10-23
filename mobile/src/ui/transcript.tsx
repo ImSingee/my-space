@@ -49,12 +49,13 @@ export function TranscriptMessage({ value }: { value: JsonValue }) {
         paddingHorizontal: role === 'user' ? 16 : 0,
         borderRadius: 12,
         backgroundColor: role === 'user' ? c.panel : 'transparent',
-        borderWidth: role === 'user' ? 1 : 0,
+        alignSelf: role === 'user' ? 'flex-end' : 'stretch',
+        maxWidth: role === 'user' ? '92%' : '100%',
         borderColor: c.border,
       }}
     >
       <Text style={[styles.label, { color: c.muted }]}>
-        {role === 'user' ? 'YOU' : 'HATCH'}
+        {role === 'user' ? 'You' : 'Hatch'}
       </Text>
       {displayContent.map((part, index) => {
         const block = record(part);
@@ -128,7 +129,7 @@ export function LiveTranscript({ state }: { state: StreamState }) {
   const c = usePalette();
   return (
     <Card>
-      <Text style={[styles.label, { color: c.accentText }]}>HATCH</Text>
+      <Text style={[styles.label, { color: c.accentText }]}>Hatch</Text>
       {state.blocks.map((block, index) => {
         if (block.kind === 'text')
           return (

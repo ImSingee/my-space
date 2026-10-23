@@ -44,12 +44,15 @@ async function getHandoffApp(id: string) {
 
 const TICKET_LIFETIME_MS = 60_000;
 const PREFIX = 'app-handoff:';
-const payloadSchema = z.strictObject({
-  sessionId: z.string().min(1),
-  appId: z.string().min(1),
-  origin: z.string(),
-  targetPath: z.string(),
-});
+const payloadSchema = z
+  .strictObject({
+    sessionId: z.string().min(1),
+    appId: z.string().min(1).optional(),
+    dashboardId: z.string().min(1).optional(),
+    origin: z.string(),
+    targetPath: z.string(),
+  })
+  .refine((value) => Boolean(value.appId) !== Boolean(value.dashboardId));
 const ticketId = (ticket: string) =>
   PREFIX + createHash('sha256').update(ticket).digest('hex');
 
@@ -86,6 +89,31 @@ export async function createAppHandoff(
   }
   const origin = requestOrigin(request);
   const targetPath = appTarget(app.slug);
+  return issueHandoff(session, origin, targetPath, { appId });
+}
+
+export async function createDashboardHandoff(
+  request: Request,
+  session: { id: string; expiresAt: Date },
+  dashboardId: string,
+) {
+  if (!(await db.query.dashboards.findFirst({ where: { id: dashboardId } }))) {
+    throw new AppError('Dashboard not found', 404);
+  }
+  return issueHandoff(
+    session,
+    requestOrigin(request),
+    `/mobile/dashboard/${encodeURIComponent(dashboardId)}`,
+    { dashboardId },
+  );
+}
+
+async function issueHandoff(
+  session: { id: string; expiresAt: Date },
+  origin: string,
+  targetPath: string,
+  resource: { appId: string } | { dashboardId: string },
+) {
   const now = new Date();
   const expiresAt = new Date(
     Math.min(now.getTime() + TICKET_LIFETIME_MS, session.expiresAt.getTime()),
@@ -104,7 +132,12 @@ export async function createAppHandoff(
   await db.insert(schema.verification).values({
     id: ticketId(ticket),
     identifier: PREFIX + session.id,
-    value: JSON.stringify({ sessionId: session.id, appId, origin, targetPath }),
+    value: JSON.stringify({
+      sessionId: session.id,
+      ...resource,
+      origin,
+      targetPath,
+    }),
     expiresAt,
   });
   return {
@@ -156,19 +189,29 @@ export async function consumeAppHandoff(request: Request) {
     db.query.session.findFirst({
       where: { id: payload.sessionId, expiresAt: { gt: new Date() } },
     }),
-    getHandoffApp(payload.appId),
+    payload.appId ? getHandoffApp(payload.appId) : Promise.resolve(null),
   ]);
   if (!session) throw new AppError('Session has ended', 401);
   if (
-    !app ||
-    appTarget(app.slug) !== payload.targetPath ||
-    !app.deploymentRevision ||
-    !app.capabilities?.frontend ||
-    app.status === 'archived' ||
-    !app.compatibility?.isSupported
+    payload.appId &&
+    (!app ||
+      appTarget(app.slug) !== payload.targetPath ||
+      !app.deploymentRevision ||
+      !app.capabilities?.frontend ||
+      app.status === 'archived' ||
+      !app.compatibility?.isSupported)
   ) {
     throw new AppError('App is no longer available', 409);
   }
+  if (
+    payload.dashboardId &&
+    (payload.targetPath !==
+      `/mobile/dashboard/${encodeURIComponent(payload.dashboardId)}` ||
+      !(await db.query.dashboards.findFirst({
+        where: { id: payload.dashboardId },
+      })))
+  )
+    throw new AppError('Dashboard is no longer available', 409);
   const cookie = getCookies(auth.options).sessionToken;
   // Better Auth/Better Call's signed-cookie wire format: percent-encoded
   // token + '.' + HMAC-SHA256(base64). A real-auth integration test protects

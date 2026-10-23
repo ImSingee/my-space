@@ -8,6 +8,8 @@ import { createConnectTransport } from '@connectrpc/connect-web';
 import {
   AppService,
   AgentService,
+  WorkflowService,
+  WorkspaceService,
   PublicErrorSchema,
 } from '@hatch/platform-api';
 import {
@@ -89,6 +91,8 @@ export class HatchApiClient {
   private readonly fetcher: FetchLike;
   private readonly appRpc: Client<typeof AppService>;
   private readonly agentRpc: Client<typeof AgentService>;
+  private readonly workflowRpc: Client<typeof WorkflowService>;
+  private readonly workspaceRpc: Client<typeof WorkspaceService>;
   private readonly onUnauthorized?: (origin: string) => void;
   constructor(options: ClientOptions) {
     this.origin = canonicalizeInstanceUrl(options.origin, options);
@@ -117,6 +121,8 @@ export class HatchApiClient {
     });
     this.appRpc = createClient(AppService, transport);
     this.agentRpc = createClient(AgentService, transport);
+    this.workflowRpc = createClient(WorkflowService, transport);
+    this.workspaceRpc = createClient(WorkspaceService, transport);
   }
 
   private async fetchResponse(
@@ -311,6 +317,47 @@ export class HatchApiClient {
       signal,
     );
     return response.resources.map(appProjection);
+  }
+  workspace(signal?: AbortSignal) {
+    return this.rpcRequest(
+      (signal) => this.workspaceRpc.getWorkspace({}, { signal }),
+      signal,
+    );
+  }
+  async workflows(signal?: AbortSignal): Promise<AppSummary[]> {
+    const result = await this.rpcRequest(
+      (signal) => this.workflowRpc.listWorkflows({}, { signal }),
+      signal,
+    );
+    return result.resources.map(appProjection);
+  }
+  async workflow(id: string, signal?: AbortSignal): Promise<AppSummary> {
+    const result = await this.rpcRequest(
+      (signal) => this.workflowRpc.getWorkflow({ id }, { signal }),
+      signal,
+    );
+    if (!result.resource)
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned no workflow.',
+      );
+    return appProjection(result.resource);
+  }
+  async dashboardHandoff(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<AppHandoff> {
+    const result = await this.rpcRequest(
+      (signal) => this.workspaceRpc.createDashboardHandoff({ id }, { signal }),
+      signal,
+    );
+    validateHandoff(this.origin, result, id);
+    return {
+      url: result.url,
+      ticket: result.ticket,
+      expiresAt: result.expiresAt,
+      targetPath: result.targetPath,
+    };
   }
   async app(id: string, signal?: AbortSignal): Promise<AppDetail> {
     const response = await this.rpcRequest(
