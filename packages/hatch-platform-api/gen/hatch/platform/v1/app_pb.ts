@@ -560,7 +560,7 @@ export const AssociateAppSessionResponseSchema: GenMessage<AssociateAppSessionRe
  */
 export const AppService: GenService<{
   /**
-   * Compatibility adapter for AuthService.CreateHandoff with an App target.
+   * Legacy App validation/navigation over the shared session handoff transport.
    * Existing ID-or-slug lookup and response fields remain supported.
    *
    * @generated from rpc hatch.platform.v1.AppService.CreateAppHandoff

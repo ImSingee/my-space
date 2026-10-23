@@ -2,7 +2,7 @@ import { fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { getAgentModelCatalog } from '~server/agent-model-catalog';
-import { createHandoff } from '~server/handoffs';
+import { createAppHandoff, createHandoff } from '~server/handoffs';
 import {
   insertAgentSession,
   listSessionSummaries,
@@ -363,13 +363,10 @@ export function registerPlatformApi(
   );
   router.rpc(
     AuthService.method.createHandoff,
-    (input, context) => {
-      const { target } = input;
-      if (!target.case) throw publicApiError('BAD_REQUEST');
+    (_input, context) => {
       return createHandoff(
         new Request(context.url, { headers: context.requestHeader }),
         context.values.get(publicApiContext).session!,
-        { type: target.case, id: target.value.id },
       );
     },
     { ...sessionOnly, jsonOptions: { ignoreUnknownFields: false } },
@@ -378,10 +375,10 @@ export function registerPlatformApi(
     AppService.method.createAppHandoff,
     async (input, context) => {
       const app = await find('apps', input.id);
-      return createHandoff(
+      return createAppHandoff(
         new Request(context.url, { headers: context.requestHeader }),
         context.values.get(publicApiContext).session!,
-        { type: 'app', id: app.id },
+        app.id,
       );
     },
     sessionOnly,

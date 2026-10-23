@@ -11,31 +11,8 @@ service AuthService {
   rpc CreateHandoff(CreateHandoffRequest) returns (CreateHandoffResponse);
 }
 
-message AppHandoffTarget {
-  // Immutable App ID. Unlike the legacy App RPC, this does not resolve slugs.
-  string id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 191
-  }];
-}
-
-message DashboardHandoffTarget {
-  // Immutable Dashboard ID; the server selects the existing Dashboard page.
-  string id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 191
-    pattern: "^[A-Za-z0-9_-]+$"
-  }];
-}
-
-message CreateHandoffRequest {
-  // Exactly one resource, never a caller-supplied URL or redirect path.
-  oneof target {
-    option (buf.validate.oneof).required = true;
-    AppHandoffTarget app = 1;
-    DashboardHandoffTarget dashboard = 2;
-  }
-}
+// Establish browser authentication only. Navigation belongs to the client.
+message CreateHandoffRequest {}
 
 message CreateHandoffResponse {
   // POST application/x-www-form-urlencoded with only ticket=<ticket> here.
@@ -43,8 +20,8 @@ message CreateHandoffResponse {
   // One use, at most 60 seconds. Never put this or session tokens in a URL.
   string ticket = 2;
   string expires_at = 3;
-  // Informational, server-selected destination of the consume endpoint's 303.
-  string target_path = 4;
+  // Fixed same-origin completion page. Navigate after it loads successfully.
+  string completion_url = 4;
 }
 
 message User {

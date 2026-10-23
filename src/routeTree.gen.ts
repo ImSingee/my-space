@@ -44,6 +44,7 @@ import { Route as AppWorkflowWorkflowSlugIndexRouteImport } from './routes/_app/
 import { Route as AppWorkflowWorkflowSlugManageRouteImport } from './routes/_app/workflow/$workflowSlug/manage'
 import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
 import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
+import { Route as ApiAuthHandoffsCompleteRouteImport } from './routes/api/auth/handoffs/complete'
 import { Route as ApiAuthHandoffsConsumeRouteImport } from './routes/api/auth/handoffs/consume'
 import { Route as ApiWorkflowWorkflowIdDownloadRouteImport } from './routes/api/workflow/$workflowId/download'
 import { Route as ApiWorkflowWorkflowIdRunRouteImport } from './routes/api/workflow/$workflowId/run'
@@ -239,6 +240,11 @@ const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
   path: '/api/app/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthHandoffsCompleteRoute = ApiAuthHandoffsCompleteRouteImport.update({
+  id: '/api/auth/handoffs/complete',
+  path: '/api/auth/handoffs/complete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthHandoffsConsumeRoute = ApiAuthHandoffsConsumeRouteImport.update({
   id: '/api/auth/handoffs/consume',
   path: '/api/auth/handoffs/consume',
@@ -364,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/auth/handoffs/complete': typeof ApiAuthHandoffsCompleteRoute
   '/api/auth/handoffs/consume': typeof ApiAuthHandoffsConsumeRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
@@ -415,6 +422,7 @@ export interface FileRoutesByTo {
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/auth/handoffs/complete': typeof ApiAuthHandoffsCompleteRoute
   '/api/auth/handoffs/consume': typeof ApiAuthHandoffsConsumeRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
@@ -470,6 +478,7 @@ export interface FileRoutesById {
   '/_app/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/auth/handoffs/complete': typeof ApiAuthHandoffsCompleteRoute
   '/api/auth/handoffs/consume': typeof ApiAuthHandoffsConsumeRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
@@ -525,6 +534,7 @@ export interface FileRouteTypes {
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/auth/handoffs/complete'
     | '/api/auth/handoffs/consume'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
@@ -576,6 +586,7 @@ export interface FileRouteTypes {
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/auth/handoffs/complete'
     | '/api/auth/handoffs/consume'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
@@ -630,6 +641,7 @@ export interface FileRouteTypes {
     | '/_app/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/auth/handoffs/complete'
     | '/api/auth/handoffs/consume'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
@@ -665,6 +677,7 @@ export interface RootRouteChildren {
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
+  ApiAuthHandoffsCompleteRoute: typeof ApiAuthHandoffsCompleteRoute
   ApiAuthHandoffsConsumeRoute: typeof ApiAuthHandoffsConsumeRoute
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
   ApiWorkflowWorkflowIdRunRoute: typeof ApiWorkflowWorkflowIdRunRoute
@@ -925,6 +938,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/handoffs/complete': {
+      id: '/api/auth/handoffs/complete'
+      path: '/api/auth/handoffs/complete'
+      fullPath: '/api/auth/handoffs/complete'
+      preLoaderRoute: typeof ApiAuthHandoffsCompleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/handoffs/consume': {
       id: '/api/auth/handoffs/consume'
       path: '/api/auth/handoffs/consume'
@@ -1157,6 +1177,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRpcSplatRoute: ApiRpcSplatRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
+  ApiAuthHandoffsCompleteRoute: ApiAuthHandoffsCompleteRoute,
   ApiAuthHandoffsConsumeRoute: ApiAuthHandoffsConsumeRoute,
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,
   ApiWorkflowWorkflowIdRunRoute: ApiWorkflowWorkflowIdRunRoute,

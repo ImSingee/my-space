@@ -21,78 +21,17 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_hatch_platform_v1_auth: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'ChxoYXRjaC9wbGF0Zm9ybS92MS9hdXRoLnByb3RvEhFoYXRjaC5wbGF0Zm9ybS52MSIqChBBcHBIYW5kb2ZmVGFyZ2V0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BIkIKFkRhc2hib2FyZEhhbmRvZmZUYXJnZXQSKAoCaWQYASABKAlCHLpIGXIXEAEYvwEyEF5bQS1aYS16MC05Xy1dKyQimwEKFENyZWF0ZUhhbmRvZmZSZXF1ZXN0EjIKA2FwcBgBIAEoCzIjLmhhdGNoLnBsYXRmb3JtLnYxLkFwcEhhbmRvZmZUYXJnZXRIABI+CglkYXNoYm9hcmQYAiABKAsyKS5oYXRjaC5wbGF0Zm9ybS52MS5EYXNoYm9hcmRIYW5kb2ZmVGFyZ2V0SABCDwoGdGFyZ2V0EgW6SAIIASJdChVDcmVhdGVIYW5kb2ZmUmVzcG9uc2USCwoDdXJsGAEgASgJEg4KBnRpY2tldBgCIAEoCRISCgpleHBpcmVzX2F0GAMgASgJEhMKC3RhcmdldF9wYXRoGAQgASgJIi8KBFVzZXISCgoCaWQYASABKAkSDQoFZW1haWwYAiABKAkSDAoEbmFtZRgDIAEoCSI6ChFTZXNzaW9uQ3JlZGVudGlhbBIlCgR1c2VyGAEgASgLMhcuaGF0Y2gucGxhdGZvcm0udjEuVXNlciJhChBBcGlLZXlDcmVkZW50aWFsEiUKBHVzZXIYASABKAsyFy5oYXRjaC5wbGF0Zm9ybS52MS5Vc2VyEgoKAmlkGAIgASgJEhEKBG5hbWUYAyABKAlIAIgBAUIHCgVfbmFtZSJGCg1SdW5DcmVkZW50aWFsEg4KBnJ1bl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXJ1bm5lcl9pZBgDIAEoCSISChBHZXRTdGF0dXNSZXF1ZXN0IvIBChFHZXRTdGF0dXNSZXNwb25zZRIXCgpleHBpcmVzX2F0GAEgASgJSAGIAQESNwoHc2Vzc2lvbhgCIAEoCzIkLmhhdGNoLnBsYXRmb3JtLnYxLlNlc3Npb25DcmVkZW50aWFsSAASNgoHYXBpX2tleRgDIAEoCzIjLmhhdGNoLnBsYXRmb3JtLnYxLkFwaUtleUNyZWRlbnRpYWxIABIvCgNydW4YBCABKAsyIC5oYXRjaC5wbGF0Zm9ybS52MS5SdW5DcmVkZW50aWFsSABCEwoKY3JlZGVudGlhbBIFukgCCAFCDQoLX2V4cGlyZXNfYXQyyQEKC0F1dGhTZXJ2aWNlElYKCUdldFN0YXR1cxIjLmhhdGNoLnBsYXRmb3JtLnYxLkdldFN0YXR1c1JlcXVlc3QaJC5oYXRjaC5wbGF0Zm9ybS52MS5HZXRTdGF0dXNSZXNwb25zZRJiCg1DcmVhdGVIYW5kb2ZmEicuaGF0Y2gucGxhdGZvcm0udjEuQ3JlYXRlSGFuZG9mZlJlcXVlc3QaKC5oYXRjaC5wbGF0Zm9ybS52MS5DcmVhdGVIYW5kb2ZmUmVzcG9uc2ViBnByb3RvMw',
+    'ChxoYXRjaC9wbGF0Zm9ybS92MS9hdXRoLnByb3RvEhFoYXRjaC5wbGF0Zm9ybS52MSIWChRDcmVhdGVIYW5kb2ZmUmVxdWVzdCJgChVDcmVhdGVIYW5kb2ZmUmVzcG9uc2USCwoDdXJsGAEgASgJEg4KBnRpY2tldBgCIAEoCRISCgpleHBpcmVzX2F0GAMgASgJEhYKDmNvbXBsZXRpb25fdXJsGAQgASgJIi8KBFVzZXISCgoCaWQYASABKAkSDQoFZW1haWwYAiABKAkSDAoEbmFtZRgDIAEoCSI6ChFTZXNzaW9uQ3JlZGVudGlhbBIlCgR1c2VyGAEgASgLMhcuaGF0Y2gucGxhdGZvcm0udjEuVXNlciJhChBBcGlLZXlDcmVkZW50aWFsEiUKBHVzZXIYASABKAsyFy5oYXRjaC5wbGF0Zm9ybS52MS5Vc2VyEgoKAmlkGAIgASgJEhEKBG5hbWUYAyABKAlIAIgBAUIHCgVfbmFtZSJGCg1SdW5DcmVkZW50aWFsEg4KBnJ1bl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXJ1bm5lcl9pZBgDIAEoCSISChBHZXRTdGF0dXNSZXF1ZXN0IvIBChFHZXRTdGF0dXNSZXNwb25zZRIXCgpleHBpcmVzX2F0GAEgASgJSAGIAQESNwoHc2Vzc2lvbhgCIAEoCzIkLmhhdGNoLnBsYXRmb3JtLnYxLlNlc3Npb25DcmVkZW50aWFsSAASNgoHYXBpX2tleRgDIAEoCzIjLmhhdGNoLnBsYXRmb3JtLnYxLkFwaUtleUNyZWRlbnRpYWxIABIvCgNydW4YBCABKAsyIC5oYXRjaC5wbGF0Zm9ybS52MS5SdW5DcmVkZW50aWFsSABCEwoKY3JlZGVudGlhbBIFukgCCAFCDQoLX2V4cGlyZXNfYXQyyQEKC0F1dGhTZXJ2aWNlElYKCUdldFN0YXR1cxIjLmhhdGNoLnBsYXRmb3JtLnYxLkdldFN0YXR1c1JlcXVlc3QaJC5oYXRjaC5wbGF0Zm9ybS52MS5HZXRTdGF0dXNSZXNwb25zZRJiCg1DcmVhdGVIYW5kb2ZmEicuaGF0Y2gucGxhdGZvcm0udjEuQ3JlYXRlSGFuZG9mZlJlcXVlc3QaKC5oYXRjaC5wbGF0Zm9ybS52MS5DcmVhdGVIYW5kb2ZmUmVzcG9uc2ViBnByb3RvMw',
     [file_buf_validate_validate],
   );
 
 /**
- * @generated from message hatch.platform.v1.AppHandoffTarget
- */
-export type AppHandoffTarget = Message<'hatch.platform.v1.AppHandoffTarget'> & {
-  /**
-   * Immutable App ID. Unlike the legacy App RPC, this does not resolve slugs.
-   *
-   * @generated from field: string id = 1;
-   */
-  id: string;
-};
-
-/**
- * Describes the message hatch.platform.v1.AppHandoffTarget.
- * Use `create(AppHandoffTargetSchema)` to create a new message.
- */
-export const AppHandoffTargetSchema: GenMessage<AppHandoffTarget> =
-  /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 0);
-
-/**
- * @generated from message hatch.platform.v1.DashboardHandoffTarget
- */
-export type DashboardHandoffTarget =
-  Message<'hatch.platform.v1.DashboardHandoffTarget'> & {
-    /**
-     * Immutable Dashboard ID; the server selects the existing Dashboard page.
-     *
-     * @generated from field: string id = 1;
-     */
-    id: string;
-  };
-
-/**
- * Describes the message hatch.platform.v1.DashboardHandoffTarget.
- * Use `create(DashboardHandoffTargetSchema)` to create a new message.
- */
-export const DashboardHandoffTargetSchema: GenMessage<DashboardHandoffTarget> =
-  /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 1);
-
-/**
+ * Establish browser authentication only. Navigation belongs to the client.
+ *
  * @generated from message hatch.platform.v1.CreateHandoffRequest
  */
 export type CreateHandoffRequest =
-  Message<'hatch.platform.v1.CreateHandoffRequest'> & {
-    /**
-     * Exactly one resource, never a caller-supplied URL or redirect path.
-     *
-     * @generated from oneof hatch.platform.v1.CreateHandoffRequest.target
-     */
-    target:
-      | {
-          /**
-           * @generated from field: hatch.platform.v1.AppHandoffTarget app = 1;
-           */
-          value: AppHandoffTarget;
-          case: 'app';
-        }
-      | {
-          /**
-           * @generated from field: hatch.platform.v1.DashboardHandoffTarget dashboard = 2;
-           */
-          value: DashboardHandoffTarget;
-          case: 'dashboard';
-        }
-      | { case: undefined; value?: undefined };
-  };
+  Message<'hatch.platform.v1.CreateHandoffRequest'> & {};
 
 /**
  * Describes the message hatch.platform.v1.CreateHandoffRequest.
@@ -100,7 +39,7 @@ export type CreateHandoffRequest =
  */
 export const CreateHandoffRequestSchema: GenMessage<CreateHandoffRequest> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 2);
+  messageDesc(file_hatch_platform_v1_auth, 0);
 
 /**
  * @generated from message hatch.platform.v1.CreateHandoffResponse
@@ -127,11 +66,11 @@ export type CreateHandoffResponse =
     expiresAt: string;
 
     /**
-     * Informational, server-selected destination of the consume endpoint's 303.
+     * Fixed same-origin completion page. Navigate after it loads successfully.
      *
-     * @generated from field: string target_path = 4;
+     * @generated from field: string completion_url = 4;
      */
-    targetPath: string;
+    completionUrl: string;
   };
 
 /**
@@ -140,7 +79,7 @@ export type CreateHandoffResponse =
  */
 export const CreateHandoffResponseSchema: GenMessage<CreateHandoffResponse> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 3);
+  messageDesc(file_hatch_platform_v1_auth, 1);
 
 /**
  * @generated from message hatch.platform.v1.User
@@ -168,7 +107,7 @@ export type User = Message<'hatch.platform.v1.User'> & {
  */
 export const UserSchema: GenMessage<User> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 4);
+  messageDesc(file_hatch_platform_v1_auth, 2);
 
 /**
  * @generated from message hatch.platform.v1.SessionCredential
@@ -187,7 +126,7 @@ export type SessionCredential =
  */
 export const SessionCredentialSchema: GenMessage<SessionCredential> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 5);
+  messageDesc(file_hatch_platform_v1_auth, 3);
 
 /**
  * @generated from message hatch.platform.v1.ApiKeyCredential
@@ -215,7 +154,7 @@ export type ApiKeyCredential = Message<'hatch.platform.v1.ApiKeyCredential'> & {
  */
 export const ApiKeyCredentialSchema: GenMessage<ApiKeyCredential> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 6);
+  messageDesc(file_hatch_platform_v1_auth, 4);
 
 /**
  * @generated from message hatch.platform.v1.RunCredential
@@ -243,7 +182,7 @@ export type RunCredential = Message<'hatch.platform.v1.RunCredential'> & {
  */
 export const RunCredentialSchema: GenMessage<RunCredential> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 7);
+  messageDesc(file_hatch_platform_v1_auth, 5);
 
 /**
  * @generated from message hatch.platform.v1.GetStatusRequest
@@ -257,7 +196,7 @@ export type GetStatusRequest =
  */
 export const GetStatusRequestSchema: GenMessage<GetStatusRequest> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 8);
+  messageDesc(file_hatch_platform_v1_auth, 6);
 
 /**
  * All successfully authenticated public callers have full platform authority.
@@ -305,7 +244,7 @@ export type GetStatusResponse =
  */
 export const GetStatusResponseSchema: GenMessage<GetStatusResponse> =
   /*@__PURE__*/
-  messageDesc(file_hatch_platform_v1_auth, 9);
+  messageDesc(file_hatch_platform_v1_auth, 7);
 
 /**
  * @generated from service hatch.platform.v1.AuthService

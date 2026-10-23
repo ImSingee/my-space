@@ -9,7 +9,7 @@ import "hatch/platform/v1/lifecycle.proto";
 
 // Public API for CLI and native clients. Platform Web UI uses Server Functions.
 service AppService {
-  // Compatibility adapter for AuthService.CreateHandoff with an App target.
+  // Legacy App validation/navigation over the shared session handoff transport.
   // Existing ID-or-slug lookup and response fields remain supported.
   rpc CreateAppHandoff(CreateAppHandoffRequest) returns (CreateAppHandoffResponse) {
     option deprecated = true;
