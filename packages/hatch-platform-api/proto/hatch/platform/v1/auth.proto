@@ -6,6 +6,22 @@ import "buf/validate/validate.proto";
 
 service AuthService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  // Exchange an existing Better Auth session for a one-use browser POST ticket.
+  // API keys and Run credentials cannot create interactive browser sessions.
+  rpc CreateHandoff(CreateHandoffRequest) returns (CreateHandoffResponse);
+}
+
+// Establish browser authentication only. Navigation belongs to the client.
+message CreateHandoffRequest {}
+
+message CreateHandoffResponse {
+  // POST application/x-www-form-urlencoded with only ticket=<ticket> here.
+  string url = 1;
+  // One use, at most 60 seconds. Never put this or session tokens in a URL.
+  string ticket = 2;
+  string expires_at = 3;
+  // Fixed same-origin completion page. Navigate after it loads successfully.
+  string completion_url = 4;
 }
 
 message User {
