@@ -920,3 +920,89 @@ describe('one-use WebView handoff', () => {
     expect((await consume(pending.ticket)).status).toBe(401);
   });
 });
+
+describe('native workspace navigation contract', () => {
+  it('retains ordered duplicate App pins and exposes only session-authorized workspace data', async () => {
+    await db.delete(schema.sidebarItems);
+    await db.insert(schema.sidebarItems).values([
+      {
+        id: 'pin-archive',
+        appId: 'app-one',
+        label: 'Archive',
+        entryHash: '/archive',
+        sortOrder: 2,
+      },
+      {
+        id: 'pin-today',
+        appId: 'app-one',
+        label: 'Today',
+        entryHash: '/today',
+        sortOrder: 1,
+      },
+    ]);
+    const response = await call('WorkspaceService/GetWorkspace');
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.appPins).toEqual([
+      {
+        id: 'pin-today',
+        appId: 'app-one',
+        label: 'Today',
+        entryHash: '/today',
+      },
+      {
+        id: 'pin-archive',
+        appId: 'app-one',
+        label: 'Archive',
+        entryHash: '/archive',
+      },
+    ]);
+    expect(data.dashboards.length).toBeGreaterThan(0);
+    expect(
+      (
+        await call('WorkspaceService/GetWorkspace', {
+          headers: { authorization: '', origin: 'https://evil.test' },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call('WorkspaceService/GetWorkspace', {
+          headers: { authorization: '' },
+        })
+      ).status,
+    ).not.toBe(200);
+  });
+  it('issues an exact one-use dashboard target and rejects a removed dashboard at consumption', async () => {
+    await db
+      .insert(schema.dashboards)
+      .values({ id: 'native-dash', name: 'Native' })
+      .onConflictDoNothing();
+    const make = async () => {
+      const response = await call('WorkspaceService/CreateDashboardHandoff', {
+        body: { id: 'native-dash' },
+      });
+      expect(response.status).toBe(200);
+      return response.json() as Promise<{ ticket: string; targetPath: string }>;
+    };
+    const ticket = await make();
+    expect(ticket.targetPath).toBe('/mobile/dashboard/native-dash');
+    const response = await consume(ticket.ticket);
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(ticket.targetPath);
+    expect(response.headers.get('set-cookie')).toContain('HttpOnly');
+    expect((await consume(ticket.ticket)).status).toBe(401);
+    const removed = await make();
+    await db
+      .delete(schema.dashboards)
+      .where(eq(schema.dashboards.id, 'native-dash'));
+    expect((await consume(removed.ticket)).status).toBe(409);
+    expect(
+      (
+        await call('WorkspaceService/CreateDashboardHandoff', {
+          body: { id: 'native-dash' },
+        })
+      ).status,
+    ).toBe(404);
+  });
+});
