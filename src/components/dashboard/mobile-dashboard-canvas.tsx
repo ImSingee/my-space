@@ -44,13 +44,13 @@ export function MobileDashboardCanvas({
     setRefreshSignal((value) => value + 1);
   };
 
-  if (data.isPending || dashboards.isPending)
+  if (data.isPending)
     return (
       <Center mih="60dvh" component="output" aria-label="Loading dashboard">
         <Loader size="sm" />
       </Center>
     );
-  if (data.isError || dashboards.isError)
+  if (data.isError)
     return (
       <Stack p="lg" role="alert">
         <Text>Couldn’t load this dashboard.</Text>

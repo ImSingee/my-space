@@ -56,7 +56,8 @@ async function mount() {
     routeTree: root.addChildren([route, app]),
     history: createMemoryHistory({ initialEntries: ['/'] }),
   });
-  return render(<RouterProvider router={router as never} />);
+  const screen = await render(<RouterProvider router={router as never} />);
+  return Object.assign(screen, { queryClient });
 }
 
 beforeEach(() => {
@@ -67,7 +68,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-test('renders a real widget and refreshes it while keeping layout editing disabled', async () => {
+test('keeps a real widget usable while dashboard metadata is pending or unavailable', async () => {
+  let rejectMetadata!: (reason: Error) => void;
+  const metadata = new Promise<{ id: string; autoRefreshSeconds: number }[]>(
+    (_resolve, reject) => {
+      rejectMetadata = reject;
+    },
+  );
+  fixture.list.mockReturnValueOnce(metadata);
   const item = {
     id: 'placement',
     appId: 'app',
@@ -101,16 +109,32 @@ test('renders a real widget and refreshes it while keeping layout editing disabl
       .querySelector('iframe')
       ?.contentDocument?.getElementById('hatch-widget-root')?.textContent;
   await expect.poll(widgetText).toBe('Refresh 0');
+  expect(fixture.list).toHaveBeenCalledOnce();
+  expect(screen.queryClient.getQueryState(['dashboards'])?.status).toBe(
+    'pending',
+  );
   expect(document.querySelector('[data-editing]')).toBeNull();
   await expect
     .element(document.querySelector('.react-resizable-handle') as HTMLElement)
     .not.toBeVisible();
   expect(document.querySelector('nav')).toBeNull();
+  rejectMetadata(new Error('Dashboard list unavailable'));
+  await expect
+    .poll(() => screen.queryClient.getQueryState(['dashboards'])?.status)
+    .toBe('error');
+  await expect
+    .element(screen.getByRole('main', { name: 'Dashboard canvas' }))
+    .toBeVisible();
+  await expect.poll(widgetText).toBe('Refresh 0');
   await screen
     .getByRole('button', { name: 'Refresh dashboard', exact: true })
     .click();
   await expect.poll(widgetText).toBe('Refresh 1');
   expect(fixture.read).toHaveBeenCalledTimes(2);
+  expect(fixture.list).toHaveBeenCalledTimes(2);
+  await expect
+    .poll(() => screen.queryClient.getQueryState(['dashboards'])?.status)
+    .toBe('success');
 });
 
 test('recovers from an unavailable dashboard through retry and keeps the empty canvas usable', async () => {
