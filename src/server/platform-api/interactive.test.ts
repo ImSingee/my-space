@@ -5,7 +5,10 @@ import { errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { fromJson, toJson } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
-import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
+import {
+  AppService,
+  file_hatch_platform_v1_app,
+} from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
 import { AuthService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/auth_pb';
 import { PublicErrorSchema } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/error_pb';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -121,18 +124,12 @@ function client(useBinaryFormat: boolean) {
     cli: cliClient(transport),
   };
 }
-async function handoff(target: 'legacy' | 'session' = 'legacy') {
-  const response =
-    target === 'legacy'
-      ? await call('AppService/CreateAppHandoff', { body: { id: 'app-one' } })
-      : await call('AuthService/CreateHandoff', {
-          body: {},
-        });
+async function handoff() {
+  const response = await call('AuthService/CreateHandoff', { body: {} });
   expect(response.status).toBe(200);
   return (await response.json()) as {
     ticket: string;
     url: string;
-    targetPath: string;
     completionUrl: string;
     expiresAt: string;
   };
@@ -407,7 +404,6 @@ describe('interactive Platform API contracts and authority', () => {
         ['AgentService/ListSessions', {}],
         ['AgentService/GetSession', { id: runSession }],
         ['AgentService/CreateSession', {}],
-        ['AppService/CreateAppHandoff', { id: 'app-one' }],
         ['AuthService/CreateHandoff', {}],
       ] as const) {
         const response = await call(path, { headers, body });
@@ -530,7 +526,7 @@ describe('interactive Platform API contracts and authority', () => {
         { id: 'snapshot-run', userTurn: 0, status: 'blocked' },
       ]);
       expect(running.runs[0].completedAt).toBeUndefined();
-      const handoff = await api.apps.createAppHandoff({ id: 'example-app' });
+      const handoff = await api.auth.createHandoff({});
       expect(handoff.url).toBe(`${origin}/api/auth/handoffs/consume`);
       expect((await consume(handoff.ticket)).status).toBe(303);
     },
@@ -676,36 +672,6 @@ describe('interactive Platform API contracts and authority', () => {
     ).toBe(405);
   });
 
-  it('keeps trusted instance origins and exact App IDs when creating handoffs', async () => {
-    const tailscale = 'https://hatch.example.ts.net';
-    const response = await call('AppService/CreateAppHandoff', {
-      origin: tailscale,
-      body: { id: 'app-one', targetPath: 'https://evil.example' },
-      headers: { origin: tailscale },
-    });
-    expect(response.status).toBe(200);
-    const ticket = await response.json();
-    expect(ticket.url).toBe(`${tailscale}/api/auth/handoffs/consume`);
-    expect(ticket.targetPath).toBe('/app/example-app/embed/');
-    expect(
-      (
-        await consume(ticket.ticket, {
-          origin: tailscale,
-          headers: { origin: tailscale },
-        })
-      ).status,
-    ).toBe(303);
-    await db.insert(schema.apps).values({
-      id: 'shadow',
-      slug: 'app-one',
-      name: 'Slug shadow',
-      status: 'draft',
-    });
-    expect(
-      (await client(true).apps.createAppHandoff({ id: 'app-one' })).targetPath,
-    ).toBe('/app/example-app/embed/');
-  });
-
   it('enforces Protovalidate fields and Connect message limits', async () => {
     expect(
       (
@@ -845,14 +811,14 @@ describe('resource-independent session handoff', () => {
   });
 
   it('permits one consumer under contention and rejects expired tickets', async () => {
-    const ticket = await handoff('session');
+    const ticket = await handoff();
     const responses = await Promise.all(
       Array.from({ length: 4 }, () => consume(ticket.ticket)),
     );
     expect(responses.map((response) => response.status).sort()).toEqual([
       303, 401, 401, 401,
     ]);
-    const expired = await handoff('session');
+    const expired = await handoff();
     await db
       .update(schema.verification)
       .set({ expiresAt: new Date(Date.now() - 1) });
@@ -872,7 +838,7 @@ describe('resource-independent session handoff', () => {
         (await call('AuthService/CreateHandoff', { body, ...options })).status,
       ).toBe(403);
     }
-    const ticket = await handoff('session');
+    const ticket = await handoff();
     expect(
       (await consume(ticket.ticket, { headers: { origin: alternate } })).status,
     ).toBe(403);
@@ -893,29 +859,34 @@ describe('resource-independent session handoff', () => {
   });
 
   it('rejects injected redirects and invalid transport without setting a cookie', async () => {
-    const { ticket } = await handoff('session');
+    const { ticket } = await handoff();
     for (const [options, status] of [
       [{ extra: '&redirect=https://evil.example' }, 400],
       [{ extra: `&ticket=${ticket}` }, 400],
       [{ method: 'GET' }, 405],
       [{ headers: { 'content-type': 'application/json' } }, 415],
       [{ headers: { origin: 'https://evil.example' } }, 403],
+      [{ headers: { origin: 'null', 'sec-fetch-site': 'none' } }, 403],
+      [{ headers: { origin, 'sec-fetch-site': 'cross-site' } }, 403],
     ] as const) {
       const response = await consume(ticket, options);
       expect(response.status).toBe(status);
       expect(response.headers.has('set-cookie')).toBe(false);
       expect(response.headers.has('location')).toBe(false);
     }
-    expect((await consume(ticket)).status).toBe(303);
+    expect(
+      (await consume(ticket, { headers: { origin, 'sec-fetch-site': 'none' } }))
+        .status,
+    ).toBe(303);
   });
 
   it('establishes authentication without resources or after resources change', async () => {
-    const pending = await handoff('session');
+    const pending = await handoff();
     await db.update(schema.apps).set({ status: 'archived' });
     await db.delete(schema.dashboards);
     expect((await consume(pending.ticket)).status).toBe(303);
     await db.delete(schema.apps);
-    const issued = await handoff('session');
+    const issued = await handoff();
     const records = await db.query.verification.findMany();
     expect(JSON.parse(records[0].value)).toEqual({ sessionId, origin });
     const response = await consume(issued.ticket);
@@ -930,7 +901,7 @@ describe('resource-independent session handoff', () => {
   });
 
   it('only completes with a live browser cookie and never exposes credentials', async () => {
-    const issued = await handoff('session');
+    const issued = await handoff();
     const consumed = await consume(issued.ticket);
     const completed = await handleHandoffCompletion(
       new Request(issued.completionUrl, {
@@ -1049,28 +1020,66 @@ describe('resource-independent session handoff', () => {
   });
 });
 
-describe('handoff contract and upgrade boundaries', () => {
-  it('does not use another App deployment to authorize the target', async () => {
-    const ticket = await handoff();
-    await db.insert(schema.apps).values({
-      id: 'other-app',
-      slug: 'other-app',
-      name: 'Other app',
+describe('handoff public contract and removal boundaries', () => {
+  it('removes the App RPC and its messages while retaining generic handoffs', async () => {
+    expect(AppService.method).not.toHaveProperty('createAppHandoff');
+    const messages = file_hatch_platform_v1_app.messages.map(
+      (message) => message.name,
+    );
+    expect(messages).not.toContain('CreateAppHandoffRequest');
+    expect(messages).not.toContain('CreateAppHandoffResponse');
+    for (const binary of [false, true]) {
+      expect(client(binary).apps).not.toHaveProperty('createAppHandoff');
+      const response = await handlePlatformApiRequest(
+        new Request(
+          origin + '/api/rpc/hatch.platform.v1.AppService/CreateAppHandoff',
+          {
+            method: 'POST',
+            headers: {
+              authorization: 'Bearer ' + token,
+              'connect-protocol-version': '1',
+              'content-type': binary ? 'application/proto' : 'application/json',
+            },
+            body: binary
+              ? new Uint8Array([10, 7, ...new TextEncoder().encode('app-one')])
+              : JSON.stringify({ id: 'app-one' }),
+          },
+        ),
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ code: 'not_found' });
+      expect(response.headers.has('set-cookie')).toBe(false);
+    }
+    expect(await db.query.verification.findMany()).toHaveLength(0);
+    const issued = await handoff();
+    expect(Object.keys(issued).sort()).toEqual([
+      'completionUrl',
+      'expiresAt',
+      'ticket',
+      'url',
+    ]);
+    expect((await consume(issued.ticket)).status).toBe(303);
+  });
+
+  it('rejects unexpired App tickets without a cookie or resource redirect', async () => {
+    const ticket = randomBytes(32).toString('base64url');
+    await db.insert(schema.verification).values({
+      id: 'app-handoff:' + createHash('sha256').update(ticket).digest('hex'),
+      identifier: 'app-handoff:' + sessionId,
+      value: JSON.stringify({
+        sessionId,
+        appId: 'app-one',
+        origin,
+        targetPath: '/app/example-app/embed/',
+      }),
+      expiresAt: new Date(Date.now() + 60_000),
     });
-    await db
-      .update(schema.deployments)
-      .set({ appId: 'other-app' })
-      .where(eq(schema.deployments.id, 'deployment-one'));
-    const response = await consume(ticket.ticket);
-    expect(response.status).toBe(409);
+    const response = await consume(ticket);
+    expect(response.status).toBe(401);
     expect(response.headers.has('set-cookie')).toBe(false);
-    expect(
-      (
-        await call('AppService/CreateAppHandoff', {
-          body: { id: 'app-one' },
-        })
-      ).status,
-    ).toBe(409);
+    expect(response.headers.has('location')).toBe(false);
+    const fresh = await handoff();
+    expect((await consume(fresh.ticket)).status).toBe(303);
   });
 
   it('prunes expired handoffs without deleting other authentication records', async () => {
@@ -1082,19 +1091,13 @@ describe('handoff contract and upgrade boundaries', () => {
         value: 'untouched',
         expiresAt: expired,
       },
-      {
-        id: 'app-handoff:old',
-        identifier: 'old',
-        value: '{}',
-        expiresAt: expired,
-      },
       { id: 'handoff:old', identifier: 'old', value: '{}', expiresAt: expired },
     ]);
-    await handoff('session');
+    await handoff();
     const rows = await db.query.verification.findMany();
     expect(rows).toHaveLength(2);
     expect(rows.find((row) => row.id === 'unrelated')?.value).toBe('untouched');
-    expect(rows.some((row) => row.id.endsWith(':old'))).toBe(false);
+    expect(rows.some((row) => row.id === 'handoff:old')).toBe(false);
   });
 
   it('accepts an empty request and rejects resource or navigation configuration', async () => {
@@ -1116,239 +1119,27 @@ describe('handoff contract and upgrade boundaries', () => {
     );
   });
 
-  it.each([
-    'archived',
-    'frontend',
-    'deployment',
-    'compatibility',
-    'slug',
-  ] as const)(
-    'rechecks App %s availability at consumption and issuance',
-    async (change) => {
-      const ticket = await handoff();
-      if (change === 'archived')
-        await db.update(schema.apps).set({ status: 'archived' });
-      if (change === 'frontend')
-        await db.update(schema.apps).set({ capabilities: null });
-      if (change === 'deployment') await db.delete(schema.deployments);
-      if (change === 'compatibility')
-        await db
-          .update(schema.deployments)
-          .set({ compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION + 1 });
-      if (change === 'slug')
-        await db.update(schema.apps).set({ slug: '../outside' });
-      const response = await consume(ticket.ticket);
-      expect(response.status).toBe(409);
-      expect(response.headers.has('set-cookie')).toBe(false);
-      expect(
-        (
-          await call('AppService/CreateAppHandoff', {
-            body: { id: 'app-one' },
-          })
-        ).status,
-      ).toBe(409);
-    },
-  );
-
-  it('consumes pre-upgrade App tickets once through the shared validation path', async () => {
-    const ticket = randomBytes(32).toString('base64url');
-    await db.insert(schema.verification).values({
-      id: 'app-handoff:' + createHash('sha256').update(ticket).digest('hex'),
-      identifier: 'app-handoff:' + sessionId,
-      value: JSON.stringify({
-        sessionId,
-        appId: 'app-one',
-        origin,
-        targetPath: '/app/example-app/embed/',
-      }),
-      expiresAt: new Date(Date.now() + 60_000),
-    });
-    const response = await consume(ticket);
-    expect(response.status).toBe(303);
-    expect(
-      (
-        await auth.api.getSession({
-          headers: new Headers({ cookie: cookies(response) }),
-        })
-      )?.session.id,
-    ).toBe(sessionId);
-    expect((await consume(ticket)).status).toBe(401);
-  });
-
-  it.each(['legacy', 'session'] as const)(
-    'fails closed for corrupt %s envelopes',
-    async (kind) => {
-      for (const replacement of [
-        '{invalid',
-        { targetPath: '//evil.example' },
-        { target: { type: 'url', id: 'https://evil.example' } },
-        { target: { type: 'dashboard', id: 'dashboard-one' } },
-      ]) {
-        const { ticket } = await handoff(kind);
-        const record = (await db.query.verification.findMany())[0];
-        await db.update(schema.verification).set({
-          value:
-            typeof replacement === 'string'
-              ? replacement
-              : JSON.stringify({ ...JSON.parse(record.value), ...replacement }),
-        });
-        const response = await consume(ticket);
-        expect([403, 409]).toContain(response.status);
-        expect(response.headers.has('set-cookie')).toBe(false);
-        expect(response.headers.has('location')).toBe(false);
-      }
-    },
-  );
-});
-
-describe('one-use WebView handoff', () => {
-  it('accepts native form posts without relaxing opaque or cross-site origin checks', async () => {
-    const ticket = await handoff();
-    for (const headers of [
-      { origin: 'null', 'sec-fetch-site': 'none' },
-      { origin, 'sec-fetch-site': 'cross-site' },
-      { origin: 'https://evil.example', 'sec-fetch-site': 'none' },
+  it('fails closed for corrupt or resource-bearing envelopes', async () => {
+    for (const replacement of [
+      '{invalid',
+      { targetPath: '//evil.example' },
+      { appId: 'app-one' },
+      { target: { type: 'url', id: 'https://evil.example' } },
+      { target: { type: 'dashboard', id: 'dashboard-one' } },
     ]) {
-      expect((await consume(ticket.ticket, { headers })).status).toBe(403);
+      const { ticket } = await handoff();
+      const record = (await db.query.verification.findMany())[0];
+      await db.update(schema.verification).set({
+        value:
+          typeof replacement === 'string'
+            ? replacement
+            : JSON.stringify({ ...JSON.parse(record.value), ...replacement }),
+      });
+      const response = await consume(ticket);
+      expect(response.status).toBe(403);
+      expect(response.headers.has('set-cookie')).toBe(false);
+      expect(response.headers.has('location')).toBe(false);
+      expect((await consume(ticket)).status).toBe(401);
     }
-    const response = await consume(ticket.ticket, {
-      headers: { origin, 'sec-fetch-site': 'none' },
-    });
-    expect(response.status).toBe(303);
-    expect(response.headers.get('location')).toBe(ticket.targetPath);
-    expect((await consume(ticket.ticket)).status).toBe(401);
-  });
-
-  it('sets a real host-only HttpOnly cookie and fixed 303 App target without exposing Bearer', async () => {
-    const ticket = await handoff();
-    expect(new URL(ticket.url).search).toBe('');
-    expect(ticket.targetPath).toBe('/app/example-app/embed/');
-    expect(Date.parse(ticket.expiresAt) - Date.now()).toBeLessThanOrEqual(
-      60_000,
-    );
-    expect(JSON.stringify(ticket)).not.toContain(token);
-    const rows = await db.query.verification.findMany();
-    expect(JSON.stringify(rows)).not.toContain(ticket.ticket);
-    expect(JSON.stringify(rows)).not.toContain(token);
-    const response = await consume(ticket.ticket);
-    expect(response.status).toBe(303);
-    expect(response.headers.get('location')).toBe('/app/example-app/embed/');
-    const setCookie = response.headers.get('set-cookie')!;
-    expect(setCookie).toContain('HttpOnly');
-    expect(setCookie).toContain('Secure');
-    expect(setCookie).toContain('SameSite=Lax');
-    expect(setCookie).not.toMatch(/Domain=/i);
-    expect(await response.text()).toBe('');
-    const web = await auth.api.getSession({
-      headers: new Headers({ cookie: cookies(response) }),
-    });
-    expect(web?.session.id).toBe(sessionId);
-    expect((await consume(ticket.ticket)).status).toBe(401);
-  });
-
-  it('permits exactly one concurrent consumer', async () => {
-    const ticket = await handoff();
-    const responses = await Promise.all([
-      consume(ticket.ticket),
-      consume(ticket.ticket),
-    ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([
-      303, 401,
-    ]);
-  });
-
-  it('rejects expired, cross-origin, cross-instance and redirect-injected handoffs', async () => {
-    const expired = await handoff();
-    await db
-      .update(schema.verification)
-      .set({ expiresAt: new Date(Date.now() - 1) });
-    expect((await consume(expired.ticket)).status).toBe(401);
-    const ticket = await handoff();
-    expect(
-      (
-        await consume(ticket.ticket, {
-          headers: { origin: 'https://evil.example' },
-        })
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await consume(ticket.ticket, {
-          extra: '&redirect=https://evil.example',
-        })
-      ).status,
-    ).toBe(400);
-    expect((await consume(ticket.ticket, { method: 'GET' })).status).toBe(405);
-    expect(
-      (await consume(ticket.ticket, { origin: 'https://hatch.example.ts.net' }))
-        .status,
-    ).toBe(403);
-    expect((await consume(ticket.ticket)).status).toBe(401);
-    expect(
-      (
-        await call('AppService/CreateAppHandoff', {
-          body: { id: '' },
-        })
-      ).status,
-    ).toBe(400);
-  });
-
-  it('does not open renamed, unavailable or unsupported Apps', async () => {
-    const ticket = await handoff();
-    await db
-      .update(schema.apps)
-      .set({ slug: 'renamed' })
-      .where(eq(schema.apps.id, 'app-one'));
-    expect((await consume(ticket.ticket)).status).toBe(409);
-    await db
-      .update(schema.apps)
-      .set({ slug: 'example-app', status: 'archived' })
-      .where(eq(schema.apps.id, 'app-one'));
-    expect(
-      (await call('AppService/CreateAppHandoff', { body: { id: 'app-one' } }))
-        .status,
-    ).toBe(409);
-    await db
-      .update(schema.apps)
-      .set({ status: 'deployed' })
-      .where(eq(schema.apps.id, 'app-one'));
-    await db
-      .update(schema.deployments)
-      .set({ compatibilityVersion: LATEST_APP_COMPATIBILITY_VERSION + 1 });
-    expect(
-      (await call('AppService/CreateAppHandoff', { body: { id: 'app-one' } }))
-        .status,
-    ).toBe(409);
-  });
-
-  it('invalidates browser cookies and pending tickets when the native session signs out', async () => {
-    const signedIn = await authCall('sign-up/email', {
-      name: 'Other device',
-      email: `${randomUUID()}@mobile.test`,
-      password: 'Mobile-test-password-94',
-    });
-    const otherToken = ((await signedIn.json()) as { token: string }).token;
-    const headers = { authorization: `Bearer ${otherToken}` };
-    const first = (await (
-      await call('AppService/CreateAppHandoff', {
-        body: { id: 'app-one' },
-        headers,
-      })
-    ).json()) as { ticket: string };
-    const pending = (await (
-      await call('AppService/CreateAppHandoff', {
-        body: { id: 'app-one' },
-        headers,
-      })
-    ).json()) as { ticket: string };
-    const browser = await consume(first.ticket);
-    expect(browser.status).toBe(303);
-    expect((await authCall('sign-out', {}, headers)).status).toBe(200);
-    expect(
-      await auth.api.getSession({
-        headers: new Headers({ cookie: cookies(browser) }),
-      }),
-    ).toBeNull();
-    expect((await consume(pending.ticket)).status).toBe(401);
   });
 });
