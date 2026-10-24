@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { and, gt, inArray, like, lt, or } from 'drizzle-orm';
+import { and, eq, gt, like, lt } from 'drizzle-orm';
 import { getCookies } from 'better-auth/cookies';
 import { z } from 'zod';
 import { auth } from '~auth/server';
@@ -11,30 +11,17 @@ import {
   sessionOriginError,
 } from '~server/session-http-auth';
 import { readBoundedText } from './platform-api/body';
-import { resolveLegacyAppHandoffPath } from './legacy-app-handoff';
 
 const TICKET_LIFETIME_MS = 60_000;
 const PREFIX = 'handoff:';
-const LEGACY_PREFIX = 'app-handoff:';
 const COMPLETION_PATH = '/api/auth/handoffs/complete';
-const commonPayload = {
+const payloadSchema = z.strictObject({
   sessionId: z.string().min(1),
   origin: z.string(),
-};
-const payloadSchema = z
-  .strictObject(commonPayload)
-  .transform((payload) => ({ ...payload, legacy: false as const }));
-// Only the published App RPC carries resource/navigation state.
-const legacyPayloadSchema = z
-  .strictObject({
-    ...commonPayload,
-    appId: z.string().min(1).max(191),
-    targetPath: z.string(),
-  })
-  .transform((payload) => ({ ...payload, legacy: true as const }));
+});
 type HandoffSession = { id: string; expiresAt: Date };
-const ticketId = (ticket: string, prefix = PREFIX) =>
-  prefix + createHash('sha256').update(ticket).digest('hex');
+const ticketId = (ticket: string) =>
+  PREFIX + createHash('sha256').update(ticket).digest('hex');
 
 function requestOrigin(request: Request) {
   const origin = new URL(request.url).origin;
@@ -48,32 +35,6 @@ function requestOrigin(request: Request) {
 }
 
 export async function createHandoff(request: Request, session: HandoffSession) {
-  const handoff = await issueHandoff(request, session);
-  return {
-    ...handoff,
-    completionUrl: new URL(COMPLETION_PATH, handoff.url).href,
-  };
-}
-
-/** Keep the old wire contract without adding resources to CreateHandoff. */
-export async function createAppHandoff(
-  request: Request,
-  session: HandoffSession,
-  appId: string,
-) {
-  const targetPath = await resolveLegacyAppHandoffPath(appId);
-  if (!targetPath) throw new AppError('App not found', 404);
-  return {
-    ...(await issueHandoff(request, session, { appId, targetPath })),
-    targetPath,
-  };
-}
-
-async function issueHandoff(
-  request: Request,
-  session: HandoffSession,
-  legacyApp?: { appId: string; targetPath: string },
-) {
   const origin = requestOrigin(request);
   const now = new Date();
   const expiresAt = new Date(
@@ -86,21 +47,16 @@ async function issueHandoff(
     .delete(schema.verification)
     .where(
       and(
-        or(
-          like(schema.verification.id, `${PREFIX}%`),
-          like(schema.verification.id, `${LEGACY_PREFIX}%`),
-        ),
+        like(schema.verification.id, `${PREFIX}%`),
         lt(schema.verification.expiresAt, now),
       ),
     );
-  const prefix = legacyApp ? LEGACY_PREFIX : PREFIX;
   await db.insert(schema.verification).values({
-    id: ticketId(ticket, prefix),
-    identifier: prefix + session.id,
+    id: ticketId(ticket),
+    identifier: PREFIX + session.id,
     value: JSON.stringify({
       sessionId: session.id,
       origin,
-      ...legacyApp,
     }),
     expiresAt,
   });
@@ -108,6 +64,7 @@ async function issueHandoff(
     url: `${origin}/api/auth/handoffs/consume`,
     ticket,
     expiresAt: expiresAt.toISOString(),
+    completionUrl: new URL(COMPLETION_PATH, origin).href,
   };
 }
 
@@ -136,10 +93,7 @@ async function consumeHandoff(request: Request) {
     .delete(schema.verification)
     .where(
       and(
-        inArray(schema.verification.id, [
-          ticketId(params.get('ticket')!),
-          ticketId(params.get('ticket')!, LEGACY_PREFIX),
-        ]),
+        eq(schema.verification.id, ticketId(params.get('ticket')!)),
         gt(schema.verification.expiresAt, new Date()),
       ),
     )
@@ -151,15 +105,11 @@ async function consumeHandoff(request: Request) {
   } catch {
     throw new AppError('Invalid handoff', 403);
   }
-  const legacy = record.id.startsWith(LEGACY_PREFIX);
-  const parsed = (legacy ? legacyPayloadSchema : payloadSchema).safeParse(
-    storedPayload,
-  );
+  const parsed = payloadSchema.safeParse(storedPayload);
   if (
     !parsed.success ||
     parsed.data.origin !== origin ||
-    record.identifier !==
-      (legacy ? LEGACY_PREFIX : PREFIX) + parsed.data.sessionId
+    record.identifier !== PREFIX + parsed.data.sessionId
   )
     throw new AppError('Invalid handoff', 403);
   const payload = parsed.data;
@@ -167,12 +117,6 @@ async function consumeHandoff(request: Request) {
     where: { id: payload.sessionId, expiresAt: { gt: new Date() } },
   });
   if (!session) throw new AppError('Session has ended', 401);
-  const targetPath = payload.legacy
-    ? await resolveLegacyAppHandoffPath(payload.appId)
-    : COMPLETION_PATH;
-  if (!targetPath || (payload.legacy && targetPath !== payload.targetPath)) {
-    throw new AppError('Handoff target is no longer available', 409);
-  }
   const cookie = getCookies(auth.options).sessionToken;
   // Better Auth/Better Call's signed-cookie wire format: percent-encoded
   // token + '.' + HMAC-SHA256(base64). A real-auth integration test protects
@@ -189,7 +133,7 @@ async function consumeHandoff(request: Request) {
   return new Response(null, {
     status: 303,
     headers: {
-      location: targetPath,
+      location: COMPLETION_PATH,
       'set-cookie': `${cookie.name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`,
       'cache-control': 'no-store',
       'referrer-policy': 'no-referrer',

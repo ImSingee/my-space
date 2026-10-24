@@ -112,8 +112,7 @@ artifact/data fences. Deployment requests include the resource's observed
 
 Every valid Better Auth session (Cookie or Bearer session token), user API key
 (`x-api-key`), or Agent Run JWT has full access to the existing lifecycle, auth
-status and SDK procedures. Interactive Agent methods, `CreateHandoff`, and the
-legacy `CreateAppHandoff`
+status and SDK procedures. Interactive Agent methods and `CreateHandoff`
 require a Better Auth user session; API keys and Run JWTs receive
 `permission_denied` with `SESSION_REQUIRED`, even alongside a valid Cookie.
 There are no added scopes or roles. A Run's context associates newly created Apps with
@@ -159,7 +158,12 @@ REST `null`. Timestamps remain ISO strings.
 | `AgentService/CreateSession`   | Optional `title` (≤200 characters), `providerId`/`modelId` (1–200 characters when present) | `{id}`. Blank title becomes `New chat`; omitted models remain unset. Availability is checked when a run starts.                                                                                                                                                                                |
 | `AgentService/GetSession`      | `id` (1–200 characters)                                                                    | `{session}` with transcript `google.protobuf.Value` messages, optional `activeRun`, run timings, `updatedAt` Retry CAS and `serverTime`. One repeatable-read snapshot; pending questions/environment requests and `answeredAskId` preserve reconnect behavior. Missing session is `not_found`. |
 | `AuthService/CreateHandoff`    | Empty message                                                                              | `{url, ticket, expiresAt, completionUrl}`. Establishes the original session Cookie without resource configuration; fixed completion page, no caller-supplied URL/path, unknown JSON fields fail. See [browser handoffs](browser-handoffs.md).                                                  |
-| `AppService/CreateAppHandoff`  | App `id` or slug (1–191 characters)                                                        | Deprecated compatibility adapter to the same handoff service. Existing response fields, ID-first lookup and App embed destination remain supported.                                                                                                                                            |
+
+`AppService/CreateAppHandoff` and its request/response messages have been removed.
+The old endpoint returns HTTP 404 (`not_found`), and outstanding legacy tickets
+return HTTP 401 on consumption. Clients must migrate to the empty
+`AuthService/CreateHandoff` request, wait for `completionUrl`, then navigate the
+WebView themselves. See [migration and rollout impact](browser-handoffs.md#removed-app-handoff-contract-and-client-migration).
 
 ### Native authentication and one-use browser handoff
 
