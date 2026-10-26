@@ -1,9 +1,15 @@
 /** Server-only: lazy Deno backend process manager + Connect reverse proxy. */
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  request as httpRequest,
+} from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import {
   appBuildDir,
   appStorageDir,
@@ -1202,6 +1208,161 @@ function invalidateLocalBackend(id: string, preserveKeepAlive: boolean): void {
 const MAX_SIGNED_BODY_BYTES = 1024 * 1024;
 
 /**
+ * Headers copied from an app backend onto the platform response.
+ *
+ * `node:http` does not decode `Content-Encoding`, so `Content-Length` and
+ * `Content-Range` describe the bytes the client actually receives. Players
+ * need that for Range (206/416), HEAD, and downloads. Connect/gRPC framing
+ * headers stay so RPC streams are unchanged.
+ *
+ * Every other response header is dropped. A backend must not be able to set
+ * cookies, widen CORS, or override CSP, HSTS, COOP/COEP/CORP, framing, or
+ * clear site data on the platform origin. `Location` and `Refresh` are
+ * dropped so a proxied URL cannot become an open redirect. Hop-by-hop
+ * headers (`Transfer-Encoding`, `Connection`, and so on) are dropped because
+ * chunked framing is already decoded before the body is streamed.
+ */
+const PROXY_RESPONSE_HEADERS = [
+  'accept-ranges',
+  'cache-control',
+  'content-disposition',
+  'content-encoding',
+  'content-language',
+  'content-length',
+  'content-range',
+  'content-type',
+  'etag',
+  'expires',
+  'last-modified',
+  'vary',
+  'connect-accept-encoding',
+  'connect-content-encoding',
+  'connect-protocol-version',
+  'grpc-accept-encoding',
+  'grpc-encoding',
+  'grpc-message',
+  'grpc-status',
+] as const;
+
+/** Statuses whose Fetch response is required to have a null body. */
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+type BackendUpstream = {
+  status: number;
+  statusText: string;
+  headers: IncomingHttpHeaders;
+  message: IncomingMessage;
+};
+
+function setSafeHeader(headers: Headers, name: string, value: string): void {
+  try {
+    headers.set(name, value);
+  } catch {
+    // A backend value the Fetch Headers API rejects (for example a raw
+    // newline) is omitted. One bad header must not fail the response.
+  }
+}
+
+function proxyResponseHeaders(upstream: IncomingHttpHeaders): Headers {
+  const headers = new Headers();
+  for (const name of PROXY_RESPONSE_HEADERS) {
+    const raw = upstream[name];
+    if (name === 'content-length') {
+      // Only a single decimal length is safe. A duplicate or non-numeric
+      // value would disagree with the unmodified body stream.
+      if (typeof raw === 'string' && /^\d+$/.test(raw)) {
+        setSafeHeader(headers, name, raw);
+      }
+      continue;
+    }
+    const value = Array.isArray(raw) ? raw.join(', ') : raw;
+    if (value) setSafeHeader(headers, name, value);
+  }
+  // `nosniff` only tightens MIME handling. Any other value is ignored.
+  const sniff = upstream['x-content-type-options'];
+  if (typeof sniff === 'string' && sniff.trim().toLowerCase() === 'nosniff') {
+    setSafeHeader(headers, 'x-content-type-options', 'nosniff');
+  }
+  return headers;
+}
+
+function responseStatusText(value: string): string {
+  return /^[\t\x20-\x7E]*$/.test(value) ? value : '';
+}
+
+function proxiedResponseBody(
+  method: string,
+  status: number,
+  upstream: IncomingMessage,
+): ReadableStream<Uint8Array> | null {
+  // HEAD and 204/205/304 must not carry a body. Resume so a keep-alive
+  // backend socket is not stuck, and so Content-Length stays the length the
+  // backend declared instead of the length of an empty stream.
+  if (method === 'HEAD' || NULL_BODY_STATUSES.has(status)) {
+    upstream.resume();
+    return null;
+  }
+  return Readable.toWeb(upstream) as ReadableStream<Uint8Array>;
+}
+
+function forwardToAppBackend(
+  target: string,
+  method: string,
+  headers: Headers,
+  body: Buffer | ReadableStream<Uint8Array> | null,
+  signal: AbortSignal,
+): Promise<BackendUpstream> {
+  return new Promise((resolve, reject) => {
+    const outgoing: Record<string, string> = {};
+    for (const [name, value] of headers) outgoing[name] = value;
+    let settled = false;
+    let source: Readable | undefined;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      source?.destroy();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const req = httpRequest(
+      target,
+      { method, headers: outgoing, signal },
+      (message) => {
+        if (settled) {
+          message.resume();
+          return;
+        }
+        settled = true;
+        resolve({
+          status: message.statusCode ?? 502,
+          statusText: message.statusMessage ?? '',
+          headers: message.headers,
+          message,
+        });
+      },
+    );
+    req.on('error', fail);
+    if (Buffer.isBuffer(body)) {
+      req.end(body);
+      return;
+    }
+    if (!body) {
+      req.end();
+      return;
+    }
+    // DOM ReadableStream and Node's stream/web types disagree in this
+    // tsconfig; the runtime value is the request body stream.
+    source = Readable.fromWeb(
+      body as unknown as Parameters<typeof Readable.fromWeb>[0],
+    );
+    source.on('error', (error) => {
+      req.destroy(error);
+      fail(error);
+    });
+    source.pipe(req);
+  });
+}
+
+/**
  * Reverse-proxy a platform request to the app's Deno backend.
  * `stripPrefix` is removed from the pathname before forwarding (e.g. the
  * `/api/app/<id>/rpc` Connect base path).
@@ -1209,6 +1370,10 @@ const MAX_SIGNED_BODY_BYTES = 1024 * 1024;
  * When `signWithSecret` is set the body is buffered and signed with the per-app
  * key (HMAC over `<timestamp>.<body>`), forwarding `x-hatch-timestamp` +
  * `x-hatch-signature` so the backend can verify the platform vetted the call.
+ *
+ * Request `Range` and conditional validators are forwarded. The response status
+ * (including 206, 304, and 416) and the media/cache headers listed in
+ * {@link PROXY_RESPONSE_HEADERS} are copied through unchanged.
  */
 export async function proxyAppRequest(
   id: string,
@@ -1285,11 +1450,15 @@ export async function proxyAppRequest(
   ]) {
     headers.delete(header);
   }
-  const init: RequestInit & { duplex?: 'half' } = {
-    method: request.method,
-    redirect: 'manual',
-    headers,
-  };
+  // Always request the identity representation. Connect unary treats
+  // Accept-Encoding as response-compression negotiation; `identity` keeps
+  // that response uncompressed while a gzip request body (Content-Encoding)
+  // can still be decompressed by the backend. Media ranges then describe the
+  // same bytes as Content-Length and Content-Range. This proxy does not
+  // decode the response: a backend that compresses anyway has Content-Encoding
+  // and those exact bytes forwarded.
+  headers.set('accept-encoding', 'identity');
+  let backendBody: Buffer | ReadableStream<Uint8Array> | null = null;
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   if (options.signWithSecret) {
     // Signed forward (platform webhook): buffer the (bounded) body so we can
@@ -1324,7 +1493,7 @@ export async function proxyAppRequest(
         }
         payload = Buffer.concat(parts, total);
       }
-      init.body = payload;
+      backendBody = payload;
     }
     const timestamp = String(Date.now());
     headers.set(HATCH_TIMESTAMP_HEADER, timestamp);
@@ -1332,12 +1501,10 @@ export async function proxyAppRequest(
       HATCH_SIGNATURE_HEADER,
       hatchSignature(options.signWithSecret, timestamp, payload),
     );
-  } else if (hasBody) {
+  } else if (hasBody && request.body) {
     // Stream the request body straight through rather than buffering the whole
     // upload in memory, so a large body can't exhaust the server process.
-    // `duplex: 'half'` is required by undici when the body is a stream.
-    init.body = request.body;
-    init.duplex = 'half';
+    backendBody = request.body;
   }
 
   // Bound only the time to response headers: abort if the backend never
@@ -1349,34 +1516,27 @@ export async function proxyAppRequest(
     BACKEND_RESPONSE_TIMEOUT_MS,
   );
   if (typeof headerTimer.unref === 'function') headerTimer.unref();
-  init.signal = AbortSignal.any([request.signal, headerTimeout.signal]);
-  let upstream: Response;
+  const signal = AbortSignal.any([request.signal, headerTimeout.signal]);
+  let upstream: BackendUpstream;
   try {
-    upstream = await fetch(target, init);
+    upstream = await forwardToAppBackend(
+      target,
+      request.method,
+      headers,
+      backendBody,
+      signal,
+    );
   } finally {
     clearTimeout(headerTimer);
   }
-  const responseHeaders = new Headers();
-  const contentType = upstream.headers.get('content-type');
-  if (contentType) responseHeaders.set('content-type', contentType);
-  for (const key of [
-    'grpc-status',
-    'grpc-message',
-    'connect-protocol-version',
-    // Per-message compression is part of backend RPC stream framing.
-    'connect-content-encoding',
-    'connect-accept-encoding',
-    'grpc-encoding',
-    'grpc-accept-encoding',
-  ]) {
-    const value = upstream.headers.get(key);
-    if (value) responseHeaders.set(key, value);
-  }
 
   // Stream the upstream response body through as well instead of buffering it.
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: responseHeaders,
-  });
+  return new Response(
+    proxiedResponseBody(request.method, upstream.status, upstream.message),
+    {
+      status: upstream.status,
+      statusText: responseStatusText(upstream.statusText),
+      headers: proxyResponseHeaders(upstream.headers),
+    },
+  );
 }

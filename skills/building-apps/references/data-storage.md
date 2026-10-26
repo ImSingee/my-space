@@ -95,10 +95,12 @@ await Deno.writeTextFile(path.join(storageDir, 'state.json'), '{}');
 ```
 
 Storage is backend-only: there is no Storage HTTP API and browser code cannot
-access the directory directly. Files survive backend restarts, deployments,
-and rollbacks. Disabling the capability revokes backend access without deleting
-files; re-enabling it exposes the same contents. Deleting the App permanently
-deletes its storage directory.
+access the directory directly. Serve a file to a browser or an external player
+from the webhook instead, including HTTP Range requests; see
+[Backend integrations](backend-integrations.md). Files survive backend restarts,
+deployments, and rollbacks. Disabling the capability revokes backend access
+without deleting files; re-enabling it exposes the same contents. Deleting the
+App permanently deletes its storage directory.
 
 ## KV
 

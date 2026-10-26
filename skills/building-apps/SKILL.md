@@ -150,10 +150,12 @@ For mutable files, enable both `capabilities.backend` and
 and injects its absolute path into the backend as `STORAGE_DIR`. Read and write
 only within that directory; never write to `HATCH_ASSETS_DIR`.
 
-Storage is backend-only and has no frontend or widget HTTP API. Its contents
-survive backend restarts, deployments, and rollbacks. Turning the capability
-off revokes backend access but preserves the files; turning it back on exposes
-the same contents. Deleting the App permanently deletes the directory.
+Storage is backend-only and has no frontend or widget HTTP API. Serve a
+stored file, including video that clients seek with HTTP Range, from the
+webhook; see [Backend integrations](references/backend-integrations.md). Its
+contents survive backend restarts, deployments, and rollbacks. Turning the
+capability off revokes backend access but preserves the files; turning it back
+on exposes the same contents. Deleting the App permanently deletes the directory.
 
 ## Manifest
 
@@ -429,8 +431,9 @@ Read only the reference relevant to the requested capability:
   `auth: none`; they cannot carry App-private authentication. Use a dedicated
   nonreserved header such as X-App-Token or a raw-body provider signature.
   None mode is public and unsigned at the platform layer, not full header
-  passthrough. Platform credentials never bypass an App-owned authentication
-  check. Use `hatch app invoke webhook <id-or-slug>`
+  passthrough. Webhook responses can serve Storage media with HTTP Range
+  support for browsers and external players. Platform credentials never bypass
+  an App-owned authentication check. Use `hatch app invoke webhook <id-or-slug>`
   for raw HTTP invocation; `hatch app invoke backend <id-or-slug> <Service/Method>`
   uses Connect unary JSON. See the reference for credential precedence,
   raw-byte handling, errors and transport limits.
