@@ -48,22 +48,26 @@ export const Route = createFileRoute('/_app/app/$appSlug/')({
 const readDeploymentRevision = (appId: string) =>
   getAppDeploymentRevision({ data: appId });
 
-// Compares fragments the way the router stores them: no '#', percent-decoded.
-function normalizeHash(hash: string) {
-  const fragment = hash.replace(/^#/, '');
-  try {
-    return decodeURI(fragment);
-  } catch {
-    return fragment;
-  }
+// The still percent-encoded fragment of an href, without '#'. Hashes move
+// between the host and app URLs in this form only: decoding would turn an
+// escaped `%2520` into `%20` and change what the app's route points at.
+function rawFragment(href: string) {
+  const index = href.indexOf('#');
+  return index < 0 ? '' : href.slice(index + 1);
+}
+
+// Comparison key for fragments: encodes what a URL would encode, but never
+// decodes existing escapes, so distinct fragments never compare equal.
+function canonicalFragment(fragment: string) {
+  return new URL(`#${fragment}`, 'http://fragment.invalid').hash.slice(1);
 }
 
 // Moves the app to another page without adding a history entry. The URL must
 // be absolute (a relative one resolves against the calling host document) and
 // keep its '#' even when empty, so it stays a same-document fragment change.
-function replaceInnerHash(win: Window, hash: string) {
+function replaceInnerHash(win: Window, fragment: string) {
   const [base] = win.location.href.split('#');
-  win.location.replace(`${base}#${hash}`);
+  win.location.replace(`${base}#${fragment}`);
 }
 
 function AppView() {
@@ -100,12 +104,12 @@ function AppView() {
     revisionReader: readDeploymentRevision,
   });
   const router = useRouter();
-  // The location the view is rendered for: its hash as a fragment without '#'
-  // (e.g. '/settings'; '' = root) and its history entry key, which changes on
-  // every navigation even when the hash stays the same. While a navigation to
-  // another app is still loading, these keep describing the outgoing app.
-  const hostHash = useRouterState({
-    select: (s) => (s.resolvedLocation ?? s.location).hash,
+  // The location the view is rendered for: its raw fragment (e.g. '/settings';
+  // '' = root) and its history entry key, which changes on every navigation
+  // even when the fragment stays the same. While a navigation to another app
+  // is still loading, these keep describing the outgoing app.
+  const hostFragment = useRouterState({
+    select: (s) => rawFragment((s.resolvedLocation ?? s.location).href),
   });
   const hostEntryKey = useRouterState({
     select: (s) => (s.resolvedLocation ?? s.location).state.__TSR_key,
@@ -137,16 +141,21 @@ function AppView() {
 
     const syncHashOut = () => {
       try {
-        const hash = normalizeHash(win?.location.hash ?? '');
+        const fragment = rawFragment(win?.location.href ?? '');
         const { latestLocation, state } = router;
         const resolved = state.resolvedLocation ?? state.location;
         // A navigation away from this app is in flight; don't override it.
         if (latestLocation.pathname !== resolved.pathname) return;
-        if (hash === normalizeHash(latestLocation.hash)) return;
+        if (
+          canonicalFragment(fragment) ===
+          canonicalFragment(rawFragment(latestLocation.href))
+        )
+          return;
         void router.navigate({
           to: '/app/$appSlug',
           params: { appSlug },
-          hash,
+          // The router writes `hash` into the URL verbatim, so pass it encoded.
+          hash: fragment,
           replace: true,
           resetScroll: false,
           hashScrollIntoView: false,
@@ -209,8 +218,12 @@ function AppView() {
         if (!doc) return;
         // Deep-link: seed the freshly loaded app with the host's hash once,
         // before listening, so it doesn't immediately echo back out.
-        const seed = router.state.location.hash;
-        if (seed && normalizeHash(next.location.hash) !== normalizeHash(seed)) {
+        const seed = rawFragment(router.state.location.href);
+        if (
+          seed &&
+          canonicalFragment(rawFragment(next.location.href)) !==
+            canonicalFragment(seed)
+        ) {
           replaceInnerHash(next, seed);
         }
         for (const [target, type] of innerEvents(next)) {
@@ -260,13 +273,16 @@ function AppView() {
     // A newer navigation is still loading; its resolution re-runs this.
     if (router.latestLocation.href !== resolved.href) return;
     try {
-      if (normalizeHash(win.location.hash) !== normalizeHash(hostHash)) {
-        replaceInnerHash(win, hostHash);
+      if (
+        canonicalFragment(rawFragment(win.location.href)) !==
+        canonicalFragment(hostFragment)
+      ) {
+        replaceInnerHash(win, hostFragment);
       }
     } catch {
       // cross-origin frame
     }
-  }, [hostEntryKey, hostHash, canOpen, router]);
+  }, [hostEntryKey, hostFragment, canOpen, router]);
 
   const queryClient = useQueryClient();
   const reload = async () => {

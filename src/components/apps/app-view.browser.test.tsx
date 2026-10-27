@@ -120,11 +120,11 @@ function app(overrides: Partial<AppDetail> = {}): AppDetail {
   };
 }
 
-async function renderAppView() {
+async function renderAppView(initialEntry = '/app/app-one') {
   const queryClient = new QueryClient();
   const router = createRouter({
     routeTree: mocks.rootRoute!.addChildren([Route]),
-    history: createMemoryHistory({ initialEntries: ['/app/app-one'] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
     context: { queryClient },
   });
   const screen = await render(
@@ -417,4 +417,16 @@ test('returns the open app to the selected entry point', async () => {
   expect(router.state.location.hash).toBe('/settings');
   // The app stays loaded; only its page changes.
   expect(screen.container.querySelector('iframe')).toBe(frame);
+});
+
+test('keeps percent escapes when moving hashes between URLs', async () => {
+  // `a%2520b` names the id `a%20b`; decoding once would retarget `a b`.
+  const { screen, router } = await renderAppView('/app/app-one#/files/a%2520b');
+  const win = await loadedFrame(screen, 'app-one');
+  expect(win.location.hash).toBe('#/files/a%2520b');
+
+  win.history.pushState(null, '', '#/files/c%2520d');
+  await vi.waitFor(() =>
+    expect(router.state.location.href).toBe('/app/app-one#/files/c%2520d'),
+  );
 });
