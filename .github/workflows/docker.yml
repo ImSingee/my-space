@@ -70,6 +70,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          target: standard
           build-args: |
             HATCH_BUILD_COMMIT=${{ steps.revision.outputs.commit }}
             HATCH_BUILD_COMMIT_TIME=${{ steps.revision.outputs.commit_time }}
@@ -79,3 +80,38 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The full image extends the standard runtime with extra tools. Every tag
+      # mirrors a standard tag with a `-full` suffix (e.g. `master-full`).
+      - name: Extract full metadata
+        id: meta_full
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=${{ github.event_name == 'pull_request' && 'false' || 'auto' }}
+            suffix=-full,onlatest=true
+          tags: |
+            type=ref,event=branch,enable=${{ github.event_name != 'pull_request' }}
+            type=ref,event=pr
+            type=semver,pattern={{version}},enable=${{ github.event_name != 'pull_request' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name != 'pull_request' }}
+            type=sha,prefix=
+
+      # Reuses the shared stages built above; only the extra tool layer is new.
+      - name: Build full
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: full
+          build-args: |
+            HATCH_BUILD_COMMIT=${{ steps.revision.outputs.commit }}
+            HATCH_BUILD_COMMIT_TIME=${{ steps.revision.outputs.commit_time }}
+          platforms: linux/amd64
+          push: ${{ env.PUSH_IMAGE == 'true' }}
+          tags: ${{ steps.meta_full.outputs.tags }}
+          labels: ${{ steps.meta_full.outputs.labels }}
+          cache-from: |
+            type=gha
+            type=gha,scope=full
+          cache-to: type=gha,mode=max,scope=full

@@ -38,7 +38,8 @@ RUN HATCH_BUILD_COMMIT="$HATCH_BUILD_COMMIT" \
     HATCH_BUILD_COMMIT_TIME="$HATCH_BUILD_COMMIT_TIME" pnpm build
 
 # --- Runtime image -----------------------------------------------------------
-FROM base AS runner
+# Shared by the standard (default) and full images defined at the end.
+FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -106,3 +107,17 @@ EXPOSE 3700
 # Platform (default). The Agent Runner runs the same image with
 # `command: ["node", "dist/runner/main.mjs"]` (see docker-compose.yml).
 CMD ["node", "dist/platform/server/index.mjs"]
+
+# --- Full image --------------------------------------------------------------
+# The runtime image plus optional heavyweight tools, published with a `-full`
+# tag suffix. Add tools here rather than to `runtime` when only some
+# deployments need them.
+FROM runtime AS full
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
+# --- Standard image ----------------------------------------------------------
+# Kept last so a plain `docker build .` produces the standard image.
+FROM runtime AS standard

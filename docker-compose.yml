@@ -25,6 +25,8 @@ services:
       retries: 12
 
   app:
+    # Set HATCH_IMAGE=ghcr.io/imsingee/my-space:master-full in `.env` to use
+    # the full image with extra tools such as ffmpeg (applies to `agent` too).
     image: ${HATCH_IMAGE:-ghcr.io/imsingee/my-space:master}
     pull_policy: always
     restart: unless-stopped
