@@ -274,4 +274,63 @@ describe('App webhook route', () => {
       { expectedDeploymentId: 'deployment-1' },
     );
   });
+
+  it('forwards Range and conditional headers for public and platform webhooks', async () => {
+    const mediaHeaders = {
+      range: 'bytes=0-1023',
+      'if-range': '"clip"',
+      'if-match': '"clip"',
+      'if-none-match': '"clip"',
+      'if-modified-since': 'Wed, 21 Oct 2025 00:00:00 GMT',
+      'if-unmodified-since': 'Thu, 22 Oct 2025 00:00:00 GMT',
+      'accept-encoding': 'gzip, deflate, br',
+    };
+    mocks.findDeployment.mockResolvedValue({
+      compatibilityVersion: 2,
+      manifestNormalized: { webhook: { auth: 'none' } },
+    });
+    const none = new Request(
+      'https://hatch.test/api/app/example/hook/media/clip.mp4',
+      { headers: mediaHeaders },
+    );
+    expect((await handle({ request: none })).status).toBe(200);
+    expect(mocks.proxyAppRequest).toHaveBeenLastCalledWith(
+      'example',
+      none,
+      '/api/app/example/hook',
+      '/__webhook',
+      { expectedDeploymentId: 'deployment-1' },
+    );
+    expect(none.headers.get('range')).toBe('bytes=0-1023');
+    expect(none.headers.get('if-range')).toBe('"clip"');
+
+    mocks.findDeployment.mockResolvedValue({
+      compatibilityVersion: 2,
+      manifestNormalized: { webhook: { auth: 'platform' } },
+    });
+    const platform = new Request(
+      'https://hatch.test/api/app/example/hook/media/clip.mp4',
+      {
+        method: 'HEAD',
+        headers: { ...mediaHeaders, 'x-hatch-secret': 'webhook-secret' },
+      },
+    );
+    expect((await handle({ request: platform })).status).toBe(200);
+    expect(mocks.proxyAppRequest).toHaveBeenLastCalledWith(
+      'example',
+      platform,
+      '/api/app/example/hook',
+      '/__webhook',
+      {
+        stripSecretParam: false,
+        expectedDeploymentId: 'deployment-1',
+        signWithSecret: 'signing-secret',
+      },
+    );
+    expect(platform.method).toBe('HEAD');
+    expect(platform.headers.get('range')).toBe('bytes=0-1023');
+    expect(platform.headers.get('if-modified-since')).toBe(
+      'Wed, 21 Oct 2025 00:00:00 GMT',
+    );
+  });
 });

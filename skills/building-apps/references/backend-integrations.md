@@ -166,6 +166,33 @@ or third-party authentication. Use a dedicated nonreserved header such as
 `X-App-Token` or a provider signature header, or a signature over the raw body.
 Removed values are not copied to another header.
 
+## Serving media from a webhook
+
+A webhook response is streamed back to the caller, so the App can serve files
+from `STORAGE_DIR` (video, audio, images, and downloads) on `/__webhook/...`.
+The platform forwards `Range`, `If-Range`, `If-Match`, `If-None-Match`,
+`If-Modified-Since`, and `If-Unmodified-Since`. It asks the backend for
+`Accept-Encoding: identity` and does not compress or decompress the body.
+Implement ranges on the raw file bytes.
+
+- `200` with `Accept-Ranges: bytes` for the whole object.
+- `206` with `Content-Type`, `Content-Range`, and `Content-Length` for a
+  satisfiable range.
+- `416` with `Content-Range: bytes */<size>` when the range cannot be
+  satisfied.
+- `304` with no body when `ETag` or `Last-Modified` matches.
+- `HEAD` with the same headers `GET` would send and no body.
+
+`Content-Disposition`, `Cache-Control`, `ETag`, `Last-Modified`, `Expires`,
+and `Vary` are forwarded. `Content-Encoding` is forwarded only when the App
+itself sent an encoded body; do not gzip a byte range.
+`X-Content-Type-Options: nosniff` is forwarded when that is the value.
+`Set-Cookie`, CORS, CSP, HSTS,
+COOP/COEP/CORP, and `Location` are not. An `auth: none` URL can be opened by a
+browser or an external player such as VLC or IINA, because those clients send
+`Range` without platform credentials. `auth: platform` still requires a
+platform credential on every request, which those players do not send.
+
 In platform mode credential selection is fail-closed: explicit `x-api-key`
 wins over Authorization (Bearer session or Run JWT), with no Cookie/secret
 fallback on failure. Otherwise `x-hatch-secret` wins over `?secret=` (even an
