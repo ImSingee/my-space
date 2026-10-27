@@ -116,6 +116,7 @@ export type NormalizedManifest = {
     format?: 'bundle-v1';
     /** Absent when no policy was declared, which runs unrestricted. */
     network?: NetworkPolicy;
+    extraPermissions?: string[];
   };
   /**
    * Full-App URL and discoverable routes, when present. Stored deployment
@@ -292,6 +293,9 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
       ...(src.backend.runtime === undefined
         ? {}
         : { runtime: src.backend.runtime }),
+      ...(src.backend.extraPermissions === undefined
+        ? {}
+        : { extraPermissions: src.backend.extraPermissions }),
       ...(src.backend.network === undefined
         ? {}
         : { network: src.backend.network }),

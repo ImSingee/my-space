@@ -645,3 +645,62 @@ describe('app backend runtime artifacts', () => {
     expect(args.some((arg) => arg.startsWith('--allow-net='))).toBe(false);
   });
 });
+
+describe('App extra permission runtime boundary', () => {
+  it('reads artifact declarations and merges platform permissions', () => {
+    const dir = runtimeDir();
+    writeBackendEntry(dir, 'backend/main.bundle.js');
+    writeManifest(dir, {
+      backend: {
+        entry: 'backend/main.bundle.js',
+        format: 'bundle-v1',
+        network: ['one:443'],
+        extraPermissions: ['--allow-read', '--allow-net', '--allow-run=echo'],
+      },
+    });
+    const artifact = resolveBackendArtifact(dir);
+    expect(artifact.extraPermissions).toEqual([
+      '--allow-read',
+      '--allow-net',
+      '--allow-run=echo',
+    ]);
+    const options = {
+      artifact,
+      buildDir: dir,
+      port: 34567,
+      storageDir: '/storage',
+      cacheDir: null,
+      certPaths: [],
+      hasLock: false,
+    };
+    const args = buildBackendDenoArgs(options);
+    expect(args).toContain('--allow-read');
+    expect(args).toContain('--allow-net');
+    expect(args).toContain('--allow-run=echo');
+    expect(args.some((arg) => arg.startsWith('--allow-read='))).toBe(false);
+    expect(args).not.toContain('--allow-net=one:443');
+    expect(
+      buildBackendDenoArgs({
+        ...options,
+        artifact: { ...artifact, extraPermissions: ['--allow-all'] },
+      }).filter((arg) => arg.startsWith('--allow-')),
+    ).toEqual(['--allow-all']);
+  });
+  it.each([
+    null,
+    '--allow-run',
+    ['--inspect'],
+    ['--allow-run=echo\n--inspect'],
+    ['--allow-read=/x\0'],
+    [42],
+  ])('fails closed on persisted permissions %j', (extraPermissions) => {
+    const dir = runtimeDir();
+    writeBackendEntry(dir, 'backend/main.ts');
+    writeManifest(dir, {
+      backend: { entry: 'backend/main.ts', extraPermissions },
+    });
+    expect(() => resolveBackendArtifact(dir)).toThrow(
+      /Invalid backend artifact: backend.extraPermissions is invalid/,
+    );
+  });
+});

@@ -8,6 +8,7 @@
  * schema at build time and persisted separately.
  */
 import { z } from 'zod';
+import { extraPermissionsSchema } from './extra-permissions.js';
 import { networkPolicySchema } from './network-policy.js';
 import { WORKFLOW_SLUG_MAX_LENGTH } from './workflow-identity.js';
 
@@ -108,6 +109,7 @@ export const sourceWorkflowManifestSchema = z
     entry: sourceRelativePath.default('workflow.ts'),
     /** Optional under compatibility v1; omission runs unrestricted. */
     network: networkPolicySchema.optional(),
+    extraPermissions: extraPermissionsSchema.optional(),
     triggers: workflowTriggersSchema.default({ cron: [], webhook: false }),
   })
   .strict();

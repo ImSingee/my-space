@@ -8,6 +8,7 @@ const tempDirs: string[] = [];
 
 async function makeWorkflowSource(options?: {
   network?: unknown;
+  extraPermissions?: string[];
   workflowSource?: string;
 }): Promise<{
   sourceDir: string;
@@ -30,6 +31,9 @@ async function makeWorkflowSource(options?: {
         ...(options && Object.hasOwn(options, 'network')
           ? { network: options.network }
           : {}),
+        ...(options?.extraPermissions === undefined
+          ? {}
+          : { extraPermissions: options.extraPermissions }),
         triggers: { cron: [], webhook: false },
       }),
       'utf8',
@@ -207,3 +211,49 @@ describe('buildWorkflow dependencies', { timeout: 30_000 }, () => {
     ).rejects.toThrow(/Requires net access/);
   });
 });
+
+describe(
+  'Workflow deployment permission validation',
+  { timeout: 30_000 },
+  () => {
+    it.each(['--allow-foo', '--allow-sys=bogus'])(
+      'rejects invalid Deno flag %s before evaluating code',
+      async (flag) => {
+        const { sourceDir, outputDir } = await makeWorkflowSource({
+          network: [],
+          extraPermissions: [flag],
+          workflowSource: 'throw new Error("must not evaluate");',
+        });
+        await expect(
+          buildWorkflow('demo', { sourceDir, outputDir }),
+        ).rejects.toThrow(
+          /Invalid extraPermissions:[\s\S]*(unexpected argument|unknown sys descriptor)/,
+        );
+        await expect(
+          fs.access(path.join(outputDir, 'workflow.js')),
+        ).rejects.toThrow(/ENOENT/);
+      },
+    );
+    it('uses authorized permissions for describe and persists declarations', async () => {
+      const extraPermissions = ['--allow-run=echo'];
+      const { sourceDir, outputDir } = await makeWorkflowSource({
+        network: [],
+        extraPermissions,
+        workflowSource: `import { defineWorkflow } from '@hatch/workflow';
+await new Deno.Command('echo', { args: ['describe-ok'] }).output();
+await Deno.readTextFile('./workflow.js');
+export default defineWorkflow({ run: () => 'ok' });`,
+      });
+      const result = await buildWorkflow('demo', { sourceDir, outputDir });
+      expect(result.normalized.extraPermissions).toEqual(extraPermissions);
+      expect(
+        JSON.parse(
+          await fs.readFile(
+            path.join(outputDir, 'manifest.normalized.json'),
+            'utf8',
+          ),
+        ).extraPermissions,
+      ).toEqual(extraPermissions);
+    });
+  },
+);

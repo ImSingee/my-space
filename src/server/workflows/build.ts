@@ -11,6 +11,7 @@ import {
   materializeWorkflowHatchSdk,
 } from '~agent/hatch-sdk';
 import { WORKFLOW_BUILD_WORK_DIR } from '~agent/paths';
+import { assertDenoPermissionFlags } from '../deno-permissions';
 import { validateDenoDependencySource } from '../deno-dependencies';
 import { run } from '../subprocess';
 import {
@@ -150,6 +151,10 @@ export async function buildWorkflow(
         parse: parseSourceWorkflowManifest,
         logs,
       }));
+    if (manifest.extraPermissions !== undefined) {
+      await assertDenoPermissionFlags(manifest.extraPermissions, tempSrc);
+    }
+
     const entry = path.join(tempSrc, manifest.entry);
     if (!(await pathExists(entry))) {
       throw new Error(`workflow entry not found: ${manifest.entry}`);
@@ -233,8 +238,12 @@ export async function buildWorkflow(
         bundlePath,
         artifactDir: stagedOutput,
         network: manifest.network,
+        extraPermissions: manifest.extraPermissions,
       }),
-      { cwd: tempSrc, env: workflowSandboxEnv({ HATCH_MODE: 'describe' }) },
+      {
+        cwd: stagedOutput,
+        env: workflowSandboxEnv({ HATCH_MODE: 'describe' }),
+      },
     );
     if (describe.code !== 0) {
       throw new Error(

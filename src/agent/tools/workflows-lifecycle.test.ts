@@ -124,6 +124,7 @@ describe('Agent Workflow identity contract', () => {
       compatibility: null,
       inputSchema: null,
       network: null,
+      extraPermissions: null,
       webhook: { enabled: false, url: null },
       cron: [],
       recentRuns: [],

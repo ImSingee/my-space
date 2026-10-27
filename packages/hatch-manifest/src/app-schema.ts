@@ -6,6 +6,7 @@
  * shape that drives iframe/widget loading.
  */
 import { z } from 'zod';
+import { extraPermissionsSchema } from './extra-permissions.js';
 import { isAppManagedPathSegment } from './app-managed-path.js';
 import {
   APP_NAME_MAX_LENGTH,
@@ -334,6 +335,7 @@ export const sourceManifestSchema = z
         runtime: backendRuntimeSchema.optional(),
         /** Unified Deno network permission for the deployed backend. */
         network: networkPolicySchema.optional(),
+        extraPermissions: extraPermissionsSchema.optional(),
       })
       .strict()
       .optional(),

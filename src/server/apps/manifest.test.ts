@@ -528,3 +528,32 @@ describe('normalizeManifest widgets', () => {
     expect(w.defaultSize).toEqual({ w: 4, h: 3 });
   });
 });
+
+describe('App extra permission declarations', () => {
+  const manifest = (extraPermissions: unknown) => ({
+    id: 'demo',
+    name: 'Demo',
+    capabilities: { backend: true },
+    backend: { entry: 'backend/main.ts', extraPermissions },
+  });
+  it('accepts arbitrary permission flags, deduplicates and preserves normalization', () => {
+    const flags = ['--allow-ffi', '--allow-run=a,b', '--allow-all'];
+    const parsed = parseSourceManifest(manifest([...flags, flags[0]]));
+    expect(parsed.backend?.extraPermissions).toEqual(flags);
+    expect(normalizeManifest(parsed).backend?.extraPermissions).toEqual(flags);
+  });
+  it.each([
+    ['--inspect'],
+    ['--config=x'],
+    ['--allow-run=echo\n--inspect'],
+    ['--allow-read=\r/x'],
+    ['--allow-run=echo\0'],
+    '--allow-run',
+    null,
+    [1],
+  ])('rejects non-permission or unsafe argv declarations %j', (flags) => {
+    expect(() => parseSourceManifest(manifest(flags))).toThrow(
+      /extraPermissions/,
+    );
+  });
+});

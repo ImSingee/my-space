@@ -104,3 +104,66 @@ try {
     }
   });
 });
+
+describe('Deno extra permission enforcement', () => {
+  async function execute(source: string, extraPermissions: string[]) {
+    const artifactDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'hatch-deno-extra-'),
+    );
+    tempDirs.push(artifactDir);
+    const bundlePath = path.join(artifactDir, 'workflow.js');
+    await fs.writeFile(bundlePath, source, 'utf8');
+    return execFileAsync(
+      'deno',
+      buildWorkflowDenoArgs({
+        artifactDir,
+        bundlePath,
+        network: [],
+        extraPermissions,
+      }),
+      { cwd: artifactDir, timeout: 10_000 },
+    );
+  }
+
+  it('permits the declared command and denies another command', async () => {
+    const { stdout } = await execute(
+      `
+const result = await new Deno.Command('echo', { args: ['permission-ok'], stdout: 'piped' }).output();
+console.log(new TextDecoder().decode(result.stdout).trim());
+try { await new Deno.Command('ls').output(); } catch (error) { console.log(error.name); }
+`,
+      ['--allow-run=echo'],
+    );
+    expect(stdout.trim().split('\n')).toEqual(['permission-ok', 'NotCapable']);
+  });
+
+  it('starts allow-all without conflicting platform allow flags', async () => {
+    const { stdout } = await execute(
+      "console.log((await Deno.permissions.query({ name: 'run' })).state);",
+      ['--allow-all'],
+    );
+    expect(stdout.trim()).toBe('granted');
+  });
+
+  it('bare read grants access beyond the artifact while the default denies it', async () => {
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'hatch-deno-outside-'),
+    );
+    tempDirs.push(outsideDir);
+    const outsideFile = path.join(outsideDir, 'data.txt');
+    await fs.writeFile(outsideFile, 'outside-ok');
+    const source = `console.log(await Deno.readTextFile(${JSON.stringify(outsideFile)}));`;
+    await expect(execute(source, [])).rejects.toMatchObject({
+      stderr: expect.stringContaining('NotCapable'),
+    });
+    expect((await execute(source, ['--allow-read'])).stdout.trim()).toBe(
+      'outside-ok',
+    );
+  });
+
+  it('denies FFI without a declaration', async () => {
+    await expect(
+      execute("Deno.dlopen('/nonexistent-library', {});", []),
+    ).rejects.toMatchObject({ stderr: expect.stringContaining('NotCapable') });
+  });
+});

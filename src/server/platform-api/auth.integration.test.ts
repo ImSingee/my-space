@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createLocalJWKSet, jwtVerify, SignJWT } from 'jose';
+import { PROTOCOL_VERSION } from '~agent/protocol';
 
 const databaseUrl = process.env.HATCH_AUTH_TEST_DATABASE_URL;
 const origin = 'http://127.0.0.1:3799';
@@ -190,7 +191,7 @@ describe.runIf(Boolean(databaseUrl))(
         JSON.stringify({
           type: 'runner.hello',
           runnerId,
-          protocolVersion: 18,
+          protocolVersion: PROTOCOL_VERSION,
           activeRunIds: [],
           workspaceSessionIds: [],
         }),
@@ -199,7 +200,7 @@ describe.runIf(Boolean(databaseUrl))(
       if (
         !listConnectedRunners().some((runner) => runner.runnerId === runnerId)
       )
-        throw new Error('Protocol-18 Runner failed to become ready');
+        throw new Error('Runner failed to become ready');
     }, 30000);
     afterAll(async () => {
       socket?.terminate();

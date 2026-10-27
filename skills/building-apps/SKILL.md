@@ -249,6 +249,42 @@ channels do not need to appear in the manifest. In `"deno-run"` mode, bind to
 `"deno-serve"` mode, Hatch supplies the loopback host and port. Every other
 destination must be declared.
 
+### Extra Deno permissions
+
+1. Declare `extraPermissions` **only when strictly necessary**. If platform
+   capabilities (network, storage, database, KV, Data Tables, Workflow calls,
+   or a pure JS/Wasm implementation) can achieve the goal, you must not use it.
+2. **Obtain explicit user authorization before writing the declaration or
+   deploying.** Explain the exact flags, why each is necessary, and the risks:
+   Apps, Workflows, and the platform share the same OS user; these permissions
+   are equivalent to host access and can expose platform credentials and other
+   Apps' data. Without explicit consent, do not write the flags into a manifest
+   or deploy them. Adding, broadening, or modifying an existing declaration
+   requires fresh authorization.
+
+Each item is a complete Deno `--allow-*` argument, for example
+`--allow-run=ffmpeg,git`, `--allow-ffi=/opt/lib/example.dylib`, or `--allow-all`.
+Prefer narrowly scoped flags. Deno validates names and values during deployment;
+newlines and NUL are rejected. Flags are merged with platform permissions: a
+bare flag wins over scoped flags of the same name, scoped values are unioned,
+and `--allow-all` replaces all other permission flags. `--allow-net` and
+`--allow-all` override network restrictions; scoped net values extend them.
+Relative paths resolve from the deployment artifact directory, not the source
+checkout. Prefer absolute paths; App assets may use `backend/assets/...`.
+
+This example requires necessity and explicit user authorization under both
+rules above before it may be written or deployed:
+
+```json
+{
+  "backend": {
+    "entry": "backend/main.ts",
+    "network": [],
+    "extraPermissions": ["--allow-run=date"]
+  }
+}
+```
+
 ## Dependencies
 
 Deno is the only App package manager. Add normal semver dependencies to
@@ -271,9 +307,12 @@ with `--frozen` and rejects stale dependency state.
 Deno skips npm lifecycle scripts by default. App preparation and deploy do not
 execute package `preinstall`, `install`, or `postinstall` code, even when a
 package version has been audited. Keep `deno.json` `allowScripts` empty. If a
-dependency needs a lifecycle script, native addon, FFI build, downloaded
-binary, or runtime sidecar, replace it with a dependency that installs without
-those mechanisms.
+dependency needs a lifecycle script or npm native addon, replace it with a
+compatible dependency: bundle-v1 bundles dependencies, so npm native addons
+remain unsupported. `Deno.dlopen` can load a separately supplied library with
+an authorized `--allow-ffi` declaration. Host commands or sidecars require an
+authorized `--allow-run` declaration; supply reviewed binaries as backend
+assets or use existing host installations, never an npm lifecycle download.
 
 ## Local validation
 
@@ -316,15 +355,17 @@ checks.
 Other Deno commands that resolve App execution entries must use the same SDK,
 automatic node-modules, and frozen-lock contract as the entry check. The
 manifest check above uses manual node-modules to match the restricted loader.
+Include authorized `backend.extraPermissions` in local execution and test
+commands, using the merge rules above rather than appending conflicting flags.
 For example:
 
 ```bash
 deno test --config=deno.json --no-remote --node-modules-dir=auto \
   --import-map=.hatch/import-map.json \
-  --lock=deno.lock --frozen <test paths...>
+  --lock=deno.lock --frozen <merged platform and authorized extraPermissions flags...> <test paths...>
 deno run --config=deno.json --no-remote --node-modules-dir=auto \
   --import-map=.hatch/import-map.json \
-  --lock=deno.lock --frozen <permission flags...> <entry.ts>
+  --lock=deno.lock --frozen <merged platform and authorized extraPermissions flags...> <entry.ts>
 deno cache --config=deno.json --no-remote --node-modules-dir=auto \
   --import-map=.hatch/import-map.json \
   --lock=deno.lock --frozen <entries...>

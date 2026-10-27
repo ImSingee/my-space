@@ -72,6 +72,7 @@ function detail(): WorkflowDetailForAgent {
     liveVersion: 1,
     compatibility: unsupportedCompatibility,
     inputSchema: null,
+    extraPermissions: { flags: [], hostAccess: false },
     network: { mode: 'blocked', destinations: [], legacy: false },
     webhook: { enabled: false, url: null },
     cron: [],

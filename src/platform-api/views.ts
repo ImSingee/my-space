@@ -1,6 +1,11 @@
 /** Allowlisted JSON views. No database rows, credentials or build logs. */
 import { z } from 'zod';
+import { extraPermissionsSchema } from '../../packages/hatch-manifest/src/extra-permissions.js';
 import { networkPolicySchema } from '../../packages/hatch-manifest/src/network-policy.js';
+
+const extraPermissionsView = z
+  .object({ flags: extraPermissionsSchema, hostAccess: z.boolean() })
+  .strict();
 
 const str = z.string();
 const nullable = str.nullable();
@@ -71,6 +76,7 @@ export const appManifestViewSchema = z.object({
       runtime: z.enum(['deno-run', 'deno-serve']).optional(),
       format: z.literal('bundle-v1').optional(),
       network: networkPolicySchema.optional(),
+      extraPermissions: extraPermissionsSchema.optional(),
     })
     .optional(),
   app: z
@@ -148,6 +154,7 @@ export const appDetailSchema = appSummarySchema
             mode: mode.nullable(),
             running: z.boolean(),
             network: networkView.nullable(),
+            extraPermissions: extraPermissionsView.nullable(),
           })
           .strict(),
         cron: z
@@ -211,6 +218,7 @@ export const workflowDetailSchema = resourceSchema
     compatibility: compatibilitySchema.nullable(),
     inputSchema: z.unknown(),
     network: networkView.nullable(),
+    extraPermissions: extraPermissionsView.nullable(),
     webhook: z.object({ enabled: z.boolean(), url: nullable }).strict(),
     cron: z.array(
       z
@@ -231,6 +239,7 @@ export const workflowManifestViewSchema = z.object({
   description: str,
   entry: str,
   network: networkPolicySchema.optional(),
+  extraPermissions: extraPermissionsSchema.optional(),
   triggers: z.object({
     cron: z.array(
       z.object({ name: str, schedule: str, input: z.unknown().optional() }),

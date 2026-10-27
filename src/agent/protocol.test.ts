@@ -96,8 +96,8 @@ describe('Workflow creation payload', () => {
 });
 
 describe('runner -> platform messages', () => {
-  it('uses protocol v18 for structured references and compatibility responses', () => {
-    expect(PROTOCOL_VERSION).toBe(18);
+  it('uses protocol v19 for extra permission read models', () => {
+    expect(PROTOCOL_VERSION).toBe(19);
   });
 
   it('parses runner.hello', () => {

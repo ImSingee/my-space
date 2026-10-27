@@ -77,8 +77,18 @@ all serving platform processes before deploying Apps using the new mode;
 older platform releases always invoke `deno run`.
 
 Keep backend imports statically bundleable. Computed dynamic imports, separate
-worker entries, native addons, FFI, runtime sidecars, and packages that expect
-their source-relative resources are unsupported.
+worker entries, npm native addons, and packages that expect unpackaged
+source-relative resources are unsupported. FFI via `Deno.dlopen` can use an
+explicitly authorized `backend.extraPermissions` flag such as
+`--allow-ffi=backend/assets/library.so`; host commands/sidecars require scoped
+`--allow-run` and a reviewed host executable or packaged asset. Relative paths
+resolve from the artifact directory. These permissions must be strictly
+necessary: use network, storage, KV, Data Tables, Workflow calls, or JS/Wasm
+instead whenever possible. Before writing or deploying any such declaration,
+explain the exact flags, necessity, and host-access risks and obtain explicit
+user authorization; repeat this for every addition, broadening, or modification.
+Apps and the platform share the same OS user, so these permissions can expose
+platform credentials and other Apps' data.
 
 ## Invoking a deployed backend
 

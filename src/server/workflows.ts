@@ -2,7 +2,14 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { db, schema } from '~/db';
 import type { JsonObject, WorkflowStatus } from '~/db/schema';
-import { type NetworkAccessView, networkAccessView } from '~/network-policy';
+import {
+  type NetworkAccessView,
+  effectiveNetworkAccessView,
+} from '~/network-policy';
+import {
+  type ExtraPermissionsView,
+  extraPermissionsView,
+} from '~/extra-permissions';
 import { WORKFLOW_SLUG_MAX_LENGTH } from '~/workflow-identity';
 import {
   type WorkflowCompatibility,
@@ -12,6 +19,7 @@ import { authMiddleware } from './auth';
 import { idAndDeploymentSchema, idSchema } from './validation';
 import {
   workflowNetworkPolicyFromManifest,
+  workflowExtraPermissionsFromManifest,
   workflowWebhookUrl,
 } from './workflows/manifest';
 import {
@@ -213,6 +221,7 @@ export type WorkflowOps = {
   status: string;
   /** Declaration from the active deployment; null before first deployment. */
   network: NetworkAccessView | null;
+  extraPermissions: ExtraPermissionsView | null;
   webhook: { enabled: boolean; url: string | null; secret: string | null };
   cron: { enabled: boolean; jobs: WorkflowCronJobView[] };
 };
@@ -228,6 +237,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
       return {
         status: 'draft',
         network: null,
+        extraPermissions: null,
         webhook: { enabled: false, url: null, secret: null },
         cron: { enabled: false, jobs: [] },
       };
@@ -235,6 +245,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
     const jobs = await listWorkflowCronJobs(id);
     let webhookEnabled = false;
     let network: NetworkAccessView | null = null;
+    let extraPermissions: ExtraPermissionsView | null = null;
     const deployment = workflow.currentDeploymentId
       ? await db.query.workflowDeployments.findFirst({
           where: { id: workflow.currentDeploymentId as string },
@@ -242,8 +253,12 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
         })
       : null;
     if (deployment) {
-      network = networkAccessView(
+      extraPermissions = extraPermissionsView(
+        workflowExtraPermissionsFromManifest(deployment.manifestNormalized),
+      );
+      network = effectiveNetworkAccessView(
         workflowNetworkPolicyFromManifest(deployment.manifestNormalized),
+        extraPermissions.flags,
       );
     }
     // Only advertise the webhook when the workflow is actually live: the public
@@ -258,6 +273,7 @@ export const getWorkflowOps = createServerFn({ method: 'GET' })
     return {
       status: workflow.status,
       network,
+      extraPermissions,
       webhook: {
         enabled: webhookEnabled,
         url: webhookEnabled ? workflowWebhookUrl(id) : null,

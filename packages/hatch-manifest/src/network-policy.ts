@@ -137,6 +137,24 @@ export function networkAccessView(
   };
 }
 
+/** Include permission overrides so UI and Agent views reflect effective access. */
+export function effectiveNetworkAccessView(
+  policy: NetworkPolicy | undefined,
+  extra: readonly string[] = [],
+): NetworkAccessView {
+  if (extra.includes('--allow-all') || extra.includes('--allow-net')) {
+    return networkAccessView('unrestricted');
+  }
+  const base = networkAccessView(policy);
+  if (base.mode === 'unrestricted') return base;
+  const destinations = extra
+    .filter((flag) => flag.startsWith('--allow-net='))
+    .flatMap((flag) => flag.slice('--allow-net='.length).split(','));
+  return networkAccessView([
+    ...new Set([...base.destinations, ...destinations]),
+  ]);
+}
+
 /**
  * Resolve the effective Deno allowlist. `null` means a bare `--allow-net`;
  * an empty array means no network permission flag at all.
