@@ -252,8 +252,8 @@ destination must be declared.
 ### Extra Deno permissions
 
 1. Declare `extraPermissions` **only when strictly necessary**. If platform
-   capabilities (network, storage, KV, Data Tables, Workflow calls, or a pure
-   JS/Wasm implementation) can achieve the goal, you must not use it.
+   capabilities (network, storage, database, KV, Data Tables, Workflow calls,
+   or a pure JS/Wasm implementation) can achieve the goal, you must not use it.
 2. **Obtain explicit user authorization before writing the declaration or
    deploying.** Explain the exact flags, why each is necessary, and the risks:
    Apps, Workflows, and the platform share the same OS user; these permissions

@@ -90,7 +90,7 @@ evidence. Do not create, commit, or deploy a workflow.
 ## Extra permission review
 
 1. Declare `extraPermissions` **only when strictly necessary**. If platform
-   capabilities (network, storage, KV, Data Tables, Workflow calls, or a pure
+   capabilities (network, KV, Data Tables, Workflow calls, or a pure
    JS/Wasm implementation) can achieve the goal, you must not use it.
 2. **Obtain explicit user authorization before writing the declaration or
    deploying.** Explain the exact flags, why each is necessary, and the risks:

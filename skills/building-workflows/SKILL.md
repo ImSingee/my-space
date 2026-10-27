@@ -93,10 +93,11 @@ export default defineWorkflow({
 
 ### Runtime constraints
 
-- Runs on Deno with **env + scoped read** and only the network access declared
-  by `manifest.network`, unless explicitly extended through authorized
-  `extraPermissions` (including write/run/ffi). There is no per-workflow database
-  or storage yet.
+- Runs on Deno with **env + scoped read**. Network access follows
+  `manifest.network`; compatibility v1 may omit it, which runs unrestricted.
+  New Workflows must always declare `network`. Authorized `extraPermissions`
+  can extend these permissions (including write/run/ffi). There is no
+  per-workflow database or storage yet.
 - **No AI calls** during a run.
 - Keep the result JSON-serializable. Do all real work inside `ctx.step` so the
   inspector is useful.
@@ -251,7 +252,7 @@ lockfile, npm, and remote module resolution disabled.
 ## Extra Deno permissions
 
 1. Declare `extraPermissions` **only when strictly necessary**. If platform
-   capabilities (network, storage, KV, Data Tables, Workflow calls, or a pure
+   capabilities (network, KV, Data Tables, Workflow calls, or a pure
    JS/Wasm implementation) can achieve the goal, you must not use it.
 2. **Obtain explicit user authorization before writing the declaration or
    deploying.** Explain the exact flags, why each is necessary, and the risks:
