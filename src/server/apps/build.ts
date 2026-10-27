@@ -36,6 +36,7 @@ import {
   type DataSchemaDescriptor,
 } from './data-table/schema';
 import { subprocessSandboxEnv } from '../sandbox-env';
+import { assertDenoPermissionFlags } from '../deno-permissions';
 import { validateDenoDependencySource } from '../deno-dependencies';
 import { run as runSubprocess } from '../subprocess';
 
@@ -836,6 +837,10 @@ export async function buildApp(
         parse: parseSourceManifest,
         logs,
       }));
+
+    if (manifest.backend?.extraPermissions !== undefined) {
+      await assertDenoPermissionFlags(manifest.backend?.extraPermissions, src);
+    }
 
     // The manifest id drives every generated URL (app/widget/RPC), but
     // artifacts and the DB row are keyed by the `id` argument. If they diverge,

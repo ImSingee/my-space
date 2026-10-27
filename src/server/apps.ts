@@ -10,7 +10,14 @@ import { db } from '~/db';
 // would survive the client transform and drag postgres-js into the browser
 // bundle (crashing the app with "Buffer is not defined").
 import type { AppCapabilities, AppStatus } from '~/db/schema';
-import { type NetworkAccessView, networkAccessView } from '~/network-policy';
+import {
+  type NetworkAccessView,
+  effectiveNetworkAccessView,
+} from '~/network-policy';
+import {
+  type ExtraPermissionsView,
+  extraPermissionsView,
+} from '~/extra-permissions';
 import { normalizedManifestFor } from './apps/access';
 import type { NormalizedManifest, WebhookAuth } from './apps/manifest';
 import {
@@ -281,6 +288,7 @@ export type AppOps = {
     mode: 'serverless' | 'long-running' | null;
     /** Declaration from the active deployment; null before first deployment. */
     network: NetworkAccessView | null;
+    extraPermissions: ExtraPermissionsView | null;
   };
   database: { enabled: boolean; dbName: string | null };
   cron: { enabled: boolean; jobs: CronJobView[] };
@@ -311,7 +319,12 @@ export const getAppOps = createServerFn({ method: 'GET' })
     });
     if (!app) {
       return {
-        backend: { capable: false, mode: null, network: null },
+        backend: {
+          capable: false,
+          mode: null,
+          network: null,
+          extraPermissions: null,
+        },
         database: { enabled: false, dbName: null },
         cron: { enabled: false, jobs: [] },
         webhook: { enabled: false, url: null, secret: null, auth: 'platform' },
@@ -328,8 +341,14 @@ export const getAppOps = createServerFn({ method: 'GET' })
       backend: {
         capable: Boolean(caps?.backend),
         mode: app.backendMode ?? null,
+        extraPermissions: manifest?.backend
+          ? extraPermissionsView(manifest.backend.extraPermissions)
+          : null,
         network: manifest?.backend
-          ? networkAccessView(manifest.backend.network)
+          ? effectiveNetworkAccessView(
+              manifest.backend.network,
+              manifest.backend.extraPermissions,
+            )
           : null,
       },
       database: {

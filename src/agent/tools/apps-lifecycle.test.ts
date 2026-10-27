@@ -80,7 +80,13 @@ function appDetail(frontend: boolean): AppDetail {
     updatedAt: '2026-08-29T00:00:00.000Z',
     manifest: manifest(frontend),
     ops: {
-      backend: { capable: false, mode: null, running: false, network: null },
+      backend: {
+        capable: false,
+        mode: null,
+        running: false,
+        network: null,
+        extraPermissions: null,
+      },
       cron: { enabled: false, jobs: [] },
       webhook: {
         enabled: false,

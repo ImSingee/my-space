@@ -1,7 +1,14 @@
 /** Server-only: read-only workflow views for the Agent (list + detail). */
 import { db } from '~/db';
 import type { WorkflowDeploymentStatus, WorkflowStatus } from '~/db/schema';
-import { type NetworkAccessView, networkAccessView } from '~/network-policy';
+import {
+  type NetworkAccessView,
+  effectiveNetworkAccessView,
+} from '~/network-policy';
+import {
+  type ExtraPermissionsView,
+  extraPermissionsView,
+} from '~/extra-permissions';
 import {
   type WorkflowCompatibility,
   workflowCompatibility,
@@ -10,6 +17,7 @@ import {
   projectWorkflowManifestUrls,
   type NormalizedWorkflowManifest,
   workflowNetworkPolicyFromManifest,
+  workflowExtraPermissionsFromManifest,
 } from './manifest';
 import { listWorkflowDeployments, listWorkflowRuns } from './manage';
 import { listWorkflowCronJobs } from './scheduler';
@@ -92,6 +100,7 @@ export type WorkflowDetailForAgent = {
   inputSchema: unknown;
   /** Declaration from the active deployment; null before first deployment. */
   network: NetworkAccessView | null;
+  extraPermissions: ExtraPermissionsView | null;
   webhook: { enabled: boolean; url: string | null };
   cron: { name: string; schedule: string; nextRun: string | null }[];
   recentRuns: {
@@ -127,6 +136,7 @@ export async function getWorkflowDetailForAgent(
     url: null,
   };
   let network: NetworkAccessView | null = null;
+  let extraPermissions: ExtraPermissionsView | null = null;
   if (w.currentDeploymentId) {
     const deployment = await db.query.workflowDeployments.findFirst({
       where: { id: w.currentDeploymentId as string },
@@ -138,8 +148,12 @@ export async function getWorkflowDetailForAgent(
     const manifest =
       deployment?.manifestNormalized as NormalizedWorkflowManifest | null;
     if (deployment) {
-      network = networkAccessView(
+      extraPermissions = extraPermissionsView(
+        workflowExtraPermissionsFromManifest(deployment.manifestNormalized),
+      );
+      network = effectiveNetworkAccessView(
         workflowNetworkPolicyFromManifest(deployment.manifestNormalized),
+        extraPermissions.flags,
       );
     }
     if (manifest?.triggers?.webhook) {
@@ -162,6 +176,7 @@ export async function getWorkflowDetailForAgent(
     compatibility,
     inputSchema: w.inputSchema ?? null,
     network,
+    extraPermissions,
     webhook,
     cron,
     recentRuns: runs.map((r) => ({

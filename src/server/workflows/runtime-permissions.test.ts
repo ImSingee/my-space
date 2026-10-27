@@ -47,3 +47,35 @@ describe('workflow Deno network permissions', () => {
     expect(args).toContain('--cached-only');
   });
 });
+
+describe('workflow extra permission merging', () => {
+  it('broadens platform scopes and unions declared scopes', () => {
+    const args = buildWorkflowDenoArgs({
+      ...base,
+      network: ['one:443'],
+      extraPermissions: ['--allow-read', '--allow-net', '--allow-run=echo'],
+    });
+    expect(args).toContain('--allow-read');
+    expect(args).toContain('--allow-net');
+    expect(args).toContain('--allow-run=echo');
+    expect(args).not.toContain('--allow-read=/artifacts');
+    expect(args).not.toContain('--allow-net=one:443');
+    expect(
+      buildWorkflowDenoArgs({
+        ...base,
+        network: ['one:443'],
+        extraPermissions: ['--allow-net=two:443'],
+      }),
+    ).toContain('--allow-net=one:443,two:443');
+  });
+  it('starts allow-all without other allow flags', () => {
+    const args = buildWorkflowDenoArgs({
+      ...base,
+      network: [],
+      extraPermissions: ['--allow-all'],
+    });
+    expect(args.filter((arg) => arg.startsWith('--allow-'))).toEqual([
+      '--allow-all',
+    ]);
+  });
+});

@@ -16,7 +16,10 @@ import {
   assertSupportedWorkflowCompatibility,
   WorkflowDeploymentCompatibilityError,
 } from './compatibility';
-import { workflowNetworkPolicyFromManifest } from './manifest';
+import {
+  workflowExtraPermissionsFromManifest,
+  workflowNetworkPolicyFromManifest,
+} from './manifest';
 import { buildWorkflowDenoArgs } from './runtime-permissions';
 import { workflowSandboxEnv } from './sandbox-env';
 import { validateWorkflowInput } from './validate';
@@ -265,8 +268,12 @@ async function executeRun(
   }
 
   let network;
+  let extraPermissions;
   try {
     network = workflowNetworkPolicyFromManifest(deployment.manifestNormalized);
+    extraPermissions = workflowExtraPermissionsFromManifest(
+      deployment.manifestNormalized,
+    );
   } catch (error) {
     await db
       .update(schema.workflowRuns)
@@ -315,10 +322,15 @@ async function executeRun(
 
   const child = spawn(
     'deno',
-    // Scope FS reads to this run's own artifact dir so untrusted workflow code
-    // can't read host files (.env, ~/.ssh, other apps' artifacts). The main
-    // module load is exempt from --allow-read, and input arrives over stdin.
-    buildWorkflowDenoArgs({ bundlePath: bundle, artifactDir: dir, network }),
+    // Default reads are scoped to this artifact; declared extraPermissions may
+    // intentionally extend host access. The main module load is exempt from
+    // --allow-read, and input arrives over stdin.
+    buildWorkflowDenoArgs({
+      bundlePath: bundle,
+      artifactDir: dir,
+      network,
+      extraPermissions,
+    }),
     {
       cwd: dir,
       // Never inherit the platform's process.env: with --allow-env the workflow

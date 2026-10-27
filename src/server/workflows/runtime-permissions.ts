@@ -1,3 +1,4 @@
+import { mergeDenoPermissionFlags } from '~/extra-permissions';
 import {
   effectiveNetworkAllowlist,
   type NetworkPolicy,
@@ -8,6 +9,7 @@ export type WorkflowDenoArgsOptions = {
   artifactDir: string;
   /** Absent when no policy was declared, which runs unrestricted. */
   network?: NetworkPolicy;
+  extraPermissions?: string[];
 };
 
 /** Build one permission contract shared by describe mode and real runs. */
@@ -15,6 +17,7 @@ export function buildWorkflowDenoArgs({
   bundlePath,
   artifactDir,
   network,
+  extraPermissions,
 }: WorkflowDenoArgsOptions): string[] {
   const args = ['run'];
 
@@ -31,16 +34,17 @@ export function buildWorkflowDenoArgs({
     );
   }
 
+  const permissionFlags: string[] = [];
   const allowlist = effectiveNetworkAllowlist(network);
   if (allowlist === null) {
-    args.push('--allow-net');
+    permissionFlags.push('--allow-net');
   } else if (allowlist.length > 0) {
-    args.push(`--allow-net=${allowlist.join(',')}`);
+    permissionFlags.push(`--allow-net=${allowlist.join(',')}`);
   }
 
+  permissionFlags.push('--allow-env', `--allow-read=${artifactDir}`);
   args.push(
-    '--allow-env',
-    `--allow-read=${artifactDir}`,
+    ...mergeDenoPermissionFlags(permissionFlags, extraPermissions),
     '--no-prompt',
     bundlePath,
   );

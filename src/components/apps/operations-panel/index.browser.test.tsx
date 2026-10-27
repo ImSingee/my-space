@@ -78,7 +78,12 @@ function appOps(
   },
 ): AppOps {
   return {
-    backend: { capable: false, mode: null, network: null },
+    backend: {
+      capable: false,
+      mode: null,
+      network: null,
+      extraPermissions: null,
+    },
     database,
     cron: { enabled: false, jobs: [] },
     webhook: {

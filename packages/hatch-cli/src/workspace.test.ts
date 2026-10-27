@@ -61,6 +61,7 @@ const getResource = (kind: 'app' | 'workflow') => ({
           liveVersion: null,
           inputSchema: {},
           network: null,
+          extraPermissions: null,
           webhook: { enabled: false, url: null },
           cron: [],
           recentRuns: [],
@@ -80,6 +81,7 @@ const getResource = (kind: 'app' | 'workflow') => ({
               mode: null,
               running: false,
               network: null,
+              extraPermissions: null,
             },
             cron: { enabled: false, jobs: [] },
             webhook: {

@@ -29,6 +29,7 @@ import {
   compatibilityListSummary,
   compatibilityRollbackWarning,
 } from './compatibility';
+import { formatExtraPermissions } from './extra-permissions';
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
@@ -152,6 +153,7 @@ export function createWorkflowTools(options: {
             )
           : null,
         `Network: ${formatNetworkAccess(detail.network)}`,
+        `Extra permissions: ${formatExtraPermissions(detail.extraPermissions)}`,
         detail.webhook.enabled
           ? `Webhook: ${detail.webhook.url ?? 'n/a'} [secret set]`
           : null,

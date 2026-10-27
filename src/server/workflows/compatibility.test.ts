@@ -161,3 +161,33 @@ describe('Workflow compatibility runtime boundary', () => {
     await expect(db.query.workflowRuns.findMany()).resolves.toEqual([]);
   });
 });
+
+describe('Workflow persisted extra permission boundary', () => {
+  it('marks a run failed before execution when persisted flags are invalid', async () => {
+    await seedDeployment();
+    await db
+      .update(schema.workflowDeployments)
+      .set({ manifestNormalized: { extraPermissions: ['--inspect'] } })
+      .where(eq(schema.workflowDeployments.id, DEPLOYMENT_ID));
+    const { runId } = await startWorkflowRun(WORKFLOW_ID, {
+      trigger: 'manual',
+      input: {},
+    });
+    await expect
+      .poll(async () => {
+        const run = await db.query.workflowRuns.findFirst({
+          where: { id: runId },
+        });
+        return {
+          status: run?.status,
+          error: run?.error,
+          startedAt: run?.startedAt,
+        };
+      })
+      .toMatchObject({
+        status: 'failed',
+        error: expect.stringContaining('Invalid workflow extraPermissions'),
+        startedAt: null,
+      });
+  });
+});

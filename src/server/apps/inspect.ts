@@ -2,7 +2,14 @@
 import { appCompatibility, type AppCompatibility } from '~/app-compatibility';
 import { db } from '~/db';
 import type { AppCapabilities, AppStatus } from '~/db/schema';
-import { type NetworkAccessView, networkAccessView } from '~/network-policy';
+import {
+  type NetworkAccessView,
+  effectiveNetworkAccessView,
+} from '~/network-policy';
+import {
+  type ExtraPermissionsView,
+  extraPermissionsView,
+} from '~/extra-permissions';
 import { listDeployments } from './manage';
 import {
   type NormalizedManifest,
@@ -110,6 +117,7 @@ export type AppRuntimeOps = {
     running: boolean;
     /** Declaration from the active deployment; null before first deployment. */
     network: NetworkAccessView | null;
+    extraPermissions: ExtraPermissionsView | null;
   };
   cron: {
     enabled: boolean;
@@ -223,8 +231,14 @@ export async function getAppDetailForAgent(
         capable: Boolean(caps?.backend),
         mode: app.backendMode ?? null,
         running: isAppRunning(id),
+        extraPermissions: manifest?.backend
+          ? extraPermissionsView(manifest.backend.extraPermissions)
+          : null,
         network: manifest?.backend
-          ? networkAccessView(manifest.backend.network)
+          ? effectiveNetworkAccessView(
+              manifest.backend.network,
+              manifest.backend.extraPermissions,
+            )
           : null,
       },
       cron: { enabled: Boolean(caps?.cron), jobs: cronJobs },

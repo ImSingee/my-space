@@ -1356,3 +1356,58 @@ describe('buildApp managed Data Tables', () => {
     );
   });
 });
+
+describe('App deployment permission validation', () => {
+  it.each(['--allow-foo', '--allow-sys=bogus'])(
+    'rejects invalid Deno flag %s before publishing an artifact',
+    async (flag) => {
+      const { sourceDir, outputDir } = await makeAppSource(
+        {
+          id: 'demo',
+          name: 'Demo',
+          capabilities: { backend: true },
+          backend: {
+            entry: 'backend/main.ts',
+            network: [],
+            extraPermissions: [flag],
+          },
+        },
+        { 'backend/main.ts': 'export const value = 1;' },
+      );
+      await expect(buildApp('demo', { sourceDir, outputDir })).rejects.toThrow(
+        /Invalid extraPermissions:[\s\S]*(unexpected argument|unknown sys descriptor)/,
+      );
+      await expect(
+        fs.access(path.join(outputDir, 'manifest.normalized.json')),
+      ).rejects.toThrow(/ENOENT/);
+    },
+  );
+  it('builds valid permissions and persists them into the artifact', async () => {
+    const extraPermissions = [
+      '--allow-run=echo',
+      '--allow-read',
+      '--allow-all',
+    ];
+    const { sourceDir, outputDir } = await makeAppSource(
+      {
+        id: 'demo',
+        name: 'Demo',
+        capabilities: { backend: true },
+        backend: { entry: 'backend/main.ts', network: [], extraPermissions },
+      },
+      { 'backend/main.ts': 'export const value = 1;' },
+    );
+    const result = await buildApp('demo', { sourceDir, outputDir });
+    expect(result.normalized.backend?.extraPermissions).toEqual(
+      extraPermissions,
+    );
+    expect(
+      JSON.parse(
+        await fs.readFile(
+          path.join(outputDir, 'manifest.normalized.json'),
+          'utf8',
+        ),
+      ).backend.extraPermissions,
+    ).toEqual(extraPermissions);
+  });
+});

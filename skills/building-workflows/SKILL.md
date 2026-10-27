@@ -94,7 +94,8 @@ export default defineWorkflow({
 ### Runtime constraints
 
 - Runs on Deno with **env + scoped read** and only the network access declared
-  by `manifest.network` (no write/run/ffi). There is no per-workflow database
+  by `manifest.network`, unless explicitly extended through authorized
+  `extraPermissions` (including write/run/ffi). There is no per-workflow database
   or storage yet.
 - **No AI calls** during a run.
 - Keep the result JSON-serializable. Do all real work inside `ctx.step` so the
@@ -160,8 +161,11 @@ it reports a skipped lifecycle script, do not enable it blindly:
    code, reads credentials/project-external files, writes outside the package or
    project, changes global configuration, elevates privileges, is obfuscated or
    dynamic, or cannot be fully traced.
-3. Reject native addons, FFI, runtime sidecars, and generated runtime files that
-   cannot be carried by the single-file Workflow bundle.
+3. Reject npm native addons and generated runtime files that cannot be
+   carried by the single-file Workflow bundle. FFI through `Deno.dlopen` and
+   host commands/sidecars require necessary, explicitly authorized
+   `extraPermissions` as described below, plus separately available reviewed
+   host libraries or binaries.
 4. Only after confirming the exact command is safe, add the exact locked version
    to `deno.json`—never `true`, a tag, wildcard, or range:
 
@@ -243,6 +247,36 @@ lockfile, npm, and remote module resolution disabled.
   `/api/workflow/<id>/run?secret=<secret>`. POST a JSON body (used as the run
   input) or GET with query params. The secret may also be sent as the
   `x-hatch-secret` header.
+
+## Extra Deno permissions
+
+1. Declare `extraPermissions` **only when strictly necessary**. If platform
+   capabilities (network, storage, KV, Data Tables, Workflow calls, or a pure
+   JS/Wasm implementation) can achieve the goal, you must not use it.
+2. **Obtain explicit user authorization before writing the declaration or
+   deploying.** Explain the exact flags, why each is necessary, and the risks:
+   Apps, Workflows, and the platform share the same OS user; these permissions
+   are equivalent to host access and can expose platform credentials and other
+   Apps' data. Without explicit consent, do not write the flags into a manifest
+   or deploy them. Adding, broadening, or modifying an existing declaration
+   requires fresh authorization.
+
+Each item is a complete Deno `--allow-*` argument, for example
+`--allow-run=ffmpeg,git`, `--allow-ffi=/opt/lib/example.dylib`, or `--allow-all`.
+Prefer narrowly scoped flags. Deno validates names and values during deployment;
+newlines and NUL are rejected. Flags are merged with platform permissions: a
+bare flag wins over scoped flags of the same name, scoped values are unioned,
+and `--allow-all` replaces all other permission flags. `--allow-net` and
+`--allow-all` override network restrictions; scoped net values extend them.
+Relative paths resolve from the deployment artifact directory, not the source
+checkout. Prefer absolute paths to separately available host libraries or binaries.
+
+The top-level declaration below is an example only: both necessity and explicit
+user authorization are mandatory before writing it or deploying it.
+
+```json
+{ "extraPermissions": ["--allow-run=date"] }
+```
 
 ## Local validation
 

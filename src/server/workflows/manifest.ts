@@ -1,4 +1,5 @@
 /** Shared source contract and platform deployment normalization. */
+import { extraPermissionsSchema } from '~/extra-permissions';
 import { type NetworkPolicy, networkPolicySchema } from '~/network-policy';
 import {
   sourceWorkflowManifestSchema,
@@ -14,6 +15,7 @@ export type NormalizedWorkflowManifest = {
   entry: string;
   /** Absent when no policy was declared, which runs unrestricted. */
   network?: NetworkPolicy;
+  extraPermissions?: string[];
   triggers: {
     cron: WorkflowCronJob[];
     /** Inbound webhook URL, when the webhook trigger is enabled. */
@@ -63,6 +65,9 @@ export function normalizeWorkflowManifest(
     description: src.description,
     entry: src.entry,
     ...(src.network === undefined ? {} : { network: src.network }),
+    ...(src.extraPermissions === undefined
+      ? {}
+      : { extraPermissions: src.extraPermissions }),
     triggers: {
       cron: src.triggers.cron,
       webhook: {
@@ -87,6 +92,25 @@ export function workflowNetworkPolicyFromManifest(
   if (!result.success) {
     throw new Error(
       `Invalid workflow network policy: ${result.error.issues[0]?.message ?? 'unknown policy error'}`,
+    );
+  }
+  return result.data;
+}
+
+/** Reject corrupted deployment permissions before starting a workflow run. */
+export function workflowExtraPermissionsFromManifest(
+  raw: unknown,
+): string[] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('Invalid workflow deployment manifest.');
+  }
+  if (!Object.hasOwn(raw, 'extraPermissions')) return undefined;
+  const result = extraPermissionsSchema.safeParse(
+    (raw as Record<string, unknown>).extraPermissions,
+  );
+  if (!result.success) {
+    throw new Error(
+      `Invalid workflow extraPermissions: ${result.error.issues[0]?.message}`,
     );
   }
   return result.data;

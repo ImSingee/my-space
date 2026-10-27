@@ -44,6 +44,7 @@ import {
   compatibilityListSummary,
   compatibilityRollbackWarning,
 } from './compatibility';
+import { formatExtraPermissions } from './extra-permissions';
 import { formatNetworkAccess } from './network-access';
 import { requireIdSlug, requireSessionId, text, tool } from './shared';
 
@@ -200,6 +201,9 @@ export function createAppTools(options: {
         }`,
         detail.ops.backend.capable
           ? `Network: ${formatNetworkAccess(detail.ops.backend.network)}`
+          : null,
+        detail.ops.backend.capable
+          ? `Extra permissions: ${formatExtraPermissions(detail.ops.backend.extraPermissions)}`
           : null,
         `Database: ${databaseStatus}`,
         `Data Tables: ${dataTableStatus}`,

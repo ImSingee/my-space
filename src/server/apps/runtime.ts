@@ -24,6 +24,10 @@ import {
   networkDestinationFromUrl,
   networkPolicySchema,
 } from '~/network-policy';
+import {
+  extraPermissionsSchema,
+  mergeDenoPermissionFlags,
+} from '~/extra-permissions';
 import { internalPlatformUrl } from '../internal-platform-url';
 import { subprocessSandboxEnv } from '../sandbox-env';
 import {
@@ -66,6 +70,7 @@ export type BackendArtifact = {
   format?: 'bundle-v1';
   /** Absent when no policy was declared, which runs unrestricted. */
   network?: NetworkPolicy;
+  extraPermissions?: string[];
 };
 
 const LEGACY_BACKEND_ENTRY = 'backend/main.ts';
@@ -162,6 +167,7 @@ function readBackendArtifactMetadata(buildDir: string): {
   runtime?: BackendRuntime;
   format?: 'bundle-v1';
   network?: NetworkPolicy;
+  extraPermissions?: string[];
 } {
   const manifestPath = path.join(buildDir, NORMALIZED_MANIFEST);
   let manifestStat;
@@ -235,8 +241,21 @@ function readBackendArtifactMetadata(buildDir: string): {
     }
     network = parsedNetwork.data;
   }
+  let extraPermissions: string[] | undefined;
+  if (Object.hasOwn(metadata, 'extraPermissions')) {
+    const parsedPermissions = extraPermissionsSchema.safeParse(
+      metadata.extraPermissions,
+    );
+    if (!parsedPermissions.success) {
+      throw invalidBackendArtifact(
+        `backend.extraPermissions is invalid: ${parsedPermissions.error.issues[0]?.message}`,
+      );
+    }
+    extraPermissions = parsedPermissions.data;
+  }
   const base = {
     entry,
+    ...(extraPermissions === undefined ? {} : { extraPermissions }),
     ...(runtime === undefined ? {} : { runtime }),
     ...(network === undefined ? {} : { network }),
   };
@@ -279,9 +298,13 @@ export function resolveBackendArtifact(buildDir: string): BackendArtifact {
     metadata.network === undefined ? {} : { network: metadata.network };
   const runtime =
     metadata.runtime === undefined ? {} : { runtime: metadata.runtime };
+  const permissions =
+    metadata.extraPermissions === undefined
+      ? {}
+      : { extraPermissions: metadata.extraPermissions };
   return metadata.format === 'bundle-v1'
-    ? { entryPath, format: 'bundle-v1', ...network, ...runtime }
-    : { entryPath, ...network, ...runtime };
+    ? { entryPath, format: 'bundle-v1', ...network, ...runtime, ...permissions }
+    : { entryPath, ...network, ...runtime, ...permissions };
 }
 
 /** Outbound workflow calls the app declared, read from the staged manifest. */
@@ -423,18 +446,22 @@ export function buildBackendDenoArgs({
     // Legacy source artifacts resolve dependencies from the build-time cache.
     denoArgs.push('--node-modules-dir=none');
   }
-  denoArgs.push(`--allow-read=${allowRead.join(',')}`);
-  if (storageDir) denoArgs.push(`--allow-write=${storageDir}`);
+  const permissionFlags = [`--allow-read=${allowRead.join(',')}`];
+  if (storageDir) permissionFlags.push(`--allow-write=${storageDir}`);
   const allowNet = effectiveNetworkAllowlist(
     artifact.network,
     automaticNetworkDestinations,
   );
   if (allowNet === null) {
-    denoArgs.push('--allow-net');
+    permissionFlags.push('--allow-net');
   } else if (allowNet.length > 0) {
-    denoArgs.push(`--allow-net=${allowNet.join(',')}`);
+    permissionFlags.push(`--allow-net=${allowNet.join(',')}`);
   }
-  denoArgs.push('--allow-env', '--no-prompt');
+  permissionFlags.push('--allow-env');
+  denoArgs.push(
+    ...mergeDenoPermissionFlags(permissionFlags, artifact.extraPermissions),
+    '--no-prompt',
+  );
   if (!bundled && importMap) {
     denoArgs.push(`--import-map=${importMap}`);
   }

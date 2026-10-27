@@ -7,6 +7,7 @@ import {
   parseSourceWorkflowManifest,
   projectWorkflowManifestUrls,
   workflowNetworkPolicyFromManifest,
+  workflowExtraPermissionsFromManifest,
   workflowWebhookUrl,
 } from './manifest';
 
@@ -147,4 +148,40 @@ describe('workflow network policy manifest', () => {
       workflowNetworkPolicyFromManifest({ network: ['10.0.0.0/8'] }),
     ).toThrow(/Invalid workflow network policy/);
   });
+});
+
+describe('Workflow extra permission declarations', () => {
+  it('accepts arbitrary permission flags, deduplicates and preserves normalization', () => {
+    const flags = ['--allow-ffi', '--allow-run=a,b', '--allow-all'];
+    const parsed = parseSourceWorkflowManifest({
+      ...manifest(),
+      extraPermissions: [...flags, flags[0]],
+    });
+    expect(parsed.extraPermissions).toEqual(flags);
+    expect(normalizeWorkflowManifest(parsed).extraPermissions).toEqual(flags);
+    expect(
+      workflowExtraPermissionsFromManifest(normalizeWorkflowManifest(parsed)),
+    ).toEqual(flags);
+    expect(workflowExtraPermissionsFromManifest({})).toBeUndefined();
+  });
+  it.each([
+    ['--inspect'],
+    ['--config=x'],
+    ['--allow-run=echo\n--inspect'],
+    ['--allow-read=\r/x'],
+    ['--allow-run=echo\0'],
+    '--allow-run',
+    null,
+    [1],
+  ])(
+    'rejects invalid source and persisted permissions %j',
+    (extraPermissions) => {
+      expect(() =>
+        parseSourceWorkflowManifest({ ...manifest(), extraPermissions }),
+      ).toThrow(/extraPermissions/);
+      expect(() =>
+        workflowExtraPermissionsFromManifest({ extraPermissions }),
+      ).toThrow(/Invalid workflow extraPermissions/);
+    },
+  );
 });

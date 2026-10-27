@@ -9,6 +9,7 @@ import {
   BackendTime,
   backendLastExitLabel,
 } from '~components/apps/backend-controls';
+import { ExtraPermissionsDetails } from '~components/system/extra-permissions';
 import { NetworkAccessDetails } from '~components/system/network-access';
 import {
   appBackendsQueryOptions,
@@ -97,6 +98,9 @@ function BackendSection({
       </Text>
       <RuntimeFact label="Network">
         <NetworkAccessDetails access={backend.network} appPlatformChannels />
+      </RuntimeFact>
+      <RuntimeFact label="Extra permissions">
+        <ExtraPermissionsDetails access={backend.extraPermissions} />
       </RuntimeFact>
       {runtime ? (
         <Stack gap={6} mt={4}>
