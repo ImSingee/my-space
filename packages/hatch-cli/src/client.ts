@@ -3,21 +3,13 @@ import {
   toJson,
   type DescMessage,
   type JsonObject,
+  type JsonValue,
 } from '@bufbuild/protobuf';
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
-import {
-  appSummarySchema,
-  workflowSummarySchema,
-  appDetailSchema,
-  workflowDetailSchema,
-  appManifestViewSchema,
-  workflowManifestViewSchema,
-} from '../../../src/platform-api/views';
+import { z } from 'zod';
 import {
   queryAppKvRequestSchema,
-  queryAppKvResponseSchema,
   queryAppDataTableRequestSchema,
-  queryAppDataTableResponseSchema,
   type QueryAppKvRequest,
   type QueryAppDataTableRequest,
 } from '../../../src/platform-api/data-schemas';
@@ -56,15 +48,31 @@ export function credentialHeaders(credential: Profile): Record<string, string> {
     ? { 'x-api-key': credential.apiKey }
     : { authorization: `Bearer ${credential.token}` };
 }
+const invalidResponse = () =>
+  new CliError(
+    'invalid_response',
+    'The platform returned an incomplete response.',
+    7,
+  );
 function required<T>(value: T | undefined): T {
-  if (value === undefined)
-    throw new CliError(
-      'invalid_response',
-      'The platform returned an incomplete response.',
-      7,
-    );
+  if (value === undefined) throw invalidResponse();
   return value;
 }
+/**
+ * Released CLIs must keep working after additive platform changes. JSON views
+ * are server allowlists, so read only fields the CLI uses and pass the rest
+ * through unchanged instead of re-validating them against a bundled snapshot.
+ */
+function jsonObject(value: JsonValue): JsonObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw invalidResponse();
+  return value;
+}
+const resourceViewSchema = z.looseObject({
+  id: z.string(),
+  slug: z.string(),
+  createdAt: z.string(),
+});
 const basicResource = (value: Resource) => ({
   id: value.id,
   slug: value.slug,
@@ -87,15 +95,12 @@ const source = (value: Source) => ({
       ? null
       : Buffer.from(value.bundle).toString('base64'),
 });
-const deployment = (value: Deployment, kind: 'app' | 'workflow') => ({
+const deployment = (value: Deployment) => ({
   deploymentId: value.deploymentId,
   version: value.version,
   compatibilityVersion: value.compatibilityVersion,
   ...(value.slug === undefined ? {} : { slug: value.slug }),
-  normalized: (kind === 'app'
-    ? appManifestViewSchema
-    : workflowManifestViewSchema
-  ).parse(toJson(ValueSchema, required(value.normalized))),
+  normalized: jsonObject(toJson(ValueSchema, required(value.normalized))),
 });
 const restored = (value: RestoredVersion) => ({
   version: value.version,
@@ -158,47 +163,35 @@ function parseCreate<D extends DescMessage>(schema: D, input: CreateInput) {
 export function cliClient(transport: Transport) {
   const apps = createClient(AppService, transport);
   const workflows = createClient(WorkflowService, transport);
-  function lifecycle(
-    client: {
-      list: (
-        request: Record<string, never>,
-      ) => Promise<{ resources: Resource[] }>;
-      create: (
-        request: CreateInput,
-      ) => Promise<{ id: string; slug: string; name: string; files: File[] }>;
-      get: (request: { id: string }) => Promise<{ resource?: Resource }>;
-      source: (request: { id: string }) => Promise<{ source?: Source }>;
-      deploy: (request: {
-        id: string;
-        message: string;
-        generation: string;
-        bundle: Uint8Array;
-        allowDestructiveDataMigration?: boolean;
-        dataMigrationApprovalToken?: string;
-      }) => Promise<{ deployment?: Deployment }>;
-      rollback: (request: {
-        id: string;
-        version: number;
-      }) => Promise<{ restored?: RestoredVersion }>;
-    },
-    kind: 'app' | 'workflow',
-  ) {
-    const resource = (value: Resource, detailed = false) => {
-      const schema =
-        kind === 'app'
-          ? detailed
-            ? appDetailSchema
-            : appSummarySchema
-          : detailed
-            ? workflowDetailSchema
-            : workflowSummarySchema;
-      return schema.parse({
+  function lifecycle(client: {
+    list: (
+      request: Record<string, never>,
+    ) => Promise<{ resources: Resource[] }>;
+    create: (
+      request: CreateInput,
+    ) => Promise<{ id: string; slug: string; name: string; files: File[] }>;
+    get: (request: { id: string }) => Promise<{ resource?: Resource }>;
+    source: (request: { id: string }) => Promise<{ source?: Source }>;
+    deploy: (request: {
+      id: string;
+      message: string;
+      generation: string;
+      bundle: Uint8Array;
+      allowDestructiveDataMigration?: boolean;
+      dataMigrationApprovalToken?: string;
+    }) => Promise<{ deployment?: Deployment }>;
+    rollback: (request: {
+      id: string;
+      version: number;
+    }) => Promise<{ restored?: RestoredVersion }>;
+  }) {
+    const resource = (value: Resource) => {
+      const result = resourceViewSchema.safeParse({
         ...basicResource(value),
-        ...(toJson(ValueSchema, required(value.view)) as Record<
-          string,
-          unknown
-        >),
+        ...jsonObject(toJson(ValueSchema, required(value.view))),
       });
+      if (!result.success) throw invalidResponse();
+      return result.data;
     };
     return {
       list: async (_input: Record<string, never>) =>
@@ -213,7 +206,7 @@ export function cliClient(transport: Transport) {
         };
       },
       get: async (input: { id: string }) =>
-        resource(required((await client.get(input)).resource), true),
+        resource(required((await client.get(input)).resource)),
       source: async (input: { id: string }) =>
         source(required((await client.source(input)).source)),
       deploy: async (input: DeployInput) =>
@@ -227,7 +220,6 @@ export function cliClient(transport: Transport) {
               })
             ).deployment,
           ),
-          kind,
         ),
       rollback: async (input: {
         params: { id: string };
@@ -249,18 +241,15 @@ export function cliClient(transport: Transport) {
   const sdk = createClient(SdkService, transport);
   return {
     apps: {
-      ...lifecycle(
-        {
-          list: apps.listApps,
-          create: (input) =>
-            apps.createApp(parseCreate(CreateAppRequestSchema, input)),
-          get: apps.getApp,
-          source: apps.getAppSource,
-          deploy: apps.deployApp,
-          rollback: apps.rollbackApp,
-        },
-        'app',
-      ),
+      ...lifecycle({
+        list: apps.listApps,
+        create: (input) =>
+          apps.createApp(parseCreate(CreateAppRequestSchema, input)),
+        get: apps.getApp,
+        source: apps.getAppSource,
+        deploy: apps.deployApp,
+        rollback: apps.rollbackApp,
+      }),
       kv: async (input: {
         params: { id: string };
         body: QueryAppKvRequest;
@@ -270,9 +259,7 @@ export function cliClient(transport: Transport) {
           id: input.params.id,
           input: fromJson(ValueSchema, body),
         });
-        return queryAppKvResponseSchema.parse(
-          toJson(ValueSchema, required(result.result)),
-        );
+        return jsonObject(toJson(ValueSchema, required(result.result)));
       },
       dataTable: async (input: {
         params: { id: string };
@@ -283,9 +270,7 @@ export function cliClient(transport: Transport) {
           id: input.params.id,
           input: fromJson(ValueSchema, body),
         });
-        return queryAppDataTableResponseSchema.parse(
-          toJson(ValueSchema, required(result.result)),
-        );
+        return jsonObject(toJson(ValueSchema, required(result.result)));
       },
       dbQuery: async (input: {
         params: { id: string };
@@ -305,20 +290,17 @@ export function cliClient(transport: Transport) {
         return { appId: result.appId, association: result.association };
       },
     },
-    workflows: lifecycle(
-      {
-        list: workflows.listWorkflows,
-        create: (input) =>
-          workflows.createWorkflow(
-            parseCreate(CreateWorkflowRequestSchema, input),
-          ),
-        get: workflows.getWorkflow,
-        source: workflows.getWorkflowSource,
-        deploy: workflows.deployWorkflow,
-        rollback: workflows.rollbackWorkflow,
-      },
-      'workflow',
-    ),
+    workflows: lifecycle({
+      list: workflows.listWorkflows,
+      create: (input) =>
+        workflows.createWorkflow(
+          parseCreate(CreateWorkflowRequestSchema, input),
+        ),
+      get: workflows.getWorkflow,
+      source: workflows.getWorkflowSource,
+      deploy: workflows.deployWorkflow,
+      rollback: workflows.rollbackWorkflow,
+    }),
     auth: {
       status: async (_input: Record<string, never>): Promise<AuthStatus> => {
         const result = await auth.getStatus({});

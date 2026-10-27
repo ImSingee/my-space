@@ -35,6 +35,22 @@
       "rules": {
         "local/no-dynamic-import": "off"
       }
+    },
+    {
+      "files": ["packages/hatch-cli/src/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/platform-api/views", "**/platform-api/views.*"],
+                "message": "Platform views are server output allowlists. Released CLIs must read only the fields they use and pass the rest through."
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "settings": {

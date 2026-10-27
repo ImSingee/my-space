@@ -39,68 +39,14 @@ let sdkFailure: boolean;
 let resourceSlug: string;
 let createRequests: unknown[];
 const token = 'private-workspace-test-secret';
-const getResource = (kind: 'app' | 'workflow') => ({
+const getResource = () => ({
   id: 'immutable',
   slug: resourceSlug,
   name: 'Fixture',
   status: 'draft',
   createdAt: generation,
   updatedAt: generation,
-  view: fromJson(ValueSchema, {
-    id: 'immutable',
-    slug: resourceSlug,
-    name: 'Fixture',
-    description: null,
-    status: 'draft',
-    createdAt: generation,
-    updatedAt: generation,
-    compatibility: null,
-    deployments: [],
-    ...(kind === 'workflow'
-      ? {
-          liveVersion: null,
-          inputSchema: {},
-          network: null,
-          extraPermissions: null,
-          webhook: { enabled: false, url: null },
-          cron: [],
-          recentRuns: [],
-        }
-      : {
-          currentVersion: null,
-          capabilities: [],
-          backendMode: null,
-          dbName: null,
-          dataDbName: null,
-          currentDeploymentId: null,
-          currentSourceCommit: null,
-          manifest: null,
-          ops: {
-            backend: {
-              capable: false,
-              mode: null,
-              running: false,
-              network: null,
-              extraPermissions: null,
-            },
-            cron: { enabled: false, jobs: [] },
-            webhook: {
-              enabled: false,
-              url: null,
-              hasSecret: false,
-              auth: 'platform',
-            },
-            storage: { enabled: false },
-            kv: { enabled: false, url: null, entryCount: 0 },
-            dataTable: {
-              enabled: false,
-              url: null,
-              dbName: null,
-              schemaHash: null,
-            },
-          },
-        }),
-  }),
+  view: fromJson(ValueSchema, {}),
 });
 function createResource(
   data: Pick<CreateAppRequest, 'slug' | 'name' | 'pin' | 'description'>,
@@ -141,7 +87,7 @@ const rpc = connectNodeAdapter({
   routes: (router) => {
     router.service(AppService, {
       createApp: createResource,
-      getApp: () => ({ resource: getResource('app') }),
+      getApp: () => ({ resource: getResource() }),
       associateAppSession: () => ({
         appId: 'immutable',
         association: 'not-applicable',
@@ -149,7 +95,7 @@ const rpc = connectNodeAdapter({
     });
     router.service(WorkflowService, {
       createWorkflow: createResource,
-      getWorkflow: () => ({ resource: getResource('workflow') }),
+      getWorkflow: () => ({ resource: getResource() }),
       getWorkflowSource: () => ({
         source: {
           id: 'immutable',
