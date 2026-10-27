@@ -282,6 +282,21 @@ test('uses the app slug for links and hash-aware active state', async () => {
   expect(settings.element()).toHaveAttribute('data-active', 'true');
 });
 
+test('treats the app router home page as the root pin', async () => {
+  fixtures.apps = [app('01k-app', 'todo')];
+  fixtures.pins = [
+    pin('pin-root', '01k-app', 'todo', null, 'Todo home'),
+    pin('pin-settings', '01k-app', 'todo', 'settings', 'Todo settings'),
+  ];
+
+  const { screen } = await renderSections('/app/todo#/');
+
+  const home = screen.getByRole('link', { name: 'Todo home' });
+  const settings = screen.getByRole('link', { name: 'Todo settings' });
+  await expect.element(home).toHaveAttribute('data-active', 'true');
+  expect(settings.element()).not.toHaveAttribute('data-active');
+});
+
 test('uses the singular workflow namespace for links and active state', async () => {
   fixtures.workflows = [workflow('01immutableworkflow', true, 'daily-digest')];
 

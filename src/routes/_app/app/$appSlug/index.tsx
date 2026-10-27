@@ -48,6 +48,28 @@ export const Route = createFileRoute('/_app/app/$appSlug/')({
 const readDeploymentRevision = (appId: string) =>
   getAppDeploymentRevision({ data: appId });
 
+// The still percent-encoded fragment of an href, without '#'. Hashes move
+// between the host and app URLs in this form only: decoding would turn an
+// escaped `%2520` into `%20` and change what the app's route points at.
+function rawFragment(href: string) {
+  const index = href.indexOf('#');
+  return index < 0 ? '' : href.slice(index + 1);
+}
+
+// Comparison key for fragments: encodes what a URL would encode, but never
+// decodes existing escapes, so distinct fragments never compare equal.
+function canonicalFragment(fragment: string) {
+  return new URL(`#${fragment}`, 'http://fragment.invalid').hash.slice(1);
+}
+
+// Moves the app to another page without adding a history entry. The URL must
+// be absolute (a relative one resolves against the calling host document) and
+// keep its '#' even when empty, so it stays a same-document fragment change.
+function replaceInnerHash(win: Window, fragment: string) {
+  const [base] = win.location.href.split('#');
+  win.location.replace(`${base}#${fragment}`);
+}
+
 function AppView() {
   const { appSlug } = Route.useParams();
   const appQueryOptions = appViewQueryOptions(appSlug);
@@ -81,8 +103,17 @@ function AppView() {
     deploymentRevision: app.deploymentRevision,
     revisionReader: readDeploymentRevision,
   });
-  // Router hash is the fragment without '#' (e.g. '/settings'); '' = root.
-  const hostHash = useRouterState({ select: (s) => s.location.hash });
+  const router = useRouter();
+  // The location the view is rendered for: its raw fragment (e.g. '/settings';
+  // '' = root) and its history entry key, which changes on every navigation
+  // even when the fragment stays the same. While a navigation to another app
+  // is still loading, these keep describing the outgoing app.
+  const hostFragment = useRouterState({
+    select: (s) => rawFragment((s.resolvedLocation ?? s.location).href),
+  });
+  const hostEntryKey = useRouterState({
+    select: (s) => (s.resolvedLocation ?? s.location).state.__TSR_key,
+  });
 
   // Mirror the embedded app's URL hash and document title out to the host page:
   // the host URL stays shareable/refreshable (its hash deep-links into the app)
@@ -110,15 +141,25 @@ function AppView() {
 
     const syncHashOut = () => {
       try {
-        const hash = win?.location.hash ?? '';
-        if (hash !== window.location.hash) {
-          const { pathname, search } = window.location;
-          window.history.replaceState(
-            window.history.state,
-            '',
-            `${pathname}${search}${hash}`,
-          );
-        }
+        const fragment = rawFragment(win?.location.href ?? '');
+        const { latestLocation, state } = router;
+        const resolved = state.resolvedLocation ?? state.location;
+        // A navigation away from this app is in flight; don't override it.
+        if (latestLocation.pathname !== resolved.pathname) return;
+        if (
+          canonicalFragment(fragment) ===
+          canonicalFragment(rawFragment(latestLocation.href))
+        )
+          return;
+        void router.navigate({
+          to: '/app/$appSlug',
+          params: { appSlug },
+          // The router writes `hash` into the URL verbatim, so pass it encoded.
+          hash: fragment,
+          replace: true,
+          resetScroll: false,
+          hashScrollIntoView: false,
+        });
       } catch {
         // cross-origin frame
       }
@@ -129,9 +170,24 @@ function AppView() {
       syncTitle();
     };
 
+    // Hash routers usually navigate with `history.pushState`, which never fires
+    // `hashchange`; the Navigation API reports every same-document change.
+    // Without it, fall back to the events fragment and history traversals fire.
+    const innerEvents = (target: Window) =>
+      target.navigation
+        ? ([[target.navigation, 'currententrychange']] as const)
+        : ([
+            [target, 'popstate'],
+            [target, 'hashchange'],
+          ] as const);
+
     const detach = () => {
       try {
-        win?.removeEventListener('hashchange', onInnerChange);
+        if (win) {
+          for (const [target, type] of innerEvents(win)) {
+            target.removeEventListener(type, onInnerChange);
+          }
+        }
       } catch {
         // window already torn down
       }
@@ -162,11 +218,17 @@ function AppView() {
         if (!doc) return;
         // Deep-link: seed the freshly loaded app with the host's hash once,
         // before listening, so it doesn't immediately echo back out.
-        const hostHash = window.location.hash;
-        if (hostHash && next.location.hash !== hostHash) {
-          next.location.hash = hostHash;
+        const seed = rawFragment(router.state.location.href);
+        if (
+          seed &&
+          canonicalFragment(rawFragment(next.location.href)) !==
+            canonicalFragment(seed)
+        ) {
+          replaceInnerHash(next, seed);
         }
-        next.addEventListener('hashchange', onInnerChange);
+        for (const [target, type] of innerEvents(next)) {
+          target.addEventListener(type, onInnerChange);
+        }
         const head = doc.head ?? doc.documentElement;
         if (head) {
           titleObserver = new MutationObserver(syncTitle);
@@ -194,26 +256,34 @@ function AppView() {
       detach();
       document.title = hostTitle;
     };
-  }, [canOpen, frameKey, src]);
+  }, [appSlug, canOpen, frameKey, router, src]);
 
-  // Push host hash changes into the already-loaded app. The seed-on-load above
-  // covers fresh loads (and app switches, which reload the iframe via `src`);
-  // this covers re-selecting a pin for the *current* app at a different entry
-  // point, where only the hash changes and the iframe document stays put. The
-  // equality guard converges with the iframe→host mirror above (no ping-pong).
+  // Push each host navigation into the already-loaded app. The seed-on-load
+  // above covers fresh loads (and app switches, which mount a new iframe); this
+  // covers navigations within the current app, such as selecting its sidebar
+  // pin or going back, where the iframe document stays put. It runs per history
+  // entry rather than per hash value, so selecting a pin still resets the app
+  // when the host hash had not caught up with the app's own navigation yet.
+  // Replacing keeps the host entry the only new history entry. The equality
+  // guard converges with the iframe→host mirror above (no ping-pong).
   useEffect(() => {
     const win = winRef.current;
     if (!win || !canOpen) return;
+    const resolved = router.state.resolvedLocation ?? router.state.location;
+    // A newer navigation is still loading; its resolution re-runs this.
+    if (router.latestLocation.href !== resolved.href) return;
     try {
-      if (win.location.hash.replace(/^#/, '') !== hostHash) {
-        win.location.hash = hostHash;
+      if (
+        canonicalFragment(rawFragment(win.location.href)) !==
+        canonicalFragment(hostFragment)
+      ) {
+        replaceInnerHash(win, hostFragment);
       }
     } catch {
       // cross-origin frame
     }
-  }, [hostHash, canOpen]);
+  }, [hostEntryKey, hostFragment, canOpen, router]);
 
-  const router = useRouter();
   const queryClient = useQueryClient();
   const reload = async () => {
     if (reloading) return;
@@ -347,7 +417,9 @@ function AppView() {
       {canOpen ? (
         <Box className={classes.frameWrap}>
           <iframe
-            key={frameKey}
+            // A fresh element per app: reusing it across `src` changes would
+            // briefly expose the previous app's document as already loaded.
+            key={`${src}:${frameKey}`}
             ref={frameRef}
             src={src}
             title={app.name}
