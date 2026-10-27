@@ -1,4 +1,7 @@
-/** Allowlisted JSON views. No database rows, credentials or build logs. */
+/**
+ * Allowlisted JSON views. No database rows, credentials or build logs.
+ * Server output only: clients must tolerate additive fields and values.
+ */
 import { z } from 'zod';
 import { extraPermissionsSchema } from '../../packages/hatch-manifest/src/extra-permissions.js';
 import { networkPolicySchema } from '../../packages/hatch-manifest/src/network-policy.js';
