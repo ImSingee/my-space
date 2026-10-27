@@ -11,8 +11,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
+  Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   View,
   type ScrollViewInstance,
@@ -25,21 +28,23 @@ import { useChatDraft, type Picked } from '../../src/state/use-chat-draft';
 import { useRunStream } from '../../src/state/use-run-stream';
 import { useLifetimeSignal } from '../../src/state/use-lifetime-signal';
 import { AskCard } from '../../src/ui/ask-card';
+import { Button, IconButton } from '../../src/ui/button';
+import { Glyph } from '../../src/ui/glyph';
 import { LiveTranscript, TranscriptMessage } from '../../src/ui/transcript';
-import {
-  Action,
-  Busy,
-  Notice,
-  Text,
-  errorText,
-  styles,
-  usePalette,
-} from '../../src/ui/primitives';
+import { Busy, Egg, Notice, errorText } from '../../src/ui/primitives';
+import { GlyphTile, Monogram } from '../../src/ui/rows';
+import { Text, type } from '../../src/ui/text';
+import { palette as c, radii } from '../../src/ui/theme';
+
+const suggestions = [
+  'Build a tiny tool that tracks my week',
+  'Improve one of my Apps',
+  'Think through an idea with me',
+];
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api, origin } = useSession();
-  const c = usePalette();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { draft, setDraft, files, setFiles } = useChatDraft(id);
@@ -316,6 +321,20 @@ export default function ChatScreen() {
     setProblem(null);
     send.mutate();
   };
+  // The keyboard replaces the home-indicator inset under the composer.
+  const [keyboardShown, setKeyboardShown] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', () =>
+      setKeyboardShown(true),
+    );
+    const hide = Keyboard.addListener('keyboardWillHide', () =>
+      setKeyboardShown(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   useEffect(() => {
     if (atBottom) list.current?.scrollToEnd({ animated: false });
   }, [stream.state.lastSeq, detail?.messages.length, atBottom]);
@@ -330,44 +349,63 @@ export default function ChatScreen() {
     !Array.isArray(lastMessage) &&
     lastMessage.role === 'assistant' &&
     lastMessage.stopReason === 'error';
+  const status =
+    stream.connection === 'live'
+      ? 'Working on your server'
+      : stream.connection === 'paused'
+        ? 'Updates paused · still working'
+        : 'Reconnecting…';
+  const canSend =
+    !busy &&
+    !runId &&
+    Boolean(selectedModel) &&
+    Boolean(draft.trim() || files.length);
   return (
     <View
       ref={frame}
-      style={styles.screen}
+      style={{ flex: 1, backgroundColor: c.paper }}
       onLayout={() =>
         frame.current?.measureInWindow((_x, y) => setKeyboardOffset(y))
       }
     >
       <KeyboardAvoidingView
-        style={styles.screen}
+        style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={keyboardOffset}
       >
         <Stack.Screen
           options={{
-            title: detail?.title ?? 'Conversation',
+            title: detail?.title || 'Conversation',
             headerTransparent: false,
           }}
         />
         {session.isPending ? (
-          <Busy />
+          <Busy label="Opening conversation" />
         ) : session.error && !detail ? (
-          <Notice
-            title="Couldn’t load this conversation"
-            detail={errorText(session.error)}
-            action={{
-              label: 'Try again',
-              onPress: () => void session.refetch(),
-            }}
-          />
+          <View style={{ flex: 1, padding: 16 }}>
+            <Notice
+              tone="danger"
+              title="Couldn’t load this conversation"
+              detail={errorText(session.error)}
+              action={{
+                label: 'Try again',
+                onPress: () => void session.refetch(),
+              }}
+            />
+          </View>
         ) : (
           <FlatList
-            style={styles.screen}
+            style={{ flex: 1 }}
             contentInsetAdjustmentBehavior="automatic"
             ref={list}
             data={detail?.messages ?? []}
             keyExtractor={(_, index) => String(index)}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={{
+              paddingHorizontal: 16,
+              paddingTop: 12,
+              paddingBottom: 24,
+              gap: 18,
+            }}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
             onScroll={(event) => {
@@ -385,29 +423,62 @@ export default function ChatScreen() {
             renderItem={({ item }) => <TranscriptMessage value={item} />}
             ListEmptyComponent={
               !runId ? (
-                <Notice
-                  title="Start with an idea."
-                  detail="Build an app, explore your data, or pick up an unfinished project. Photos and files can help explain what you mean."
-                />
+                <View style={{ gap: 14, paddingTop: 24 }}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'flex-end',
+                    }}
+                  >
+                    <Egg size={22} outline />
+                    <Egg size={30} />
+                  </View>
+                  <Text accessibilityRole="header" style={type.display}>
+                    Start with an idea.
+                  </Text>
+                  <Text style={type.callout}>
+                    Build an App, explore your data or pick up something
+                    unfinished. Photos and files can help explain what you mean.
+                  </Text>
+                  <View style={{ gap: 8, marginTop: 6 }}>
+                    {suggestions.map((text) => (
+                      <Pressable
+                        key={text}
+                        accessibilityRole="button"
+                        accessibilityHint="Puts this in your message"
+                        disabled={busy}
+                        onPress={() => setDraft(text)}
+                        style={({ pressed }) => ({
+                          minHeight: 44,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 10,
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                          borderRadius: 16,
+                          backgroundColor: pressed ? c.limeSoft : c.card,
+                        })}
+                      >
+                        <Glyph name="sparkle" size={13} color={c.moss} />
+                        <Text style={[type.callout, { flex: 1, color: c.ink }]}>
+                          {text}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
               ) : undefined
             }
             ListFooterComponent={
               <View style={{ gap: 16 }}>
                 {runId ? (
-                  <>
-                    <Text style={[styles.caption, { color: c.muted }]}>
-                      {stream.connection === 'live'
-                        ? 'Agent is working on your server'
-                        : stream.connection === 'paused'
-                          ? 'Updates paused. Your Agent keeps working.'
-                          : 'Reconnecting to your Agent…'}
-                    </Text>
-                    <LiveTranscript state={stream.state} />
-                  </>
+                  <LiveTranscript state={stream.state} status={status} />
                 ) : null}
                 {ask && runId ? (
                   answerSubmitted ? (
                     <Notice
+                      tone="info"
                       title="Answer sent"
                       detail="Your answer is saved on the server. Waiting for your Agent to continue."
                     />
@@ -424,6 +495,7 @@ export default function ChatScreen() {
                 ) : null}
                 {env && runId ? (
                   <Notice
+                    tone="info"
                     title="Continue in Hatch web"
                     detail={`${env.reason} Open this conversation in your browser to provide environment values securely.`}
                     action={{
@@ -443,6 +515,7 @@ export default function ChatScreen() {
                   lastRun.status,
                 ) ? (
                   <Notice
+                    tone={lastRun.status === 'cancelled' ? 'neutral' : 'danger'}
                     title={
                       lastRun.status === 'cancelled'
                         ? 'Run stopped'
@@ -468,33 +541,59 @@ export default function ChatScreen() {
                     }
                   />
                 ) : null}
-                {(detail?.appIds ?? []).map((appId) => (
-                  <Action
-                    fullWidth
-                    key={appId}
-                    label={`Open ${apps.data?.find((app) => app.id === appId)?.name ?? 'app'}`}
-                    secondary
-                    onPress={() =>
-                      router.push({
-                        pathname: '/apps/[id]',
-                        params: { id: appId },
-                      })
-                    }
-                  />
-                ))}
+                {(detail?.appIds ?? []).map((appId) => {
+                  const name =
+                    apps.data?.find((app) => app.id === appId)?.name ?? 'App';
+                  return (
+                    <Pressable
+                      key={appId}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open ${name}`}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/apps/[id]',
+                          params: { id: appId },
+                        })
+                      }
+                      style={({ pressed }) => ({
+                        minHeight: 56,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: 10,
+                        paddingRight: 16,
+                        borderRadius: 20,
+                        backgroundColor: pressed ? c.limeSoft : c.card,
+                      })}
+                    >
+                      <Monogram name={name} size={36} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={type.meta}>Built here</Text>
+                        <Text style={type.heading} numberOfLines={1}>
+                          Open {name}
+                        </Text>
+                      </View>
+                      <Glyph name="chevron" size={12} color={c.inkFaint} />
+                    </Pressable>
+                  );
+                })}
               </View>
             }
           />
         )}
         <View
           style={{
-            paddingHorizontal: 16,
-            paddingTop: 10,
-            paddingBottom: Math.max(insets.bottom, 12),
-            backgroundColor: c.panel,
-            borderTopWidth: 1,
-            borderTopColor: c.border,
-            gap: 10,
+            paddingHorizontal: 14,
+            paddingTop: 12,
+            paddingBottom: keyboardShown ? 10 : Math.max(insets.bottom, 12),
+            backgroundColor: c.card,
+            borderTopLeftRadius: radii.sheet,
+            borderTopRightRadius: radii.sheet,
+            shadowColor: c.ink,
+            shadowOpacity: 0.08,
+            shadowRadius: 18,
+            shadowOffset: { width: 0, height: -4 },
+            gap: 8,
             flexShrink: 1,
             maxHeight: '75%',
           }}
@@ -512,24 +611,38 @@ export default function ChatScreen() {
             }
           >
             {problem ? (
-              <View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  padding: 12,
+                  paddingRight: 4,
+                  borderRadius: 16,
+                  backgroundColor: c.dangerSoft,
+                }}
+              >
                 <Text
                   accessibilityRole="alert"
-                  style={[styles.caption, { color: c.danger }]}
+                  style={[type.small, { flex: 1, color: c.danger }]}
                 >
                   {problem}
                 </Text>
-                <Action
-                  compact
-                  secondary
+                <IconButton
                   label="Dismiss message"
+                  glyph="close"
+                  tone="clear"
+                  size={32}
                   onPress={() => setProblem(null)}
                 />
               </View>
             ) : null}
-            <View style={styles.row}>
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            >
               <Choice
                 label="Model"
+                glyph="model"
                 value={
                   selectedModel
                     ? `${selectedModel.providerId}:${selectedModel.modelId}`
@@ -562,12 +675,12 @@ export default function ChatScreen() {
                 }}
               />
               {runId ? (
-                <Action
-                  compact
-                  secondary
-                  danger
+                <Button
+                  variant="danger"
+                  size="small"
+                  glyph="stop"
                   label={cancel.isPending ? 'Stopping…' : 'Stop'}
-                  disabled={cancel.isPending}
+                  busy={cancel.isPending}
                   onPress={() =>
                     Alert.alert(
                       'Stop this run?',
@@ -587,6 +700,7 @@ export default function ChatScreen() {
             </View>
             {config.error ? (
               <Notice
+                tone="danger"
                 title="Couldn’t load models"
                 detail={errorText(config.error)}
                 action={{
@@ -598,23 +712,52 @@ export default function ChatScreen() {
             {files.length ? (
               <ScrollView horizontal contentContainerStyle={{ gap: 8 }}>
                 {files.map((file) => (
-                  <Action
+                  <Pressable
                     key={file.id}
-                    compact
-                    secondary
-                    label={`Remove ${file.image ? 'photo' : file.name}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${file.image ? 'photo' : file.name}`}
                     disabled={busy}
                     onPress={() =>
                       setFiles((value) =>
                         value.filter((item) => item.id !== file.id),
                       )
                     }
-                  />
+                    style={({ pressed }) => ({
+                      minHeight: 48,
+                      maxWidth: 220,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: 6,
+                      paddingRight: 10,
+                      borderRadius: 14,
+                      backgroundColor: pressed ? c.sunken : c.paper,
+                      opacity: busy ? 0.5 : 1,
+                    })}
+                  >
+                    {file.image ? (
+                      <Image
+                        accessible={false}
+                        source={{ uri: file.uri }}
+                        style={{ width: 36, height: 36, borderRadius: 9 }}
+                      />
+                    ) : (
+                      <GlyphTile glyph="file" size={36} />
+                    )}
+                    <Text
+                      style={[type.small, { flexShrink: 1, color: c.ink }]}
+                      numberOfLines={1}
+                    >
+                      {file.name}
+                    </Text>
+                    <Glyph name="close" size={11} color={c.inkSoft} />
+                  </Pressable>
                 ))}
               </ScrollView>
             ) : null}
             <NativeField
               ref={composer}
+              variant="bare"
               label="Message your Agent"
               maxLength={50000}
               multiline
@@ -628,21 +771,19 @@ export default function ChatScreen() {
               }
             />
           </ScrollView>
-          <View style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <AttachmentMenu
-                disabled={busy || files.length >= 6}
-                onChoose={(kind) => void choose(kind)}
-              />
-            </View>
-            <Action
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <AttachmentMenu
+              disabled={busy || files.length >= 6}
+              onChoose={(kind) => void choose(kind)}
+            />
+            <Text style={[type.meta, { flex: 1 }]} numberOfLines={1}>
+              {files.length ? `${files.length} of 6 attached` : ''}
+            </Text>
+            <IconButton
               label={send.isPending ? 'Sending…' : 'Send'}
-              disabled={
-                busy ||
-                Boolean(runId) ||
-                !selectedModel ||
-                (!draft.trim() && !files.length)
-              }
+              glyph="send"
+              tone={canSend ? 'moss' : 'sunken'}
+              disabled={!canSend}
               onPress={submit}
             />
           </View>

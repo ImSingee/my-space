@@ -113,7 +113,7 @@ describe('instance and credential boundaries', () => {
       ticket: 'a'.repeat(43),
       url: `${origin}/api/auth/handoffs/consume`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      targetPath: '/app/example/embed/',
+      completionUrl: `${origin}/api/auth/handoffs/complete`,
     };
     const fetcher = vi
       .fn<FetchLike>()
@@ -130,20 +130,20 @@ describe('instance and credential boundaries', () => {
     expect(await client.sessions(app.id)).toEqual([]);
     expect(await client.createSession()).toEqual({ id: session.id });
     expect(await client.session(session.id)).toEqual(session);
-    expect(await client.handoff(app.id)).toEqual(handoff);
+    expect(await client.createHandoff()).toEqual(handoff);
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
       `${origin}/api/rpc/hatch.platform.v1.AppService/ListApps`,
       `${origin}/api/rpc/hatch.platform.v1.AppService/GetApp`,
       `${origin}/api/rpc/hatch.platform.v1.AgentService/ListSessions`,
       `${origin}/api/rpc/hatch.platform.v1.AgentService/CreateSession`,
       `${origin}/api/rpc/hatch.platform.v1.AgentService/GetSession`,
-      `${origin}/api/rpc/hatch.platform.v1.AppService/CreateAppHandoff`,
+      `${origin}/api/rpc/hatch.platform.v1.AuthService/CreateHandoff`,
     ]);
     expect(
       JSON.parse(
         new TextDecoder().decode(fetcher.mock.calls[5][1].body as Uint8Array),
       ),
-    ).toEqual({ id: 'app-1' });
+    ).toEqual({});
     expect(
       JSON.parse(
         new TextDecoder().decode(fetcher.mock.calls[2][1].body as Uint8Array),
@@ -209,7 +209,7 @@ describe('instance and credential boundaries', () => {
     const handoff = {
       ticket: 'a'.repeat(32),
       url: `${origin}/api/auth/handoffs/consume`,
-      targetPath: '/app/example-app/embed/',
+      completionUrl: `${origin}/api/auth/handoffs/complete`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
     const source = webViewHandoffSource(origin, handoff);
@@ -242,27 +242,22 @@ describe('instance and credential boundaries', () => {
       url: `${origin}/api/auth/handoffs/consume`,
       ticket: 'a'.repeat(32),
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
-      targetPath: '/app/demo/embed/',
+      completionUrl: `${origin}/api/auth/handoffs/complete`,
     };
     expect(() => validateHandoff(origin, valid)).not.toThrow();
-    expect(() =>
-      validateHandoff(origin, {
-        ...valid,
-        url: `${origin}/api/v1/auth/handoffs/consume`,
-      }),
-    ).toThrow(MobileError);
-    expect(() =>
-      validateHandoff(origin, {
-        ...valid,
-        url: 'https://evil.test/api/auth/handoffs/consume',
-      }),
-    ).toThrow(MobileError);
-    expect(() =>
-      validateHandoff(origin, { ...valid, targetPath: '/app/demo/../admin' }),
-    ).toThrow(MobileError);
-    expect(() =>
-      validateHandoff(origin, { ...valid, expiresAt: '2000-01-01T00:00:00Z' }),
-    ).toThrow(MobileError);
+    for (const invalid of [
+      { url: `${origin}/api/v1/auth/handoffs/consume` },
+      { url: 'https://evil.test/api/auth/handoffs/consume' },
+      { completionUrl: 'https://evil.test/api/auth/handoffs/complete' },
+      { completionUrl: `${origin}/app/demo/embed/` },
+      { completionUrl: `${origin}/api/auth/handoffs/complete?next=/admin` },
+      { completionUrl: `${origin}/api/auth/handoffs/complete#token` },
+      { ticket: 'short' },
+      { expiresAt: '2000-01-01T00:00:00Z' },
+    ])
+      expect(() => validateHandoff(origin, { ...valid, ...invalid })).toThrow(
+        MobileError,
+      );
   });
   it('keeps tokens isolated by SHA256 canonical origin and never persists a raw origin key', async () => {
     const { vault, values } = setup();

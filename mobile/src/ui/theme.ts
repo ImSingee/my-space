@@ -1,19 +1,41 @@
-// Native projection of DESIGN.md, base-theme.ts and ember-theme/style.css.
-// Keep this dependency-free: mobile must not import the Mantine/web runtime.
-export const hatchPalette = {
-  dark: false,
-  background: '#ffffff',
-  card: '#ffffff',
-  panel: '#faf8f5',
-  sunken: '#f6f3ee',
-  text: '#1c1917',
-  muted: '#57534e',
-  border: '#e7e5e4',
-  accent: '#ea580c',
-  // Ember 7 is the accessible text/control tint on white and warm surfaces.
-  accentText: '#c2410c',
-  subtle: '#fff7ed',
-  danger: '#b91c1c',
+// Field Guide: the native app's own light visual system. Pale sage paper,
+// green-black ink, moss for actions and a lime highlighter for live, pinned
+// and selected states. Keep this dependency-free and independent of the web UI.
+export const palette = {
+  paper: '#EDF0E8',
+  card: '#FFFFFF',
+  sunken: '#E2E6DC',
+  rule: '#D3D9CC',
+  ink: '#111A14',
+  inkSoft: '#465049',
+  inkFaint: '#5B665E',
+  moss: '#1D5C3A',
+  lime: '#D4F264',
+  limeSoft: '#EEF9C8',
+  danger: '#B42318',
+  dangerSoft: '#FBE7E4',
+  onMoss: '#FFFFFF',
 } as const;
 
-export const hatchRadii = { small: 8, card: 12, large: 16 } as const;
+// Specimen pigments for monogram tiles. Ink text is readable on every one.
+export const pigments = [
+  '#D4F264',
+  '#BFE5C8',
+  '#C5E2F0',
+  '#DAD3F4',
+  '#EFE3B0',
+  '#F3D0D6',
+] as const;
+
+export function pigmentFor(seed: string) {
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return pigments[Math.abs(hash) % pigments.length];
+}
+
+export const radii = { chip: 10, tile: 18, card: 22, sheet: 28 } as const;
+
+export const fonts = {
+  display: 'ui-rounded',
+  mono: 'ui-monospace',
+} as const;

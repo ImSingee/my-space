@@ -1,118 +1,106 @@
 import { Host } from '@expo/ui';
-import { hatchPalette as c, hatchRadii } from './theme';
+import { Button, HStack, Image, Menu, Picker, Text } from '@expo/ui/swift-ui';
 import {
-  Button,
-  DisclosureGroup,
-  Image,
-  Menu,
-  Picker,
-  Text,
-  Toggle,
-} from '@expo/ui/swift-ui';
-import {
-  buttonStyle,
+  accessibilityElement,
+  accessibilityLabel,
+  background,
   contentShape,
-  shapes,
-  multilineTextAlignment,
-  buttonBorderShape,
-  tint,
-  controlSize,
   disabled,
+  fixedSize,
   font,
   foregroundStyle,
   frame,
+  layoutPriority,
   lineLimit,
-  accessibilityLabel,
+  multilineTextAlignment,
+  padding,
   pickerStyle,
+  shapes,
   tag,
-  textSelection,
 } from '@expo/ui/swift-ui/modifiers';
 import { useState } from 'react';
-import type {
-  ActionProps,
-  AttachmentMenuProps,
-  ChoiceProps,
-  DetailProps,
-} from './native-controls.types';
+import { glyphs } from './glyph.types';
+import { palette as c } from './theme';
+import type { AttachmentMenuProps, ChoiceProps } from './native-controls.types';
 
-// Each island owns its SwiftUI layout; React Native owns the surrounding screen.
-export function Action({
-  label,
-  onPress,
-  disabled: unavailable,
-  secondary,
-  danger,
-  compact,
-  fullWidth,
-}: ActionProps) {
-  return (
-    <Host
-      colorScheme="light"
-      seedColor={c.accentText}
-      matchContents={fullWidth ? { vertical: true } : true}
-      ignoreSafeArea="all"
-      style={{
-        minHeight: 44,
-        flexShrink: 1,
-        opacity: unavailable ? 0.45 : 1,
-        ...(fullWidth ? { width: '100%' } : {}),
-      }}
-    >
-      <Button
-        onPress={onPress}
-        role={danger ? 'destructive' : 'default'}
-        modifiers={[
-          buttonStyle(secondary ? 'borderless' : 'borderedProminent'),
-          buttonBorderShape('roundedRectangle', hatchRadii.card),
-          tint(danger ? c.danger : c.accentText),
-          ...(!danger
-            ? [foregroundStyle(secondary ? c.accentText : '#ffffff')]
-            : []),
-          font({ textStyle: 'body', weight: 'semibold' }),
-          controlSize(compact ? 'regular' : 'large'),
-          disabled(Boolean(unavailable)),
-        ]}
-      >
-        <Text
-          modifiers={[
-            font({ textStyle: 'body', weight: 'semibold' }),
-            multilineTextAlignment('center'),
-            lineLimit(),
-            frame({
-              minHeight: compact ? 20 : 26,
-              ...(fullWidth ? { maxWidth: Infinity } : {}),
-            }),
-            contentShape(shapes.rectangle()),
-          ]}
-        >
-          {label}
-        </Text>
-      </Button>
-    </Host>
-  );
-}
+// System menus keep native selection, VoiceOver and dismissal behavior; the
+// trigger is drawn as a Field Guide chip.
 export function Choice({
   label,
   value,
   options,
   onChange,
   disabled: unavailable,
+  glyph,
 }: ChoiceProps) {
+  const current = options.find((option) => option.value === value)?.label;
+  // Menu labels report their ideal width; cap them to the width RN assigns.
+  const [width, setWidth] = useState<number>();
   return (
+    // RN owns the width; the chip hugs its label and wraps instead of
+    // overflowing at large Dynamic Type sizes.
     <Host
       colorScheme="light"
-      seedColor={c.accentText}
+      seedColor={c.moss}
       matchContents={{ vertical: true }}
       ignoreSafeArea="all"
-      style={{ minHeight: 44, flex: 1 }}
+      style={{
+        minHeight: 44,
+        flexGrow: 1,
+        flexShrink: 1,
+        opacity: unavailable ? 0.5 : 1,
+      }}
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
       <Menu
         label={
-          <Text
-            modifiers={[lineLimit(2)]}
-          >{`${label}: ${options.find((option) => option.value === value)?.label ?? ''}`}</Text>
+          <HStack
+            spacing={7}
+            modifiers={[
+              padding({ horizontal: 14, vertical: 10 }),
+              frame({ minHeight: 44 }),
+              background(c.paper, shapes.capsule()),
+              contentShape(shapes.capsule()),
+              frame({ maxWidth: width, alignment: 'leading' }),
+              accessibilityElement('combine'),
+              accessibilityLabel(`${label}: ${current ?? 'none'}`),
+            ]}
+          >
+            {glyph ? (
+              <Image
+                systemName={glyphs[glyph]}
+                modifiers={[
+                  font({ textStyle: 'footnote', weight: 'semibold' }),
+                  foregroundStyle(c.moss),
+                ]}
+              />
+            ) : null}
+            <Text
+              modifiers={[
+                font({ textStyle: 'subheadline', weight: 'semibold' }),
+                foregroundStyle(c.ink),
+                lineLimit(3),
+                multilineTextAlignment('leading'),
+                fixedSize({ horizontal: false, vertical: true }),
+                layoutPriority(1),
+              ]}
+            >
+              {current ?? label}
+            </Text>
+            <Image
+              systemName="chevron.up.chevron.down"
+              modifiers={[
+                font({ textStyle: 'caption2', weight: 'bold' }),
+                foregroundStyle(c.inkSoft),
+              ]}
+            />
+          </HStack>
         }
-        modifiers={[disabled(Boolean(unavailable))]}
+        modifiers={[
+          frame({ maxWidth: Infinity, alignment: 'leading' }),
+          disabled(Boolean(unavailable)),
+          accessibilityLabel(`${label}: ${current ?? 'none'}`),
+        ]}
       >
         <Picker
           label={label}
@@ -130,33 +118,7 @@ export function Choice({
     </Host>
   );
 }
-export function OptionToggle({
-  label,
-  selected,
-  onChange,
-  unavailable,
-}: {
-  label: string;
-  selected: boolean;
-  onChange: () => void;
-  unavailable: boolean;
-}) {
-  return (
-    <Host
-      colorScheme="light"
-      seedColor={c.accentText}
-      matchContents={{ vertical: true }}
-      ignoreSafeArea="all"
-    >
-      <Toggle
-        label={label}
-        isOn={selected}
-        onIsOnChange={onChange}
-        modifiers={[disabled(unavailable)]}
-      />
-    </Host>
-  );
-}
+
 export function AttachmentMenu({
   disabled: unavailable,
   onChoose,
@@ -164,20 +126,22 @@ export function AttachmentMenu({
   return (
     <Host
       colorScheme="light"
-      seedColor={c.accentText}
-      matchContents={{ vertical: true }}
+      seedColor={c.moss}
+      matchContents
       ignoreSafeArea="all"
-      style={{ minHeight: 44 }}
+      style={{ minHeight: 44, opacity: unavailable ? 0.45 : 1 }}
     >
       <Menu
         label={
           <Image
             systemName="paperclip"
             modifiers={[
-              font({ textStyle: 'body' }),
-              foregroundStyle(c.accentText),
+              font({ textStyle: 'body', weight: 'semibold' }),
+              foregroundStyle(c.ink),
               frame({ width: 44, height: 44 }),
-              contentShape(shapes.rectangle()),
+              background(c.sunken, shapes.circle()),
+              contentShape(shapes.circle()),
+              accessibilityLabel('Attach'),
             ]}
           />
         }
@@ -194,34 +158,6 @@ export function AttachmentMenu({
           onPress={() => onChoose('file')}
         />
       </Menu>
-    </Host>
-  );
-}
-export function Details({ title, text, error }: DetailProps) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <Host
-      colorScheme="light"
-      seedColor={c.accentText}
-      matchContents={{ vertical: true }}
-      ignoreSafeArea="all"
-    >
-      <DisclosureGroup
-        label={title}
-        isExpanded={expanded}
-        onIsExpandedChange={setExpanded}
-      >
-        <Text
-          modifiers={[
-            font({ textStyle: 'caption', design: 'monospaced' }),
-            foregroundStyle(error ? c.danger : c.muted),
-            textSelection(true),
-            lineLimit(),
-          ]}
-        >
-          {text ?? ''}
-        </Text>
-      </DisclosureGroup>
     </Host>
   );
 }

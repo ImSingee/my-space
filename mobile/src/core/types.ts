@@ -101,11 +101,12 @@ export type CreateRunInput = {
   | { retry: true; expectedSessionUpdatedAt: string }
 );
 export type RunCreated = { runId: string; startedAt: string };
-export type AppHandoff = {
+/** Resource-free browser sign-in; the client chooses where to go afterwards. */
+export type SessionHandoff = {
   url: string;
   ticket: string;
   expiresAt: string;
-  targetPath: string;
+  completionUrl: string;
 };
 
 export type AgentStreamEvent =

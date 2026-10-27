@@ -117,9 +117,12 @@ issued credential for the same instance. A run already accepted by the server
 continues independently.
 
 The WebView receives only a random, one-use, at-most-60-second ticket in a form
-POST body. The server binds it to the original session, exact trusted instance,
-and fixed deployed-App target. Atomic consumption sets a host-only HttpOnly
-cookie for the **same server session** and redirects to the App's embed route.
+POST body. The server binds it to the original session and exact trusted
+instance; it names no App or Dashboard. Atomic consumption sets a host-only
+HttpOnly cookie for the **same server session** and redirects to the fixed
+completion page. Only after that exact page loads does the same WebView navigate
+to the App's embed route (keeping a pin's hash) or `/mobile/dashboard/:id`;
+switching dashboards reuses that browser session without another ticket.
 There is no bearer URL, injected credential, or JavaScript credential bridge.
 Native sign-out or server-side revocation invalidates the WebView session too.
 
@@ -132,8 +135,11 @@ is iPhone-first and does not claim Android session-isolation acceptance.
 The client uses generated `@hatch/platform-api` descriptors with Connect Web
 unary JSON transport at `/api/rpc`. App list/detail use `AppService/ListApps`
 and `GetApp`; model catalog and session list/create/detail use `AgentService`;
-`AppService/CreateAppHandoff` issues the ticket. The browser consumes it with
-form `POST /api/auth/handoffs/consume` and follows its 303 redirect. There is no
+`AuthService/CreateHandoff({})` issues the ticket and completion URL, and
+`WorkspaceService/GetWorkspace` supplies Dashboards, App pins (pin id, App id and
+slug, label, hash) and pinned Workflow IDs. The browser consumes the ticket with
+form `POST /api/auth/handoffs/consume` and follows its 303 redirect to
+`/api/auth/handoffs/complete`. The deprecated `CreateAppHandoff` is not used. There is no
 mobile API namespace, REST alias or fallback to undocumented Server Functions.
 The shared proto is the wire contract. A small UI projection restores nullable
 fields and transcript JSON from Protobuf optional fields and Value messages.
@@ -151,8 +157,9 @@ Interactive resources require an ordinary user session; API keys and Run JWTs
 cannot acquire conversation or browser sessions. No database migration or
 Platform/Runner, App, or Workflow compatibility-version bump is required.
 
-Use a backend revision including the Connect migration (#194) and the merged
-mobile API work (#189). Previously issued tickets expire within
+Use a backend revision including the Connect migration (#194), the merged
+mobile API work (#189), resource-free session handoffs (#219) and the workspace
+API with the mobile Dashboard canvas (#220). Previously issued tickets expire within
 60 seconds; request a fresh handoff after upgrading. Rollback must pair the
 client and backend protocol revisions. See [the API contract](../docs/platform-api.md#interactive-agent-and-app-resources).
 

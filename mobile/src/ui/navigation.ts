@@ -1,26 +1,32 @@
+import { glyphs } from './glyph.types';
+
 export const tabDetails = {
   dashboard: {
     label: 'Dashboard',
-    icon: 'rectangle.3.group',
+    glyph: 'dashboard',
+    icon: glyphs.dashboard,
     androidIcon: 'dashboard',
-    detail: 'Your widgets, at a glance',
+    detail: 'Live widgets from your instance',
   },
   apps: {
     label: 'Apps',
-    icon: 'square.grid.2x2',
+    glyph: 'apps',
+    icon: glyphs.apps,
     androidIcon: 'apps',
-    detail: 'Your everyday tools',
+    detail: 'Pinned shortcuts and every App',
   },
   agent: {
     label: 'Agent',
-    icon: 'bubble.left.and.bubble.right',
+    glyph: 'agent',
+    icon: glyphs.agent,
     androidIcon: 'chat_bubble_outline',
-    detail: 'Ideas and conversations',
+    detail: 'Conversations with your Agent',
   },
   workflows: {
     label: 'Workflows',
-    icon: 'arrow.triangle.branch',
+    glyph: 'workflows',
+    icon: glyphs.workflows,
     androidIcon: 'account_tree',
-    detail: 'Your automations',
+    detail: 'Pinned and all automations',
   },
 } as const;

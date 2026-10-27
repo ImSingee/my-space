@@ -9,16 +9,18 @@ import {
   useSession,
   vault,
 } from '../src/state/session';
+import { Button } from '../src/ui/button';
 import {
-  Action,
-  Brand,
+  Busy,
   Card,
-  PageHeading,
-  Text,
+  Highlight,
+  Wordmark,
   errorText,
-  styles,
-  usePalette,
 } from '../src/ui/primitives';
+import { GlyphTile, Group, ListRow } from '../src/ui/rows';
+import { SectionLabel } from '../src/ui/screen';
+import { Text, type } from '../src/ui/text';
+import { fonts, palette as c } from '../src/ui/theme';
 
 type Approval = {
   userCode: string;
@@ -27,7 +29,6 @@ type Approval = {
 };
 export default function ConnectScreen() {
   const { connect, origins, authError } = useSession();
-  const c = usePalette();
   const [url, setUrl] = useState(origins[0] ?? '');
   const urlField = useRef<NativeFieldRef>(null);
   const [pending, setPending] = useState(false);
@@ -114,26 +115,77 @@ export default function ConnectScreen() {
     setCode(null);
     setError(null);
   };
+  const step = code ? 2 : pending ? 2 : 1;
+  const steps = [
+    'Enter your Hatch address',
+    'Approve this phone in your browser',
+    'Come back — you’re in',
+  ];
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: c.background }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: c.paper }}>
       <KeyboardAvoidingView
-        style={styles.screen}
+        style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingTop: 48, gap: 24 }]}
+          contentContainerStyle={{
+            paddingHorizontal: 22,
+            paddingTop: 28,
+            paddingBottom: 48,
+            gap: 22,
+          }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
         >
-          <Brand />
-          <PageHeading
-            title="Welcome to Hatch"
-            detail="Your apps and ideas, wherever you are."
-          />
-          <View style={{ gap: 12, paddingVertical: 8 }}>
-            <Text style={[styles.label, { color: c.muted }]}>
-              Instance address
+          <Wordmark size={34} />
+          <View style={{ gap: 10 }}>
+            <Text accessibilityRole="header" style={type.display}>
+              Your own software, in your pocket.
             </Text>
+            <Text style={type.callout}>
+              Hatch runs on your server. Point this phone at it and approve the
+              sign-in from your browser.
+            </Text>
+          </View>
+          <View style={{ gap: 8 }}>
+            {steps.map((label, index) => {
+              const active = index + 1 === step;
+              return (
+                <View
+                  key={label}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <Text
+                    style={[
+                      type.meta,
+                      { color: active ? c.ink : c.inkFaint, minWidth: 22 },
+                    ]}
+                  >
+                    {String(index + 1).padStart(2, '0')}
+                  </Text>
+                  <Highlight active={active}>
+                    <Text
+                      style={[
+                        type.callout,
+                        {
+                          color: active ? c.ink : c.inkSoft,
+                          fontWeight: active ? '600' : '400',
+                        },
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Highlight>
+                </View>
+              );
+            })}
+          </View>
+          <View style={{ gap: 10 }}>
+            <Text style={type.meta}>Instance address</Text>
             <NativeField
               ref={urlField}
               label="Hatch instance URL"
@@ -144,46 +196,42 @@ export default function ConnectScreen() {
               keyboardType="url"
               onSubmitEditing={() => void begin()}
             />
-            <Text style={[styles.caption, { color: c.muted }]}>
-              Enter your Hatch address. You’ll sign in securely in your browser
-              and grant this phone access to your instance.
-            </Text>
             {!pending ? (
-              <Action
+              <Button
+                size="large"
                 fullWidth
-                label="Connect to Hatch"
+                label="Connect"
                 disabled={!url.trim()}
                 onPress={() => void begin()}
               />
             ) : null}
           </View>
           {code ? (
-            <Card>
-              <Text
-                accessibilityRole="header"
-                style={[styles.heading, { color: c.text }]}
-              >
-                Check this code in your browser
-              </Text>
+            <Card style={{ backgroundColor: c.ink, gap: 14 }}>
+              <Text style={[type.meta, { color: c.lime }]}>Approval code</Text>
               <Text
                 selectable
+                accessibilityLabel={`Approval code ${code.userCode.split('').join(' ')}`}
                 style={{
-                  color: c.text,
-                  fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-                  fontSize: 28,
+                  color: c.card,
+                  fontFamily: fonts.mono,
+                  fontSize: 34,
+                  lineHeight: 42,
                   fontWeight: '600',
+                  letterSpacing: 4,
                 }}
               >
                 {code.userCode}
               </Text>
-              <Text style={[styles.body, { color: c.muted }]}>
-                Approve only the request you just started. Return here after
-                approval; your session will connect automatically.
+              <Text style={[type.small, { color: c.card, opacity: 0.86 }]}>
+                Check that your browser shows this same code. Approve only the
+                request you just started; this screen continues on its own.
               </Text>
-              <Action
+              <Button
                 fullWidth
+                variant="secondary"
+                glyph="browser"
                 label="Reopen approval page"
-                secondary
                 onPress={() =>
                   void openLoginBrowser(code.verificationUrl).catch(
                     (failure: unknown) => setError(errorText(failure)),
@@ -191,45 +239,44 @@ export default function ConnectScreen() {
                 }
               />
             </Card>
+          ) : pending ? (
+            <Busy label="Starting secure sign-in" />
           ) : null}
           {pending ? (
-            <Action
+            <Button
               fullWidth
+              variant="secondary"
               label="Cancel sign-in"
-              secondary
               onPress={cancel}
             />
           ) : null}
           {error ? (
-            <View style={{ gap: 8 }}>
-              <Text
-                accessibilityRole="header"
-                style={[styles.heading, { color: c.text }]}
-              >
+            <Card style={{ backgroundColor: c.dangerSoft, gap: 6 }}>
+              <Text accessibilityRole="header" style={type.heading}>
                 Couldn’t connect
               </Text>
               <Text
                 accessibilityRole="alert"
-                style={[styles.body, { color: c.danger }]}
+                style={[type.callout, { color: c.danger }]}
               >
                 {error}
               </Text>
-            </View>
+            </Card>
           ) : null}
           {!pending && origins.length ? (
-            <View style={{ gap: 8 }}>
-              <Text style={[styles.label, { color: c.muted }]}>
-                Recent instances
-              </Text>
-              {origins.map((item) => (
-                <Action
-                  fullWidth
-                  key={item}
-                  label={item.replace(/^https?:\/\//, '')}
-                  secondary
-                  onPress={() => setUrl(item)}
-                />
-              ))}
+            <View>
+              <SectionLabel count={origins.length}>Recent</SectionLabel>
+              <Group>
+                {origins.map((item) => (
+                  <ListRow
+                    key={item}
+                    title={item.replace(/^https?:\/\//, '')}
+                    leading={<GlyphTile glyph="server" size={36} />}
+                    accessibilityHint="Fills in this address"
+                    onPress={() => setUrl(item)}
+                  />
+                ))}
+              </Group>
             </View>
           ) : null}
         </ScrollView>

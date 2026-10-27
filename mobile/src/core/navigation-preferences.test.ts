@@ -3,7 +3,11 @@ import {
   defaultNavigation,
   normalizeNavigation,
 } from './navigation-preferences';
-import { validateHandoff } from './security';
+import {
+  appDestination,
+  dashboardDestination,
+  destinationUrl,
+} from './security';
 
 describe('device navigation preferences', () => {
   it('preserves ordered visible tabs and start page across serialization', () => {
@@ -42,33 +46,29 @@ describe('device navigation preferences', () => {
   });
 });
 
-describe('dashboard WebView destination boundary', () => {
+describe('WebView destinations after a resource-free handoff', () => {
   const origin = 'https://hatch.example.test';
-  const handoff = {
-    url: `${origin}/api/auth/handoffs/consume`,
-    ticket: 'a'.repeat(43),
-    targetPath: '/mobile/dashboard/daily',
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
-  };
-  it('binds dashboard handoffs to the requested dashboard and retains the app-only default', () => {
-    expect(() => validateHandoff(origin, handoff, 'daily')).not.toThrow(
-      'handoff',
+  it('opens encoded dashboard canvases and pinned App entries on this instance only', () => {
+    expect(destinationUrl(origin, dashboardDestination('daily'))).toBe(
+      `${origin}/mobile/dashboard/daily`,
     );
-    expect(() => validateHandoff(origin, handoff, 'other')).toThrow('handoff');
-    expect(() => validateHandoff(origin, handoff)).toThrow('handoff');
+    expect(destinationUrl(origin, dashboardDestination('a/../admin'))).toBe(
+      `${origin}/mobile/dashboard/a%2F..%2Fadmin`,
+    );
+    expect(destinationUrl(origin, appDestination('notes', '/today'))).toBe(
+      `${origin}/app/notes/embed/#/today`,
+    );
+    expect(destinationUrl(origin, appDestination('notes', '#/archive'))).toBe(
+      `${origin}/app/notes/embed/#/archive`,
+    );
+    expect(destinationUrl(origin, appDestination('notes', ''))).toBe(
+      `${origin}/app/notes/embed/`,
+    );
+    for (const slug of ['', '../admin', 'notes/embed', '//evil.test', 'a b'])
+      expect(() => appDestination(slug)).toThrow('Invalid App address');
+    expect(() => dashboardDestination('')).toThrow('Invalid Dashboard');
     expect(() =>
-      validateHandoff(
-        origin,
-        { ...handoff, targetPath: '/mobile/dashboard/daily/../other' },
-        'daily',
-      ),
-    ).toThrow('handoff');
-    expect(() =>
-      validateHandoff(
-        origin,
-        { ...handoff, url: 'https://evil.test/api/auth/handoffs/consume' },
-        'daily',
-      ),
-    ).toThrow('handoff');
+      destinationUrl(origin, { path: '//evil.test/mobile/dashboard/x' }),
+    ).toThrow('Invalid page address');
   });
 });

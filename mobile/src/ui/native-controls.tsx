@@ -1,23 +1,7 @@
-import { hatchPalette as c } from './theme';
-import { useState } from 'react';
-import { Alert, Button, Switch, Text, View } from 'react-native';
-import type {
-  ActionProps,
-  AttachmentMenuProps,
-  ChoiceProps,
-  DetailProps,
-} from './native-controls.types';
+import { Alert } from 'react-native';
+import { Button, IconButton } from './button';
+import type { AttachmentMenuProps, ChoiceProps } from './native-controls.types';
 
-export function Action({ label, onPress, disabled, danger }: ActionProps) {
-  return (
-    <Button
-      title={label}
-      onPress={onPress}
-      disabled={disabled}
-      color={danger ? c.danger : c.accentText}
-    />
-  );
-}
 export function Choice({
   label,
   value,
@@ -27,8 +11,8 @@ export function Choice({
 }: ChoiceProps) {
   return (
     <Button
-      color={c.accentText}
-      title={`${label}: ${options.find((option) => option.value === value)?.label ?? ''}`}
+      variant="secondary"
+      label={options.find((option) => option.value === value)?.label ?? label}
       disabled={disabled}
       onPress={() =>
         Alert.alert(label, undefined, [
@@ -42,35 +26,12 @@ export function Choice({
     />
   );
 }
-export function OptionToggle({
-  label,
-  selected,
-  onChange,
-  unavailable,
-}: {
-  label: string;
-  selected: boolean;
-  onChange: () => void;
-  unavailable: boolean;
-}) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <Text style={{ flex: 1, color: c.text }}>{label}</Text>
-      <Switch
-        trackColor={{ true: c.accentText }}
-        accessibilityLabel={label}
-        value={selected}
-        onValueChange={onChange}
-        disabled={unavailable}
-      />
-    </View>
-  );
-}
 export function AttachmentMenu({ disabled, onChoose }: AttachmentMenuProps) {
   return (
-    <Button
-      color={c.accentText}
-      title="Attach"
+    <IconButton
+      label="Attach"
+      glyph="attach"
+      tone="card"
       disabled={disabled}
       onPress={() =>
         Alert.alert('Attach to this message', undefined, [
@@ -80,22 +41,5 @@ export function AttachmentMenu({ disabled, onChoose }: AttachmentMenuProps) {
         ])
       }
     />
-  );
-}
-export function Details({ title, text }: DetailProps) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View>
-      <Button
-        color={c.accentText}
-        title={title}
-        onPress={() => setExpanded(!expanded)}
-      />
-      {expanded ? (
-        <Text selectable style={{ color: c.muted }}>
-          {text}
-        </Text>
-      ) : null}
-    </View>
   );
 }

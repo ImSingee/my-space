@@ -1,20 +1,22 @@
 # Mobile UI conventions
 
-Match Hatch's Ember visual system in `../DESIGN.md`: white canvas, warm stone
-ink and borders, orange accent, lightly warm panels, editorial display headings,
-and flat 12–16 point cards. The platform is light-only; native screens follow
-that policy too. `src/ui/theme.ts` projects its tokens without importing the
-Mantine/web runtime. Use the system serif fallback for large display headings
-and native Dynamic Type for controls and body text.
+The native app has its own light visual system, Field Guide, defined in
+`src/ui/theme.ts`; it does not follow the web Ember styles. Pale sage paper,
+green-black ink, moss for actions and a lime highlighter for live, pinned and
+selected states. Rounded system display type (`ui-rounded`) for titles,
+system text for body and controls, and uppercase monospaced metadata
+(`ui-monospace`) for eyebrows, counts, timestamps and status tags. White
+22-point sheets without borders, hairline-divided rows, capsule buttons and
+SF Symbols through `Glyph`. Keep every text/surface pair at 4.5:1 or better;
+`theme.test.ts` guards the palette. Respect Reduce Motion for the egg loader
+and highlighter animations.
 
-Prefer `@expo/ui` for interaction: SwiftUI/Jetpack Compose buttons, list items,
-fields, pickers, switches, menus, and disclosure controls. Theme their supported
-tint, typography, and shape properties rather than substituting painted controls.
-Native-first does not mean using a default system Form for every page. React
-Native owns Hatch's page composition, branded connection screen, resource cards,
-conversation transcript, composer, questions, and attachment previews. Keep each
-SwiftUI/Compose subtree inside its Host. Do not put React Native content directly
-inside native controls without the supported bridge.
+React Native owns page composition, buttons, rows, tiles, the transcript,
+composer, questions and attachment previews. Use `@expo/ui` where the system
+control carries real behavior: text fields, menus/pickers and their native
+selection, and SF Symbols. Keep each SwiftUI/Compose subtree inside its Host,
+and do not put React Native content inside native controls without the
+supported bridge.
 
 Keep Expo Router's native stack, system browser authorization, native alerts,
 and Photos/Files pickers. Preserve native disabled, selected, and destructive

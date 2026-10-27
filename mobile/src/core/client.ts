@@ -8,6 +8,7 @@ import { createConnectTransport } from '@connectrpc/connect-web';
 import {
   AppService,
   AgentService,
+  AuthService,
   WorkflowService,
   WorkspaceService,
   PublicErrorSchema,
@@ -33,7 +34,6 @@ import type { StreamOptions, StreamResult } from './stream';
 import type { InstanceVault } from './vault';
 import type {
   AppDetail,
-  AppHandoff,
   AppSummary,
   AskAnswer,
   Attachment,
@@ -41,6 +41,7 @@ import type {
   AgentModelCatalog,
   RunCreated,
   SessionDetail,
+  SessionHandoff,
   SessionSummary,
 } from './types';
 
@@ -91,6 +92,7 @@ export class HatchApiClient {
   private readonly fetcher: FetchLike;
   private readonly appRpc: Client<typeof AppService>;
   private readonly agentRpc: Client<typeof AgentService>;
+  private readonly authRpc: Client<typeof AuthService>;
   private readonly workflowRpc: Client<typeof WorkflowService>;
   private readonly workspaceRpc: Client<typeof WorkspaceService>;
   private readonly onUnauthorized?: (origin: string) => void;
@@ -121,6 +123,7 @@ export class HatchApiClient {
     });
     this.appRpc = createClient(AppService, transport);
     this.agentRpc = createClient(AgentService, transport);
+    this.authRpc = createClient(AuthService, transport);
     this.workflowRpc = createClient(WorkflowService, transport);
     this.workspaceRpc = createClient(WorkspaceService, transport);
   }
@@ -343,22 +346,6 @@ export class HatchApiClient {
       );
     return appProjection(result.resource);
   }
-  async dashboardHandoff(
-    id: string,
-    signal?: AbortSignal,
-  ): Promise<AppHandoff> {
-    const result = await this.rpcRequest(
-      (signal) => this.workspaceRpc.createDashboardHandoff({ id }, { signal }),
-      signal,
-    );
-    validateHandoff(this.origin, result, id);
-    return {
-      url: result.url,
-      ticket: result.ticket,
-      expiresAt: result.expiresAt,
-      targetPath: result.targetPath,
-    };
-  }
   async app(id: string, signal?: AbortSignal): Promise<AppDetail> {
     const response = await this.rpcRequest(
       (signal) => this.appRpc.getApp({ id }, { signal }),
@@ -505,16 +492,17 @@ export class HatchApiClient {
       )
     ).attachment;
   }
-  async handoff(appId: string, signal?: AbortSignal): Promise<AppHandoff> {
+  /** Sign a fresh WebView in with this session. It names no App or Dashboard. */
+  async createHandoff(signal?: AbortSignal): Promise<SessionHandoff> {
     const result = await this.rpcRequest(
-      (signal) => this.appRpc.createAppHandoff({ id: appId }, { signal }),
+      (signal) => this.authRpc.createHandoff({}, { signal }),
       signal,
     );
     const handoff = {
       url: result.url,
       ticket: result.ticket,
       expiresAt: result.expiresAt,
-      targetPath: result.targetPath,
+      completionUrl: result.completionUrl,
     };
     validateHandoff(this.origin, handoff);
     return handoff;

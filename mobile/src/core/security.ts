@@ -1,6 +1,7 @@
-import type { AppHandoff } from './types';
+import type { SessionHandoff } from './types';
 
-export const APP_HANDOFF_PATH = '/api/auth/handoffs/consume';
+export const HANDOFF_CONSUME_PATH = '/api/auth/handoffs/consume';
+export const HANDOFF_COMPLETION_PATH = '/api/auth/handoffs/complete';
 
 export type InstanceUrlOptions = { allowDevelopmentLoopback?: boolean };
 
@@ -121,50 +122,81 @@ export function validateToken(value: string): string {
   return value;
 }
 
-export function validateHandoff(
-  origin: string,
-  handoff: {
-    url: string;
-    ticket: string;
-    expiresAt: string;
-    targetPath: string;
-  },
-  dashboardId?: string,
-): void {
+function isFixedInstanceUrl(origin: string, value: string, path: string) {
   let url: URL;
   try {
-    url = new URL(handoff.url);
+    url = new URL(value);
   } catch {
-    throw new MobileError('invalid_handoff', 'The app handoff is invalid.');
+    return false;
   }
+  return (
+    !forbidden.test(value) &&
+    url.origin === origin &&
+    url.pathname === path &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash
+  );
+}
+
+/** Both handoff URLs are fixed instance endpoints; neither may name a resource. */
+export function validateHandoff(origin: string, handoff: SessionHandoff): void {
   if (
-    url.origin !== origin ||
-    url.pathname !== APP_HANDOFF_PATH ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    forbidden.test(handoff.url) ||
+    !isFixedInstanceUrl(origin, handoff.url, HANDOFF_CONSUME_PATH) ||
+    !isFixedInstanceUrl(
+      origin,
+      handoff.completionUrl,
+      HANDOFF_COMPLETION_PATH,
+    ) ||
     !/^[A-Za-z0-9_-]{20,512}$/.test(handoff.ticket) ||
-    (dashboardId !== undefined
-      ? handoff.targetPath !==
-        `/mobile/dashboard/${encodeURIComponent(dashboardId)}`
-      : !/^\/app\/[a-zA-Z0-9_-]+\/embed\/$/.test(handoff.targetPath)) ||
     !Number.isFinite(Date.parse(handoff.expiresAt)) ||
     Date.parse(handoff.expiresAt) <= Date.now()
   ) {
     throw new MobileError(
       'invalid_handoff',
-      'The app handoff is invalid or expired.',
+      'The sign-in handoff is invalid or expired.',
     );
   }
+}
+
+/** The authenticated page a WebView opens after the handoff completes. */
+export type BrowserDestination = { path: string; hash?: string };
+
+export function appDestination(
+  slug: string,
+  hash?: string,
+): BrowserDestination {
+  if (!/^[A-Za-z0-9_-]{1,191}$/.test(slug))
+    throw new MobileError('invalid_id', 'Invalid App address.');
+  return {
+    path: `/app/${slug}/embed/`,
+    hash: hash?.replace(/^#/, '') || undefined,
+  };
+}
+
+export function dashboardDestination(id: string): BrowserDestination {
+  if (!id || id.length > 191 || forbidden.test(id))
+    throw new MobileError('invalid_id', 'Invalid Dashboard identifier.');
+  return { path: `/mobile/dashboard/${encodeURIComponent(id)}` };
+}
+
+export function destinationUrl(
+  origin: string,
+  destination: BrowserDestination,
+): string {
+  const url = new URL(destination.path, origin);
+  if (url.origin !== origin || url.pathname !== destination.path)
+    throw new MobileError('invalid_path', 'Invalid page address.');
+  if (destination.hash) url.hash = destination.hash;
+  return url.href;
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new MobileError('cancelled', 'Cancelled.');
 }
 
-export function webViewHandoffSource(origin: string, handoff: AppHandoff) {
+export function webViewHandoffSource(origin: string, handoff: SessionHandoff) {
   return {
     uri: handoff.url,
     method: 'POST' as const,
