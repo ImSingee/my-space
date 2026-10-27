@@ -44,6 +44,21 @@ function defaultCounterTemplateFixture(): Plugin {
   };
 }
 
+// App views embed `/app/<slug>/embed/`. Serve a blank same-origin document
+// there so the iframe never boots the Browser Mode runner page instead.
+function appEmbedFixture(): Plugin {
+  return {
+    name: 'app-embed-test-fixture',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!/^\/app\/[^/]+\/embed\//.test(req.url ?? '')) return next();
+        res.setHeader('Content-Type', 'text/html');
+        res.end('<!doctype html><title>Embedded app</title>');
+      });
+    },
+  };
+}
+
 export default defineConfig({
   test: {
     maxWorkers: 2,
@@ -91,7 +106,11 @@ export default defineConfig({
             '@tiptap/suggestion',
           ],
         },
-        plugins: [defaultCounterTemplateFixture(), viteReact()],
+        plugins: [
+          appEmbedFixture(),
+          defaultCounterTemplateFixture(),
+          viteReact(),
+        ],
         test: {
           name: 'browser',
           globals: true,

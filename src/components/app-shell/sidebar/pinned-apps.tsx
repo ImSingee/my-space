@@ -36,6 +36,10 @@ import {
   useIsActive,
 } from './section';
 
+// Hash routers report their home page as '/', while a pin without an entry
+// point targets the app root as ''.
+const rootAsEmpty = (hash: string) => (hash === '/' ? '' : hash);
+
 export function PinnedApps() {
   const isActive = useIsActive();
   const navigate = useNavigate();
@@ -138,7 +142,7 @@ export function PinnedApps() {
   }) => {
     if (!isActive(`/app/${pin.appSlug}`)) return false;
     if ((pinCountByApp.get(pin.appId) ?? 0) <= 1) return true;
-    return hostHash === (pin.entryHash ?? '');
+    return rootAsEmpty(hostHash) === rootAsEmpty(pin.entryHash ?? '');
   };
 
   const submitEdit = () => {

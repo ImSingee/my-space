@@ -15,7 +15,7 @@ import { appTheme } from '~/ui/theme';
 const mocks = vi.hoisted(() => ({
   app: null as AppDetail | null,
   pendingRevision: null as string | null,
-  getAppBySlug: vi.fn<() => Promise<AppDetail | null>>(),
+  getAppBySlug: vi.fn<(input: { data: string }) => Promise<AppDetail | null>>(),
   rootRoute: null as AnyRootRoute | null,
   toastError: vi.fn<(message: string) => void>(),
 }));
@@ -136,7 +136,30 @@ async function renderAppView() {
   );
   await expect.element(screen.getByText('App shell')).toBeVisible();
   await expect.element(screen.getByText('Example app')).toBeVisible();
-  return screen;
+  return { screen, router };
+}
+
+type Screen = Awaited<ReturnType<typeof renderAppView>>['screen'];
+
+/** Wait until the app's own document is loaded and the view is listening. */
+async function loadedFrame(screen: Screen, slug: string) {
+  let win: Window | null = null;
+  await vi.waitFor(() => {
+    const frame = screen.container.querySelector('iframe');
+    expect(frame).toHaveAttribute('src', `/app/${slug}/embed/`);
+    expect(frame?.contentWindow?.location.pathname).toBe(`/app/${slug}/embed/`);
+    expect(frame?.contentDocument?.readyState).toBe('complete');
+    expect(screen.container.querySelector('.mantine-Loader-root')).toBeNull();
+    win = frame?.contentWindow ?? null;
+  });
+  return win!;
+}
+
+/** Serve a distinct app per slug, as the real lookup does. */
+function serveAppsBySlug() {
+  mocks.getAppBySlug.mockImplementation(async ({ data: slug }) =>
+    app({ id: slug, slug }),
+  );
 }
 
 /** Serve the current fixture for every fetch after the initial load. */
@@ -156,7 +179,7 @@ beforeEach(() => {
 
 test('marks an update and remounts the iframe only after reload', async () => {
   mocks.pendingRevision = 'revision-two';
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
   serveApp({ deploymentRevision: 'revision-two' });
   const originalFrame = screen.container.querySelector('iframe');
   expect(originalFrame).toBeTruthy();
@@ -199,7 +222,7 @@ test('replaces an unsupported frontend with an Agent update state', async () => 
     },
   });
 
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
 
   expect(screen.container.querySelector('iframe')).toBeNull();
   await expect
@@ -218,7 +241,7 @@ test('directs a newer frontend deployment to a platform update', async () => {
     },
   });
 
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
 
   expect(screen.container.querySelector('iframe')).toBeNull();
   await expect
@@ -236,7 +259,7 @@ test('offers reload for a first deployment and opens its frontend', async () => 
     deploymentRevision: null,
   });
   mocks.pendingRevision = 'revision-one';
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
   serveApp({});
 
   expect(screen.container.querySelector('iframe')).toBeNull();
@@ -251,7 +274,7 @@ test('offers reload for a first deployment and opens its frontend', async () => 
 
 test('removes the iframe when the activated deployment drops its frontend', async () => {
   mocks.pendingRevision = 'revision-two';
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
   serveApp({
     capabilities: { ...frontendCapabilities, frontend: false, backend: true },
     deploymentRevision: 'revision-two',
@@ -268,7 +291,7 @@ test('removes the iframe when the activated deployment drops its frontend', asyn
 
 test('keeps the app view and its running iframe when a reload request fails', async () => {
   const failure = new Error('Failed to fetch');
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
   mocks.getAppBySlug.mockRejectedValueOnce(failure);
   const originalFrame = screen.container.querySelector('iframe');
 
@@ -286,7 +309,7 @@ test('keeps the app view and its running iframe when a reload request fails', as
 });
 
 test('shows not found when the app is gone on reload', async () => {
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
   mocks.getAppBySlug.mockResolvedValue(null);
 
   await screen.getByRole('button', { name: 'Reload app' }).click();
@@ -297,7 +320,7 @@ test('shows not found when the app is gone on reload', async () => {
 
 test('hands a pending update reload to the plain icon and restores the prompt on failure', async () => {
   mocks.pendingRevision = 'revision-two';
-  const screen = await renderAppView();
+  const { screen } = await renderAppView();
   let rejectReload: (error: Error) => void = () => undefined;
   mocks.getAppBySlug.mockImplementationOnce(
     () =>
@@ -329,4 +352,69 @@ test('hands a pending update reload to the plain icon and restores the prompt on
       screen.getByRole('button', { name: 'Update available — reload app' }),
     )
     .toBeEnabled();
+});
+
+test('mirrors in-app history navigation to the host URL', async () => {
+  const { screen, router } = await renderAppView();
+  const win = await loadedFrame(screen, 'app-one');
+
+  // Hash routers navigate with pushState, which fires no `hashchange`.
+  win.history.pushState(null, '', '#/orders');
+  await vi.waitFor(() => expect(router.state.location.hash).toBe('/orders'));
+
+  win.history.replaceState(null, '', '#/orders/42');
+  await vi.waitFor(() => expect(router.state.location.hash).toBe('/orders/42'));
+  expect(router.state.location.pathname).toBe('/app/app-one');
+});
+
+test('opens another app at its own entry point, not the previous page', async () => {
+  serveAppsBySlug();
+  const { screen, router } = await renderAppView();
+  const first = await loadedFrame(screen, 'app-one');
+  first.history.pushState(null, '', '#/orders');
+  await vi.waitFor(() => expect(router.state.location.hash).toBe('/orders'));
+
+  await router.navigate({
+    to: '/app/$appSlug',
+    params: { appSlug: 'app-two' },
+  });
+  const second = await loadedFrame(screen, 'app-two');
+  expect(second.location.hash).toBe('');
+  expect(router.state.location.hash).toBe('');
+
+  await router.navigate({
+    to: '/app/$appSlug',
+    params: { appSlug: 'app-one' },
+    hash: '/settings',
+  });
+  const reopened = await loadedFrame(screen, 'app-one');
+  expect(reopened.location.hash).toBe('#/settings');
+  expect(router.state.location.hash).toBe('/settings');
+});
+
+test('returns the open app to the selected entry point', async () => {
+  const { screen, router } = await renderAppView();
+  const win = await loadedFrame(screen, 'app-one');
+  const frame = screen.container.querySelector('iframe');
+
+  win.history.pushState(null, '', '#/orders');
+  await vi.waitFor(() => expect(router.state.location.hash).toBe('/orders'));
+  await router.navigate({
+    to: '/app/$appSlug',
+    params: { appSlug: 'app-one' },
+  });
+  await vi.waitFor(() => expect(win.location.hash).toBe(''));
+  expect(router.state.location.hash).toBe('');
+
+  win.history.pushState(null, '', '#/orders');
+  await vi.waitFor(() => expect(router.state.location.hash).toBe('/orders'));
+  await router.navigate({
+    to: '/app/$appSlug',
+    params: { appSlug: 'app-one' },
+    hash: '/settings',
+  });
+  await vi.waitFor(() => expect(win.location.hash).toBe('#/settings'));
+  expect(router.state.location.hash).toBe('/settings');
+  // The app stays loaded; only its page changes.
+  expect(screen.container.querySelector('iframe')).toBe(frame);
 });
