@@ -88,24 +88,34 @@ logged-in browser already holding a different session is switched to the issuing
 session. Cookie expiry tracks that session; normal Better Auth refresh rules
 remain unchanged.
 
-## Published App compatibility
+## Removed App handoff contract and client migration
 
-`AppService.CreateAppHandoff` remains callable with the same wire fields and
-ID-or-slug resolution (ID takes precedence). It is marked deprecated. Existing
-clients still receive `{url, ticket, expiresAt, targetPath}` and a redirect to
-`/app/:slug/embed/`, with the original App availability checks at both issuance
-and consumption. A rename invalidates an issued legacy ticket. This legacy
-adapter is the only path with resource/navigation state; it shares ticket
-issuance, expiry, atomic consumption, session/origin validation and Cookie
-creation with the generic method.
+`AppService.CreateAppHandoff` and its dedicated request/response messages have
+been removed at the owner's request. This is an intentional breaking change to
+the public Platform API, replacing the earlier deprecation policy. Calls to the
+old RPC now receive HTTP 404 (`not_found`); generated clients no longer expose
+it. There is no App- or Dashboard-specific replacement RPC.
 
-Legacy calls continue issuing the original `app-handoff:` envelope, which old
-and new servers can consume. Unexpired tickets issued before upgrade also work.
-The generic API uses a resource-free `handoff:` envelope and fixed completion
-route; deploy those consumers on every serving instance before enabling generic
-clients during a rolling rollout. On rollback, clients must use the existing
-legacy App RPC or wait for the generic endpoint to return. Expired handoff records
-are pruned without touching other verification records.
+Clients must use `AuthService.CreateHandoff({})` and read
+`{url, ticket, expiresAt, completionUrl}` instead of `targetPath`. POST the ticket,
+wait for a successful load of the exact fixed completion URL, then navigate the
+same WebView to the client-selected same-instance resource. Resource existence
+and access are checked by the destination, independently of authentication.
+The API never accepts a resource ID, path or redirect URL.
+
+Unexpired `app-handoff:` tickets issued by earlier servers are no longer
+consumed: they return HTTP 401 without a Cookie or redirect. Those tickets had a
+maximum lifetime of 60 seconds. Request a fresh generic ticket after upgrading;
+do not retry the old ticket or RPC. Existing authenticated sessions and Cookies
+remain valid. Old verification rows are inert and need no data migration;
+generic issuance prunes only expired `handoff:` records. No permanent legacy
+consumer or namespace cleanup branch is retained.
+
+Migrate clients before deploying this removal. During a rolling deployment,
+old RPCs and tickets may still work on older servers but fail on upgraded ones;
+do not rely on that mixed state. Generic clients work on both the #219 release
+and this release. A server rollback must retain #219's generic API and completion
+route; otherwise generic clients must wait for them to return.
 
 No new Dashboard RPC, mobile layout, database migration, App/Workflow
 compatibility bump, Platform/Runner protocol change, or historical data migration
@@ -116,7 +126,9 @@ is required. Resource access retains the existing single-tenant authority model.
 Durable tests exercise real Better Auth with the migrated in-memory PostgreSQL
 schema: empty JSON and binary requests, resource independence, completion Cookie
 verification, original session identity, credentials, revocation, expiry,
-concurrent claims, origin/redirect boundaries and published App compatibility.
+concurrent claims, origin/redirect boundaries, removed-method rejection and
+rejection of unexpired legacy tickets.
 Product acceptance runs a dedicated PostgreSQL-backed platform, completes the
-handoff in a clean browser, then visits real App and Dashboard pages with the
-same Cookie.
+handoff in a clean browser, and verifies removed-RPC rejection, legacy-ticket
+rejection, resource-independent completion and session revocation. This removal's
+acceptance does not exercise native WebViews or deployed App/Dashboard pages.
