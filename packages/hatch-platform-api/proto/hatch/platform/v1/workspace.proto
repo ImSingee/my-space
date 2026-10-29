@@ -2,9 +2,12 @@ syntax = "proto3";
 
 package hatch.platform.v1;
 
+import "buf/validate/validate.proto";
+
 // Shared instance navigation is available only to signed-in user sessions.
 service WorkspaceService {
   rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+  rpc SetDashboardAutoRefresh(SetDashboardAutoRefreshRequest) returns (SetDashboardAutoRefreshResponse);
 }
 
 message GetWorkspaceRequest {}
@@ -34,4 +37,16 @@ message GetWorkspaceResponse {
   repeated AppPin app_pins = 2;
   // Web sidebar order; excludes archived Workflows.
   repeated string pinned_workflow_ids = 3;
+}
+
+message SetDashboardAutoRefreshRequest {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 191
+  }];
+  // Seconds, 0 disables refresh. Same range and presets as the Web UI.
+  uint32 seconds = 2 [(buf.validate.field).uint32.lte = 3600];
+}
+message SetDashboardAutoRefreshResponse {
+  uint32 seconds = 1;
 }

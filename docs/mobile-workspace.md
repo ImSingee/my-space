@@ -48,3 +48,30 @@ method. Mobile clients from the earlier branch must replace that call with the
 four-step generic handoff sequence above. No new handoff target or arbitrary URL
 parameter is introduced. Session revocation, ticket replay and origin checks
 remain owned by the shared AuthService implementation.
+
+## Dashboard refresh settings
+
+`WorkspaceService.SetDashboardAutoRefresh({ id, seconds })` saves the same
+Dashboard preference used by the web UI and returns `{ seconds }`. It requires a
+valid user session, rejects missing Dashboard IDs, and accepts whole seconds from
+0 to 3600. Zero disables automatic refresh. API keys, Run credentials and hostile
+origins are rejected before any write.
+
+The shared `REFRESH_PRESETS` exported by `@hatch/platform-api` supplies both web
+and native controls: Off, 5s, 10s, 30s, 1m, 5m, 15m, 30m and 1h. Unlike local tab
+preferences, this setting belongs to the Dashboard and is shared across clients.
+The web setter and public RPC use the same persistence function.
+
+For the mobile canvas, the native host owns manual refresh controls and timer
+lifetime. The canvas has no automatic timer or platform refresh buttons. Native
+refresh commands address the currently displayed Dashboard and use the existing
+widget refresh protocol; they do not reload authentication or transmit credentials.
+
+In native-host mode, each widget's Open app action is a document link. The native
+WebView intercepts its load request and opens the App in the native stack without
+moving the canvas router or history. Ordinary web Dashboard navigation is unchanged.
+
+Deploy this Platform change together with a native client that owns refresh controls
+and scheduling. Older native clients that depend on the canvas's web refresh button
+or timer lose those controls until updated. There are no database migrations,
+environment changes, or App/Workflow compatibility version changes.

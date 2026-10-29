@@ -57,7 +57,7 @@ async function mount() {
     history: createMemoryHistory({ initialEntries: ['/'] }),
   });
   const screen = await render(<RouterProvider router={router as never} />);
-  return Object.assign(screen, { queryClient });
+  return Object.assign(screen, { queryClient, router });
 }
 
 beforeEach(() => {
@@ -68,14 +68,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-test('keeps a real widget usable while dashboard metadata is pending or unavailable', async () => {
-  let rejectMetadata!: (reason: Error) => void;
-  const metadata = new Promise<{ id: string; autoRefreshSeconds: number }[]>(
-    (_resolve, reject) => {
-      rejectMetadata = reject;
-    },
-  );
-  fixture.list.mockReturnValueOnce(metadata);
+test('the native host drives refresh and opens Apps outside the canvas router', async () => {
   const item = {
     id: 'placement',
     appId: 'app',
@@ -109,32 +102,52 @@ test('keeps a real widget usable while dashboard metadata is pending or unavaila
       .querySelector('iframe')
       ?.contentDocument?.getElementById('hatch-widget-root')?.textContent;
   await expect.poll(widgetText).toBe('Refresh 0');
-  expect(fixture.list).toHaveBeenCalledOnce();
-  expect(screen.queryClient.getQueryState(['dashboards'])?.status).toBe(
-    'pending',
-  );
+  expect(fixture.list).not.toHaveBeenCalled();
+  expect(screen.queryClient.getQueryState(['dashboards'])).toBeUndefined();
   expect(document.querySelector('[data-editing]')).toBeNull();
   await expect
     .element(document.querySelector('.react-resizable-handle') as HTMLElement)
     .not.toBeVisible();
   expect(document.querySelector('nav')).toBeNull();
-  rejectMetadata(new Error('Dashboard list unavailable'));
-  await expect
-    .poll(() => screen.queryClient.getQueryState(['dashboards'])?.status)
-    .toBe('error');
+  // No metadata request or web timer: the native host owns scheduling.
   await expect
     .element(screen.getByRole('main', { name: 'Dashboard canvas' }))
     .toBeVisible();
   await expect.poll(widgetText).toBe('Refresh 0');
-  await screen
-    .getByRole('button', { name: 'Refresh dashboard', exact: true })
-    .click();
+  expect(
+    document.querySelector('button[aria-label="Refresh dashboard"]'),
+  ).toBeNull();
+  expect(
+    document.querySelector('button[aria-label="Refresh widget"]'),
+  ).toBeNull();
+  window.dispatchEvent(
+    new CustomEvent('hatch:dashboard-refresh', {
+      detail: { dashboardId: 'other' },
+    }),
+  );
+  expect(fixture.read).toHaveBeenCalledOnce();
+  window.dispatchEvent(
+    new CustomEvent('hatch:dashboard-refresh', {
+      detail: { dashboardId: 'test' },
+    }),
+  );
   await expect.poll(widgetText).toBe('Refresh 1');
   expect(fixture.read).toHaveBeenCalledTimes(2);
-  expect(fixture.list).toHaveBeenCalledTimes(2);
-  await expect
-    .poll(() => screen.queryClient.getQueryState(['dashboards'])?.status)
-    .toBe('success');
+  expect(fixture.list).not.toHaveBeenCalled();
+  // Open app must reach the WebView as a load request the host intercepts; a
+  // router transition would move history and race the host's recovery.
+  let routed: boolean | undefined;
+  const intercept = (event: MouseEvent) => {
+    routed = event.defaultPrevented;
+    event.preventDefault();
+  };
+  window.addEventListener('click', intercept);
+  (
+    screen.getByRole('link', { name: 'Open app' }).element() as HTMLElement
+  ).click();
+  window.removeEventListener('click', intercept);
+  expect(routed).toBe(false);
+  expect(screen.router.state.location.pathname).toBe('/');
 });
 
 test('recovers from an unavailable dashboard through retry and keeps the empty canvas usable', async () => {
@@ -145,9 +158,9 @@ test('recovers from an unavailable dashboard through retry and keeps the empty c
   await expect
     .element(screen.getByRole('main', { name: 'Dashboard canvas' }))
     .toBeVisible();
-  await expect
-    .element(screen.getByRole('button', { name: 'Refresh dashboard' }))
-    .toBeVisible();
+  expect(
+    document.querySelector('button[aria-label="Refresh dashboard"]'),
+  ).toBeNull();
   expect(document.querySelector('iframe')).toBeNull();
   expect(document.querySelector('[data-editing]')).toBeNull();
 });

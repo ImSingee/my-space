@@ -34,6 +34,7 @@ export function WidgetCard({
   removeDisabled = false,
   onRemove,
   refreshSignal = 0,
+  nativeHost = false,
 }: {
   item: DashboardItem;
   geometry: DashboardLayoutItem;
@@ -46,6 +47,12 @@ export function WidgetCard({
    * value is ignored so a freshly mounted widget isn't refreshed redundantly.
    */
   refreshSignal?: number;
+  /**
+   * Rendered inside the native app's WebView. The host owns refresh controls,
+   * and Open app is a document link that the host intercepts before it loads,
+   * so the embedded router and history never change.
+   */
+  nativeHost?: boolean;
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
@@ -259,7 +266,7 @@ export function WidgetCard({
           className={`widget-no-drag ${classes.actions}`}
           data-visible={editing || undefined}
         >
-          {!editing && (refreshSupported || refreshing) ? (
+          {!nativeHost && !editing && (refreshSupported || refreshing) ? (
             <Tooltip label={refreshing ? 'Refreshing' : 'Refresh'} withArrow>
               <ActionIcon
                 variant="subtle"
@@ -282,13 +289,24 @@ export function WidgetCard({
                 color="gray"
                 size="sm"
                 aria-label="Open app"
-                renderRoot={(props) => (
-                  <Link
-                    to="/app/$appSlug"
-                    params={{ appSlug: item.appSlug }}
-                    {...props}
-                  />
-                )}
+                renderRoot={({ children, ...props }) =>
+                  nativeHost ? (
+                    <a
+                      href={`/app/${encodeURIComponent(item.appSlug)}`}
+                      {...props}
+                    >
+                      {children}
+                    </a>
+                  ) : (
+                    <Link
+                      to="/app/$appSlug"
+                      params={{ appSlug: item.appSlug }}
+                      {...props}
+                    >
+                      {children}
+                    </Link>
+                  )
+                }
               >
                 <IconAppWindow size={15} />
               </ActionIcon>

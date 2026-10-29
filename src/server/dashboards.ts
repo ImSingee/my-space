@@ -2,7 +2,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { clampRefreshSeconds } from '~components/dashboard/refresh-presets';
+import { updateDashboardAutoRefresh } from './dashboard-settings';
 import { db, schema, type TX } from '~/db';
 import {
   DASHBOARD_BREAKPOINT_ORDER,
@@ -114,13 +114,7 @@ export const setDashboardAutoRefresh = createServerFn({ method: 'POST' })
     z.object({ id: idSchema, seconds: z.number() }).parse(input),
   )
   .handler(async ({ data }) => {
-    // The UI offers a fixed preset list but we never trust the client to send a
-    // sane value, so clamp to a non-negative whole number of seconds (0 = off).
-    const seconds = clampRefreshSeconds(data.seconds);
-    await db
-      .update(schema.dashboards)
-      .set({ autoRefresh: seconds })
-      .where(eq(schema.dashboards.id, data.id));
+    await updateDashboardAutoRefresh(data.id, data.seconds);
     return { ok: true };
   });
 

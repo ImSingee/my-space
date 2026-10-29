@@ -409,6 +409,10 @@ describe('interactive Platform API contracts and authority', () => {
         ['AgentService/CreateSession', {}],
         ['AuthService/CreateHandoff', {}],
         ['WorkspaceService/GetWorkspace', {}],
+        [
+          'WorkspaceService/SetDashboardAutoRefresh',
+          { id: 'default', seconds: 5 },
+        ],
       ] as const) {
         const response = await call(path, { headers, body });
         expect(response.status).toBe(403);
@@ -1149,6 +1153,74 @@ describe('handoff public contract and removal boundaries', () => {
 });
 
 describe('session workspace navigation', () => {
+  it.each([false, true])(
+    'shares persisted refresh settings between Web and native binary=%s',
+    async (binary) => {
+      await db
+        .insert(schema.dashboards)
+        .values({ id: 'refresh-test', name: 'Refresh' });
+      const api = client(binary).workspace;
+      const { updateDashboardAutoRefresh } =
+        await import('../dashboard-settings');
+      await updateDashboardAutoRefresh('refresh-test', 30);
+      expect(
+        (await api.getWorkspace({})).dashboards.find(
+          (d) => d.id === 'refresh-test',
+        )?.autoRefreshSeconds,
+      ).toBe(30);
+      expect(
+        await api.setDashboardAutoRefresh({ id: 'refresh-test', seconds: 5 }),
+      ).toMatchObject({ seconds: 5 });
+      const { readDashboards } = await import('../workspace-read');
+      expect(
+        (await readDashboards()).find((d) => d.id === 'refresh-test')
+          ?.autoRefreshSeconds,
+      ).toBe(5);
+      await api.setDashboardAutoRefresh({ id: 'refresh-test', seconds: 0 });
+      expect(
+        (await db.query.dashboards.findFirst({ where: { id: 'refresh-test' } }))
+          ?.autoRefresh,
+      ).toBe(0);
+      await expect(
+        api.setDashboardAutoRefresh({ id: 'missing', seconds: 5 }),
+      ).rejects.toMatchObject({ code: Code.NotFound });
+    },
+  );
+
+  it('rejects invalid or unauthorized refresh mutations without changing settings', async () => {
+    await db
+      .insert(schema.dashboards)
+      .values({ id: 'refresh-test', name: 'Refresh', autoRefresh: 30 });
+    for (const seconds of [-1, 3601, 1.5, true]) {
+      expect(
+        (
+          await call('WorkspaceService/SetDashboardAutoRefresh', {
+            body: { id: 'refresh-test', seconds },
+          })
+        ).status,
+      ).toBe(400);
+    }
+    for (const headers of [
+      {},
+      { cookie, origin: 'https://evil.example' },
+      { authorization: 'Bearer invalid', cookie },
+    ] as Record<string, string>[]) {
+      expect(
+        (
+          await call('WorkspaceService/SetDashboardAutoRefresh', {
+            cookieOnly: true,
+            headers,
+            body: { id: 'refresh-test', seconds: 5 },
+          })
+        ).status,
+      ).toBeGreaterThanOrEqual(400);
+    }
+    expect(
+      (await db.query.dashboards.findFirst({ where: { id: 'refresh-test' } }))
+        ?.autoRefresh,
+    ).toBe(30);
+  });
+
   it.each([false, true])(
     'preserves web ordering, pin identity, names and hash entries binary=%s',
     async (useBinaryFormat) => {
