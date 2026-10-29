@@ -63,6 +63,16 @@ provide the shared RP ID, even when the Tailscale entrance uses HTTPS.
 Browsers without Related Origin Requests support can still use passkeys at the
 original address and password sign-in at the Tailscale address.
 
+## CLI and mobile sign-in
+
+`hatch auth login --url https://<node>.<tailnet>.ts.net` works against the
+connected Tailscale address. A device sign-in started there opens its approval
+page on that same address, so approve it in a browser session for the
+Tailscale address. Sign-ins started at `APP_URL` still approve at `APP_URL`.
+Hatch only chooses the Tailscale address when the request's host is the exact
+origin of the active node; any other host, or a disconnected node, falls back
+to `APP_URL`. The CLI keeps refusing approval pages on a different origin.
+
 ## Installation
 
 The Docker image includes a small Go executable using the official

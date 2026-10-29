@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
 import { rm } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createLocalJWKSet, jwtVerify, SignJWT } from 'jose';
@@ -284,6 +284,55 @@ describe.runIf(Boolean(databaseUrl))(
           .response.status,
       ).toBe(200);
       expect((await cli('apps', bearer(token))).response.status).toBe(401);
+    });
+
+    it('keeps a device login started on the bound tailnet URL on that origin', async () => {
+      const tailnet = 'https://hatch.example.ts.net';
+      const { getTailscaleManager } = await import('~server/tailscale-manager');
+      const trustedOrigin = vi
+        .spyOn(getTailscaleManager(), 'trustedOrigin')
+        .mockReturnValue(tailnet);
+      try {
+        const start = (host: string) =>
+          authCall<Device & { verification_uri_complete: string }>(
+            'device/code',
+            { body: { client_id: 'hatch-cli' }, headers: { host } },
+          );
+        const grant = (await start('HATCH.example.ts.net:443')).data;
+        expect(grant.verification_uri).toBe(`${tailnet}/cli/authorize`);
+        expect(grant.verification_uri_complete).toBe(
+          `${tailnet}/cli/authorize?user_code=${grant.user_code}`,
+        );
+        // The browser approves on the tailnet origin with its own session.
+        const tailnetBrowser = { origin: tailnet, cookie: await signup() };
+        const pending = await authCall<{ client_id?: string }>(
+          `device?user_code=${grant.user_code}`,
+          { headers: tailnetBrowser },
+        );
+        expect(pending.data.client_id).toBe('hatch-cli');
+        const decision = await authCall<{ success?: boolean }>(
+          'device/approve',
+          { body: { userCode: grant.user_code }, headers: tailnetBrowser },
+        );
+        expect(decision.data.success).toBe(true);
+        const { response, data } = await poll(grant);
+        expect(response.status).toBe(200);
+        expect(
+          (await cli('apps', bearer(data.access_token!))).response.status,
+        ).toBe(200);
+
+        // Every other host, including APP_URL, keeps the APP_URL page.
+        for (const host of ['127.0.0.1:3799', 'evil.example.ts.net'])
+          expect((await start(host)).data.verification_uri).toBe(
+            `${origin}/cli/authorize`,
+          );
+        trustedOrigin.mockReturnValue(null);
+        expect(
+          (await start('hatch.example.ts.net')).data.verification_uri,
+        ).toBe(`${origin}/cli/authorize`);
+      } finally {
+        trustedOrigin.mockRestore();
+      }
     });
 
     it('denies, and keeps another account from deciding a claimed request', async () => {
