@@ -16,6 +16,10 @@ import { assertSignupAllowed } from './signup-gate';
 import { getPasskeyOriginError, getPasskeyRpId } from './passkey-origin';
 import { apiKeyOptions } from './api-key-options';
 import { getTailscaleManager } from '../server/tailscale-manager';
+import {
+  rebaseDeviceGrant,
+  tailscaleRequestOrigin,
+} from './device-verification';
 
 const { appUrl, betterAuthSecret } = getPlatformEnv();
 const relyingPartyId = getPasskeyRpId(appUrl);
@@ -73,6 +77,19 @@ export const auth = betterAuth({
         });
       }
     }),
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== '/device/code') return;
+
+      // A device login started through the bound tailnet URL is approved on
+      // that URL, so its verification link must not point at APP_URL.
+      const origin = tailscaleRequestOrigin(
+        ctx.headers,
+        getTailscaleManager().trustedOrigin(),
+      );
+      if (!origin) return;
+      const grant = rebaseDeviceGrant(ctx.context.returned, origin);
+      if (grant) return ctx.json(grant);
+    }),
   },
   databaseHooks: {
     user: {
@@ -120,7 +137,8 @@ export const auth = betterAuth({
     // CLI and mobile login: the device signs in through the browser approval page at
     // /cli/authorize and receives an ordinary session token, which it sends as
     // `Authorization: Bearer`. A native session has the same authority as a
-    // browser session.
+    // browser session. Requests on the trusted Tailscale origin get this page
+    // on that origin instead (see the `after` hook).
     deviceAuthorization({
       expiresIn: '10m',
       interval: '5s',
