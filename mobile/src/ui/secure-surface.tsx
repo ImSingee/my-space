@@ -1,4 +1,10 @@
-import { useRef, useState, type ComponentType, type Ref } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type Ref,
+} from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { WebView, type WebViewProps } from 'react-native-webview';
 import * as WebBrowser from 'expo-web-browser';
@@ -13,7 +19,10 @@ import { Busy, Notice } from './primitives';
 import { palette } from './theme';
 
 // The published type omits the imperative ref the native view does forward.
-type WebViewHandle = { goBack: () => void };
+type WebViewHandle = {
+  goBack: () => void;
+  injectJavaScript: (script: string) => void;
+};
 const SurfaceWebView = WebView as unknown as ComponentType<
   WebViewProps & { ref?: Ref<WebViewHandle> }
 >;
@@ -27,10 +36,17 @@ function sameInstance(origin: string, value: string): URL | null {
   }
 }
 
+/** Navigates without adding an entry to the WebView's history. */
+function replacePage(view: WebViewHandle | null, url: string) {
+  view?.injectJavaScript(`location.replace(${JSON.stringify(url)}); true;`);
+}
+
 /**
  * One WebView, one non-persistent cookie store. The ticket is only form-POSTed;
- * after the server's exact completion page loads, the same WebView navigates to
- * the requested page. Changing `destination` later reuses that browser session.
+ * after the server's exact completion page loads, the same WebView replaces it
+ * with the requested page. Changing `destination` later replaces the page again
+ * in that browser session. Replacing keeps the sign-in pages out of the
+ * WebView's history, so nothing inside the view can step back onto them.
  */
 export function SecureSurface({
   origin,
@@ -38,18 +54,45 @@ export function SecureSurface({
   destination,
   retry,
   onOpenApp,
+  dashboardRefresh,
+  onReady,
 }: {
   origin: string;
   handoff: SessionHandoff;
   destination: BrowserDestination;
   retry: () => void;
   onOpenApp?: (slug: string) => void;
+  dashboardRefresh?: { id: string; revision: number };
+  onReady?: (ready: boolean) => void;
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [loadedPath, setLoadedPath] = useState<string | null>(null);
   const failed = useRef(false);
   const view = useRef<WebViewHandle>(null);
+  const href = destinationUrl(origin, destination);
+  useEffect(() => {
+    if (signedIn) replacePage(view.current, href);
+  }, [signedIn, href]);
+  const ready = loadedPath === destination.path && !problem;
+  useEffect(() => {
+    onReady?.(ready);
+    return () => onReady?.(false);
+  }, [ready, onReady]);
+  // A freshly loaded canvas is already current: only revisions requested after
+  // it loaded become refresh commands.
+  const sentRevision = useRef(dashboardRefresh?.revision);
+  const refreshDashboardId = dashboardRefresh?.id;
+  const refreshRevision = dashboardRefresh?.revision;
+  useEffect(() => {
+    if (!ready || !refreshDashboardId) return;
+    if (refreshRevision === sentRevision.current) return;
+    sentRevision.current = refreshRevision;
+    const detail = JSON.stringify({ dashboardId: refreshDashboardId });
+    view.current?.injectJavaScript(
+      `window.dispatchEvent(new CustomEvent('hatch:dashboard-refresh', { detail: ${detail} })); true;`,
+    );
+  }, [ready, refreshDashboardId, refreshRevision]);
   const fail = (message: string) => {
     failed.current = true;
     setProblem(message);
@@ -69,9 +112,8 @@ export function SecureSurface({
   const inTarget = (url: URL) =>
     url.pathname === target ||
     (target.endsWith('/') && url.pathname.startsWith(target));
-  const source = signedIn
-    ? { uri: destinationUrl(origin, destination) }
-    : webViewHandoffSource(origin, handoff);
+  // The source never changes: switching it would push a history entry.
+  const source = webViewHandoffSource(origin, handoff);
   return (
     <View style={{ flex: 1, backgroundColor: palette.card }}>
       <SurfaceWebView
@@ -87,7 +129,8 @@ export function SecureSurface({
         allowUniversalAccessFromFileURLs={false}
         mixedContentMode="never"
         originWhitelist={['*']}
-        allowsBackForwardNavigationGestures={signedIn}
+        // Back belongs to the native stack, never to handoff/iframe history.
+        allowsBackForwardNavigationGestures={false}
         onShouldStartLoadWithRequest={(request) => {
           if (request.url === 'about:blank') return true;
           // Dashboard widgets mount in sandboxed srcdoc subframes. Never allow
@@ -141,9 +184,11 @@ export function SecureSurface({
           // App links open natively instead of inside this view.
           if (!signedIn || state.loading) return;
           const url = sameInstance(origin, state.url);
-          if (!url || inTarget(url)) return;
+          if (!url || inTarget(url) || url.href === handoff.completionUrl)
+            return;
           const app = url.pathname.match(/^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/);
-          view.current?.goBack();
+          if (state.canGoBack) view.current?.goBack();
+          else replacePage(view.current, href);
           if (app && onOpenApp) onOpenApp(app[1]);
         }}
         onLoad={({ nativeEvent }) => {
@@ -154,7 +199,10 @@ export function SecureSurface({
             return;
           }
           const url = sameInstance(origin, nativeEvent.url);
-          if (url && inTarget(url)) setLoadedPath(target);
+          if (url && inTarget(url)) {
+            sentRevision.current = dashboardRefresh?.revision;
+            setLoadedPath(target);
+          }
         }}
         onError={() => fail('Check your connection and try again.')}
         onHttpError={({ nativeEvent }) => {

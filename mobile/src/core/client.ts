@@ -327,6 +327,13 @@ export class HatchApiClient {
       signal,
     );
   }
+  setDashboardAutoRefresh(id: string, seconds: number, signal?: AbortSignal) {
+    return this.rpcRequest(
+      (signal) =>
+        this.workspaceRpc.setDashboardAutoRefresh({ id, seconds }, { signal }),
+      signal,
+    );
+  }
   async workflows(signal?: AbortSignal): Promise<AppSummary[]> {
     const result = await this.rpcRequest(
       (signal) => this.workflowRpc.listWorkflows({}, { signal }),

@@ -10,7 +10,7 @@ import type { GlyphName } from '../src/ui/glyph.types';
 import { tabDetails } from '../src/ui/navigation';
 import { Card, Notice } from '../src/ui/primitives';
 import { GlyphTile } from '../src/ui/rows';
-import { Masthead, SectionLabel } from '../src/ui/screen';
+import { Masthead, SectionLabel, pageScrollProps } from '../src/ui/screen';
 import { Text, type } from '../src/ui/text';
 import { palette as c, radii } from '../src/ui/theme';
 
@@ -37,8 +37,9 @@ export default function NavigationSettings() {
   ];
   return (
     <ScrollView
+      {...pageScrollProps}
       style={{ flex: 1, backgroundColor: c.paper }}
-      contentContainerStyle={{ paddingBottom: 56 }}
+      contentContainerStyle={{ paddingBottom: 32 }}
     >
       <Masthead
         nested

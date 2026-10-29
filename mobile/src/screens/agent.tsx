@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import {
   Pressable,
   RefreshControl,
@@ -10,9 +10,15 @@ import {
 import type { SessionSummary } from '../core';
 import { useSession } from '../state/session';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
+import { usePullToRefresh } from '../state/use-pull-to-refresh';
 import { Glyph } from '../ui/glyph';
 import { Busy, EmptyState, Notice, Tag, errorText } from '../ui/primitives';
-import { Screen, SectionLabel } from '../ui/screen';
+import {
+  Masthead,
+  PageRoot,
+  SectionLabel,
+  pageScrollProps,
+} from '../ui/screen';
 import { Text, type } from '../ui/text';
 import { palette as c, radii } from '../ui/theme';
 
@@ -58,6 +64,7 @@ function stamp(iso: string) {
 
 export function AgentScreen({ nested = false }: { nested?: boolean }) {
   const { api, origin } = useSession();
+  const focused = useIsFocused();
   const queryClient = useQueryClient();
   const signal = useLifetimeSignal();
   const sessions = useQuery({
@@ -82,37 +89,53 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
   const start = () => {
     if (!create.isPending) create.mutate();
   };
+  const pull = usePullToRefresh(focused, () => sessions.refetch());
   const list = sessions.data ?? [];
   return (
-    <Screen
-      eyebrow={
-        sessions.data
-          ? `Agent · ${list.length} conversation${list.length === 1 ? '' : 's'}`
-          : 'Agent'
-      }
-      title="Agent"
-      nested={nested}
-    >
+    <PageRoot nested={nested}>
       <SectionList
+        {...pageScrollProps}
         sections={sectionsOf(list)}
         keyExtractor={(item) => item.id}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
         refreshControl={
           <RefreshControl
-            refreshing={sessions.isRefetching}
-            onRefresh={() => void sessions.refetch()}
+            refreshing={pull.refreshing}
+            onRefresh={pull.onRefresh}
             tintColor={c.moss}
           />
         }
         ListHeaderComponent={
-          <View style={{ gap: 12, paddingTop: 4 }}>
+          <View style={{ gap: 12 }}>
+            <View style={{ marginHorizontal: -16 }}>
+              <Masthead
+                eyebrow={
+                  sessions.data
+                    ? `Agent · ${list.length} conversation${list.length === 1 ? '' : 's'}`
+                    : 'Agent'
+                }
+                title="Agent"
+                nested={nested}
+              />
+            </View>
             <StartCard busy={create.isPending} onPress={start} />
             {create.error ? (
               <Notice
                 tone="danger"
                 title="Couldn’t start a conversation"
                 detail={errorText(create.error)}
+              />
+            ) : null}
+            {sessions.error && sessions.data ? (
+              <Notice
+                tone="danger"
+                title="Couldn’t refresh"
+                detail={errorText(sessions.error)}
+                action={{
+                  label: 'Try again',
+                  onPress: () => void sessions.refetch(),
+                }}
               />
             ) : null}
           </View>
@@ -202,7 +225,7 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
           </Pressable>
         )}
       />
-    </Screen>
+    </PageRoot>
   );
 }
 

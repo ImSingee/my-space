@@ -24,6 +24,13 @@ states. Keep touch targets at least 44 points, let text wrap/scale, and avoid
 competing safe-area or keyboard insets. Use platform files for platform-specific
 APIs; keep the other platform buildable without claiming unperformed acceptance.
 
+A scrolling page's main scroll view is its first view (`ScrollScreen`, or
+`PageRoot` plus `pageScrollProps`), with the masthead inside the content. Native
+tabs only find a first-descendant scroll view, and UIKit then owns the tab bar,
+status bar and home indicator insets; never pad for the tab bar by hand. Drive a
+`RefreshControl` only from a user pull through `usePullToRefresh`, keep it
+mounted, and never bind `refreshing` to query fetch state.
+
 Authentication, query identity, cancellation, draft ownership, and duplicate
 submission guards are independent of presentation. Native text bindings must
 not echo delayed JavaScript edits over newer text or reset selection. Submission

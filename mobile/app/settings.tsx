@@ -7,7 +7,7 @@ import { Button, IconButton } from '../src/ui/button';
 import type { GlyphName } from '../src/ui/glyph.types';
 import { Card, errorText } from '../src/ui/primitives';
 import { GlyphTile } from '../src/ui/rows';
-import { Masthead } from '../src/ui/screen';
+import { Masthead, pageScrollProps } from '../src/ui/screen';
 import { Text, type } from '../src/ui/text';
 import { palette as c } from '../src/ui/theme';
 
@@ -58,8 +58,9 @@ export default function SettingsScreen() {
     );
   return (
     <ScrollView
+      {...pageScrollProps}
       style={{ flex: 1, backgroundColor: c.paper }}
-      contentContainerStyle={{ paddingBottom: 48 }}
+      contentContainerStyle={{ paddingBottom: 32 }}
     >
       <View style={{ paddingTop: 14 }}>
         <Masthead

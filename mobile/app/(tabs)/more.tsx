@@ -1,13 +1,13 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { ScrollView, View } from 'react-native';
+import { View } from 'react-native';
 import type { TabId } from '../../src/core/navigation-preferences';
 import { useNavigationPreferences } from '../../src/state/navigation';
 import { useSession } from '../../src/state/session';
 import { tabDetails } from '../../src/ui/navigation';
 import { Tag, Wordmark } from '../../src/ui/primitives';
 import { GlyphTile, Group, ListRow } from '../../src/ui/rows';
-import { Screen, SectionLabel } from '../../src/ui/screen';
+import { ScrollScreen, SectionLabel } from '../../src/ui/screen';
 import { Text, type } from '../../src/ui/text';
 
 export default function MoreScreen() {
@@ -27,10 +27,8 @@ export default function MoreScreen() {
       ? 'More'
       : tabDetails[preferences.defaultTab].label;
   return (
-    <Screen eyebrow={host} title="More">
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}
-      >
+    <ScrollScreen eyebrow={host} title="More">
+      <View style={{ paddingHorizontal: 16 }}>
         <SectionLabel count={preferences.order.length}>Everything</SectionLabel>
         <Group>
           {preferences.order.map((id) => {
@@ -84,7 +82,7 @@ export default function MoreScreen() {
             Version {Constants.expoConfig?.version ?? '—'}
           </Text>
         </View>
-      </ScrollView>
-    </Screen>
+      </View>
+    </ScrollScreen>
   );
 }

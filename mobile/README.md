@@ -69,7 +69,9 @@ applies its private-networking plugin before React starts. `expo-status-bar` and
 The mobile project uses the React Native strict TypeScript API, including native
 instance ref types, without the legacy opt-out. Its base tsconfig includes the
 `.json` extension so the test transformer can resolve SDK 58's package exports.
-The chat list uses automatic content-inset adjustment. Home, chat, and WebView
+The chat list and every scrolling tab or list page use automatic content-inset
+adjustment on a scroll view that is the page's first view, so UIKit keeps the
+last row reachable above the native tab bar. Home, chat, and WebView
 screens explicitly use Router's supported opaque system header, keeping short
 histories and segmented controls below navigation. Home and WebView apply only
 left/right safe areas; Home lets React Native own its Host safe area to prevent
@@ -120,10 +122,14 @@ The WebView receives only a random, one-use, at-most-60-second ticket in a form
 POST body. The server binds it to the original session and exact trusted
 instance; it names no App or Dashboard. Atomic consumption sets a host-only
 HttpOnly cookie for the **same server session** and redirects to the fixed
-completion page. Only after that exact page loads does the same WebView navigate
-to the App's embed route (keeping a pin's hash) or `/mobile/dashboard/:id`;
-switching dashboards reuses that browser session without another ticket.
-There is no bearer URL, injected credential, or JavaScript credential bridge.
+completion page. Only after that exact page loads does the same WebView replace
+it with the App's embed route (keeping a pin's hash) or `/mobile/dashboard/:id`;
+switching dashboards replaces the page again in that browser session without
+another ticket. Replacing keeps the sign-in pages out of WebView history, and
+WebView back-forward gestures are off, so back always belongs to the native
+stack. There is no bearer URL, injected credential, or JavaScript credential
+bridge; the host injects only that `location.replace` and the Dashboard's
+credential-free refresh command.
 Native sign-out or server-side revocation invalidates the WebView session too.
 
 WebViews are incognito, do not share browser/native cookie stores, reject file

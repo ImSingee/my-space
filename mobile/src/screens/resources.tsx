@@ -1,18 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useState } from 'react';
-import {
-  RefreshControl,
-  ScrollView,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { RefreshControl, useWindowDimensions, View } from 'react-native';
 import { useSession } from '../state/session';
+import { usePullToRefresh } from '../state/use-pull-to-refresh';
 import { Busy, EmptyState, Notice, Tag, errorText } from '../ui/primitives';
 import { NativeField } from '../ui/native-field';
 import { GlyphTile, Group, IndexRow, ListRow, PinTile } from '../ui/rows';
 import { ScopeTabs } from '../ui/scope-tabs';
-import { Screen, SectionLabel } from '../ui/screen';
+import { ScrollScreen, SectionLabel } from '../ui/screen';
 import { StatusTag } from '../ui/status';
 import { palette as c } from '../ui/theme';
 import type { AppSummary } from '../core';
@@ -29,6 +25,7 @@ export function ResourcesScreen({
   nested?: boolean;
 }) {
   const { api, origin } = useSession();
+  const focused = useIsFocused();
   const { fontScale, width } = useWindowDimensions();
   const [scope, setScope] = useState<Scope>(all ? 'all' : 'pinned');
   const [search, setSearch] = useState('');
@@ -49,11 +46,13 @@ export function ResourcesScreen({
     // Pinned counts include workflows even while the complete list is shown.
     enabled: Boolean(api) && kind === 'apps',
   });
-  const refresh = () => {
-    void resources.refetch();
-    void workspace.refetch();
-    if (kind === 'apps' && scope === 'pinned') void workflows.refetch();
-  };
+  const refresh = () =>
+    Promise.all([
+      resources.refetch(),
+      workspace.refetch(),
+      ...(kind === 'apps' && scope === 'pinned' ? [workflows.refetch()] : []),
+    ]);
+  const pull = usePullToRefresh(focused, refresh);
   const match = (name: string) =>
     name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
   const available = (resources.data ?? []).filter(
@@ -113,7 +112,7 @@ export function ResourcesScreen({
     });
   const noun = kind === 'apps' ? 'Apps' : 'Workflows';
   return (
-    <Screen
+    <ScrollScreen
       eyebrow={
         resources.data
           ? `${kind === 'apps' ? 'Collection' : 'Automations'} · ${available.length} total`
@@ -123,6 +122,15 @@ export function ResourcesScreen({
       }
       title={noun}
       nested={nested}
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
+      refreshControl={
+        <RefreshControl
+          refreshing={pull.refreshing}
+          onRefresh={pull.onRefresh}
+          tintColor={c.moss}
+        />
+      }
     >
       <ScopeTabs<Scope>
         label={`${noun} scope`}
@@ -137,22 +145,7 @@ export function ResourcesScreen({
           },
         ]}
       />
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: 12,
-          paddingBottom: 48,
-        }}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl
-            refreshing={resources.isRefetching || workspace.isRefetching}
-            onRefresh={refresh}
-            tintColor={c.moss}
-          />
-        }
-      >
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <NativeField
           variant="search"
           label={`Search ${scope === 'pinned' ? 'pinned items' : kind}`}
@@ -301,7 +294,7 @@ export function ResourcesScreen({
             </Group>
           </>
         ) : null}
-      </ScrollView>
-    </Screen>
+      </View>
+    </ScrollScreen>
   );
 }

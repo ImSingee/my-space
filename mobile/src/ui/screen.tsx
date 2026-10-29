@@ -1,10 +1,51 @@
 import type { PropsWithChildren, ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import {
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+  type ScrollViewProps,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, type } from './text';
 import { palette as c } from './theme';
 
-/** Masthead page: mono eyebrow, rounded display title and round actions. */
+/**
+ * Inset ownership for a page's root scroll view. On iOS UIKit adds the status
+ * bar, native tab bar and home indicator to the adjusted inset, so content
+ * scrolls under the glass bar yet its end stays reachable. Native tabs only
+ * find a scroll view that is first in the page's view chain, which also gives
+ * scroll-to-top on tab re-tap and tab-bar minimising; keep it there.
+ */
+export const pageScrollProps = {
+  contentInsetAdjustmentBehavior: 'automatic',
+  automaticallyAdjustsScrollIndicatorInsets: true,
+} as const satisfies ScrollViewProps;
+
+/**
+ * Root of a scrolling page. Vertical insets belong to the scroll view on iOS
+ * (see `pageScrollProps`) and to the stack header or tab bar on Android, so
+ * only a top-level Android page pads its status bar here.
+ */
+export function PageRoot({
+  nested = false,
+  children,
+}: PropsWithChildren<{ nested?: boolean }>) {
+  return (
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: c.paper }}
+      edges={
+        Platform.OS === 'ios' || nested
+          ? ['left', 'right']
+          : ['top', 'left', 'right']
+      }
+    >
+      {children}
+    </SafeAreaView>
+  );
+}
+
+/** Fixed page with a masthead over a non-scrolling surface (the Dashboard). */
 export function Screen({
   eyebrow,
   title,
@@ -30,6 +71,43 @@ export function Screen({
       />
       {children}
     </SafeAreaView>
+  );
+}
+
+/** Scrolling page: the masthead scrolls with content, like a large title. */
+export function ScrollScreen({
+  eyebrow,
+  title,
+  actions,
+  nested = false,
+  children,
+  contentContainerStyle,
+  ...scrollProps
+}: PropsWithChildren<
+  {
+    eyebrow?: string;
+    title: string;
+    actions?: ReactNode;
+    nested?: boolean;
+  } & Omit<ScrollViewProps, 'children'>
+>) {
+  return (
+    <PageRoot nested={nested}>
+      <ScrollView
+        {...pageScrollProps}
+        {...scrollProps}
+        style={{ flex: 1 }}
+        contentContainerStyle={[{ paddingBottom: 32 }, contentContainerStyle]}
+      >
+        <Masthead
+          eyebrow={eyebrow}
+          title={title}
+          actions={actions}
+          nested={nested}
+        />
+        {children}
+      </ScrollView>
+    </PageRoot>
   );
 }
 

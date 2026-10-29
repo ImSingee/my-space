@@ -1,13 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
+import { useIsFocused, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSession } from '../../src/state/session';
+import { usePullToRefresh } from '../../src/state/use-pull-to-refresh';
 import { Button } from '../../src/ui/button';
 import { Busy, Card, Notice, Tag, errorText } from '../../src/ui/primitives';
 import { GlyphTile } from '../../src/ui/rows';
-import { Masthead, SectionLabel } from '../../src/ui/screen';
+import { Masthead, SectionLabel, pageScrollProps } from '../../src/ui/screen';
 import { StatusTag, statusText } from '../../src/ui/status';
 import { Text, type } from '../../src/ui/text';
 import { palette as c } from '../../src/ui/theme';
@@ -36,6 +37,9 @@ export default function WorkflowScreen() {
     queryFn: ({ signal }) => api!.workspace(signal),
     enabled: Boolean(api),
   });
+  const pull = usePullToRefresh(useIsFocused(), () =>
+    Promise.all([query.refetch(), workspace.refetch()]),
+  );
   const data = query.data;
   const pinned = workspace.data?.pinnedWorkflowIds.includes(id) ?? false;
   if (query.error)
@@ -58,12 +62,13 @@ export default function WorkflowScreen() {
   ];
   return (
     <ScrollView
+      {...pageScrollProps}
       style={{ flex: 1, backgroundColor: c.paper }}
-      contentContainerStyle={{ paddingBottom: 56 }}
+      contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={
         <RefreshControl
-          refreshing={query.isRefetching}
-          onRefresh={() => void query.refetch()}
+          refreshing={pull.refreshing}
+          onRefresh={pull.onRefresh}
           tintColor={c.moss}
         />
       }
