@@ -3,6 +3,7 @@ import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { AgentService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/agent_pb';
 import { getAgentModelCatalog } from '~server/agent-model-catalog';
 import { createHandoff } from '~server/handoffs';
+import { updateDashboardAutoRefresh } from '~server/dashboard-settings';
 import {
   insertAgentSession,
   listSessionSummaries,
@@ -318,7 +319,11 @@ export function registerPlatformApi(
   };
   router.service(
     WorkspaceService,
-    { getWorkspace: () => readWorkspace() },
+    {
+      getWorkspace: () => readWorkspace(),
+      setDashboardAutoRefresh: (input) =>
+        updateDashboardAutoRefresh(input.id, input.seconds),
+    },
     sessionOnly,
   );
   router.service(

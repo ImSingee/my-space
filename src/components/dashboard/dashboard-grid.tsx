@@ -36,6 +36,7 @@ export function DashboardGrid({
   interactionDisabled = false,
   transformScale = 1,
   refreshSignal,
+  nativeHost = false,
 }: {
   items: DashboardItem[];
   layouts: DashboardLayouts;
@@ -51,6 +52,12 @@ export function DashboardGrid({
   transformScale?: number;
   /** Bumped by dashboard-wide manual or automatic refreshes. */
   refreshSignal?: number;
+  /**
+   * Rendered inside the native app's WebView. The host owns refresh controls,
+   * and Open app is a document link that the host intercepts before it loads,
+   * so the embedded router and history never change.
+   */
+  nativeHost?: boolean;
 }) {
   const { ref, width } = useElementSize<HTMLDivElement>();
   const breakpoint = previewBreakpoint ?? dashboardBreakpointForWidth(width);
@@ -136,6 +143,7 @@ export function DashboardGrid({
                   removeDisabled={removeDisabled}
                   onRemove={() => onRemove(item.id)}
                   refreshSignal={refreshSignal}
+                  nativeHost={nativeHost}
                 />
               </div>
             );

@@ -12,6 +12,7 @@ import {
   messageDesc,
   serviceDesc,
 } from '@bufbuild/protobuf/codegenv2';
+import { file_buf_validate_validate } from '@bufbuild/protovalidate/gen/buf/validate/validate_pb.js';
 import type { Message } from '@bufbuild/protobuf';
 
 /**
@@ -20,7 +21,8 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_hatch_platform_v1_workspace: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'CiFoYXRjaC9wbGF0Zm9ybS92MS93b3Jrc3BhY2UucHJvdG8SEWhhdGNoLnBsYXRmb3JtLnYxIhUKE0dldFdvcmtzcGFjZVJlcXVlc3QibwoQRGFzaGJvYXJkU3VtbWFyeRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg4KBnBpbm5lZBgEIAEoCBIcChRhdXRvX3JlZnJlc2hfc2Vjb25kcxgFIAEoDSJZCgZBcHBQaW4SCgoCaWQYASABKAkSDgoGYXBwX2lkGAIgASgJEg0KBWxhYmVsGAMgASgJEhIKCmVudHJ5X2hhc2gYBCABKAkSEAoIYXBwX3NsdWcYBSABKAkimQEKFEdldFdvcmtzcGFjZVJlc3BvbnNlEjcKCmRhc2hib2FyZHMYASADKAsyIy5oYXRjaC5wbGF0Zm9ybS52MS5EYXNoYm9hcmRTdW1tYXJ5EisKCGFwcF9waW5zGAIgAygLMhkuaGF0Y2gucGxhdGZvcm0udjEuQXBwUGluEhsKE3Bpbm5lZF93b3JrZmxvd19pZHMYAyADKAkycwoQV29ya3NwYWNlU2VydmljZRJfCgxHZXRXb3Jrc3BhY2USJi5oYXRjaC5wbGF0Zm9ybS52MS5HZXRXb3Jrc3BhY2VSZXF1ZXN0GicuaGF0Y2gucGxhdGZvcm0udjEuR2V0V29ya3NwYWNlUmVzcG9uc2ViBnByb3RvMw',
+    'CiFoYXRjaC9wbGF0Zm9ybS92MS93b3Jrc3BhY2UucHJvdG8SEWhhdGNoLnBsYXRmb3JtLnYxIhUKE0dldFdvcmtzcGFjZVJlcXVlc3QibwoQRGFzaGJvYXJkU3VtbWFyeRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg4KBnBpbm5lZBgEIAEoCBIcChRhdXRvX3JlZnJlc2hfc2Vjb25kcxgFIAEoDSJZCgZBcHBQaW4SCgoCaWQYASABKAkSDgoGYXBwX2lkGAIgASgJEg0KBWxhYmVsGAMgASgJEhIKCmVudHJ5X2hhc2gYBCABKAkSEAoIYXBwX3NsdWcYBSABKAkimQEKFEdldFdvcmtzcGFjZVJlc3BvbnNlEjcKCmRhc2hib2FyZHMYASADKAsyIy5oYXRjaC5wbGF0Zm9ybS52MS5EYXNoYm9hcmRTdW1tYXJ5EisKCGFwcF9waW5zGAIgAygLMhkuaGF0Y2gucGxhdGZvcm0udjEuQXBwUGluEhsKE3Bpbm5lZF93b3JrZmxvd19pZHMYAyADKAkiUwoeU2V0RGFzaGJvYXJkQXV0b1JlZnJlc2hSZXF1ZXN0EhYKAmlkGAEgASgJQgq6SAdyBRABGL8BEhkKB3NlY29uZHMYAiABKA1CCLpIBSoDGJAcIjIKH1NldERhc2hib2FyZEF1dG9SZWZyZXNoUmVzcG9uc2USDwoHc2Vjb25kcxgBIAEoDTL2AQoQV29ya3NwYWNlU2VydmljZRJfCgxHZXRXb3Jrc3BhY2USJi5oYXRjaC5wbGF0Zm9ybS52MS5HZXRXb3Jrc3BhY2VSZXF1ZXN0GicuaGF0Y2gucGxhdGZvcm0udjEuR2V0V29ya3NwYWNlUmVzcG9uc2USgAEKF1NldERhc2hib2FyZEF1dG9SZWZyZXNoEjEuaGF0Y2gucGxhdGZvcm0udjEuU2V0RGFzaGJvYXJkQXV0b1JlZnJlc2hSZXF1ZXN0GjIuaGF0Y2gucGxhdGZvcm0udjEuU2V0RGFzaGJvYXJkQXV0b1JlZnJlc2hSZXNwb25zZWIGcHJvdG8z',
+    [file_buf_validate_validate],
   );
 
 /**
@@ -153,6 +155,51 @@ export const GetWorkspaceResponseSchema: GenMessage<GetWorkspaceResponse> =
   messageDesc(file_hatch_platform_v1_workspace, 3);
 
 /**
+ * @generated from message hatch.platform.v1.SetDashboardAutoRefreshRequest
+ */
+export type SetDashboardAutoRefreshRequest =
+  Message<'hatch.platform.v1.SetDashboardAutoRefreshRequest'> & {
+    /**
+     * @generated from field: string id = 1;
+     */
+    id: string;
+
+    /**
+     * Seconds, 0 disables refresh. Same range and presets as the Web UI.
+     *
+     * @generated from field: uint32 seconds = 2;
+     */
+    seconds: number;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.SetDashboardAutoRefreshRequest.
+ * Use `create(SetDashboardAutoRefreshRequestSchema)` to create a new message.
+ */
+export const SetDashboardAutoRefreshRequestSchema: GenMessage<SetDashboardAutoRefreshRequest> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_workspace, 4);
+
+/**
+ * @generated from message hatch.platform.v1.SetDashboardAutoRefreshResponse
+ */
+export type SetDashboardAutoRefreshResponse =
+  Message<'hatch.platform.v1.SetDashboardAutoRefreshResponse'> & {
+    /**
+     * @generated from field: uint32 seconds = 1;
+     */
+    seconds: number;
+  };
+
+/**
+ * Describes the message hatch.platform.v1.SetDashboardAutoRefreshResponse.
+ * Use `create(SetDashboardAutoRefreshResponseSchema)` to create a new message.
+ */
+export const SetDashboardAutoRefreshResponseSchema: GenMessage<SetDashboardAutoRefreshResponse> =
+  /*@__PURE__*/
+  messageDesc(file_hatch_platform_v1_workspace, 5);
+
+/**
  * Shared instance navigation is available only to signed-in user sessions.
  *
  * @generated from service hatch.platform.v1.WorkspaceService
@@ -165,5 +212,13 @@ export const WorkspaceService: GenService<{
     methodKind: 'unary';
     input: typeof GetWorkspaceRequestSchema;
     output: typeof GetWorkspaceResponseSchema;
+  };
+  /**
+   * @generated from rpc hatch.platform.v1.WorkspaceService.SetDashboardAutoRefresh
+   */
+  setDashboardAutoRefresh: {
+    methodKind: 'unary';
+    input: typeof SetDashboardAutoRefreshRequestSchema;
+    output: typeof SetDashboardAutoRefreshResponseSchema;
   };
 }> = /*@__PURE__*/ serviceDesc(file_hatch_platform_v1_workspace, 0);
