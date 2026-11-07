@@ -31,6 +31,18 @@ status bar and home indicator insets; never pad for the tab bar by hand. Drive a
 `RefreshControl` only from a user pull through `usePullToRefresh`, keep it
 mounted, and never bind `refreshing` to query fetch state.
 
+Web surfaces decide every navigation in `src/core/surface-navigation.ts` and
+leave the app only through `useSystemBrowser`. New windows arrive through
+`onOpenWindow`; on Fabric `onShouldStartLoadWithRequest` cannot tell them apart.
+Every new window opens in the system browser. Keep the sign-in handshake,
+credential and frame boundaries covered by its tests.
+
+An App screen's back steps through WebKit's own `canGoBack` before leaving.
+While the page has history the screen turns off its native swipe
+(`gestureEnabled`), WKWebView's swipe takes over, and `useWebHistoryBack` turns
+the back button and Android back into one page step; other removals pass. The
+sign-in pages are replaced, never pushed, so they never become history.
+
 Authentication, query identity, cancellation, draft ownership, and duplicate
 submission guards are independent of presentation. Native text bindings must
 not echo delayed JavaScript edits over newer text or reset selection. Submission

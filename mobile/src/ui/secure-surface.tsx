@@ -1,20 +1,23 @@
 import {
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type ComponentType,
   type Ref,
 } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewProps } from 'react-native-webview';
-import * as WebBrowser from 'expo-web-browser';
 import {
-  HANDOFF_CONSUME_PATH,
+  decideLoad,
+  decideNewWindow,
   destinationUrl,
   webViewHandoffSource,
   type BrowserDestination,
   type SessionHandoff,
+  type SurfaceDecision,
 } from '../core';
+import { useSystemBrowser } from '../state/use-system-browser';
 import { Busy, Notice } from './primitives';
 import { palette } from './theme';
 
@@ -26,6 +29,8 @@ type WebViewHandle = {
 const SurfaceWebView = WebView as unknown as ComponentType<
   WebViewProps & { ref?: Ref<WebViewHandle> }
 >;
+
+export type SurfaceHandle = { goBack: () => void };
 
 function sameInstance(origin: string, value: string): URL | null {
   try {
@@ -56,6 +61,8 @@ export function SecureSurface({
   onOpenApp,
   dashboardRefresh,
   onReady,
+  onHistoryBack,
+  ref,
 }: {
   origin: string;
   handoff: SessionHandoff;
@@ -64,6 +71,12 @@ export function SecureSurface({
   onOpenApp?: (slug: string) => void;
   dashboardRefresh?: { id: string; revision: number };
   onReady?: (ready: boolean) => void;
+  /**
+   * Opts in to in-page back: reports whether the page has history of its own
+   * to step back through, and turns on WKWebView's back swipe while it does.
+   */
+  onHistoryBack?: (canGoBack: boolean) => void;
+  ref?: Ref<SurfaceHandle>;
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -79,6 +92,21 @@ export function SecureSurface({
     onReady?.(ready);
     return () => onReady?.(false);
   }, [ready, onReady]);
+  // WebKit's own canGoBack. The sign-in pages never enter history (they are
+  // replaced) and refused or external loads never add to it, so it counts only
+  // pages, pushState and hash steps the person actually visited.
+  const [webCanGoBack, setWebCanGoBack] = useState(false);
+  const historyBack =
+    Boolean(onHistoryBack) && signedIn && ready && webCanGoBack;
+  useEffect(() => {
+    onHistoryBack?.(historyBack);
+    return () => onHistoryBack?.(false);
+  }, [historyBack, onHistoryBack]);
+  useImperativeHandle(
+    ref,
+    () => ({ goBack: () => view.current?.goBack() }),
+    [],
+  );
   // A freshly loaded canvas is already current: only revisions requested after
   // it loaded become refresh commands.
   const sentRevision = useRef(dashboardRefresh?.revision);
@@ -97,6 +125,7 @@ export function SecureSurface({
     failed.current = true;
     setProblem(message);
   };
+  const openInBrowser = useSystemBrowser();
   if (problem)
     return (
       <View style={{ padding: 12 }}>
@@ -112,6 +141,28 @@ export function SecureSurface({
   const inTarget = (url: URL) =>
     url.pathname === target ||
     (target.endsWith('/') && url.pathname.startsWith(target));
+  const context = {
+    origin,
+    target,
+    handoff,
+    signedIn,
+    ready,
+    canOpenApp: Boolean(onOpenApp),
+  };
+  const follow = (decision: SurfaceDecision) => {
+    switch (decision.action) {
+      case 'browser':
+        openInBrowser(decision.url);
+        break;
+      case 'app':
+        onOpenApp?.(decision.slug);
+        break;
+      case 'expired':
+        fail('Your session expired. Try again to reconnect securely.');
+        break;
+    }
+    return decision.action === 'load';
+  };
   // The source never changes: switching it would push a history entry.
   const source = webViewHandoffSource(origin, handoff);
   return (
@@ -122,67 +173,30 @@ export function SecureSurface({
         incognito
         sharedCookiesEnabled={false}
         thirdPartyCookiesEnabled={false}
-        setSupportMultipleWindows={false}
+        // New windows reach onOpenWindow; scripts open one only on a tap.
+        setSupportMultipleWindows
         javaScriptCanOpenWindowsAutomatically={false}
         allowFileAccess={false}
         allowFileAccessFromFileURLs={false}
         allowUniversalAccessFromFileURLs={false}
         mixedContentMode="never"
         originWhitelist={['*']}
-        // Back belongs to the native stack, never to handoff/iframe history.
-        allowsBackForwardNavigationGestures={false}
-        onShouldStartLoadWithRequest={(request) => {
-          if (request.url === 'about:blank') return true;
-          // Dashboard widgets mount in sandboxed srcdoc subframes. Never allow
-          // an opaque document to replace the authenticated top-level surface.
-          if (request.url === 'about:srcdoc' && request.isTopFrame === false)
-            return true;
-          const url = sameInstance(origin, request.url);
-          if (request.isTopFrame === false) return Boolean(url);
-          if (url && !signedIn)
-            return (
-              url.pathname === HANDOFF_CONSUME_PATH ||
-              url.href === handoff.completionUrl
-            );
-          if (url && inTarget(url)) return true;
-          const app = url?.pathname.match(/^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/);
-          if (app && onOpenApp) {
-            onOpenApp(app[1]);
-            return false;
-          }
-          if (url?.pathname === '/login') {
-            fail('Your session expired. Try again to reconnect securely.');
-            return false;
-          }
-          let external: URL;
-          try {
-            external = new URL(request.url);
-          } catch {
-            return false;
-          }
-          if (
-            !url &&
-            external.protocol === 'https:' &&
-            !external.username &&
-            !external.password
-          )
-            Alert.alert('Open in your browser?', external.origin, [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open',
-                onPress: () =>
-                  void WebBrowser.openBrowserAsync(external.href).catch(() =>
-                    fail('Couldn’t open the browser.'),
-                  ),
-              },
-            ]);
-          return false;
+        // The edge swipe steps back through the page's own history, then
+        // belongs to the native stack again.
+        allowsBackForwardNavigationGestures={historyBack}
+        onShouldStartLoadWithRequest={(request) =>
+          follow(decideLoad(request, context))
+        }
+        onOpenWindow={({ nativeEvent }) => {
+          follow(decideNewWindow(nativeEvent.targetUrl, context));
         }}
         onNavigationStateChange={(state) => {
           // Single-page routing changes the URL without a load request, so it
           // bypasses onShouldStartLoadWithRequest. Keep the surface on its page;
           // App links open natively instead of inside this view.
-          if (!signedIn || state.loading) return;
+          if (!signedIn) return;
+          setWebCanGoBack(state.canGoBack);
+          if (state.loading) return;
           const url = sameInstance(origin, state.url);
           if (!url || inTarget(url) || url.href === handoff.completionUrl)
             return;

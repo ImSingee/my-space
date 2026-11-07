@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { appDestination, type BrowserDestination } from '../../src/core';
-import { SecureSurface } from '../../src/ui/secure-surface';
+import { SecureSurface, type SurfaceHandle } from '../../src/ui/secure-surface';
 import { useSession } from '../../src/state/session';
+import { useWebHistoryBack } from '../../src/state/use-web-history-back';
 import { IconButton } from '../../src/ui/button';
 import { Busy, Notice, errorText } from '../../src/ui/primitives';
 import { palette as c } from '../../src/ui/theme';
@@ -20,6 +21,10 @@ export default function AppScreen() {
   }>();
   const { api, origin, epoch } = useSession();
   const [attempt, setAttempt] = useState(0);
+  // Back steps through the App's own pages first, then leaves the screen.
+  const surface = useRef<SurfaceHandle>(null);
+  const [inPageBack, setInPageBack] = useState(false);
+  useWebHistoryBack(inPageBack, () => surface.current?.goBack());
   const app = useQuery({
     queryKey: [origin, 'app', id],
     queryFn: ({ signal }) => api!.app(id, signal),
@@ -57,6 +62,7 @@ export default function AppScreen() {
       <Stack.Screen
         options={{
           title: name,
+          gestureEnabled: !inPageBack,
           headerTransparent: false,
           headerStyle: { backgroundColor: c.card },
           headerRight: () => (
@@ -83,11 +89,13 @@ export default function AppScreen() {
         <Busy label={`Opening ${name}`} />
       ) : (
         <SecureSurface
+          ref={surface}
           key={`${epoch}-${attempt}`}
           origin={origin!}
           handoff={data}
           destination={destination}
           retry={retry}
+          onHistoryBack={setInPageBack}
         />
       )}
     </SafeAreaView>
