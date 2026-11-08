@@ -211,7 +211,10 @@ export class HatchApiClient {
         },
         credentialSnapshot,
       );
-      if (!response.ok) throw statusError(response.status);
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
+        throw statusError(response.status);
+      }
       const value: unknown = await response.json();
       throwIfAborted(bounded.signal);
       if (typeof value !== 'object' || value === null) throw new Error();
@@ -230,6 +233,10 @@ export class HatchApiClient {
         'The instance returned an invalid response.',
       );
     } finally {
+      // Cancel the native request too: cancelling an unread Expo response body
+      // alone does not stop the network task. Do this after error mapping so
+      // cleanup cannot turn a server rejection into a timeout.
+      bounded.abort();
       bounded.dispose();
     }
   }
@@ -263,7 +270,20 @@ export class HatchApiClient {
         ok: response.ok,
         data: data as Record<string, unknown>,
       };
+    } catch (error) {
+      if (bounded.signal.aborted && !signal.aborted)
+        throw new MobileError(
+          'request_timeout',
+          'The instance took too long to respond.',
+        );
+      throwIfAborted(signal);
+      if (error instanceof MobileError) throw error;
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned an invalid login response.',
+      );
     } finally {
+      bounded.abort();
       bounded.dispose();
     }
   }
@@ -440,7 +460,22 @@ export class HatchApiClient {
     signal?: AbortSignal,
   ): Promise<RunCreated> {
     try {
-      return await this.post('/api/agent/runs', input, signal);
+      const result = await this.post<RunCreated>(
+        '/api/agent/runs',
+        input,
+        signal,
+      );
+      if (
+        typeof result.runId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,256}$/.test(result.runId) ||
+        typeof result.startedAt !== 'string' ||
+        !Number.isFinite(Date.parse(result.startedAt))
+      )
+        throw new MobileError(
+          'invalid_response',
+          'The instance returned an invalid run identity.',
+        );
+      return result;
     } catch (error) {
       if (
         error instanceof MobileError &&
@@ -535,33 +570,40 @@ export class HatchApiClient {
       connection.signal.addEventListener('abort', onAbort, { once: true });
       if (connection.signal.aborted) onAbort();
     });
-    let response: Response;
     try {
-      response = await Promise.race([
-        this.fetchResponse(
-          `/api/agent/runs/${pathId(runId)}/events?after=${after}`,
-          {
-            signal: connection.signal,
-            headers: { accept: 'text/event-stream' },
-          },
-        ),
-        interrupted,
-      ]);
-    } catch (error) {
-      if (connection.signal.aborted) {
-        throwIfAborted(options.signal);
-        throw new MobileError(
-          'stream_timeout',
-          'The instance took too long to open the event stream. Reconnect to try again.',
-        );
+      let response: Response;
+      try {
+        response = await Promise.race([
+          this.fetchResponse(
+            `/api/agent/runs/${pathId(runId)}/events?after=${after}`,
+            {
+              signal: connection.signal,
+              headers: { accept: 'text/event-stream' },
+            },
+          ),
+          interrupted,
+        ]);
+      } catch (error) {
+        if (connection.signal.aborted) {
+          throwIfAborted(options.signal);
+          throw new MobileError(
+            'stream_timeout',
+            'The instance took too long to open the event stream. Reconnect to try again.',
+          );
+        }
+        throw error;
+      } finally {
+        connection.signal.removeEventListener('abort', onAbort);
+        connection.dispose();
       }
-      throw error;
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
+        throw statusError(response.status);
+      }
+      return await streamRunEvents(response, options);
     } finally {
-      connection.signal.removeEventListener('abort', onAbort);
-      connection.dispose();
+      connection.abort();
     }
-    if (!response.ok) throw statusError(response.status);
-    return streamRunEvents(response, options);
   }
   async signOut(signal?: AbortSignal): Promise<void> {
     // A failed server revocation is surfaced; the UI may offer explicit local-only forget.

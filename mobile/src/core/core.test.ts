@@ -410,6 +410,95 @@ describe('instance and credential boundaries', () => {
 });
 
 describe('request lifecycle races', () => {
+  it('discards non-OK JSON and stream bodies without waiting, aborting the native fetch and preserving the status', async () => {
+    vi.useFakeTimers();
+    const cancellations: ReturnType<typeof vi.fn>[] = [];
+    const fetcher = vi.fn<FetchLike>(async () => {
+      const cancel = vi.fn<() => Promise<void>>(() => new Promise(() => {}));
+      cancellations.push(cancel);
+      return new Response(new ReadableStream<Uint8Array>({ cancel }), {
+        status: 503,
+      });
+    });
+    const { client, vault } = setup(fetcher);
+    await vault.set(origin, 'fixture-token');
+    const onEvent = vi.fn<(packet: RunStreamEvent) => void>();
+    await expect(client.request('/api/agent/runs')).rejects.toMatchObject({
+      code: 'request_failed',
+      status: 503,
+    });
+    await expect(client.streamRun('run-1', { onEvent })).rejects.toMatchObject({
+      code: 'request_failed',
+      status: 503,
+    });
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(cancellations.map((cancel) => cancel.mock.calls.length)).toEqual([
+      1, 1,
+    ]);
+    expect(fetcher.mock.calls.every(([, init]) => init.signal?.aborted)).toBe(
+      true,
+    );
+    expect(await vault.get(origin)).toBe('fixture-token');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps a successful native stream open past the header deadline and aborts it after the terminal event', async () => {
+    vi.useFakeTimers();
+    let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const fetcher = vi.fn<FetchLike>(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              body = controller;
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const { client, vault } = setup(fetcher);
+    await vault.set(origin, 'fixture-token');
+    const onEvent = vi.fn<(packet: RunStreamEvent) => void>();
+    const pending = client.streamRun('run-1', { onEvent });
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(false);
+    body!.enqueue(new TextEncoder().encode(event(1, { type: 'done' })));
+    await expect(pending).resolves.toEqual({ reason: 'terminal', lastSeq: 1 });
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('treats a missing or invalid run identity as ambiguous and never retries the mutation', async () => {
+    const startedAt = '2026-11-09T00:00:00.000Z';
+    const responses = [
+      {},
+      { runId: '../other', startedAt },
+      { runId: 'run-1', startedAt: 'invalid' },
+      { runId: 'run-1', startedAt },
+    ];
+    const fetcher = vi.fn<FetchLike>(async () => json(responses.shift()));
+    const { client, vault } = setup(fetcher);
+    await vault.set(origin, 'fixture-token');
+    const input = {
+      sessionId: 'session-1',
+      providerId: 'p',
+      modelId: 'm',
+      content: [{ type: 'text' as const, text: 'Keep this draft' }],
+    };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await expect(client.createRun(input)).rejects.toMatchObject({
+        code: 'ambiguous_run',
+      });
+      expect(fetcher).toHaveBeenCalledTimes(attempt);
+    }
+    await expect(client.createRun(input)).resolves.toEqual({
+      runId: 'run-1',
+      startedAt,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
   it('signs out the original credential without revoking a concurrently replaced login', async () => {
     const fetcher = vi
       .fn<FetchLike>()
@@ -566,6 +655,72 @@ describe('request lifecycle races', () => {
 });
 
 describe('device login lifecycle', () => {
+  it('reports a stalled device-token poll as a request timeout rather than user cancellation', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi
+      .fn<FetchLike>()
+      .mockResolvedValueOnce(json(grant()))
+      .mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener(
+              'abort',
+              () => reject(new Error('aborted')),
+              { once: true },
+            );
+          }),
+      );
+    const { client, vault } = setup(fetcher);
+    const failure = new DeviceLogin(client)
+      .start()
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(16_000);
+    await expect(failure).resolves.toMatchObject({ code: 'request_timeout' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1][1].signal?.aborted).toBe(true);
+    expect(await vault.get(origin)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('maps invalid login JSON to a safe response error', async () => {
+    const fetcher = vi.fn<FetchLike>().mockResolvedValue(new Response('{'));
+    const { client, vault } = setup(fetcher);
+    await expect(new DeviceLogin(client).start()).rejects.toMatchObject({
+      code: 'invalid_response',
+      message: 'The instance returned an invalid login response.',
+    });
+    expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(true);
+    expect(await vault.get(origin)).toBeNull();
+  });
+
+  it('also bounds login response bodies after their headers have arrived', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn<FetchLike>(
+      async (_url, init) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init.signal?.addEventListener(
+                'abort',
+                () => controller.error(new Error('aborted')),
+                { once: true },
+              );
+            },
+          }),
+        ),
+    );
+    const { client } = setup(fetcher);
+    const parent = new AbortController();
+    const failure = client
+      .deviceRequest('/api/auth/device/token', {}, parent.signal, 15_000)
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(failure).resolves.toMatchObject({ code: 'request_timeout' });
+    expect(parent.signal.aborted).toBe(false);
+    expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('polls while the native browser is open and stores a token only after approval', async () => {
     vi.useFakeTimers();
     const fetcher = vi

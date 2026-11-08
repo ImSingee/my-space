@@ -19,9 +19,24 @@ required for releases.
    pnpm --dir mobile eas login --device
    ```
 
-2. Link the app to an existing Expo project, or create `hatch-mobile` under the
-   chosen account with `pnpm --dir mobile eas init`. This records the real Expo
-   project ID in `mobile/app.config.ts`; the Apple app ID is a separate value.
+2. Confirm the configured project with `pnpm --dir mobile eas project:info`.
+   Normal releases keep the existing `extra.eas.projectId` in
+   `mobile/app.config.ts`; running `eas init` alone does not select a replacement.
+
+   To deliberately replace the Expo project, first record its existing owner,
+   slug, and project ID for recovery. In `mobile/app.config.ts`, remove only
+   `extra.eas.projectId` and set `owner` and `slug` for the intended account and
+   project. Run `pnpm --dir mobile eas init --account <account>` to create or
+   select that project, then write the returned project ID into the dynamic
+   config manually and verify it with `project:info`. Alternatively, if the
+   replacement already exists, set its owner, slug, and known project ID
+   together in the config and verify them. The Apple app ID and bundle identifier
+   stay the same when replacing only the Expo project.
+
+   A replacement has separate remote build numbering and project credential
+   assignments. Complete the next two steps for that project before releasing.
+   Restoring the recorded config points the local app back at the original
+   project; it does not transfer remote builds or credentials.
 
 3. Initialize the remote iOS build number with
    `pnpm --dir mobile eas build:version:set --platform ios --profile production`.

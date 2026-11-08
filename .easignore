@@ -30,6 +30,8 @@ mobile/expo-env.d.ts
 **/credentials.json
 **/*.p8
 **/*.p12
+**/*.[pP][eE][mM]
+**/*.[pP][fF][xX]
 **/*.key
 **/*.jks
 **/*.mobileprovision

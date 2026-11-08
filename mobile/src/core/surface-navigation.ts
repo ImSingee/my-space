@@ -39,6 +39,21 @@ const BLOCK = { action: 'block' } as const;
 const HANDOFF_PREFIX = '/api/auth/handoffs/';
 const APP_PATH = /^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/;
 
+// Paths and tickets use ASCII. Decode those escapes independently so an
+// unrelated malformed escape or invalid UTF-8 cannot hide a credential.
+// Reject excessive nesting rather than passing an ambiguous URL outside.
+function decodeUrlAscii(value: string): string | null {
+  let text = value;
+  for (let depth = 0; depth < 4; depth++) {
+    const decoded = text.replace(/%([0-7][0-9a-f])/gi, (_escape, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    );
+    if (decoded === text) return text;
+    text = decoded;
+  }
+  return /%[0-7][0-9a-f]/i.test(text) ? null : text;
+}
+
 function parse(value: string) {
   try {
     return new URL(value);
@@ -66,18 +81,26 @@ function inTarget(url: URL, target: string) {
  * The only thing that leaves the app is a plain http(s) URL: no credentials in
  * it, no handoff page and no ticket. Cookies and tokens never go with it.
  */
-export function browserUrl(value: string, context: SurfaceContext) {
+export function browserUrl(
+  value: string,
+  context: Pick<SurfaceContext, 'origin' | 'handoff'>,
+) {
   const url = parse(value);
   if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:'))
     return null;
   if (url.username || url.password) return null;
-  if (url.origin === context.origin && url.pathname.startsWith(HANDOFF_PREFIX))
-    return null;
-  let text = url.href;
-  try {
-    text = decodeURIComponent(text);
-  } catch {
-    // Keep the encoded form; the ticket alphabet is never escaped.
+  const text = decodeUrlAscii(url.href);
+  const path = decodeUrlAscii(url.pathname);
+  if (text === null || path === null) return null;
+  if (url.origin === context.origin) {
+    // URL normalizes dot segments and backslashes after decoding as well.
+    const normalized = parse(`${url.origin}${path}`)?.pathname;
+    if (
+      !normalized ||
+      normalized === HANDOFF_PREFIX.slice(0, -1) ||
+      normalized.startsWith(HANDOFF_PREFIX)
+    )
+      return null;
   }
   if (context.handoff.ticket && text.includes(context.handoff.ticket))
     return null;
@@ -95,8 +118,9 @@ export function decideLoad(
   request: SurfaceRequest,
   context: SurfaceContext,
 ): SurfaceDecision {
-  if (request.url === 'about:blank') return LOAD;
   const subframe = request.isTopFrame === false;
+  if (request.url === 'about:blank')
+    return subframe || !context.signedIn ? LOAD : BLOCK;
   // Dashboard widgets mount in sandboxed srcdoc subframes. An opaque document
   // never replaces the authenticated top-level surface.
   if (request.url === 'about:srcdoc') return subframe ? LOAD : BLOCK;

@@ -217,6 +217,7 @@ export function boundedSignal(parent?: AbortSignal, timeoutMs?: number) {
     timeoutMs === undefined ? undefined : setTimeout(abort, timeoutMs);
   return {
     signal: controller.signal,
+    abort,
     dispose() {
       if (timer !== undefined) clearTimeout(timer);
       parent?.removeEventListener('abort', abort);

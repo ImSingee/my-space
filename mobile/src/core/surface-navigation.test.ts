@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decideLoad,
   decideNewWindow,
+  browserUrl,
   stepsBackInPage,
   type SurfaceContext,
 } from './surface-navigation';
@@ -116,6 +117,58 @@ describe('surface navigation', () => {
           .action === 'browser',
     );
     expect(leaked).toEqual([]);
+  });
+
+  it('keeps partially encoded tickets private even alongside malformed escapes', () => {
+    const escaped = `%54${ticket.slice(1)}`;
+    for (const value of [
+      `https://docs.example/?ticket=${escaped}&bad=%ZZ`,
+      `https://docs.example/?bad=%FF#${escaped}`,
+      `https://docs.example/?ticket=%2554${ticket.slice(1)}`,
+    ]) {
+      expect(browserUrl(value, app)).toBeNull();
+      expect(decideNewWindow(value, app).action).toBe('block');
+      expect(
+        decideLoad({ url: value, navigationType: 'click' }, app).action,
+      ).toBe('block');
+    }
+  });
+
+  it('blocks encoded handoff paths at the shared browser boundary', () => {
+    for (const path of [
+      '/api/auth/%68andoffs/consume?ticket=another-ticket',
+      '/api%2fauth%2fhandoffs%2fcomplete',
+      '/api/auth/%2568andoffs/consume',
+      '/api/elsewhere/%2e%2e/auth/%68andoffs/consume',
+      '/api/auth%5chandoffs%5cconsume',
+      '/api/auth/%68andoffs',
+    ]) {
+      expect(browserUrl(`${origin}${path}`, app)).toBeNull();
+      expect(decideNewWindow(`${origin}${path}`, app).action).toBe('block');
+    }
+    expect(
+      browserUrl('https://docs.example/help%20page?price=100%25', app),
+    ).toBe('https://docs.example/help%20page?price=100%25');
+  });
+
+  it('allows blank initialization and subframes without blanking a signed-in surface', () => {
+    expect(
+      decideLoad(
+        { url: 'about:blank', isTopFrame: true },
+        {
+          ...app,
+          signedIn: false,
+          ready: false,
+        },
+      ).action,
+    ).toBe('load');
+    expect(
+      decideLoad({ url: 'about:blank', isTopFrame: false }, app).action,
+    ).toBe('load');
+    expect(
+      decideLoad({ url: 'about:blank', isTopFrame: true }, app).action,
+    ).toBe('block');
+    expect(decideLoad({ url: 'about:blank' }, app).action).toBe('block');
   });
 
   it('lets the page take only a single step back and never holds other removals', () => {
