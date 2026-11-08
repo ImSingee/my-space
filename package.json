@@ -39,7 +39,9 @@
     "mobile:start": "pnpm --dir mobile start",
     "mobile:check": "pnpm --dir mobile check:types",
     "mobile:test": "pnpm --dir mobile test",
-    "mobile:export:ios": "pnpm --dir mobile export:ios"
+    "mobile:export:ios": "pnpm --dir mobile export:ios",
+    "mobile:release:ios": "pnpm --dir mobile release:ios",
+    "mobile:submit:ios": "pnpm --dir mobile submit:ios"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.7",

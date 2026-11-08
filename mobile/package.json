@@ -9,6 +9,9 @@
     "android": "expo run:android",
     "check:types": "tsc --noEmit",
     "export:ios": "expo export --platform ios",
+    "eas": "pnpm --config.ignore-scripts=true dlx eas-cli@27.5.0",
+    "release:ios": "pnpm eas build --platform ios --profile production --auto-submit",
+    "submit:ios": "pnpm eas submit --platform ios --profile production",
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
