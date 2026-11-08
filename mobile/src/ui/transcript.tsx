@@ -5,6 +5,7 @@ import { Details } from './details';
 import { Glyph } from './glyph';
 import { Egg, useReducedMotion } from './primitives';
 import { Text, type } from './text';
+import { messageBlocks } from './transcript-content';
 import { palette as c } from './theme';
 
 function record(
@@ -53,10 +54,7 @@ export function TranscriptMessage({ value }: { value: JsonValue }) {
   }
   if (role !== 'user' && role !== 'assistant') return null;
   const mine = role === 'user';
-  const displayContent =
-    mine && Array.isArray(message.composerContent)
-      ? message.composerContent
-      : content;
+  const displayContent = messageBlocks(message);
   const ink = mine ? c.card : c.ink;
   return (
     <View

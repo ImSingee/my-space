@@ -13,10 +13,20 @@ export function Details({
   state,
 }: DetailProps & { state?: 'working' | 'done' | 'failed' }) {
   const [expanded, setExpanded] = useState(false);
+  const failed = state === 'failed' || error;
+  // The dot's color is not announced, so screen readers hear the status too.
+  const status =
+    state === 'working'
+      ? 'In progress'
+      : failed
+        ? 'Failed'
+        : state === 'done'
+          ? 'Done'
+          : undefined;
   const dot =
     state === 'working'
       ? c.lime
-      : state === 'failed' || error
+      : failed
         ? c.danger
         : state === 'done'
           ? c.moss
@@ -35,6 +45,7 @@ export function Details({
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         accessibilityLabel={title}
+        accessibilityValue={status ? { text: status } : undefined}
         onPress={() => setExpanded(!expanded)}
         style={({ pressed }) => ({
           minHeight: 44,

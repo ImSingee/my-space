@@ -18,11 +18,13 @@ const options = {
   keychainService: 'app.hatch.mobile.preferences',
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
+/** Reading and saving fail differently, so each names what went wrong. */
+export type NavigationProblem = { title: string; detail: string };
 const NavigationContext = createContext<{
   ready: boolean;
   preferences: NavigationPreferences;
   saving: boolean;
-  error: string | null;
+  error: NavigationProblem | null;
   save: (value: NavigationPreferences) => Promise<void>;
 } | null>(null);
 export function NavigationProvider({ children }: PropsWithChildren) {
@@ -30,19 +32,25 @@ export function NavigationProvider({ children }: PropsWithChildren) {
   const [preferences, setPreferences] = useState(defaultNavigation);
   const [saving, setSaving] = useState(false);
   const saveInProgress = useRef(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<NavigationProblem | null>(null);
   useEffect(() => {
     void SecureStore.getItemAsync(key, options)
       .then((raw) => {
         try {
           if (raw) setPreferences(normalizeNavigation(JSON.parse(raw)));
         } catch {
-          setError(
-            'Saved navigation could not be read. Default tabs are shown.',
-          );
+          setError({
+            title: 'Saved tabs couldn’t be read',
+            detail: 'Default tabs are shown until you save new settings.',
+          });
         }
       })
-      .catch(() => setError('Couldn’t read this device’s navigation settings.'))
+      .catch(() =>
+        setError({
+          title: 'Saved tabs couldn’t be read',
+          detail: 'Couldn’t read this device’s navigation settings.',
+        }),
+      )
       .finally(() => setReady(true));
   }, []);
   const save = async (value: NavigationPreferences) => {
@@ -55,7 +63,10 @@ export function NavigationProvider({ children }: PropsWithChildren) {
       await SecureStore.setItemAsync(key, JSON.stringify(next), options);
       setPreferences(next);
     } catch {
-      setError('Couldn’t save on this device. Please try again.');
+      setError({
+        title: 'Settings weren’t saved',
+        detail: 'Couldn’t save on this device. Please try again.',
+      });
     } finally {
       saveInProgress.current = false;
       setSaving(false);

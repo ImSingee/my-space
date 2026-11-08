@@ -42,7 +42,8 @@ export default function WorkflowScreen() {
   );
   const data = query.data;
   const pinned = workspace.data?.pinnedWorkflowIds.includes(id) ?? false;
-  if (query.error)
+  // A failed refresh keeps what was already loaded.
+  if (query.error && !query.data)
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: c.paper }}>
         <Notice
@@ -75,6 +76,17 @@ export default function WorkflowScreen() {
     >
       <Masthead nested eyebrow="Workflow" title={data.name} />
       <View style={{ paddingHorizontal: 20, gap: 14 }}>
+        {query.error ? (
+          <Notice
+            tone="danger"
+            title="Couldn’t refresh"
+            detail={errorText(query.error)}
+            action={{
+              label: 'Try again',
+              onPress: () => void query.refetch(),
+            }}
+          />
+        ) : null}
         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
           <StatusTag status={data.status} />
           {pinned ? <Tag tone="outline" glyph="pin" label="Pinned" /> : null}

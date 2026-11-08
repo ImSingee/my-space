@@ -125,7 +125,7 @@ export function SecureSurface({
     failed.current = true;
     setProblem(message);
   };
-  const openInBrowser = useSystemBrowser();
+  const openInBrowser = useSystemBrowser(origin, handoff);
   if (problem)
     return (
       <View style={{ padding: 12 }}>
@@ -200,6 +200,12 @@ export function SecureSurface({
           const url = sameInstance(origin, state.url);
           if (!url || inTarget(url) || url.href === handoff.completionUrl)
             return;
+          // A page that routes itself to sign-in has lost its session; offer
+          // the reconnect instead of stepping back onto the expired page.
+          if (url.pathname === '/login') {
+            fail('Your session expired. Try again to reconnect securely.');
+            return;
+          }
           const app = url.pathname.match(/^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/);
           if (state.canGoBack) view.current?.goBack();
           else replacePage(view.current, href);

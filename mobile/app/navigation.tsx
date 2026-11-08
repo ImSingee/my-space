@@ -48,7 +48,7 @@ export default function NavigationSettings() {
       />
       <View style={{ paddingHorizontal: 16 }}>
         {error ? (
-          <Notice tone="danger" title="Settings weren’t saved" detail={error} />
+          <Notice tone="danger" title={error.title} detail={error.detail} />
         ) : null}
         <SectionLabel>Preview</SectionLabel>
         <View

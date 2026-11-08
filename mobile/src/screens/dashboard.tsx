@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { REFRESH_PRESETS, formatInterval } from '@hatch/platform-api';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { router, useIsFocused } from 'expo-router';
 import { Animated, Easing, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +37,8 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
   const focused = useIsFocused();
   const [selection, setSelection] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // The tab and a pushed copy never share a one-use ticket.
+  const screen = useId();
   const workspace = useQuery({
     queryKey: [origin, 'workspace'],
     queryFn: ({ signal }) => api!.workspace(signal),
@@ -56,7 +58,7 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
   }
   // One sign-in per surface: switching dashboards navigates the same WebView.
   const handoff = useQuery({
-    queryKey: [origin, 'browser-handoff', 'dashboard', epoch, attempt],
+    queryKey: [origin, 'browser-handoff', 'dashboard', screen, epoch, attempt],
     queryFn: ({ signal }) => api!.createHandoff(signal),
     enabled: Boolean(api && destination && focused),
     retry: false,
@@ -128,7 +130,9 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
         <RefreshButton
           revision={refreshRevision}
           onPress={refresh}
-          disabled={!ready}
+          // With no dashboards there is no canvas to wait for; a refresh
+          // can still find one created on the web.
+          disabled={!ready && !(workspace.data && !dashboards.length)}
         />
       }
     >

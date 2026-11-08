@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { appDestination, type BrowserDestination } from '../../src/core';
@@ -21,6 +21,8 @@ export default function AppScreen() {
   }>();
   const { api, origin, epoch } = useSession();
   const [attempt, setAttempt] = useState(0);
+  // Each screen signs in with its own one-use ticket, even for the same App.
+  const screen = useId();
   // Back steps through the App's own pages first, then leaves the screen.
   const surface = useRef<SurfaceHandle>(null);
   const [inPageBack, setInPageBack] = useState(false);
@@ -39,7 +41,7 @@ export default function AppScreen() {
     invalid = error;
   }
   const handoff = useQuery({
-    queryKey: [origin, 'browser-handoff', 'app', id, epoch, attempt],
+    queryKey: [origin, 'browser-handoff', 'app', id, screen, epoch, attempt],
     queryFn: ({ signal }) => api!.createHandoff(signal),
     enabled: Boolean(api && destination),
     retry: false,

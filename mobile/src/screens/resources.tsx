@@ -46,18 +46,19 @@ export function ResourcesScreen({
     // Pinned counts include workflows even while the complete list is shown.
     enabled: Boolean(api) && kind === 'apps',
   });
+  // Both scopes count pinned workflows, so a refresh re-reads them too.
   const refresh = () =>
     Promise.all([
       resources.refetch(),
       workspace.refetch(),
-      ...(kind === 'apps' && scope === 'pinned' ? [workflows.refetch()] : []),
+      ...(kind === 'apps' ? [workflows.refetch()] : []),
     ]);
   const pull = usePullToRefresh(focused, refresh);
   const match = (name: string) =>
     name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
-  const available = (resources.data ?? []).filter(
-    (item) => item.status !== 'archived',
-  );
+  const live = (items: AppSummary[] | undefined) =>
+    (items ?? []).filter((item) => item.status !== 'archived');
+  const available = live(resources.data);
   const appById = new Map(available.map((item) => [item.id, item]));
   const allPins = (workspace.data?.appPins ?? []).filter((pin) =>
     appById.has(pin.appId),
@@ -65,7 +66,7 @@ export function ResourcesScreen({
   const pins = allPins.filter((pin) => match(pin.label));
   const pinnedWorkflowIds = workspace.data?.pinnedWorkflowIds ?? [];
   const workflowById = new Map(
-    (kind === 'workflows' ? available : (workflows.data ?? [])).map((item) => [
+    (kind === 'workflows' ? available : live(workflows.data)).map((item) => [
       item.id,
       item,
     ]),
