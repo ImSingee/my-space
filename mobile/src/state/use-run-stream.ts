@@ -5,13 +5,18 @@ import {
   initialStreamState,
   reduceStreamEvent,
   type HatchApiClient,
+  type StreamState,
 } from '../core';
 
 /** A cursor belongs to its rendered state. Cold opens replay from zero. */
 export function useRunStream(
   api: HatchApiClient | null,
   runId: string | null,
-  reconcile: () => Promise<boolean>,
+  /**
+   * Called when the stream stops: with the run and the exact state it showed,
+   * read synchronously, so a caller never keeps an older snapshot.
+   */
+  reconcile: (runId: string, shown: StreamState) => Promise<boolean>,
 ) {
   const [focused, setFocused] = useState(false);
   const [active, setActive] = useState(AppState.currentState === 'active');
@@ -75,7 +80,7 @@ export function useRunStream(
             });
           }
           if (controller.signal.aborted) return;
-          if (await reconcileRef.current()) return;
+          if (await reconcileRef.current(runId, stateRef.current)) return;
           // The SSE endpoint can report a transient transport error while the
           // run remains active. Re-read that sequence instead of losing an event.
           if (stateRef.current.terminal === 'error') {

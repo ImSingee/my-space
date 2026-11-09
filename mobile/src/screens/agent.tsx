@@ -7,12 +7,14 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import type { SessionSummary } from '../core';
+import { useRef } from 'react';
 import { useSession } from '../state/session';
+import { useConversationListRefresh } from '../state/use-conversation-list-refresh';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
 import { usePullToRefresh } from '../state/use-pull-to-refresh';
 import { Glyph } from '../ui/glyph';
 import { Busy, EmptyState, Notice, Tag, errorText } from '../ui/primitives';
+import { sectionsOf, stamp } from '../ui/session-dates';
 import {
   Masthead,
   PageRoot,
@@ -21,46 +23,6 @@ import {
 } from '../ui/screen';
 import { Text, type } from '../ui/text';
 import { palette as c, radii } from '../ui/theme';
-
-const day = 24 * 60 * 60 * 1000;
-
-function sectionsOf(sessions: SessionSummary[]) {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const today = start.getTime();
-  const buckets = [
-    { title: 'Today', from: today },
-    { title: 'Yesterday', from: today - day },
-    { title: 'This week', from: today - 6 * day },
-    { title: 'Earlier', from: -Infinity },
-  ];
-  return buckets
-    .map((bucket, index) => ({
-      title: bucket.title,
-      data: sessions.filter((item) => {
-        const at = new Date(item.updatedAt).getTime();
-        const until = index ? buckets[index - 1].from : Infinity;
-        return at >= bucket.from && at < until;
-      }),
-    }))
-    .filter((section) => section.data.length);
-}
-
-// Section headers already name the day; rows add the detail that is missing.
-function stamp(iso: string) {
-  const at = new Date(iso);
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const since = at.getTime() - start.getTime();
-  if (since >= -day)
-    return at.toLocaleTimeString(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  if (since >= -6 * day)
-    return at.toLocaleDateString(undefined, { weekday: 'short' });
-  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
 
 export function AgentScreen({ nested = false }: { nested?: boolean }) {
   const { api, origin } = useSession();
@@ -86,9 +48,19 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
       router.push({ pathname: '/chat/[id]', params: { id: result.id } });
     },
   });
+  // A second tap can land before the pending state renders; one request only.
+  const creating = useRef(false);
   const start = () => {
-    if (!create.isPending) create.mutate();
+    if (creating.current) return;
+    creating.current = true;
+    create.mutate(undefined, {
+      onSettled: () => {
+        creating.current = false;
+      },
+    });
   };
+  const refetchSessions = sessions.refetch;
+  useConversationListRefresh(focused, refetchSessions);
   const pull = usePullToRefresh(focused, () => sessions.refetch());
   const list = sessions.data ?? [];
   return (

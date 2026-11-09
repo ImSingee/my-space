@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Animated, Easing, Image, View } from 'react-native';
 import type { JsonValue, StreamState } from '../core';
+import { Button } from './button';
 import { Details } from './details';
 import { Glyph } from './glyph';
 import { Egg, useReducedMotion } from './primitives';
@@ -213,9 +214,14 @@ function WorkingDots() {
 export function LiveTranscript({
   state,
   status,
+  settled = false,
+  action,
 }: {
   state: StreamState;
   status: string;
+  /** A stopped run's frozen output: nothing is still working. */
+  settled?: boolean;
+  action?: { label: string; onPress: () => void };
 }) {
   return (
     <View style={{ gap: 10, paddingVertical: 4 }}>
@@ -225,12 +231,23 @@ export function LiveTranscript({
         accessibilityLiveRegion="polite"
         accessibilityLabel={status}
       >
-        <Speaker live />
-        <WorkingDots />
+        <Speaker live={!settled} />
+        {settled ? null : <WorkingDots />}
         <Text style={[type.meta, { flex: 1 }]} numberOfLines={2}>
           {status}
         </Text>
       </View>
+      {action ? (
+        <View style={{ alignSelf: 'flex-start' }}>
+          <Button
+            label={action.label}
+            variant="quiet"
+            size="small"
+            glyph="refresh"
+            onPress={action.onPress}
+          />
+        </View>
+      ) : null}
       {state.blocks.map((block, index) => {
         if (block.kind === 'text')
           return (
@@ -261,7 +278,7 @@ export function LiveTranscript({
           </View>
         ) : null;
       })}
-      {!state.blocks.length ? (
+      {!state.blocks.length && !settled ? (
         <Text style={type.callout}>Your Agent is getting started…</Text>
       ) : null}
       {state.error ? (

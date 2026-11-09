@@ -22,10 +22,18 @@ import {
   type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { AskAnswer, JsonValue } from '../../src/core';
+import type { AskAnswer, JsonValue, StreamState } from '../../src/core';
 import { useSession } from '../../src/state/session';
 import { useChatDraft, type Picked } from '../../src/state/use-chat-draft';
 import { useRunStream } from '../../src/state/use-run-stream';
+import {
+  checksSpent,
+  placeHeldReplies,
+  shownHeldReplies,
+  type HeldReply,
+} from '../../src/state/settled-run';
+import { useHeldReplies } from '../../src/state/use-held-replies';
+import { markConversationWorking } from '../../src/state/conversation-follow';
 import { useLifetimeSignal } from '../../src/state/use-lifetime-signal';
 import { AskCard } from '../../src/ui/ask-card';
 import { Button, IconButton } from '../../src/ui/button';
@@ -97,18 +105,66 @@ export default function ChatScreen() {
       })),
     ) ?? [];
 
+  // The run the composer, questions and environment requests belong to.
   const runId = detail?.activeRun?.id ?? optimisticRun;
-  const refresh = useCallback(async () => {
-    if (lifetimeSignal().aborted) return true;
-    const result = await refetchSession();
-    if (lifetimeSignal().aborted) return true;
-    if (result.error) throw result.error;
-    await queryClient.invalidateQueries({ queryKey: [origin, 'sessions'] });
-    await queryClient.invalidateQueries({ queryKey: [origin, 'apps'] });
-    setOptimisticRun(null);
-    return result.data?.activeRun === null;
-  }, [refetchSession, queryClient, origin, lifetimeSignal]);
-  const stream = useRunStream(api, runId, refresh);
+  // The stream follows its run until it lets go with the state it showed,
+  // even after the conversation stops listing the run as active.
+  const [following, setFollowing] = useState<string | null>(null);
+  if (runId && runId !== following) setFollowing(runId);
+  const streamRunId = runId ?? following;
+  const { held, end: holdReply, recheck } = useHeldReplies(refetchSession);
+  const refresh = useCallback(
+    async (ended?: { runId: string; state: StreamState }) => {
+      if (lifetimeSignal().aborted) return true;
+      const result = await refetchSession();
+      if (lifetimeSignal().aborted) return true;
+      if (result.error) throw result.error;
+      await queryClient.invalidateQueries({ queryKey: [origin, 'sessions'] });
+      await queryClient.invalidateQueries({ queryKey: [origin, 'apps'] });
+      const data = result.data;
+      if (!data) return false;
+      if (data.activeRun) {
+        setOptimisticRun(null);
+        return false;
+      }
+      // Only the stream lets go of its run, with the exact state it showed.
+      // A stop can end the run before its partial reply is saved; that reply
+      // is kept and re-checked rather than dropped.
+      if (!ended) return false;
+      holdReply(id, ended.runId, data, ended.state);
+      setOptimisticRun((current) => (current === ended.runId ? null : current));
+      setFollowing((current) => (current === ended.runId ? null : current));
+      return true;
+    },
+    [refetchSession, queryClient, origin, lifetimeSignal, holdReply, id],
+  );
+  const reconcile = useCallback(
+    (endedRunId: string, shown: StreamState) =>
+      refresh({ runId: endedRunId, state: shown }),
+    [refresh],
+  );
+  const stream = useRunStream(api, streamRunId, reconcile);
+  const heldShown = placeHeldReplies(
+    detail?.messages ?? [],
+    shownHeldReplies(held, id, detail),
+  );
+  const heldReply = (entry: HeldReply) => (
+    <LiveTranscript
+      key={entry.runId}
+      state={entry.state}
+      settled
+      status={
+        checksSpent(entry)
+          ? 'Stopped · this reply isn’t saved on your server yet'
+          : 'Stopped · checking for the saved reply'
+      }
+      action={
+        checksSpent(entry)
+          ? { label: 'Check again', onPress: recheck }
+          : undefined
+      }
+    />
+  );
   const ask = stream.state.lastSeq
     ? stream.state.pendingAsk
     : detail?.activeRun?.pendingAsk;
@@ -129,7 +185,7 @@ export default function ChatScreen() {
       const signal = lifetimeSignal();
       const text = (composer.current?.getText() ?? draft).trim();
       if (!selectedModel) throw new Error('Choose a configured model first.');
-      if (runId)
+      if (streamRunId)
         throw new Error('Wait for the current reply or stop it first.');
       const attachmentIds: string[] = [];
       for (const file of files.filter((item) => !item.image)) {
@@ -144,6 +200,9 @@ export default function ChatScreen() {
         );
         attachmentIds.push(file.id);
       }
+      // The list follows this conversation even if we leave before the
+      // request lands or its result is read.
+      markConversationWorking(queryClient, origin!, id);
       return api!.createRun(
         {
           sessionId: id,
@@ -208,14 +267,16 @@ export default function ChatScreen() {
   const cancel = useMutation({
     mutationFn: (targetRunId: string) =>
       api!.cancelRun(targetRunId, lifetimeSignal()),
-    onSuccess: refresh,
+    // The stream lets go of the stopped run itself, with its final state.
+    onSuccess: () => refresh(),
     onError: (error) => {
       if (!lifetimeSignal().aborted) setProblem(errorText(error));
     },
   });
   const retryRun = useMutation({
-    mutationFn: () =>
-      api!.createRun(
+    mutationFn: () => {
+      markConversationWorking(queryClient, origin!, id);
+      return api!.createRun(
         {
           sessionId: id,
           providerId: selectedModel!.providerId,
@@ -224,7 +285,8 @@ export default function ChatScreen() {
           expectedSessionUpdatedAt: detail!.updatedAt,
         },
         lifetimeSignal(),
-      ),
+      );
+    },
     onSuccess: async (result) => {
       if (lifetimeSignal().aborted) return;
       setOptimisticRun(result.runId);
@@ -349,15 +411,16 @@ export default function ChatScreen() {
     !Array.isArray(lastMessage) &&
     lastMessage.role === 'assistant' &&
     lastMessage.stopReason === 'error';
-  const status =
-    stream.connection === 'live'
+  const status = !runId
+    ? 'Stopping…'
+    : stream.connection === 'live'
       ? 'Working on your server'
       : stream.connection === 'paused'
         ? 'Updates paused · still working'
         : 'Reconnecting…';
   const canSend =
     !busy &&
-    !runId &&
+    !streamRunId &&
     Boolean(selectedModel) &&
     Boolean(draft.trim() || files.length);
   return (
@@ -399,6 +462,7 @@ export default function ChatScreen() {
             contentInsetAdjustmentBehavior="automatic"
             ref={list}
             data={detail?.messages ?? []}
+            extraData={held}
             keyExtractor={(_, index) => String(index)}
             contentContainerStyle={{
               paddingHorizontal: 16,
@@ -420,9 +484,19 @@ export default function ChatScreen() {
             onContentSizeChange={() => {
               if (atBottom) list.current?.scrollToEnd({ animated: false });
             }}
-            renderItem={({ item }) => <TranscriptMessage value={item} />}
+            renderItem={({ item, index }) => {
+              const after = heldShown.after.get(index);
+              return after ? (
+                <View style={{ gap: 18 }}>
+                  <TranscriptMessage value={item} />
+                  {after.map(heldReply)}
+                </View>
+              ) : (
+                <TranscriptMessage value={item} />
+              );
+            }}
             ListEmptyComponent={
-              !runId ? (
+              !streamRunId && !heldShown.rest.length ? (
                 <View style={{ gap: 14, paddingTop: 24 }}>
                   <View
                     style={{
@@ -472,7 +546,8 @@ export default function ChatScreen() {
             }
             ListFooterComponent={
               <View style={{ gap: 16 }}>
-                {runId ? (
+                {heldShown.rest.map(heldReply)}
+                {streamRunId ? (
                   <LiveTranscript state={stream.state} status={status} />
                 ) : null}
                 {ask && runId ? (
