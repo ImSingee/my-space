@@ -1,7 +1,7 @@
 import { AttachmentMenu, Choice } from '../../src/ui/native-controls';
 import { NativeField, type NativeFieldRef } from '../../src/ui/native-field';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useIsFocused, useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AskAnswer, JsonValue, StreamState } from '../../src/core';
 import { useSession } from '../../src/state/session';
 import { useChatDraft, type Picked } from '../../src/state/use-chat-draft';
+import { useRefreshOnReturn } from '../../src/state/use-refresh-on-return';
 import { useRunStream } from '../../src/state/use-run-stream';
 import {
   checksSpent,
@@ -78,6 +79,11 @@ export default function ChatScreen() {
     queryKey: [origin, 'session', id],
     queryFn: ({ signal }) => api!.session(id, signal),
     enabled: Boolean(api),
+  });
+  // Another client may add messages or start a run while a pushed screen
+  // covers this one. Joining any read in flight keeps background checks whole.
+  useRefreshOnReturn(useIsFocused(), () => {
+    if (api) void session.refetch({ cancelRefetch: false });
   });
   const config = useQuery({
     queryKey: [origin, 'config'],

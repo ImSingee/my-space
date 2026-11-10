@@ -2,6 +2,7 @@ import { render } from 'vitest-browser-react';
 import { afterEach, expect, test, vi } from 'vitest';
 import { usePullToRefresh } from '../../../mobile/src/state/use-pull-to-refresh';
 import { useDashboardAutoRefresh } from '../../../mobile/src/state/use-dashboard-auto-refresh';
+import { useRefreshOnReturn } from '../../../mobile/src/state/use-refresh-on-return';
 
 afterEach(() => vi.useRealTimers());
 
@@ -105,4 +106,35 @@ test('native scheduling stops off-screen/background and restarts for a new dashb
   await screen.rerender(<Timer refresh={refresh} seconds={0} />);
   await vi.advanceTimersByTimeAsync(15000);
   expect(refresh).toHaveBeenCalledTimes(2);
+});
+
+function Conversation({
+  focused,
+  refresh,
+}: {
+  focused: boolean;
+  refresh: () => unknown;
+}) {
+  useRefreshOnReturn(focused, refresh);
+  return null;
+}
+
+test('a conversation re-reads once each time it is shown again, never on first show or re-render', async () => {
+  const first = vi.fn<() => void>();
+  const screen = await render(<Conversation focused refresh={first} />);
+  expect(first).not.toHaveBeenCalled();
+  // A pushed App screen covers the conversation, then closes.
+  await screen.rerender(<Conversation focused={false} refresh={first} />);
+  await screen.rerender(<Conversation focused refresh={first} />);
+  expect(first).toHaveBeenCalledTimes(1);
+  // Each render brings a new callback; none of them reads on its own.
+  const latest = vi.fn<() => void>();
+  await screen.rerender(<Conversation focused refresh={latest} />);
+  await screen.rerender(<Conversation focused refresh={() => latest()} />);
+  expect(first).toHaveBeenCalledTimes(1);
+  expect(latest).not.toHaveBeenCalled();
+  await screen.rerender(<Conversation focused={false} refresh={latest} />);
+  await screen.rerender(<Conversation focused refresh={latest} />);
+  expect(latest).toHaveBeenCalledTimes(1);
+  expect(first).toHaveBeenCalledTimes(1);
 });
