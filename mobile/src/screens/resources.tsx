@@ -84,10 +84,11 @@ export function ResourcesScreen({
   const pinsByApp = new Map<string, number>();
   for (const pin of allPins)
     pinsByApp.set(pin.appId, (pinsByApp.get(pin.appId) ?? 0) + 1);
+  // Both Apps scopes show the pinned count, which includes workflows.
   const failure =
     resources.error ??
     workspace.error ??
-    (kind === 'apps' && scope === 'pinned' ? workflows.error : null);
+    (kind === 'apps' ? workflows.error : null);
   const pending =
     resources.isPending ||
     (scope === 'pinned' &&

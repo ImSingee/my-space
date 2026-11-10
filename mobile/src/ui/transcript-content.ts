@@ -15,7 +15,12 @@ export function messageBlocks(message: Record<string, JsonValue>) {
   const content = Array.isArray(message.content)
     ? message.content
     : [{ type: 'text', text: message.content ?? null }];
-  if (message.role !== 'user' || !Array.isArray(message.composerContent))
+  // An empty composer array carries no text; the stored content does.
+  if (
+    message.role !== 'user' ||
+    !Array.isArray(message.composerContent) ||
+    !message.composerContent.length
+  )
     return content;
   return [
     ...message.composerContent,

@@ -27,4 +27,11 @@ describe('stored message blocks', () => {
       { type: 'text', text: 'Hi' },
     ]);
   });
+
+  it('falls back to the stored content when composer content is empty', () => {
+    const content = [{ type: 'text', text: 'Plain words' }, image];
+    expect(
+      messageBlocks({ role: 'user', content, composerContent: [] }),
+    ).toEqual(content);
+  });
 });

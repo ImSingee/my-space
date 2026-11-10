@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { REFRESH_PRESETS, formatInterval } from '@hatch/platform-api';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { router, useIsFocused } from 'expo-router';
 import { Animated, Easing, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { useSession } from '../state/session';
 import { useAppActive } from '../state/use-app-active';
 import { useDashboardAutoRefresh } from '../state/use-dashboard-auto-refresh';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
+import { useSurfaceHandoff } from '../state/use-surface-handoff';
 import { IconButton } from '../ui/button';
 import { Choice } from '../ui/native-controls';
 import {
@@ -32,13 +33,11 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
   const [ready, setReady] = useState(false);
   // Each bump asks the loaded canvas to refresh its widgets once.
   const [refreshRevision, setRefreshRevision] = useState(0);
-  // Native tabs mount hidden screens. Handoff tickets live for a minute, so
-  // only request one when the dashboard is actually on screen.
+  // Native tabs mount hidden screens: the surface's sign-in and the refresh
+  // timer wait until this one is on screen.
   const focused = useIsFocused();
   const [selection, setSelection] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  // The tab and a pushed copy never share a one-use ticket.
-  const screen = useId();
   const workspace = useQuery({
     queryKey: [origin, 'workspace'],
     queryFn: ({ signal }) => api!.workspace(signal),
@@ -56,17 +55,6 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
   } catch (error) {
     invalid = error;
   }
-  // One sign-in per surface: switching dashboards navigates the same WebView.
-  const handoff = useQuery({
-    queryKey: [origin, 'browser-handoff', 'dashboard', screen, epoch, attempt],
-    queryFn: ({ signal }) => api!.createHandoff(signal),
-    enabled: Boolean(api && destination && focused),
-    retry: false,
-    staleTime: Infinity,
-    gcTime: 0,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
   // Recovery re-reads the list and establishes a fresh browser session.
   const retry = () => {
     void workspace.refetch();
@@ -185,32 +173,28 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
           overflow: 'hidden',
         }}
       >
-        {(workspace.error && !workspace.data) || handoff.error || invalid ? (
+        {(workspace.error && !workspace.data) || invalid ? (
           <View style={{ padding: 12 }}>
             <Notice
               tone="danger"
               title="Couldn’t load your dashboard"
-              detail={errorText(workspace.error ?? handoff.error ?? invalid)}
+              detail={errorText(workspace.error ?? invalid)}
               action={{ label: 'Try again', onPress: retry }}
             />
           </View>
-        ) : handoff.data && destination ? (
-          <SecureSurface
+        ) : destination && current ? (
+          // One surface per lifetime: switching dashboards navigates the same
+          // WebView, and a surface that comes back signs in afresh.
+          <DashboardSurface
             key={`${epoch}-${attempt}`}
             origin={origin!}
-            handoff={handoff.data}
+            focused={focused}
             destination={destination}
+            dashboardRefresh={{ id: current.id, revision: refreshRevision }}
             retry={retry}
-            dashboardRefresh={{ id: current!.id, revision: refreshRevision }}
             onReady={setReady}
-            onOpenApp={(slug) =>
-              router.push({
-                pathname: '/apps/[id]',
-                params: { id: slug, slug },
-              })
-            }
           />
-        ) : workspace.isPending || (current && handoff.isPending) ? (
+        ) : workspace.isPending ? (
           <Busy label="Loading widgets" />
         ) : (
           <View style={{ paddingHorizontal: 20 }}>
@@ -222,6 +206,56 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
         )}
       </View>
     </Screen>
+  );
+}
+
+/** Owns one web surface and the one-use ticket it signs in with. */
+function DashboardSurface({
+  origin,
+  focused,
+  destination,
+  dashboardRefresh,
+  retry,
+  onReady,
+}: {
+  origin: string;
+  focused: boolean;
+  destination: BrowserDestination;
+  dashboardRefresh: { id: string; revision: number };
+  retry: () => void;
+  onReady: (ready: boolean) => void;
+}) {
+  const { api } = useSession();
+  // Native tabs mount hidden screens. Tickets live for a minute, so a hidden
+  // dashboard waits until it is on screen before claiming one.
+  const handoff = useSurfaceHandoff({ api, origin, focused });
+  if (handoff.error)
+    return (
+      <View style={{ padding: 12 }}>
+        <Notice
+          tone="danger"
+          title="Couldn’t load your dashboard"
+          detail={errorText(handoff.error)}
+          action={{ label: 'Try again', onPress: retry }}
+        />
+      </View>
+    );
+  if (!handoff.data) return <Busy label="Loading widgets" />;
+  return (
+    <SecureSurface
+      origin={origin}
+      handoff={handoff.data}
+      destination={destination}
+      retry={retry}
+      dashboardRefresh={dashboardRefresh}
+      onReady={onReady}
+      onOpenApp={(slug) =>
+        router.push({
+          pathname: '/apps/[id]',
+          params: { id: slug, slug },
+        })
+      }
+    />
   );
 }
 
