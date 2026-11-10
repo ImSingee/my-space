@@ -1,7 +1,7 @@
 import type { StopReason } from '@earendil-works/pi-ai';
 import type { AgentRunStatus } from '~/db/schema';
 import type { SessionRunTiming } from '~server/agent-runs';
-import { type AssistantBlock, type ChatMessage, partsToText } from './types';
+import type { AssistantBlock, ChatMessage } from './types';
 import type { WorkPhase } from './work-process';
 
 export type RenderTurn =
@@ -125,48 +125,16 @@ export function replyMessage(
   };
 }
 
-/**
- * Recover the latest failed turn's original user payload for a retry.
- *
- * Only a provider error at the literal end of the raw transcript is retryable:
- * once anything newer exists, replaying the older prompt could duplicate work.
- */
-export function getRetryableErrorInput(messages: ChatMessage[]): {
-  text: string;
-  images: { data: string; mimeType: string }[];
-  userMessageIndex: number;
-} | null {
-  const last = messages.at(-1);
-  if (last?.role !== 'assistant' || last.stopReason !== 'error') return null;
-
-  for (let index = messages.length - 2; index >= 0; index--) {
-    const message = messages[index];
-    if (message.role !== 'user') continue;
-
-    const text = partsToText(
-      message.content,
-      message.attachments,
-      message.composerContent,
-    );
-    const images =
-      typeof message.content === 'string'
-        ? []
-        : message.content.flatMap((part) =>
-            part.type === 'image' &&
-            typeof part.data === 'string' &&
-            part.data.length > 0 &&
-            typeof part.mimeType === 'string' &&
-            part.mimeType.length > 0
-              ? [{ data: part.data, mimeType: part.mimeType }]
-              : [],
-          );
-
-    return text.trim().length > 0 ||
-      images.length > 0 ||
-      (message.attachments?.length ?? 0) > 0
-      ? { text, images, userMessageIndex: index }
-      : null;
+/** Index in `messages` of the user message for `userTurn`, or -1. */
+export function userMessageIndexOfTurn(
+  messages: readonly ChatMessage[],
+  userTurn: number,
+): number {
+  let turn = -1;
+  for (let index = 0; index < messages.length; index++) {
+    if (messages[index]?.role !== 'user') continue;
+    turn += 1;
+    if (turn === userTurn) return index;
   }
-
-  return null;
+  return -1;
 }

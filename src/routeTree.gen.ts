@@ -56,6 +56,7 @@ import { Route as ApiAgentRunsRunIdAnswerRouteImport } from './routes/api/agent/
 import { Route as ApiAgentRunsRunIdCancelRouteImport } from './routes/api/agent/runs/$runId/cancel'
 import { Route as ApiAgentRunsRunIdEnvRouteImport } from './routes/api/agent/runs/$runId/env'
 import { Route as ApiAgentRunsRunIdEventsRouteImport } from './routes/api/agent/runs/$runId/events'
+import { Route as ApiAgentSessionsSessionIdAutoRetryRouteImport } from './routes/api/agent/sessions/$sessionId/auto-retry'
 import { Route as ApiAppAppIdAppSplatRouteImport } from './routes/api/app/$appId/app/$'
 import { Route as ApiAppAppIdDataSplatRouteImport } from './routes/api/app/$appId/data/$'
 import { Route as ApiAppAppIdHookSplatRouteImport } from './routes/api/app/$appId/hook/$'
@@ -306,6 +307,12 @@ const ApiAgentRunsRunIdEventsRoute = ApiAgentRunsRunIdEventsRouteImport.update({
   path: '/$runId/events',
   getParentRoute: () => ApiAgentRunsRoute,
 } as any)
+const ApiAgentSessionsSessionIdAutoRetryRoute =
+  ApiAgentSessionsSessionIdAutoRetryRouteImport.update({
+    id: '/api/agent/sessions/$sessionId/auto-retry',
+    path: '/api/agent/sessions/$sessionId/auto-retry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAppAppIdAppSplatRoute = ApiAppAppIdAppSplatRouteImport.update({
   id: '/api/app/$appId/app/$',
   path: '/api/app/$appId/app/$',
@@ -390,6 +397,7 @@ export interface FileRoutesByFullPath {
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/env': typeof ApiAgentRunsRunIdEnvRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
+  '/api/agent/sessions/$sessionId/auto-retry': typeof ApiAgentSessionsSessionIdAutoRetryRoute
   '/api/app/$appId/app/$': typeof ApiAppAppIdAppSplatRoute
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
   '/api/app/$appId/hook/$': typeof ApiAppAppIdHookSplatRoute
@@ -443,6 +451,7 @@ export interface FileRoutesByTo {
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/env': typeof ApiAgentRunsRunIdEnvRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
+  '/api/agent/sessions/$sessionId/auto-retry': typeof ApiAgentSessionsSessionIdAutoRetryRoute
   '/api/app/$appId/app/$': typeof ApiAppAppIdAppSplatRoute
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
   '/api/app/$appId/hook/$': typeof ApiAppAppIdHookSplatRoute
@@ -500,6 +509,7 @@ export interface FileRoutesById {
   '/api/agent/runs/$runId/cancel': typeof ApiAgentRunsRunIdCancelRoute
   '/api/agent/runs/$runId/env': typeof ApiAgentRunsRunIdEnvRoute
   '/api/agent/runs/$runId/events': typeof ApiAgentRunsRunIdEventsRoute
+  '/api/agent/sessions/$sessionId/auto-retry': typeof ApiAgentSessionsSessionIdAutoRetryRoute
   '/api/app/$appId/app/$': typeof ApiAppAppIdAppSplatRoute
   '/api/app/$appId/data/$': typeof ApiAppAppIdDataSplatRoute
   '/api/app/$appId/hook/$': typeof ApiAppAppIdHookSplatRoute
@@ -557,6 +567,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/env'
     | '/api/agent/runs/$runId/events'
+    | '/api/agent/sessions/$sessionId/auto-retry'
     | '/api/app/$appId/app/$'
     | '/api/app/$appId/data/$'
     | '/api/app/$appId/hook/$'
@@ -610,6 +621,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/env'
     | '/api/agent/runs/$runId/events'
+    | '/api/agent/sessions/$sessionId/auto-retry'
     | '/api/app/$appId/app/$'
     | '/api/app/$appId/data/$'
     | '/api/app/$appId/hook/$'
@@ -666,6 +678,7 @@ export interface FileRouteTypes {
     | '/api/agent/runs/$runId/cancel'
     | '/api/agent/runs/$runId/env'
     | '/api/agent/runs/$runId/events'
+    | '/api/agent/sessions/$sessionId/auto-retry'
     | '/api/app/$appId/app/$'
     | '/api/app/$appId/data/$'
     | '/api/app/$appId/hook/$'
@@ -696,6 +709,7 @@ export interface RootRouteChildren {
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
   ApiWorkflowWorkflowIdRunRoute: typeof ApiWorkflowWorkflowIdRunRoute
   AppAppSlugEmbedSplatRoute: typeof AppAppSlugEmbedSplatRoute
+  ApiAgentSessionsSessionIdAutoRetryRoute: typeof ApiAgentSessionsSessionIdAutoRetryRoute
   ApiAppAppIdAppSplatRoute: typeof ApiAppAppIdAppSplatRoute
   ApiAppAppIdDataSplatRoute: typeof ApiAppAppIdDataSplatRoute
   ApiAppAppIdHookSplatRoute: typeof ApiAppAppIdHookSplatRoute
@@ -1036,6 +1050,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAgentRunsRunIdEventsRouteImport
       parentRoute: typeof ApiAgentRunsRoute
     }
+    '/api/agent/sessions/$sessionId/auto-retry': {
+      id: '/api/agent/sessions/$sessionId/auto-retry'
+      path: '/api/agent/sessions/$sessionId/auto-retry'
+      fullPath: '/api/agent/sessions/$sessionId/auto-retry'
+      preLoaderRoute: typeof ApiAgentSessionsSessionIdAutoRetryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/app/$appId/app/$': {
       id: '/api/app/$appId/app/$'
       path: '/api/app/$appId/app/$'
@@ -1204,6 +1225,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,
   ApiWorkflowWorkflowIdRunRoute: ApiWorkflowWorkflowIdRunRoute,
   AppAppSlugEmbedSplatRoute: AppAppSlugEmbedSplatRoute,
+  ApiAgentSessionsSessionIdAutoRetryRoute:
+    ApiAgentSessionsSessionIdAutoRetryRoute,
   ApiAppAppIdAppSplatRoute: ApiAppAppIdAppSplatRoute,
   ApiAppAppIdDataSplatRoute: ApiAppAppIdDataSplatRoute,
   ApiAppAppIdHookSplatRoute: ApiAppAppIdHookSplatRoute,

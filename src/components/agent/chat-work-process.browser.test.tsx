@@ -95,8 +95,27 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+/** What the server reports when the session's latest run failed. */
+function retryFor(
+  runs: SessionSnapshot['runs'] = [],
+  activeRun: SessionSnapshot['activeRun'] = null,
+): SessionSnapshot['retry'] {
+  const latest = runs.at(-1);
+  return !activeRun &&
+    (latest?.status === 'failed' || latest?.status === 'interrupted')
+    ? {
+        runId: latest.id,
+        userTurn: latest.userTurn,
+        attempt: 0,
+        maxAttempts: 5,
+        nextRetryAt: null,
+      }
+    : null;
+}
+
 function snapshot(overrides: Partial<SessionSnapshot>): SessionSnapshot {
   return {
+    retry: retryFor(overrides.runs, overrides.activeRun),
     id: 'session-1',
     title: 'Tracker',
     appIds: [],

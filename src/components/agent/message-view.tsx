@@ -20,7 +20,7 @@ import {
 import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
 import type { WorkflowListItem } from '~server/workflows';
-import { AgentErrorNotice } from './agent-error-notice';
+import { AgentErrorNotice, type AutoRetryStatus } from './agent-error-notice';
 import { finalTextIndex } from './chat-turns';
 import { useComposerMessageCopy } from './composer-message-copy';
 import {
@@ -222,6 +222,9 @@ export function MessageView({
   onRetry,
   retrying = false,
   retryDisabled = false,
+  autoRetry,
+  onStopAutoRetry,
+  stoppingAutoRetry = false,
   apps,
   workflows,
   work,
@@ -232,6 +235,9 @@ export function MessageView({
   onRetry?: () => void;
   retrying?: boolean;
   retryDisabled?: boolean;
+  autoRetry?: AutoRetryStatus;
+  onStopAutoRetry?: () => void;
+  stoppingAutoRetry?: boolean;
   apps?: AppListItem[];
   workflows?: WorkflowListItem[];
   /**
@@ -359,6 +365,9 @@ export function MessageView({
           onRetry={onRetry}
           retrying={retrying}
           retryDisabled={retryDisabled}
+          autoRetry={autoRetry}
+          onStopAutoRetry={onStopAutoRetry}
+          stoppingAutoRetry={stoppingAutoRetry}
         />
       ) : null}
     </Box>

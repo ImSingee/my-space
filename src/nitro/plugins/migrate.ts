@@ -2,6 +2,7 @@ import { definePlugin } from 'nitro';
 import { runMigrations } from '~db/migrate.ts';
 import { getPlatformEnv, isSpaShellPrerendering } from '~env';
 import {
+  ensureAgentAutoRetryScheduler,
   ensureAgentRunSweeper,
   sweepExpiredAgentRuns,
 } from '~server/agent-runs';
@@ -47,6 +48,8 @@ export default definePlugin(async () => {
   startAgentInternalServer();
   await sweepExpiredAgentRuns();
   ensureAgentRunSweeper();
+  // Failed runs schedule their own replay; overdue ones fire on boot.
+  ensureAgentAutoRetryScheduler();
 
   // Recover orphaned workflow runs first (the in-memory run registry doesn't
   // survive a restart), then (re)start cron timers so deployed schedules fire

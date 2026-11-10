@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { ulid } from 'ulid';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonValue } from '~/db/schema';
 import type { AgentRunInput } from './agent-runs';
@@ -14,6 +15,7 @@ vi.mock('~server/agent-runner/hub', () => {
     connectedRunnerCount: vi.fn<Hub['connectedRunnerCount']>(() => 1),
     dispatchRun: vi.fn<Hub['dispatchRun']>(async () => 'runner-test'),
     sendRunAnswer: vi.fn<Hub['sendRunAnswer']>(),
+    sendRunCancel: vi.fn<Hub['sendRunCancel']>(() => false),
     sendRunEnvAndWait: vi.fn<Hub['sendRunEnvAndWait']>(async () => ({
       ok: true,
     })),
@@ -25,12 +27,17 @@ const hub = await import('~server/agent-runner/hub');
 const {
   assignRunToRunner,
   answerAgentRun,
+  cancelAgentRun,
   completeRunFromRunner,
   finalizeRunWorkspaceAffinity,
+  fireDueAgentAutoRetries,
   getActiveAgentRun,
+  getSessionRetryState,
   getSessionWorkspaceAffinity,
   ingestRunnerEvent,
+  interruptAgentRun,
   startAgentRun,
+  stopAgentAutoRetry,
   submitAgentEnv,
 } = await import('./agent-runs');
 
@@ -87,6 +94,25 @@ async function seedSession(id: string, messages: JsonValue[]) {
     })
     .returning({ updatedAt: schema.agentSessions.updatedAt });
   return session.updatedAt.toISOString();
+}
+
+/** A failed run (created a minute ago) that answered `userTurn`. */
+async function seedFailedRun(sessionId: string, userTurn: number) {
+  const createdAt = new Date(Date.now() - 60_000);
+  const id = ulid(createdAt.getTime()).toLowerCase();
+  await db.insert(schema.agentRuns).values({
+    id,
+    sessionId,
+    providerId: PROVIDER_A_ID,
+    modelId: MODEL_A_ID,
+    status: 'failed',
+    input: { userText: 'Failed request', userTurn },
+    error: 'Provider unavailable',
+    failureStreak: 1,
+    completedAt: createdAt,
+    createdAt,
+  });
+  return id;
 }
 
 async function seedEnvRun(runId = 'run-secret') {
@@ -543,6 +569,7 @@ describe('startAgentRun retry', () => {
         errorMessage: 'Provider unavailable',
       },
     ]);
+    await seedFailedRun('session-retry', 1);
 
     // Even an internal caller that bypasses the strict HTTP schema cannot
     // override a retry's persisted prompt or images. The requested model is
@@ -638,6 +665,7 @@ describe('startAgentRun retry', () => {
       'session-stale-retry',
       failedMessages,
     );
+    await seedFailedRun('session-stale-retry', 0);
 
     let signalProviderLookupStarted!: () => void;
     const providerLookupStarted = new Promise<void>((resolve) => {
@@ -729,7 +757,7 @@ describe('startAgentRun retry', () => {
     });
     expect(session?.messages).toEqual(failedAgainMessages);
     expect(session?.updatedAt.toISOString()).not.toBe(expectedSessionUpdatedAt);
-    expect(await db.query.agentRuns.findMany()).toHaveLength(1);
+    expect(await db.query.agentRuns.findMany()).toHaveLength(2);
     expect(hub.dispatchRun).toHaveBeenCalledTimes(1);
 
     // A new click rendered from the new failure revision remains valid.
@@ -741,7 +769,7 @@ describe('startAgentRun retry', () => {
       modelId: MODEL_B_ID,
     });
     expect(intentionalRetry.runId).not.toBe(freshRetry.runId);
-    expect(await db.query.agentRuns.findMany()).toHaveLength(2);
+    expect(await db.query.agentRuns.findMany()).toHaveLength(3);
     expect(hub.dispatchRun).toHaveBeenCalledTimes(2);
   });
 
@@ -1043,6 +1071,7 @@ describe('startAgentRun retry', () => {
       'session-disabled-model',
       failedMessages,
     );
+    const failedRunId = await seedFailedRun('session-disabled-model', 0);
 
     await expect(
       startAgentRun({
@@ -1065,7 +1094,221 @@ describe('startAgentRun retry', () => {
       providerId: PROVIDER_A_ID,
       modelId: MODEL_A_ID,
     });
-    expect(await db.query.agentRuns.findMany()).toHaveLength(0);
+    expect((await db.query.agentRuns.findMany()).map((run) => run.id)).toEqual([
+      failedRunId,
+    ]);
     expect(hub.dispatchRun).not.toHaveBeenCalled();
+  });
+});
+
+describe('automatic retry', () => {
+  const SESSION_ID = 'session-auto-retry';
+  const FAR_FUTURE = () => new Date(Date.now() + 60 * 60_000);
+
+  async function send(text: string) {
+    const { runId } = await startAgentRun({
+      sessionId: SESSION_ID,
+      content: [{ type: 'text', text }],
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+    });
+    return runId;
+  }
+
+  async function finish(runId: string, status: 'completed' | 'failed') {
+    await db
+      .update(schema.agentRuns)
+      .set({ runnerId: 'runner-test' })
+      .where(eq(schema.agentRuns.id, runId));
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: SESSION_ID },
+    });
+    await completeRunFromRunner('runner-test', {
+      runId,
+      status,
+      ...(status === 'failed' ? { error: 'terminated' } : {}),
+      messages:
+        status === 'completed'
+          ? [
+              ...(session?.messages ?? []),
+              { role: 'assistant', content: 'Done.', stopReason: 'stop' },
+            ]
+          : [],
+    });
+  }
+
+  async function latestRun() {
+    const run = await db.query.agentRuns.findFirst({
+      where: { sessionId: SESSION_ID },
+      orderBy: { id: 'desc' },
+    });
+    return run!;
+  }
+
+  async function retryState() {
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: SESSION_ID },
+    });
+    return getSessionRetryState(SESSION_ID, session!.messages);
+  }
+
+  async function expectScheduled(runId: string, attempt: number) {
+    const finishedAt = Date.now();
+    const run = await db.query.agentRuns.findFirst({ where: { id: runId } });
+    expect(run?.failureStreak).toBe(attempt);
+    const base = Math.min(160_000, 10_000 * 2 ** (attempt - 1));
+    const delay = run!.autoRetryAt!.getTime() - run!.completedAt!.getTime();
+    expect(delay).toBeGreaterThanOrEqual(base * 0.8 - 1);
+    expect(delay).toBeLessThanOrEqual(base * 1.2 + 1);
+    expect(run!.completedAt!.getTime()).toBeLessThanOrEqual(finishedAt);
+  }
+
+  beforeEach(async () => {
+    await seedAvailableModels();
+    await seedSession(SESSION_ID, []);
+  });
+
+  it('backs off across consecutive failures and turns, stops after the limit, and resets after success', async () => {
+    const first = await send('First request');
+    await finish(first, 'failed');
+    await expectScheduled(first, 1);
+
+    // Nothing fires before it is due.
+    await fireDueAgentAutoRetries(new Date());
+    expect(hub.dispatchRun).toHaveBeenCalledTimes(1);
+
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    const firstRetry = await latestRun();
+    expect(firstRetry.id).not.toBe(first);
+    expect(firstRetry.input).toMatchObject({
+      userText: 'First request',
+      userTurn: 0,
+    });
+    expect(
+      (await db.query.agentRuns.findFirst({ where: { id: first } }))
+        ?.autoRetryAt,
+    ).toBeNull();
+    await finish(firstRetry.id, 'failed');
+    await expectScheduled(firstRetry.id, 2);
+
+    // A new message supersedes the pending retry but not the failure streak.
+    const second = await send('Second request');
+    expect(
+      (await db.query.agentRuns.findFirst({ where: { id: firstRetry.id } }))
+        ?.autoRetryAt,
+    ).toBeNull();
+    await finish(second, 'failed');
+    await expectScheduled(second, 3);
+
+    for (const attempt of [4, 5, 6]) {
+      await fireDueAgentAutoRetries(FAR_FUTURE());
+      const retry = await latestRun();
+      expect(retry.input).toMatchObject({
+        userText: 'Second request',
+        userTurn: 1,
+      });
+      await finish(retry.id, 'failed');
+      if (attempt <= 5) await expectScheduled(retry.id, attempt);
+    }
+
+    const exhausted = await latestRun();
+    expect(exhausted).toMatchObject({ failureStreak: 6, autoRetryAt: null });
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    expect((await latestRun()).id).toBe(exhausted.id);
+    await expect(retryState()).resolves.toEqual({
+      runId: exhausted.id,
+      userTurn: 1,
+      attempt: 6,
+      maxAttempts: 5,
+      nextRetryAt: null,
+    });
+
+    // A manual retry still works, and a completed run resets the streak.
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: SESSION_ID },
+    });
+    const manual = await startAgentRun({
+      sessionId: SESSION_ID,
+      retry: true,
+      expectedSessionUpdatedAt: session!.updatedAt.toISOString(),
+      providerId: PROVIDER_A_ID,
+      modelId: MODEL_A_ID,
+    });
+    await finish(manual.runId, 'completed');
+    await expect(
+      db.query.agentRuns.findFirst({ where: { id: manual.runId } }),
+    ).resolves.toMatchObject({ failureStreak: 0, autoRetryAt: null });
+    await expect(retryState()).resolves.toBeNull();
+
+    const third = await send('Third request');
+    await finish(third, 'failed');
+    await expectScheduled(third, 1);
+
+    // A user stop carries the streak without scheduling a retry.
+    const fourth = await send('Fourth request');
+    await cancelAgentRun(fourth);
+    await expect(
+      db.query.agentRuns.findFirst({ where: { id: fourth } }),
+    ).resolves.toMatchObject({
+      status: 'cancelled',
+      failureStreak: 1,
+      autoRetryAt: null,
+    });
+    const fifth = await send('Fifth request');
+    await finish(fifth, 'failed');
+    await expectScheduled(fifth, 2);
+  });
+
+  it('honors a stop and fires a due retry exactly once', async () => {
+    const failed = await send('Request');
+    await finish(failed, 'failed');
+
+    await stopAgentAutoRetry(SESSION_ID);
+    await expect(retryState()).resolves.toMatchObject({
+      runId: failed,
+      attempt: 1,
+      nextRetryAt: null,
+    });
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    expect((await latestRun()).id).toBe(failed);
+
+    await db
+      .update(schema.agentRuns)
+      .set({ autoRetryAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.agentRuns.id, failed));
+    await Promise.all([fireDueAgentAutoRetries(), fireDueAgentAutoRetries()]);
+    expect(
+      await db.query.agentRuns.findMany({ where: { sessionId: SESSION_ID } }),
+    ).toHaveLength(2);
+    expect(hub.dispatchRun).toHaveBeenCalledTimes(2);
+    expect(await getActiveAgentRun(SESSION_ID)).toMatchObject({
+      userTurn: 0,
+    });
+  });
+
+  it('retries interrupted runs and counts a missing Runner as another failure', async () => {
+    const interrupted = await send('Request');
+    await interruptAgentRun(interrupted, 'Agent Runner went away.');
+    await expectScheduled(interrupted, 1);
+
+    vi.mocked(hub.connectedRunnerCount).mockReturnValue(0);
+    vi.mocked(hub.dispatchRun).mockRejectedValue(
+      new Error('No Agent Runner is connected to the platform.'),
+    );
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+
+    const retry = await latestRun();
+    expect(retry).toMatchObject({
+      status: 'failed',
+      error: 'No Agent Runner is connected to the platform.',
+      input: { userText: 'Request', userTurn: 0 },
+    });
+    await expectScheduled(retry.id, 2);
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: SESSION_ID },
+    });
+    expect(session?.messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'Request' }] },
+    ]);
   });
 });
