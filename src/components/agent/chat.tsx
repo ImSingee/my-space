@@ -800,6 +800,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
     if (session.activeRun?.id === settledRunId) return;
     const run = session.runs.find((entry) => entry.id === settledRunId);
     if (run && isActiveRunStatus(run.status)) return;
+    // A newer run (an automatic or manual retry) now answers this turn, even
+    // if it already ended: history renders that run and its retry controls.
+    const turnRun =
+      liveUserTurn === null
+        ? undefined
+        : session.runs.find((entry) => entry.userTurn === liveUserTurn);
+    if (turnRun && turnRun.id !== settledRunId) {
+      releaseStream(settledRunId);
+      return;
+    }
     // `done` follows the persisted transcript, so a snapshot that no longer
     // runs a completed run holds its reply. A stop or interruption can end
     // the run before (or without) its partial transcript: keep what was shown
@@ -815,6 +825,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     releaseStream(settledRunId);
   }, [
     liveReplyPersisted,
+    liveUserTurn,
     releaseStream,
     session,
     settledOutcome,

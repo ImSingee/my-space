@@ -350,58 +350,74 @@ async function appendEvent(
   return stored;
 }
 
+type FinishedRun = { finished: boolean; autoRetryAt: Date | null };
+
+/**
+ * Make an active run terminal and record its failure streak, scheduling an
+ * automatic retry when it failed. Callers that already hold the session row
+ * lock pass their transaction; the lock order is always session, then run.
+ */
+async function finishRunInTx(
+  tx: TX,
+  runId: string,
+  status: AgentRunStatus,
+  error?: string,
+): Promise<FinishedRun> {
+  const now = new Date();
+  const [row] = await tx
+    .update(schema.agentRuns)
+    .set({
+      status,
+      error: error ?? null,
+      pendingAsk: null,
+      pendingAnswer: null,
+      pendingEnvRequest: null,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.agentRuns.id, runId),
+        inArray(schema.agentRuns.status, ACTIVE_STATUSES),
+      ),
+    )
+    .returning({ sessionId: schema.agentRuns.sessionId });
+  if (!row) return { finished: false, autoRetryAt: null };
+
+  // Only one run per session is active, so the previous run is terminal
+  // and its streak is final. ULIDs order runs by creation.
+  const previous = await tx.query.agentRuns.findFirst({
+    where: { sessionId: row.sessionId, id: { lt: runId } },
+    orderBy: { id: 'desc' },
+    columns: { failureStreak: true },
+  });
+  const previousStreak = previous?.failureStreak ?? 0;
+  const failed = (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(
+    status,
+  );
+  const failureStreak =
+    status === 'completed' ? 0 : failed ? previousStreak + 1 : previousStreak;
+  const autoRetryAt =
+    failed && shouldAutoRetry(failureStreak)
+      ? new Date(now.getTime() + agentAutoRetryDelayMs(failureStreak))
+      : null;
+  if (failureStreak !== 0 || autoRetryAt) {
+    await tx
+      .update(schema.agentRuns)
+      .set({ failureStreak, autoRetryAt })
+      .where(eq(schema.agentRuns.id, runId));
+  }
+  return { finished: true, autoRetryAt };
+}
+
 async function finishRun(
   runId: string,
   status: AgentRunStatus,
   error?: string,
 ): Promise<boolean> {
-  const result = await db.transaction(async (tx) => {
-    const now = new Date();
-    const [row] = await tx
-      .update(schema.agentRuns)
-      .set({
-        status,
-        error: error ?? null,
-        pendingAsk: null,
-        pendingAnswer: null,
-        pendingEnvRequest: null,
-        completedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(schema.agentRuns.id, runId),
-          inArray(schema.agentRuns.status, ACTIVE_STATUSES),
-        ),
-      )
-      .returning({ sessionId: schema.agentRuns.sessionId });
-    if (!row) return { finished: false, autoRetryAt: null };
-
-    // Only one run per session is active, so the previous run is terminal
-    // and its streak is final. ULIDs order runs by creation.
-    const previous = await tx.query.agentRuns.findFirst({
-      where: { sessionId: row.sessionId, id: { lt: runId } },
-      orderBy: { id: 'desc' },
-      columns: { failureStreak: true },
-    });
-    const previousStreak = previous?.failureStreak ?? 0;
-    const failed = (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(
-      status,
-    );
-    const failureStreak =
-      status === 'completed' ? 0 : failed ? previousStreak + 1 : previousStreak;
-    const autoRetryAt =
-      failed && shouldAutoRetry(failureStreak)
-        ? new Date(now.getTime() + agentAutoRetryDelayMs(failureStreak))
-        : null;
-    if (failureStreak !== 0 || autoRetryAt) {
-      await tx
-        .update(schema.agentRuns)
-        .set({ failureStreak, autoRetryAt })
-        .where(eq(schema.agentRuns.id, runId));
-    }
-    return { finished: true, autoRetryAt };
-  });
+  const result = await db.transaction((tx) =>
+    finishRunInTx(tx, runId, status, error),
+  );
   if (result.autoRetryAt) wakeAgentAutoRetryScheduler(result.autoRetryAt);
   return result.finished;
 }
@@ -724,7 +740,7 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         if (!target) throw new AppError(NO_RETRYABLE_TURN, 409);
         if (autoRetryOfRunId !== null) {
           // Claim the schedule in the same commit as the replacement run, so
-          // a stop, a newer run, or another platform instance wins cleanly.
+          // a stop, a newer run, or a concurrent scheduler pass wins cleanly.
           const claimed = await tx
             .update(schema.agentRuns)
             .set({ autoRetryAt: null })
@@ -1019,6 +1035,26 @@ export async function finalizeRunWorkspaceAffinity(
   expectedSessionId?: string,
 ): Promise<string> {
   return db.transaction(async (tx) => {
+    // Lock the session before the run, like every other session/run
+    // transaction, so this cannot deadlock with a run start. A run's session
+    // never changes, so the unlocked read only finds which session to lock.
+    const owner = await tx.query.agentRuns.findFirst({
+      where: { id: runId },
+      columns: { sessionId: true },
+    });
+    if (!owner) {
+      throw new Error('Agent run is no longer assigned to this Runner.');
+    }
+    const [session] = await tx
+      .select({
+        workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
+        workspaceRunnerId: schema.agentSessions.workspaceRunnerId,
+      })
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.id, owner.sessionId))
+      .for('update');
+    if (!session) throw new Error('Agent session no longer exists.');
+
     const [run] = await tx
       .select({
         sessionId: schema.agentRuns.sessionId,
@@ -1034,16 +1070,6 @@ export async function finalizeRunWorkspaceAffinity(
     ) {
       throw new Error('Agent run is no longer assigned to this Runner.');
     }
-
-    const [session] = await tx
-      .select({
-        workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
-        workspaceRunnerId: schema.agentSessions.workspaceRunnerId,
-      })
-      .from(schema.agentSessions)
-      .where(eq(schema.agentSessions.id, run.sessionId))
-      .for('update');
-    if (!session) throw new Error('Agent session no longer exists.');
 
     if (session.workspaceAffinityState === 'claimed') {
       if (session.workspaceRunnerId !== runnerId) {
@@ -1370,30 +1396,61 @@ export async function completeRunFromRunner(
     // more recent run exists on the session, this transcript is stale (ULIDs
     // order by creation time, so id comparison finds newer runs).
     //
-    // The platform may already have failed or interrupted this run (lease
-    // expiry, dispatch timeout) and scheduled a replay. A late successful
+    // The transcript, the run's terminal status and any automatic retry it
+    // schedules commit together under the session lock (then the run lock,
+    // the order every session/run transaction uses). The status is re-read
+    // under that lock. If the platform already failed or interrupted this run
+    // (lease expiry, dispatch timeout) and scheduled a replay, a successful
     // report settles the turn instead: the run becomes completed, resetting
-    // the failure streak and dropping the schedule. Locking the session row
-    // serializes this with startAgentRun, so a replay either starts first
-    // (and this transcript is stale) or finds nothing left to retry.
-    const settledLate = await db.transaction(async (tx) => {
+    // the failure streak and dropping the schedule. A replay that started
+    // first makes this transcript stale; one that starts later finds nothing
+    // left to retry.
+    const outcome = await db.transaction(async (tx) => {
       await tx
         .select({ id: schema.agentSessions.id })
         .from(schema.agentSessions)
         .where(eq(schema.agentSessions.id, run.sessionId))
         .for('update');
+      const [current] = await tx
+        .select({
+          status: schema.agentRuns.status,
+          error: schema.agentRuns.error,
+        })
+        .from(schema.agentRuns)
+        .where(eq(schema.agentRuns.id, run.id))
+        .for('update');
+      if (!current) return null;
+
       const newerRun = await tx.query.agentRuns.findFirst({
         where: { sessionId: run.sessionId, id: { gt: run.id } },
         columns: { id: true },
       });
-      if (message.messages.length === 0 || newerRun) return false;
-      await tx
-        .update(schema.agentSessions)
-        .set({ messages: message.messages as JsonValue[] })
-        .where(eq(schema.agentSessions.id, run.sessionId));
+      const persisted = message.messages.length > 0 && !newerRun;
+      if (persisted) {
+        await tx
+          .update(schema.agentSessions)
+          .set({ messages: message.messages as JsonValue[] })
+          .where(eq(schema.agentSessions.id, run.sessionId));
+      }
+
+      if (!isTerminalAgentRunStatus(current.status)) {
+        const finished = await finishRunInTx(
+          tx,
+          message.runId,
+          message.status,
+          message.status === 'failed'
+            ? (message.error ?? 'Agent run failed.')
+            : undefined,
+        );
+        return { kind: 'finished' as const, ...finished };
+      }
+
       if (
+        persisted &&
         message.status === 'completed' &&
-        (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(run.status)
+        (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(
+          current.status,
+        )
       ) {
         await tx
           .update(schema.agentRuns)
@@ -1404,32 +1461,26 @@ export async function completeRunFromRunner(
             autoRetryAt: null,
           })
           .where(eq(schema.agentRuns.id, run.id));
-        return true;
+        return {
+          kind: 'terminal' as const,
+          status: 'completed' as const,
+          error: null,
+        };
       }
-      return false;
+      return { kind: 'terminal' as const, ...current };
     });
+    if (!outcome) return null;
 
-    if (isTerminalAgentRunStatus(run.status)) {
+    if (outcome.kind === 'terminal') {
       // Retry of a final report whose ack was lost. A crash between finishRun
       // and appendEvent leaves the run terminal without a terminal event, so
       // SSE clients would treat the closed stream as a disconnect — repair it.
-      await ensureTerminalEvent(
-        message.runId,
-        settledLate ? 'completed' : run.status,
-        settledLate ? null : run.error,
-      );
+      await ensureTerminalEvent(message.runId, outcome.status, outcome.error);
       return run.sessionId;
     }
 
-    const finished = await finishRun(
-      message.runId,
-      message.status,
-      message.status === 'failed'
-        ? (message.error ?? 'Agent run failed.')
-        : undefined,
-    );
-    if (!finished) return null;
-
+    if (!outcome.finished) return null;
+    if (outcome.autoRetryAt) wakeAgentAutoRetryScheduler(outcome.autoRetryAt);
     await appendEvent(
       message.runId,
       terminalEventForStatus(message.status, message.error),
@@ -1752,7 +1803,24 @@ async function fireAgentAutoRetry(run: {
       modelId: session.modelId ?? run.modelId,
     });
   } catch (error) {
-    // A conflict means a newer run, a stop, or another platform instance
+    if (isTransientDatabaseError(error)) {
+      // Keep the schedule: a deadlock victim or a dropped connection is not
+      // a verdict on the turn.
+      console.error('[agent-runs] automatic retry will try again:', error);
+      const retryAt = new Date(Date.now() + TRANSIENT_RETRY_DELAY_MS);
+      await db
+        .update(schema.agentRuns)
+        .set({ autoRetryAt: retryAt })
+        .where(
+          and(
+            eq(schema.agentRuns.id, run.id),
+            isNotNull(schema.agentRuns.autoRetryAt),
+          ),
+        );
+      wakeAgentAutoRetryScheduler(retryAt);
+      return;
+    }
+    // A conflict means a newer run, a stop, or a concurrent scheduler pass
     // already settled this schedule. Anything else (for example a removed
     // model) cannot start a run; leave the turn to a manual Retry.
     if (!(error instanceof AppError && error.status === 409)) {
@@ -1763,6 +1831,28 @@ async function fireAgentAutoRetry(run: {
       .set({ autoRetryAt: null })
       .where(eq(schema.agentRuns.id, run.id));
   }
+}
+
+const TRANSIENT_RETRY_DELAY_MS = 5000;
+
+/** Deadlock, serialization failure, or a lost/closing database connection. */
+function isTransientDatabaseError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const pgError =
+    'cause' in error && error.cause && typeof error.cause === 'object'
+      ? error.cause
+      : error;
+  const code = (pgError as { code?: unknown }).code;
+  return (
+    typeof code === 'string' &&
+    (code === '40P01' ||
+      code === '40001' ||
+      code.startsWith('08') ||
+      code === '57P01' ||
+      code === 'CONNECTION_CLOSED' ||
+      code === 'CONNECTION_ENDED' ||
+      code === 'CONNECTION_DESTROYED')
+  );
 }
 
 /** Start every automatic retry that is due. */

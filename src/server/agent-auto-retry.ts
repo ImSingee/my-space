@@ -15,9 +15,8 @@ const MAX_DELAY_MS = 160_000;
 const JITTER_RATIO = 0.2;
 
 /**
- * Longest wait between checks for due retries. Local failures wake the
- * scheduler at their exact time; this catches retries scheduled by another
- * platform instance.
+ * Longest wait between checks for due retries. Failures wake the scheduler
+ * at their exact time; this is a safety net for a missed wake-up.
  */
 export const AGENT_AUTO_RETRY_IDLE_POLL_MS = 30_000;
 

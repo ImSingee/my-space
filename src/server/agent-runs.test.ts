@@ -1361,6 +1361,30 @@ describe('automatic retry', () => {
     });
   });
 
+  it('keeps the schedule when a retry hits a transient database error', async () => {
+    const failed = await send('Request');
+    await finish(failed, 'failed');
+
+    const deadlock = Object.assign(new Error('deadlock detected'), {
+      code: '40P01',
+    });
+    const findSession = vi
+      .spyOn(db.query.agentSessions, 'findFirst')
+      .mockRejectedValueOnce(deadlock);
+    const before = Date.now();
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    findSession.mockRestore();
+
+    expect((await latestRun()).id).toBe(failed);
+    const run = await db.query.agentRuns.findFirst({ where: { id: failed } });
+    expect(run?.autoRetryAt?.getTime()).toBeGreaterThanOrEqual(before + 4000);
+    expect(run?.failureStreak).toBe(1);
+
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    expect((await latestRun()).input).toMatchObject({ userTurn: 0 });
+    expect((await latestRun()).id).not.toBe(failed);
+  });
+
   it('retries interrupted runs and counts a missing Runner as another failure', async () => {
     const interrupted = await send('Request');
     await interruptAgentRun(interrupted, 'Agent Runner went away.');

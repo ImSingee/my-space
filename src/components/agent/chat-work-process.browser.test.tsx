@@ -760,7 +760,47 @@ test('keeps an interrupted turn and its notice when its transcript never arrives
   expect(screen.getByText(interruption).all()).toHaveLength(1);
   expect(toast.error).not.toHaveBeenCalled();
 
+  // The scheduled replay already failed again before this browser saw it
+  // run (its Runner is still away). The replacement run now owns the turn.
+  const replayError = 'No Agent Runner is connected to the platform.';
+  fixtures.session = snapshot({
+    messages: [prompt] as SessionSnapshot['messages'],
+    runs: [
+      {
+        ...failedRun,
+        id: 'run-replay',
+        status: 'failed',
+        startedAt: iso(Date.now() - 1_000),
+        completedAt: iso(Date.now()),
+        error: replayError,
+      },
+    ],
+    retry: {
+      runId: 'run-replay',
+      userTurn: failedRun.userTurn,
+      attempt: 2,
+      maxAttempts: 5,
+      nextRetryAt: iso(Date.now() + 90_000),
+    },
+  });
+  await invalidateSession(queryClient);
+  await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('note'))
+    .toMatchTextContent(replayError);
+  await expect
+    .element(screen.getByRole('note'))
+    .toMatchTextContent(/Retrying automatically in 1:[23]\d · attempt 2 of 5/);
+  await expect
+    .element(screen.getByRole('button', { name: 'Stop retrying' }))
+    .toBeVisible();
+  expect(document.body.textContent).not.toContain(interruption);
+
   // Coming back later, history still explains what happened to the turn.
+  fixtures.session = snapshot({
+    messages: [prompt] as SessionSnapshot['messages'],
+    runs: [{ ...failedRun, status: 'interrupted', error: interruption }],
+  });
   await screen.unmount();
   const revisit = await renderChat();
   await expect
