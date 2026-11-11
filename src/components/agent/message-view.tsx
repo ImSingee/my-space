@@ -20,7 +20,7 @@ import {
 import { formatBytes } from '~lib/format';
 import type { AppListItem } from '~server/apps';
 import type { WorkflowListItem } from '~server/workflows';
-import { AgentErrorNotice, type AutoRetryStatus } from './agent-error-notice';
+import { AgentErrorNotice, type RetryControls } from './agent-error-notice';
 import { finalTextIndex } from './chat-turns';
 import { useComposerMessageCopy } from './composer-message-copy';
 import {
@@ -229,15 +229,9 @@ export function MessageView({
   workflows,
   work,
   onUserMessageToggle,
-}: {
+}: RetryControls & {
   message: ChatMessage;
   toolResults?: ToolResultMap;
-  onRetry?: () => void;
-  retrying?: boolean;
-  retryDisabled?: boolean;
-  autoRetry?: AutoRetryStatus;
-  onStopAutoRetry?: () => void;
-  stoppingAutoRetry?: boolean;
   apps?: AppListItem[];
   workflows?: WorkflowListItem[];
   /**

@@ -973,6 +973,11 @@ export function Chat({ sessionId }: { sessionId: string }) {
                     onAnswer={answer}
                     onSubmitEnv={submitEnv}
                     work={liveWork}
+                    retry={
+                      liveRunId && retryState?.runId === liveRunId
+                        ? retryControls(liveUserTurn)
+                        : undefined
+                    }
                   />
                 ) : null}
               </>

@@ -1286,6 +1286,81 @@ describe('automatic retry', () => {
     });
   });
 
+  it('settles an interrupted turn whose Runner reports success late', async () => {
+    const interrupted = await send('Request');
+    await db
+      .update(schema.agentRuns)
+      .set({ runnerId: 'runner-test' })
+      .where(eq(schema.agentRuns.id, interrupted));
+    await interruptAgentRun(interrupted, 'Agent Runner went away.');
+    await expectScheduled(interrupted, 1);
+
+    const reply: JsonValue[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Request' }] },
+      { role: 'assistant', content: 'Done.', stopReason: 'stop' },
+    ];
+    await completeRunFromRunner('runner-test', {
+      runId: interrupted,
+      status: 'completed',
+      messages: reply,
+    });
+
+    await expect(
+      db.query.agentRuns.findFirst({ where: { id: interrupted } }),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      error: null,
+      failureStreak: 0,
+      autoRetryAt: null,
+    });
+    await expect(retryState()).resolves.toBeNull();
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    expect((await latestRun()).id).toBe(interrupted);
+    await expect(
+      db.query.agentSessions.findFirst({ where: { id: SESSION_ID } }),
+    ).resolves.toMatchObject({ messages: reply });
+
+    // The next failure starts a fresh streak.
+    const next = await send('Next request');
+    await finish(next, 'failed');
+    await expectScheduled(next, 1);
+  });
+
+  it('keeps a replay that started before a late success report', async () => {
+    const interrupted = await send('Request');
+    await db
+      .update(schema.agentRuns)
+      .set({ runnerId: 'runner-test' })
+      .where(eq(schema.agentRuns.id, interrupted));
+    await interruptAgentRun(interrupted, 'Agent Runner went away.');
+    await fireDueAgentAutoRetries(FAR_FUTURE());
+    const replay = await latestRun();
+    expect(replay.id).not.toBe(interrupted);
+
+    await completeRunFromRunner('runner-test', {
+      runId: interrupted,
+      status: 'completed',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Request' }] },
+        { role: 'assistant', content: 'Stale.', stopReason: 'stop' },
+      ],
+    });
+
+    await expect(
+      db.query.agentRuns.findFirst({ where: { id: interrupted } }),
+    ).resolves.toMatchObject({ status: 'interrupted' });
+    await expect(
+      db.query.agentSessions.findFirst({ where: { id: SESSION_ID } }),
+    ).resolves.toMatchObject({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Request' }] },
+      ],
+    });
+    expect(await getActiveAgentRun(SESSION_ID)).toMatchObject({
+      id: replay.id,
+    });
+  });
+
   it('retries interrupted runs and counts a missing Runner as another failure', async () => {
     const interrupted = await send('Request');
     await interruptAgentRun(interrupted, 'Agent Runner went away.');

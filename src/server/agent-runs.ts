@@ -1369,30 +1369,55 @@ export async function completeRunFromRunner(
     // retried report must also never clobber a NEWER turn's history: once a
     // more recent run exists on the session, this transcript is stale (ULIDs
     // order by creation time, so id comparison finds newer runs).
-    const newerRun = await db.query.agentRuns.findFirst({
-      where: { sessionId: run.sessionId, id: { gt: run.id } },
-      columns: { id: true },
-    });
-    if (message.messages.length > 0 && !newerRun) {
-      await db
+    //
+    // The platform may already have failed or interrupted this run (lease
+    // expiry, dispatch timeout) and scheduled a replay. A late successful
+    // report settles the turn instead: the run becomes completed, resetting
+    // the failure streak and dropping the schedule. Locking the session row
+    // serializes this with startAgentRun, so a replay either starts first
+    // (and this transcript is stale) or finds nothing left to retry.
+    const settledLate = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.agentSessions.id })
+        .from(schema.agentSessions)
+        .where(eq(schema.agentSessions.id, run.sessionId))
+        .for('update');
+      const newerRun = await tx.query.agentRuns.findFirst({
+        where: { sessionId: run.sessionId, id: { gt: run.id } },
+        columns: { id: true },
+      });
+      if (message.messages.length === 0 || newerRun) return false;
+      await tx
         .update(schema.agentSessions)
         .set({ messages: message.messages as JsonValue[] })
         .where(eq(schema.agentSessions.id, run.sessionId));
-    }
+      if (
+        message.status === 'completed' &&
+        (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(run.status)
+      ) {
+        await tx
+          .update(schema.agentRuns)
+          .set({
+            status: 'completed',
+            error: null,
+            failureStreak: 0,
+            autoRetryAt: null,
+          })
+          .where(eq(schema.agentRuns.id, run.id));
+        return true;
+      }
+      return false;
+    });
 
     if (isTerminalAgentRunStatus(run.status)) {
-      // The platform interrupted the run, but its Runner finished the turn
-      // after all. The persisted reply needs no automatic replay.
-      if (message.status === 'completed' && run.autoRetryAt) {
-        await db
-          .update(schema.agentRuns)
-          .set({ autoRetryAt: null })
-          .where(eq(schema.agentRuns.id, run.id));
-      }
       // Retry of a final report whose ack was lost. A crash between finishRun
       // and appendEvent leaves the run terminal without a terminal event, so
       // SSE clients would treat the closed stream as a disconnect — repair it.
-      await ensureTerminalEvent(message.runId, run.status, run.error);
+      await ensureTerminalEvent(
+        message.runId,
+        settledLate ? 'completed' : run.status,
+        settledLate ? null : run.error,
+      );
       return run.sessionId;
     }
 

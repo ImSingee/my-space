@@ -726,6 +726,13 @@ test('keeps an interrupted turn and its notice when its transcript never arrives
   fixtures.session = snapshot({
     messages: [prompt] as SessionSnapshot['messages'],
     runs: [{ ...failedRun, status: 'interrupted', error: interruption }],
+    retry: {
+      runId: failedRun.id,
+      userTurn: failedRun.userTurn,
+      attempt: 1,
+      maxAttempts: 5,
+      nextRetryAt: iso(Date.now() + 60_000),
+    },
   });
   stream.emit({ type: 'error', message: interruption });
   await expect
@@ -737,6 +744,16 @@ test('keeps an interrupted turn and its notice when its transcript never arrives
     .element(screen.getByRole('alert'))
     .toMatchTextContent(interruption);
   await expect.element(screen.getByText('Starting the build.')).toBeVisible();
+  // The retained live turn still owns its scheduled automatic retry.
+  await expect
+    .element(screen.getByRole('alert'))
+    .toMatchTextContent(/Retrying automatically in 0:5\d · attempt 1 of 5/);
+  await expect
+    .element(screen.getByRole('button', { name: 'Stop retrying' }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Retry now' }))
+    .toBeVisible();
   await expect
     .element(screen.getByRole('button', { name: 'Worked 3s · Failed' }))
     .toHaveAttribute('aria-expanded', 'true');

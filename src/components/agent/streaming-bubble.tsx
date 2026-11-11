@@ -2,7 +2,7 @@
 import { Box, Group, Loader, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { AskAnswer } from '~agent/events';
-import { AgentErrorNotice } from './agent-error-notice';
+import { AgentErrorNotice, type RetryControls } from './agent-error-notice';
 import { AskForm } from './ask-form';
 import { finalTextIndex } from './chat-turns';
 import { Markdownish } from './markdownish';
@@ -21,6 +21,7 @@ export function StreamingBubble({
   onAnswer,
   onSubmitEnv,
   work,
+  retry,
 }: {
   state: StreamState;
   onAnswer: (askId: string, answers: AskAnswer[]) => void;
@@ -31,6 +32,11 @@ export function StreamingBubble({
    * The chat always provides it.
    */
   work?: WorkFrame;
+  /**
+   * Retry actions when the settled run failed. A failed turn can stay live
+   * while its transcript never arrives (an interrupted Runner).
+   */
+  retry?: RetryControls;
 }) {
   const ask = state.pendingAsk;
   const envRequest = state.pendingEnvRequest;
@@ -154,7 +160,7 @@ export function StreamingBubble({
         />
       ) : null}
       {state.terminalError ? (
-        <AgentErrorNotice message={state.terminalError} live />
+        <AgentErrorNotice message={state.terminalError} live {...retry} />
       ) : null}
       {work ? null : workingIndicator}
     </Box>

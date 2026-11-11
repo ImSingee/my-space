@@ -56,6 +56,16 @@ function AutoRetryLine({
   );
 }
 
+/** Retry actions for the failed turn the notice belongs to. */
+export type RetryControls = {
+  onRetry?: () => void;
+  retrying?: boolean;
+  retryDisabled?: boolean;
+  autoRetry?: AutoRetryStatus;
+  onStopAutoRetry?: () => void;
+  stoppingAutoRetry?: boolean;
+};
+
 export function AgentErrorNotice({
   message,
   live = false,
@@ -65,16 +75,10 @@ export function AgentErrorNotice({
   autoRetry,
   onStopAutoRetry,
   stoppingAutoRetry = false,
-}: {
+}: RetryControls & {
   message?: string;
   /** Announce a newly arrived live error; persisted history stays quiet. */
   live?: boolean;
-  onRetry?: () => void;
-  retrying?: boolean;
-  retryDisabled?: boolean;
-  autoRetry?: AutoRetryStatus;
-  onStopAutoRetry?: () => void;
-  stoppingAutoRetry?: boolean;
 }) {
   const scheduledAt =
     autoRetry && autoRetry.attempt > 0 ? autoRetry.nextRetryAt : null;
