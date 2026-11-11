@@ -1,0 +1,37 @@
+# EAS archives the monorepo root. Include only the mobile build inputs.
+/*
+!/package.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/mobile
+!/packages
+/packages/*
+!/packages/hatch-platform-api
+!/patches
+!/public
+/public/*
+!/public/logo512.png
+
+# .easignore replaces nested .gitignore files; keep generated native projects,
+# local credentials, and development artifacts out of the upload explicitly.
+node_modules/
+mobile/ios/
+mobile/android/
+mobile/.expo/
+mobile/dist/
+mobile/expo-env.d.ts
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.local
+**/.secrets
+**/.secrets.*
+**/auth.json
+**/credentials.json
+**/*.p8
+**/*.p12
+**/*.[pP][eE][mM]
+**/*.[pP][fF][xX]
+**/*.key
+**/*.jks
+**/*.mobileprovision

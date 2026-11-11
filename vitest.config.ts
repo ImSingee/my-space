@@ -79,6 +79,7 @@ export default defineConfig({
           include: [
             'src/**/*.{test,spec}.{ts,tsx}',
             'packages/hatch-cli/src/**/*.{test,spec}.ts',
+            'mobile/src/core/**/*.test.ts',
           ],
           exclude: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
         },
