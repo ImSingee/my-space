@@ -17,7 +17,7 @@ import {
   type SessionHandoff,
   type SurfaceDecision,
 } from '../core';
-import { useSystemBrowser } from '../state/use-system-browser';
+import { useExternalLink } from '../state/use-external-link';
 import { Busy, Notice } from './primitives';
 import { palette } from './theme';
 
@@ -125,7 +125,7 @@ export function SecureSurface({
     failed.current = true;
     setProblem(message);
   };
-  const openInBrowser = useSystemBrowser(origin, handoff);
+  const openOutside = useExternalLink(origin, handoff);
   if (problem)
     return (
       <View style={{ padding: 12 }}>
@@ -151,8 +151,8 @@ export function SecureSurface({
   };
   const follow = (decision: SurfaceDecision) => {
     switch (decision.action) {
-      case 'browser':
-        openInBrowser(decision.url);
+      case 'external':
+        openOutside(decision.url);
         break;
       case 'app':
         onOpenApp?.(decision.slug);

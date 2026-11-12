@@ -10,8 +10,11 @@ export type SurfaceDecision =
   | { action: 'app'; slug: string }
   /** The browser session ended. */
   | { action: 'expired' }
-  /** Leave the app: only this URL goes to the system browser. */
-  | { action: 'browser'; url: string };
+  /**
+   * Leave the app: only this URL goes to the system, which opens the browser
+   * or the app that owns its scheme.
+   */
+  | { action: 'external'; url: string };
 
 export type SurfaceContext = {
   origin: string;
@@ -77,22 +80,35 @@ function inTarget(url: URL, target: string) {
   );
 }
 
+// Schemes a web view resolves inside its own document. They name no page and
+// no other app, so there is nothing outside the app to hand them to.
+const DOCUMENT_SCHEMES = new Set([
+  'about:',
+  'blob:',
+  'data:',
+  'file:',
+  'javascript:',
+]);
+
 /**
- * The only thing that leaves the app is a plain http(s) URL: no credentials in
- * it, no handoff page and no ticket. Cookies and tokens never go with it.
+ * The only thing that leaves the app is a URL for the system to open: a web
+ * page in the browser, or a link in any other scheme (`mailto:`, `tel:`,
+ * `someapp://…`) in the app that owns it. It never carries the handoff ticket;
+ * a web URL also carries no credentials and is never a handoff page. Cookies
+ * and tokens never go with it.
  */
-export function browserUrl(
+export function externalUrl(
   value: string,
   context: Pick<SurfaceContext, 'origin' | 'handoff'>,
 ) {
   const url = parse(value);
-  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:'))
-    return null;
-  if (url.username || url.password) return null;
+  if (!url || DOCUMENT_SCHEMES.has(url.protocol)) return null;
+  const web = url.protocol === 'https:' || url.protocol === 'http:';
+  if (web && (url.username || url.password)) return null;
   const text = decodeUrlAscii(url.href);
   const path = decodeUrlAscii(url.pathname);
   if (text === null || path === null) return null;
-  if (url.origin === context.origin) {
+  if (web && url.origin === context.origin) {
     // URL normalizes dot segments and backslashes after decoding as well.
     const normalized = parse(`${url.origin}${path}`)?.pathname;
     if (
@@ -109,8 +125,8 @@ export function browserUrl(
 
 function leave(value: string, context: SurfaceContext): SurfaceDecision {
   if (!context.signedIn) return BLOCK;
-  const url = browserUrl(value, context);
-  return url ? { action: 'browser', url } : BLOCK;
+  const url = externalUrl(value, context);
+  return url ? { action: 'external', url } : BLOCK;
 }
 
 /** A load request inside the WebView (`onShouldStartLoadWithRequest`). */
@@ -157,8 +173,9 @@ export function decideLoad(
 
 /**
  * A new window (`target="_blank"` or a user-initiated `window.open`) always
- * opens in the system browser, outside the app, even for this App's own pages.
- * Nothing loads in the view, so its history does not change.
+ * opens outside the app: web pages in the system browser, even this App's own
+ * pages, and other schemes in the app that owns them. Nothing loads in the
+ * view, so its history does not change.
  */
 export function decideNewWindow(
   value: string,
