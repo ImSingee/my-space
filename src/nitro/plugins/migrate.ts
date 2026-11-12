@@ -12,6 +12,7 @@ import { reconcilePendingAppActivations } from '~server/apps/deploy';
 import { warmLongRunningBackends } from '~server/apps/runtime';
 import { ensureScheduler } from '~server/apps/scheduler';
 import { ensureRetentionSweep } from '~server/retention';
+import { startNotificationDelivery } from '~server/notifications/adapters';
 import { interruptStaleWorkflowRuns } from '~server/workflows/execute';
 import { ensureWorkflowScheduler } from '~server/workflows/scheduler';
 import { getTailscaleManager } from '~server/tailscale-manager';
@@ -65,4 +66,6 @@ export default definePlugin(async () => {
   // Trim unbounded history tables (logs, cron runs, workflow runs, agent run
   // events) daily so a long-lived install doesn't grow without bound.
   ensureRetentionSweep();
+  // Deliveries are durable rows; resume pending and lease-expired ones.
+  startNotificationDelivery();
 });

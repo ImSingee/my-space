@@ -1,6 +1,7 @@
 import { Box, Text } from '@mantine/core';
 import { Link, Outlet, createFileRoute } from '@tanstack/react-router';
 import {
+  IconBell,
   IconRobot,
   IconServer2,
   IconServerBolt,
@@ -24,6 +25,11 @@ const GROUPS = [
       { to: '/settings/account', label: 'Account', icon: IconUserCircle },
       { to: '/settings/providers', label: 'AI Providers', icon: IconServer2 },
       { to: '/settings/users', label: 'Users', icon: IconUsers },
+      {
+        to: '/settings/notifications',
+        label: 'Notifications',
+        icon: IconBell,
+      },
       { to: '/settings/tailscale', label: 'Tailscale', icon: IconNetwork },
     ],
   },

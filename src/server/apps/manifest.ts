@@ -8,6 +8,7 @@ import {
   type CronJob,
   type WebhookAuth,
   type BackendRuntime,
+  type NotificationsConfig,
 } from '../../../packages/hatch-manifest/src/app-schema.js';
 export * from '../../../packages/hatch-manifest/src/app-schema.js';
 
@@ -150,6 +151,16 @@ export type NormalizedManifest = {
   /** Managed Data Table REST/SSE base URL. */
   dataTable?: { url: string };
   /**
+   * Declared notification kinds plus the push URL the backend posts to, and
+   * whether the App accepts routed notifications on `/__notification`. Absent
+   * on historical deployments, which neither push nor accept notifications.
+   */
+  notifications?: {
+    url: string;
+    kinds: NotificationsConfig['kinds'];
+    destination?: NotificationsConfig['destination'];
+  };
+  /**
    * The app's declared RPC API, captured from its proto at build time. Absent
    * for apps without an RPC service. Lets the platform (and the manage UI) know
    * exactly which services + methods an app exposes.
@@ -200,6 +211,14 @@ export function projectAppManifestUrls(
     ...(manifest.rpc ? { rpc: { ...manifest.rpc, url: rpcUrl(appId) } } : {}),
     ...(manifest.kv ? { kv: { url: kvUrl(appId) } } : {}),
     ...(manifest.dataTable ? { dataTable: { url: dataTableUrl(appId) } } : {}),
+    ...(manifest.notifications
+      ? {
+          notifications: {
+            ...manifest.notifications,
+            url: notificationsUrl(appId),
+          },
+        }
+      : {}),
     ...(manifest.capabilities?.webhook || manifest.webhook
       ? {
           webhook: {
@@ -227,6 +246,11 @@ export function kvUrl(id: string): string {
 /** Managed Data Table API base used by browsers and app backends. */
 export function dataTableUrl(id: string): string {
   return `${appBasePath(id)}/data`;
+}
+
+/** Per-app notification push endpoint, called by the backend with HMAC. */
+export function notificationsUrl(id: string): string {
+  return `${appBasePath(id)}/notifications`;
 }
 
 /** Public inbound webhook URL (token appended at call time as `?secret=`). */
@@ -322,6 +346,22 @@ export function normalizeManifest(src: SourceManifest): NormalizedManifest {
   }
   if (src.capabilities.dataTable) {
     out.dataTable = { url: dataTableUrl(src.id) };
+  }
+  // Pushing and receiving both run in the backend (HMAC with the signing
+  // secret), so the declaration is meaningful only when a backend is staged.
+  if (
+    src.capabilities.notifications &&
+    src.capabilities.backend &&
+    src.backend &&
+    src.notifications
+  ) {
+    out.notifications = {
+      url: notificationsUrl(src.id),
+      kinds: src.notifications.kinds,
+      ...(src.notifications.destination
+        ? { destination: src.notifications.destination }
+        : {}),
+    };
   }
   // Workflow calls are outbound from the backend (the platform injects each
   // target's secret into the backend env), so they only apply to apps that

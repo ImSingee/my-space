@@ -230,6 +230,7 @@ describe('App Hatch SDK materialization', () => {
       '@hatch/app': './sdk/@hatch/app/dist/app.js',
       '@hatch/app/data': './sdk/@hatch/app/dist/data.js',
       '@hatch/app/data/react': './sdk/@hatch/app/dist/data-react.js',
+      '@hatch/app/notifications': './sdk/@hatch/app/dist/notifications.js',
       '@hatch/data': './sdk/@hatch/data/dist/data.js',
       '@hatch/data/react': './sdk/@hatch/data/dist/data-react.js',
     });

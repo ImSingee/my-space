@@ -557,3 +557,57 @@ describe('App extra permission declarations', () => {
     );
   });
 });
+
+describe('notifications manifest', () => {
+  const base = {
+    id: 'notifier',
+    name: 'Notifier',
+    capabilities: { backend: true, notifications: true },
+    backend: { entry: 'backend/main.ts' },
+  };
+
+  it('normalizes declared kinds and the destination declaration', () => {
+    const normalized = normalizeManifest(
+      parseSourceManifest({
+        ...base,
+        notifications: {
+          kinds: [{ kind: 'order.shipped', name: 'Order shipped' }],
+          destination: { description: 'Forwards to Slack' },
+        },
+      }),
+    );
+    expect(normalized.notifications).toEqual({
+      url: '/api/app/notifier/notifications',
+      kinds: [{ kind: 'order.shipped', name: 'Order shipped' }],
+      destination: { description: 'Forwards to Slack' },
+    });
+  });
+
+  it('requires a backend, a matching capability, and unique kinds', () => {
+    const kinds = [{ kind: 'alert', name: 'Alert' }];
+    expect(() =>
+      parseSourceManifest({
+        ...base,
+        capabilities: { notifications: true },
+        backend: undefined,
+        notifications: { kinds },
+      }),
+    ).toThrow(/requires capabilities.backend/);
+    expect(() =>
+      parseSourceManifest({
+        ...base,
+        capabilities: { backend: true },
+        notifications: { kinds },
+      }),
+    ).toThrow(/capabilities.notifications is false/);
+    expect(() =>
+      parseSourceManifest({
+        ...base,
+        notifications: { kinds: [...kinds, ...kinds] },
+      }),
+    ).toThrow(/duplicate notification kind/);
+    expect(() =>
+      parseSourceManifest({ ...base, notifications: { kinds: [] } }),
+    ).toThrow(/at least one kind or destination/);
+  });
+});

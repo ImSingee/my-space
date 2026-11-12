@@ -48,6 +48,7 @@ import {
   backendRuntimeSchema,
   type BackendRuntime,
   dataTableUrl,
+  notificationsUrl,
   kvUrl,
 } from './manifest';
 import {
@@ -877,6 +878,9 @@ async function startBackend(
   const dataBaseUrl = appRow.capabilities?.dataTable
     ? internalPlatformUrl(dataTableUrl(id))
     : null;
+  const notificationsBaseUrl = appRow.capabilities?.notifications
+    ? internalPlatformUrl(notificationsUrl(id))
+    : null;
   const automaticNetworkDestinations = [
     `127.0.0.1:${port}`,
     ...(databaseEnv.DATABASE_URL
@@ -884,6 +888,9 @@ async function startBackend(
       : []),
     ...(kvBaseUrl ? [networkDestinationFromUrl(kvBaseUrl)] : []),
     ...(dataBaseUrl ? [networkDestinationFromUrl(dataBaseUrl)] : []),
+    ...(notificationsBaseUrl
+      ? [networkDestinationFromUrl(notificationsBaseUrl)]
+      : []),
     ...(workflowsConfig?.urls.map(networkDestinationFromUrl) ?? []),
   ];
 
@@ -930,6 +937,9 @@ async function startBackend(
       ...(signingSecret ? { HATCH_SIGNING_SECRET: signingSecret } : {}),
       ...(kvBaseUrl ? { HATCH_KV_URL: kvBaseUrl } : {}),
       ...(dataBaseUrl ? { HATCH_DATA_URL: dataBaseUrl } : {}),
+      ...(notificationsBaseUrl
+        ? { HATCH_NOTIFICATIONS_URL: notificationsBaseUrl }
+        : {}),
       HATCH_DEPLOYMENT_ID: backendDeploymentId,
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1094,7 +1104,7 @@ async function startBackend(
 const BACKEND_RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Server-initiated call into an app backend (used by the cron scheduler).
+ * Server-initiated call into an app backend (cron jobs, notification delivery).
  * Lazily starts the backend, then issues a direct HTTP request to `pathAndQuery`.
  */
 export async function callAppBackend(
@@ -1102,15 +1112,22 @@ export async function callAppBackend(
   pathAndQuery: string,
   init?: RequestInit,
   expectedDeploymentId?: string,
-): Promise<{ status: number; body: string }> {
+): Promise<{ status: number; body: string; contentType: string | null }> {
   const port = await ensureAppRunning(id, expectedDeploymentId);
   const path = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
+  const timeout = AbortSignal.timeout(BACKEND_RESPONSE_TIMEOUT_MS);
   const upstream = await fetch(`http://127.0.0.1:${port}${path}`, {
     ...init,
-    signal: AbortSignal.timeout(BACKEND_RESPONSE_TIMEOUT_MS),
+    // A caller signal (e.g. a shorter delivery timeout) can only tighten the
+    // platform-wide backend response limit.
+    signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
   });
   const body = await upstream.text();
-  return { status: upstream.status, body };
+  return {
+    status: upstream.status,
+    body,
+    contentType: upstream.headers.get('content-type'),
+  };
 }
 
 /** Whether an app backend process is currently running. */

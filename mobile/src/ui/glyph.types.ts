@@ -29,6 +29,7 @@ export const glyphs = {
   question: 'questionmark.bubble',
   eyeSlash: 'eye.slash',
   sparkle: 'sparkle',
+  bell: 'bell',
 } as const;
 
 export type GlyphName = keyof typeof glyphs;

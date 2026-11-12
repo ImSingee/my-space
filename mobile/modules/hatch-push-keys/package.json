@@ -1,0 +1,9 @@
+{
+  "name": "hatch-push-keys",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stores Hatch push end-to-end keys in the keychain group shared with the notification service extension.",
+  "license": "UNLICENSED",
+  "author": "Hatch",
+  "homepage": "https://github.com/singee/hatch"
+}

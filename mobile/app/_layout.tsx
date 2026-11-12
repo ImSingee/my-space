@@ -3,6 +3,7 @@ import { Appearance } from 'react-native';
 import { useEffect } from 'react';
 import { fonts, palette as c } from '../src/ui/theme';
 import { SessionProvider, useSession } from '../src/state/session';
+import { usePushLifecycle } from '../src/state/push';
 import { Busy } from '../src/ui/primitives';
 import {
   NavigationProvider,
@@ -12,6 +13,7 @@ import {
 function Navigation() {
   const { ready, origin, epoch } = useSession();
   const navigation = useNavigationPreferences();
+  usePushLifecycle();
   if (!ready || !navigation.ready) return <Busy label="Opening Hatch…" />;
   return (
     <Stack
@@ -44,6 +46,8 @@ function Navigation() {
         <Stack.Screen name="workflows/[id]" options={{ title: '' }} />
         <Stack.Screen name="chat/[id]" options={{ title: 'Conversation' }} />
         <Stack.Screen name="apps/[id]" options={{ title: 'App' }} />
+        <Stack.Screen name="notifications/index" options={{ title: '' }} />
+        <Stack.Screen name="notifications/[id]" options={{ title: '' }} />
         <Stack.Screen
           name="settings"
           options={{ headerShown: false, presentation: 'modal' }}

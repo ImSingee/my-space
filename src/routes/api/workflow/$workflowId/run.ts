@@ -5,47 +5,12 @@ import { coerceWorkflowQueryInput } from '~server/workflows/validate';
 import { startWorkflowRun } from '~server/workflows/execute';
 import { AppError } from '~server/errors';
 import { WorkflowDeploymentCompatibilityError } from '~server/workflows/compatibility';
+import { readCappedText } from '~server/http-body';
 
 // Cap inbound webhook payloads: this endpoint authenticates with only the
 // per-workflow secret, so without a limit any valid caller could send an
 // unbounded JSON body and exhaust server memory before validation runs.
 const MAX_WEBHOOK_BODY = 1_000_000;
-
-/**
- * Read a request body as text, returning null once `max` bytes are exceeded so
- * the caller can reject oversized payloads instead of buffering them whole.
- */
-async function readCappedText(
-  request: Request,
-  max: number,
-): Promise<string | null> {
-  const body = request.body;
-  if (!body) {
-    const text = await request.text();
-    return new TextEncoder().encode(text).byteLength > max ? null : text;
-  }
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(merged);
-}
 
 /**
  * Public inbound webhook for workflows. Unlike the rest of the API this does

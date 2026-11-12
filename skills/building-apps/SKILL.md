@@ -178,7 +178,8 @@ in `manifest.ts`:
     "webhook": false,
     "storage": false,
     "kv": false,
-    "dataTable": false
+    "dataTable": false,
+    "notifications": false
   },
   "backendMode": "serverless",
   "rpc": {
@@ -243,7 +244,7 @@ arbitrary networking. Compatibility v1 and v2 still accept an omitted
 `network` and run it unrestricted; never omit it from new source.
 
 The platform automatically adds only the backend's exact loopback listener
-plus enabled Database, Data Tables, KV, and Workflow endpoints. These platform
+plus enabled Database, Data Tables, KV, Notifications, and Workflow endpoints. These platform
 channels do not need to appear in the manifest. In `"deno-run"` mode, bind to
 `127.0.0.1:${PORT}`, not `0.0.0.0`, `::`, or an unspecified host. In
 `"deno-serve"` mode, Hatch supplies the loopback host and port. Every other
@@ -481,6 +482,11 @@ Read only the reference relevant to the requested capability:
 
 - [Data and storage](references/data-storage.md): Postgres, Storage, KV, runtime
   assets, and Data Table query/mutation details.
+- [Notifications](references/backend-integrations.md#notifications): declare
+  notification kinds, push with `notify()` from `@hatch/app/notifications`, and
+  receive routed notifications on `/__notification` when the App declares
+  `notifications.destination`. Users configure routing; Apps never pick
+  recipients. Verify the signature on every `/__notification` request.
 
 ## Rollback
 

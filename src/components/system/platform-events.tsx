@@ -19,22 +19,34 @@ const PlatformEventsContext = createContext<PlatformEventsContextValue | null>(
   null,
 );
 
+function stringField(value: object, key: string): string | null {
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'string' ? field : null;
+}
+
 function parsePlatformEvent(message: MessageEvent<string>) {
   try {
     const value: unknown = JSON.parse(message.data);
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      !('type' in value) ||
-      value.type !== 'app.deployment.activated' ||
-      !('appId' in value) ||
-      typeof value.appId !== 'string' ||
-      !('deploymentRevision' in value) ||
-      typeof value.deploymentRevision !== 'string'
-    ) {
-      return null;
+    if (typeof value !== 'object' || value === null) return null;
+    const type = stringField(value, 'type');
+    if (type === 'app.deployment.activated') {
+      const appId = stringField(value, 'appId');
+      const deploymentRevision = stringField(value, 'deploymentRevision');
+      if (!appId || !deploymentRevision) return null;
+      return { type, appId, deploymentRevision } satisfies PlatformEvent;
     }
-    return value as PlatformEvent;
+    if (type === 'notification.created') {
+      const notificationId = stringField(value, 'notificationId');
+      if (!notificationId) return null;
+      return { type, notificationId } satisfies PlatformEvent;
+    }
+    if (type === 'notification.delivery.updated') {
+      const notificationId = stringField(value, 'notificationId');
+      const deliveryId = stringField(value, 'deliveryId');
+      if (!notificationId || !deliveryId) return null;
+      return { type, notificationId, deliveryId } satisfies PlatformEvent;
+    }
+    return null;
   } catch {
     return null;
   }

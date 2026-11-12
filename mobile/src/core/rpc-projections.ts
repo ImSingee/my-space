@@ -6,11 +6,15 @@ import type {
   AgentSession,
   AgentSessionSummary,
   GetModelCatalogResponse,
+  NotificationDetail as RpcNotificationDetail,
+  NotificationSummary as RpcNotificationSummary,
 } from '@hatch/platform-api';
 import { MobileError } from './security';
 import type {
   AppSummary,
   AgentModelCatalog,
+  NotificationDetail,
+  NotificationSummary,
   RunStatus,
   SessionDetail,
   SessionSummary,
@@ -135,5 +139,44 @@ export function catalogProjection(
           modelId: catalog.defaultModel.modelId,
         }
       : null,
+  };
+}
+
+export function notificationSummaryProjection(
+  value: RpcNotificationSummary,
+): NotificationSummary {
+  return {
+    id: value.id,
+    sourceType: value.sourceType,
+    sourceName: value.sourceName,
+    kind: value.kind,
+    kindName: value.kindName,
+    title: value.title,
+    body: value.body ?? null,
+    url: value.url ?? null,
+    occurredAt: value.occurredAt,
+    status: value.status,
+  };
+}
+export function notificationDetailProjection(
+  value: RpcNotificationDetail,
+): NotificationDetail {
+  if (!value.summary)
+    throw new MobileError(
+      'invalid_response',
+      'The instance returned no notification.',
+    );
+  return {
+    ...notificationSummaryProjection(value.summary),
+    deliveries: value.deliveries.map((delivery) => ({
+      id: delivery.id,
+      destinationType: delivery.destinationType,
+      destinationName: delivery.destinationName,
+      status: delivery.status,
+      attempts: delivery.attempts,
+      lastError: delivery.lastError ?? null,
+      result: delivery.result ?? null,
+      completedAt: delivery.completedAt ?? null,
+    })),
   };
 }

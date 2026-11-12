@@ -45,3 +45,15 @@ programmatic quality gates, installed-package/container results, and genuinely
 untested operating systems. No host credential injection/renewal, Tool removal,
 Workflow run/cancel, storage/key management or durable operation service is part
 of this feature.
+
+## Notification center: CLI only, no Agent Tool
+
+`hatch notification ...` (history, test/retry, sources, destinations, webhooks,
+groups, routes and channels) calls `NotificationService` and intentionally has
+no Agent Tool counterpart: delivery configuration is a user decision, made in the
+Web UI or the CLI, never by an Agent. The service accepts user sessions and API
+keys and rejects Run JWTs, so these commands are not part of the Run credential
+refresh path in `packages/hatch-cli/src/main.ts`; inside an Agent Run they fail
+with `SESSION_REQUIRED` (exit 4). Device registration is mobile-only and has no
+CLI command. Secrets (webhook signing secrets, channel tokens) are printed only
+by the create/rotate commands that mint them.

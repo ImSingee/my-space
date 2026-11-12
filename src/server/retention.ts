@@ -29,6 +29,8 @@ const RETENTION_DAYS = {
    * runs still running/blocked are never touched.
    */
   agentRunEvents: 7,
+  /** Notification history (+ deliveries via cascade). */
+  notifications: 90,
 } as const;
 
 const SWEEP_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -64,6 +66,16 @@ export async function pruneHistory(): Promise<void> {
           and r.status not in ('running', 'blocked')
           and coalesce(r.completed_at, r.created_at)
               < ${cutoff(RETENTION_DAYS.agentRunEvents)}::timestamptz`,
+  );
+  // Never drop a notification that still has a delivery in flight.
+  await db.execute(
+    sql`delete from notifications n
+        where n.created_at < ${cutoff(RETENTION_DAYS.notifications)}::timestamptz
+          and not exists (
+            select 1 from notification_deliveries d
+            where d.notification_id = n.id
+              and d.status in ('pending', 'in_progress')
+          )`,
   );
   await prunePendingAgentAttachments();
   await pruneOrphanedAgentAttachmentSessions();

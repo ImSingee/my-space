@@ -261,6 +261,8 @@ const supportedCapabilitiesSchema = z.object({
   kv: z.boolean().default(false),
   /** Platform-managed typed tables with migrations and realtime queries. */
   dataTable: z.boolean().default(false),
+  /** Declares notification kinds and/or accepts routed notifications. */
+  notifications: z.boolean().default(false),
 });
 
 export const capabilitiesSchema = supportedCapabilitiesSchema
@@ -295,6 +297,57 @@ export function isValidAppId(id: string): boolean {
 export function isValidAppSlug(slug: string): boolean {
   return slug.length <= APP_SLUG_MAX_LENGTH && APP_SLUG_RE.test(slug);
 }
+
+/** Notification kind identifier, e.g. `order.shipped`. */
+export const NOTIFICATION_KIND_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+export const notificationKindSchema = z
+  .object({
+    kind: z
+      .string()
+      .regex(
+        NOTIFICATION_KIND_RE,
+        'kind must be 1-64 lowercase letters, digits, ".", "_" or "-", starting with a letter or digit',
+      ),
+    name: z.string().trim().min(1).max(80),
+    description: z.string().max(500).optional(),
+  })
+  .strict();
+
+/**
+ * Notification declarations. `kinds` lists what the App may push; declaring
+ * `destination` makes the App selectable as a notification destination that
+ * receives routed notifications on `/__notification`.
+ */
+export const notificationsConfigSchema = z
+  .object({
+    kinds: z.array(notificationKindSchema).max(100).default([]),
+    destination: z
+      .object({ description: z.string().max(500).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((config, ctx) => {
+    const seen = new Set<string>();
+    config.kinds.forEach((entry, index) => {
+      if (seen.has(entry.kind)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `duplicate notification kind "${entry.kind}"`,
+          path: ['kinds', index, 'kind'],
+        });
+      }
+      seen.add(entry.kind);
+    });
+    if (config.kinds.length === 0 && !config.destination) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'notifications must declare at least one kind or destination',
+        path: [],
+      });
+    }
+  });
 
 /** Backend listener ownership; an omitted value retains self-listening Deno. */
 export const backendRuntimeSchema = z.enum(['deno-run', 'deno-serve']);
@@ -355,6 +408,8 @@ export const sourceManifestSchema = z
     webhook: webhookConfigSchema.optional(),
     /** Top-level workflows this app's backend may invoke (see appWorkflowRefSchema). */
     workflows: appWorkflowsSchema,
+    /** Notification kinds and destination declaration (notifications capability). */
+    notifications: notificationsConfigSchema.optional(),
   })
   .strict()
   .superRefine((manifest, ctx) => {
@@ -393,6 +448,28 @@ export const sourceManifestSchema = z
         path: ['rpc'],
       });
     }
+    if (
+      manifest.capabilities.notifications !== Boolean(manifest.notifications)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: manifest.notifications
+          ? 'notifications is declared but capabilities.notifications is false'
+          : 'capabilities.notifications is true but notifications is not declared',
+        path: ['notifications'],
+      });
+    }
+    if (
+      manifest.capabilities.notifications &&
+      (!manifest.capabilities.backend || !manifest.backend)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'capabilities.notifications requires capabilities.backend and backend.entry',
+        path: ['capabilities', 'notifications'],
+      });
+    }
     if (manifest.capabilities.widgets && manifest.widgets.length === 0) {
       ctx.addIssue({
         code: 'custom',
@@ -406,3 +483,4 @@ export type SourceManifest = z.infer<typeof sourceManifestSchema>;
 export type AppCapabilitiesShape = z.infer<typeof capabilitiesSchema>;
 /** Platform-side inbound-webhook auth mode (see webhookConfigSchema). */
 export type WebhookAuth = z.infer<typeof webhookConfigSchema>['auth'];
+export type NotificationsConfig = z.infer<typeof notificationsConfigSchema>;

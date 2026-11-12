@@ -8,6 +8,7 @@ import {
 import { assertSupportedDeployment } from '~server/apps/compatibility';
 import { errorResponse } from '~server/errors';
 import { deleteKv, getKv, listKv, setKv } from '~server/apps/kv';
+import { readCappedText } from '~server/http-body';
 
 // Cap inbound KV bodies: this endpoint authenticates with only the per-app HMAC
 // signature, so without a limit any caller could stream an unbounded body and
@@ -15,43 +16,6 @@ import { deleteKv, getKv, listKv, setKv } from '~server/apps/kv';
 // 64 KB per-value cap because JSON string-escaping can inflate a value; the
 // precise per-value limit is still enforced in setKv after decode.
 const MAX_KV_BODY = 1_000_000;
-
-/**
- * Read a request body as text, returning null once `max` bytes are exceeded so
- * the caller can reject oversized payloads instead of buffering them whole.
- * Mirrors the inbound webhook route's capped reader.
- */
-async function readCappedText(
-  request: Request,
-  max: number,
-): Promise<string | null> {
-  const body = request.body;
-  if (!body) {
-    const text = await request.text();
-    return new TextEncoder().encode(text).byteLength > max ? null : text;
-  }
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(merged);
-}
 
 /**
  * App-facing KV REST endpoint. Called by the app's OWN backend (never the

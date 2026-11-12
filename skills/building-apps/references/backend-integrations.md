@@ -256,6 +256,98 @@ export default {
 } satisfies Deno.ServeDefaultExport;
 ```
 
+## Notifications
+
+Enable `notifications` and `backend`, then declare the kinds the App pushes
+and/or `destination` to let users route notifications to this App. Users
+decide in Settings → Notifications (or `hatch notification route ...`) which
+notifications reach which devices, webhooks or App destinations; the App never
+chooses recipients.
+
+```json
+{
+  "capabilities": { "backend": true, "notifications": true },
+  "notifications": {
+    "kinds": [
+      { "kind": "order.shipped", "name": "Order shipped" },
+      {
+        "kind": "order.failed",
+        "name": "Order failed",
+        "description": "Payment or fulfilment failed"
+      }
+    ],
+    "destination": { "description": "Forwards notifications to Slack" }
+  }
+}
+```
+
+A kind is 1-64 lowercase letters, digits, `.`, `_` or `-`; names are shown to
+users. Keep existing kinds stable: users' routes reference them, and pushing a
+kind the live deployment no longer declares fails with 422.
+
+### Pushing
+
+```ts
+import { notify } from '@hatch/app/notifications';
+
+await notify({
+  kind: 'order.shipped',
+  title: `Order ${order.id} shipped`,
+  body: 'Arrives Thursday',
+  url: 'https://tracking.example.com/123',
+  data: { orderId: order.id },
+  dedupeKey: `shipped:${order.id}`,
+});
+```
+
+`notify` POSTs to `HATCH_NOTIFICATIONS_URL`, signed with
+`HATCH_SIGNING_SECRET`; both are injected only when the capability and backend
+are enabled. Title is required (≤200 characters); body ≤4000; `url` must be
+absolute http(s); `data` is a JSON object ≤32 KiB; the request body is capped
+at 64 KiB. A repeated `dedupeKey` returns the first notification with
+`deduplicated: true`. Errors throw `NotificationError` with the HTTP status.
+Pushing returns once the notification is stored; delivery happens afterwards
+with retries, so never wait for or retry delivery yourself.
+
+### Receiving as a destination
+
+Declaring `destination` adds the App to the notification destinations users
+can select. Routed notifications arrive as `POST /__notification` with a JSON
+envelope that includes the source (App or Channel id, slug and name), kind,
+title, body, url, data, dedupe key and timestamps. The handler may do anything
+with it (ignore it, forward it to another service, store it). Return 2xx when
+handled; optionally return a free-form `result` string (≤2000 characters) that
+users see in the notification history. Non-2xx, timeouts (30 s) and network
+failures are retried with backoff up to 6 attempts; 4xx other than 408/429 fail
+immediately. The same `deliveryId` can arrive more than once, so make handling
+idempotent. An App never receives notifications it pushed itself.
+
+Always verify the platform signature (HMAC over `<timestamp>.<raw body>`):
+
+```ts
+import {
+  NotificationVerificationError,
+  notificationResult,
+  verifyNotificationRequest,
+} from '@hatch/app/notifications';
+
+if (new URL(request.url).pathname === '/__notification') {
+  try {
+    const { notification } = await verifyNotificationRequest(request);
+    await forwardToSlack(notification);
+    return notificationResult(`forwarded to #ops`);
+  } catch (error) {
+    if (error instanceof NotificationVerificationError) {
+      return new Response('unauthorized', { status: 401 });
+    }
+    throw error;
+  }
+}
+```
+
+In a `"deno-serve"` backend route `/__notification` before the Connect handler,
+like `/__webhook`.
+
 ## Long-running mode
 
 Set `backendMode: "long-running"` for in-memory state, WebSockets, or background

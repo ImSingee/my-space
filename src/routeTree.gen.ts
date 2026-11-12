@@ -26,11 +26,14 @@ import { Route as AppAgentThreadIdRouteImport } from './routes/_app/agent/$threa
 import { Route as AppAppsIndexRouteImport } from './routes/_app/apps/index'
 import { Route as AppDashboardIndexRouteImport } from './routes/_app/dashboard/index'
 import { Route as AppDashboardDashboardIdRouteImport } from './routes/_app/dashboard/$dashboardId'
+import { Route as AppNotificationsIndexRouteImport } from './routes/_app/notifications/index'
+import { Route as AppNotificationsNotificationIdRouteImport } from './routes/_app/notifications/$notificationId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsAboutRouteImport } from './routes/_app/settings/about'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppSettingsAgentRunnerRouteImport } from './routes/_app/settings/agent-runner'
 import { Route as AppSettingsBackendsRouteImport } from './routes/_app/settings/backends'
+import { Route as AppSettingsNotificationsRouteImport } from './routes/_app/settings/notifications'
 import { Route as AppSettingsProvidersRouteImport } from './routes/_app/settings/providers'
 import { Route as AppSettingsTailscaleRouteImport } from './routes/_app/settings/tailscale'
 import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
@@ -45,8 +48,10 @@ import { Route as AppWorkflowWorkflowSlugIndexRouteImport } from './routes/_app/
 import { Route as AppWorkflowWorkflowSlugManageRouteImport } from './routes/_app/workflow/$workflowSlug/manage'
 import { Route as ApiAgentAttachmentsAttachmentIdRouteImport } from './routes/api/agent/attachments/$attachmentId'
 import { Route as ApiAppAppIdDownloadRouteImport } from './routes/api/app/$appId/download'
+import { Route as ApiAppAppIdNotificationsRouteImport } from './routes/api/app/$appId/notifications'
 import { Route as ApiAuthHandoffsCompleteRouteImport } from './routes/api/auth/handoffs/complete'
 import { Route as ApiAuthHandoffsConsumeRouteImport } from './routes/api/auth/handoffs/consume'
+import { Route as ApiNotificationsChannelChannelIdRouteImport } from './routes/api/notifications/channel/$channelId'
 import { Route as ApiWorkflowWorkflowIdDownloadRouteImport } from './routes/api/workflow/$workflowId/download'
 import { Route as ApiWorkflowWorkflowIdRunRouteImport } from './routes/api/workflow/$workflowId/run'
 import { Route as AppAppSlugEmbedSplatRouteImport } from './routes/app/$appSlug/embed/$'
@@ -149,6 +154,17 @@ const AppDashboardDashboardIdRoute = AppDashboardDashboardIdRouteImport.update({
   path: '/dashboard/$dashboardId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppNotificationsIndexRoute = AppNotificationsIndexRouteImport.update({
+  id: '/notifications/',
+  path: '/notifications/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppNotificationsNotificationIdRoute =
+  AppNotificationsNotificationIdRouteImport.update({
+    id: '/notifications/$notificationId',
+    path: '/notifications/$notificationId',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -174,6 +190,12 @@ const AppSettingsBackendsRoute = AppSettingsBackendsRouteImport.update({
   path: '/backends',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsNotificationsRoute =
+  AppSettingsNotificationsRouteImport.update({
+    id: '/notifications',
+    path: '/notifications',
+    getParentRoute: () => AppSettingsRoute,
+  } as any)
 const AppSettingsProvidersRoute = AppSettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
@@ -248,6 +270,12 @@ const ApiAppAppIdDownloadRoute = ApiAppAppIdDownloadRouteImport.update({
   path: '/api/app/$appId/download',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAppAppIdNotificationsRoute =
+  ApiAppAppIdNotificationsRouteImport.update({
+    id: '/api/app/$appId/notifications',
+    path: '/api/app/$appId/notifications',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAuthHandoffsCompleteRoute = ApiAuthHandoffsCompleteRouteImport.update({
   id: '/api/auth/handoffs/complete',
   path: '/api/auth/handoffs/complete',
@@ -258,6 +286,12 @@ const ApiAuthHandoffsConsumeRoute = ApiAuthHandoffsConsumeRouteImport.update({
   path: '/api/auth/handoffs/consume',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiNotificationsChannelChannelIdRoute =
+  ApiNotificationsChannelChannelIdRouteImport.update({
+    id: '/api/notifications/channel/$channelId',
+    path: '/api/notifications/channel/$channelId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiWorkflowWorkflowIdDownloadRoute =
   ApiWorkflowWorkflowIdDownloadRouteImport.update({
     id: '/api/workflow/$workflowId/download',
@@ -365,10 +399,12 @@ export interface FileRoutesByFullPath {
   '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/notifications/$notificationId': typeof AppNotificationsNotificationIdRoute
   '/settings/about': typeof AppSettingsAboutRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
+  '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
   '/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/settings/users': typeof AppSettingsUsersRoute
@@ -379,14 +415,17 @@ export interface FileRoutesByFullPath {
   '/agent/': typeof AppAgentIndexRoute
   '/apps/': typeof AppAppsIndexRoute
   '/dashboard/': typeof AppDashboardIndexRoute
+  '/notifications/': typeof AppNotificationsIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/workflows/': typeof AppWorkflowsIndexRoute
   '/app/$appSlug/manage': typeof AppAppAppSlugManageRoute
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/app/$appId/notifications': typeof ApiAppAppIdNotificationsRoute
   '/api/auth/handoffs/complete': typeof ApiAuthHandoffsCompleteRoute
   '/api/auth/handoffs/consume': typeof ApiAuthHandoffsConsumeRoute
+  '/api/notifications/channel/$channelId': typeof ApiNotificationsChannelChannelIdRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -419,10 +458,12 @@ export interface FileRoutesByTo {
   '/cli/authorize': typeof CliAuthorizeRoute
   '/agent/$threadId': typeof AppAgentThreadIdRoute
   '/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/notifications/$notificationId': typeof AppNotificationsNotificationIdRoute
   '/settings/about': typeof AppSettingsAboutRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/settings/backends': typeof AppSettingsBackendsRoute
+  '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/settings/providers': typeof AppSettingsProvidersRoute
   '/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/settings/users': typeof AppSettingsUsersRoute
@@ -433,14 +474,17 @@ export interface FileRoutesByTo {
   '/agent': typeof AppAgentIndexRoute
   '/apps': typeof AppAppsIndexRoute
   '/dashboard': typeof AppDashboardIndexRoute
+  '/notifications': typeof AppNotificationsIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/workflows': typeof AppWorkflowsIndexRoute
   '/app/$appSlug/manage': typeof AppAppAppSlugManageRoute
   '/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/app/$appId/notifications': typeof ApiAppAppIdNotificationsRoute
   '/api/auth/handoffs/complete': typeof ApiAuthHandoffsCompleteRoute
   '/api/auth/handoffs/consume': typeof ApiAuthHandoffsConsumeRoute
+  '/api/notifications/channel/$channelId': typeof ApiNotificationsChannelChannelIdRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -477,10 +521,12 @@ export interface FileRoutesById {
   '/cli/authorize': typeof CliAuthorizeRoute
   '/_app/agent/$threadId': typeof AppAgentThreadIdRoute
   '/_app/dashboard/$dashboardId': typeof AppDashboardDashboardIdRoute
+  '/_app/notifications/$notificationId': typeof AppNotificationsNotificationIdRoute
   '/_app/settings/about': typeof AppSettingsAboutRoute
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/agent-runner': typeof AppSettingsAgentRunnerRoute
   '/_app/settings/backends': typeof AppSettingsBackendsRoute
+  '/_app/settings/notifications': typeof AppSettingsNotificationsRoute
   '/_app/settings/providers': typeof AppSettingsProvidersRoute
   '/_app/settings/tailscale': typeof AppSettingsTailscaleRoute
   '/_app/settings/users': typeof AppSettingsUsersRoute
@@ -491,14 +537,17 @@ export interface FileRoutesById {
   '/_app/agent/': typeof AppAgentIndexRoute
   '/_app/apps/': typeof AppAppsIndexRoute
   '/_app/dashboard/': typeof AppDashboardIndexRoute
+  '/_app/notifications/': typeof AppNotificationsIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/workflows/': typeof AppWorkflowsIndexRoute
   '/_app/app/$appSlug/manage': typeof AppAppAppSlugManageRoute
   '/_app/workflow/$workflowSlug/manage': typeof AppWorkflowWorkflowSlugManageRoute
   '/api/agent/attachments/$attachmentId': typeof ApiAgentAttachmentsAttachmentIdRoute
   '/api/app/$appId/download': typeof ApiAppAppIdDownloadRoute
+  '/api/app/$appId/notifications': typeof ApiAppAppIdNotificationsRoute
   '/api/auth/handoffs/complete': typeof ApiAuthHandoffsCompleteRoute
   '/api/auth/handoffs/consume': typeof ApiAuthHandoffsConsumeRoute
+  '/api/notifications/channel/$channelId': typeof ApiNotificationsChannelChannelIdRoute
   '/api/workflow/$workflowId/download': typeof ApiWorkflowWorkflowIdDownloadRoute
   '/api/workflow/$workflowId/run': typeof ApiWorkflowWorkflowIdRunRoute
   '/app/$appSlug/embed/$': typeof AppAppSlugEmbedSplatRoute
@@ -535,10 +584,12 @@ export interface FileRouteTypes {
     | '/cli/authorize'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
+    | '/notifications/$notificationId'
     | '/settings/about'
     | '/settings/account'
     | '/settings/agent-runner'
     | '/settings/backends'
+    | '/settings/notifications'
     | '/settings/providers'
     | '/settings/tailscale'
     | '/settings/users'
@@ -549,14 +600,17 @@ export interface FileRouteTypes {
     | '/agent/'
     | '/apps/'
     | '/dashboard/'
+    | '/notifications/'
     | '/settings/'
     | '/workflows/'
     | '/app/$appSlug/manage'
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/app/$appId/notifications'
     | '/api/auth/handoffs/complete'
     | '/api/auth/handoffs/consume'
+    | '/api/notifications/channel/$channelId'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -589,10 +643,12 @@ export interface FileRouteTypes {
     | '/cli/authorize'
     | '/agent/$threadId'
     | '/dashboard/$dashboardId'
+    | '/notifications/$notificationId'
     | '/settings/about'
     | '/settings/account'
     | '/settings/agent-runner'
     | '/settings/backends'
+    | '/settings/notifications'
     | '/settings/providers'
     | '/settings/tailscale'
     | '/settings/users'
@@ -603,14 +659,17 @@ export interface FileRouteTypes {
     | '/agent'
     | '/apps'
     | '/dashboard'
+    | '/notifications'
     | '/settings'
     | '/workflows'
     | '/app/$appSlug/manage'
     | '/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/app/$appId/notifications'
     | '/api/auth/handoffs/complete'
     | '/api/auth/handoffs/consume'
+    | '/api/notifications/channel/$channelId'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -646,10 +705,12 @@ export interface FileRouteTypes {
     | '/cli/authorize'
     | '/_app/agent/$threadId'
     | '/_app/dashboard/$dashboardId'
+    | '/_app/notifications/$notificationId'
     | '/_app/settings/about'
     | '/_app/settings/account'
     | '/_app/settings/agent-runner'
     | '/_app/settings/backends'
+    | '/_app/settings/notifications'
     | '/_app/settings/providers'
     | '/_app/settings/tailscale'
     | '/_app/settings/users'
@@ -660,14 +721,17 @@ export interface FileRouteTypes {
     | '/_app/agent/'
     | '/_app/apps/'
     | '/_app/dashboard/'
+    | '/_app/notifications/'
     | '/_app/settings/'
     | '/_app/workflows/'
     | '/_app/app/$appSlug/manage'
     | '/_app/workflow/$workflowSlug/manage'
     | '/api/agent/attachments/$attachmentId'
     | '/api/app/$appId/download'
+    | '/api/app/$appId/notifications'
     | '/api/auth/handoffs/complete'
     | '/api/auth/handoffs/consume'
+    | '/api/notifications/channel/$channelId'
     | '/api/workflow/$workflowId/download'
     | '/api/workflow/$workflowId/run'
     | '/app/$appSlug/embed/$'
@@ -704,8 +768,10 @@ export interface RootRouteChildren {
   MobileDashboardDashboardIdRoute: typeof MobileDashboardDashboardIdRoute
   ApiAgentAttachmentsAttachmentIdRoute: typeof ApiAgentAttachmentsAttachmentIdRoute
   ApiAppAppIdDownloadRoute: typeof ApiAppAppIdDownloadRoute
+  ApiAppAppIdNotificationsRoute: typeof ApiAppAppIdNotificationsRoute
   ApiAuthHandoffsCompleteRoute: typeof ApiAuthHandoffsCompleteRoute
   ApiAuthHandoffsConsumeRoute: typeof ApiAuthHandoffsConsumeRoute
+  ApiNotificationsChannelChannelIdRoute: typeof ApiNotificationsChannelChannelIdRoute
   ApiWorkflowWorkflowIdDownloadRoute: typeof ApiWorkflowWorkflowIdDownloadRoute
   ApiWorkflowWorkflowIdRunRoute: typeof ApiWorkflowWorkflowIdRunRoute
   AppAppSlugEmbedSplatRoute: typeof AppAppSlugEmbedSplatRoute
@@ -840,6 +906,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardDashboardIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/notifications/': {
+      id: '/_app/notifications/'
+      path: '/notifications'
+      fullPath: '/notifications/'
+      preLoaderRoute: typeof AppNotificationsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/notifications/$notificationId': {
+      id: '/_app/notifications/$notificationId'
+      path: '/notifications/$notificationId'
+      fullPath: '/notifications/$notificationId'
+      preLoaderRoute: typeof AppNotificationsNotificationIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/': {
       id: '/_app/settings/'
       path: '/'
@@ -873,6 +953,13 @@ declare module '@tanstack/react-router' {
       path: '/backends'
       fullPath: '/settings/backends'
       preLoaderRoute: typeof AppSettingsBackendsRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/notifications': {
+      id: '/_app/settings/notifications'
+      path: '/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof AppSettingsNotificationsRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/providers': {
@@ -973,6 +1060,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAppAppIdDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/app/$appId/notifications': {
+      id: '/api/app/$appId/notifications'
+      path: '/api/app/$appId/notifications'
+      fullPath: '/api/app/$appId/notifications'
+      preLoaderRoute: typeof ApiAppAppIdNotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/handoffs/complete': {
       id: '/api/auth/handoffs/complete'
       path: '/api/auth/handoffs/complete'
@@ -985,6 +1079,13 @@ declare module '@tanstack/react-router' {
       path: '/api/auth/handoffs/consume'
       fullPath: '/api/auth/handoffs/consume'
       preLoaderRoute: typeof ApiAuthHandoffsConsumeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/notifications/channel/$channelId': {
+      id: '/api/notifications/channel/$channelId'
+      path: '/api/notifications/channel/$channelId'
+      fullPath: '/api/notifications/channel/$channelId'
+      preLoaderRoute: typeof ApiNotificationsChannelChannelIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/workflow/$workflowId/download': {
@@ -1128,6 +1229,7 @@ interface AppSettingsRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
   AppSettingsAgentRunnerRoute: typeof AppSettingsAgentRunnerRoute
   AppSettingsBackendsRoute: typeof AppSettingsBackendsRoute
+  AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
   AppSettingsProvidersRoute: typeof AppSettingsProvidersRoute
   AppSettingsTailscaleRoute: typeof AppSettingsTailscaleRoute
   AppSettingsUsersRoute: typeof AppSettingsUsersRoute
@@ -1139,6 +1241,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsAccountRoute: AppSettingsAccountRoute,
   AppSettingsAgentRunnerRoute: AppSettingsAgentRunnerRoute,
   AppSettingsBackendsRoute: AppSettingsBackendsRoute,
+  AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
   AppSettingsProvidersRoute: AppSettingsProvidersRoute,
   AppSettingsTailscaleRoute: AppSettingsTailscaleRoute,
   AppSettingsUsersRoute: AppSettingsUsersRoute,
@@ -1155,8 +1258,10 @@ interface AppRouteChildren {
   AppExecutionsRoute: typeof AppExecutionsRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppDashboardDashboardIdRoute: typeof AppDashboardDashboardIdRoute
+  AppNotificationsNotificationIdRoute: typeof AppNotificationsNotificationIdRoute
   AppAppsIndexRoute: typeof AppAppsIndexRoute
   AppDashboardIndexRoute: typeof AppDashboardIndexRoute
+  AppNotificationsIndexRoute: typeof AppNotificationsIndexRoute
   AppWorkflowsIndexRoute: typeof AppWorkflowsIndexRoute
   AppAppAppSlugManageRoute: typeof AppAppAppSlugManageRoute
   AppWorkflowWorkflowSlugManageRoute: typeof AppWorkflowWorkflowSlugManageRoute
@@ -1172,8 +1277,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppExecutionsRoute: AppExecutionsRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppDashboardDashboardIdRoute: AppDashboardDashboardIdRoute,
+  AppNotificationsNotificationIdRoute: AppNotificationsNotificationIdRoute,
   AppAppsIndexRoute: AppAppsIndexRoute,
   AppDashboardIndexRoute: AppDashboardIndexRoute,
+  AppNotificationsIndexRoute: AppNotificationsIndexRoute,
   AppWorkflowsIndexRoute: AppWorkflowsIndexRoute,
   AppAppAppSlugManageRoute: AppAppAppSlugManageRoute,
   AppWorkflowWorkflowSlugManageRoute: AppWorkflowWorkflowSlugManageRoute,
@@ -1220,8 +1327,10 @@ const rootRouteChildren: RootRouteChildren = {
   MobileDashboardDashboardIdRoute: MobileDashboardDashboardIdRoute,
   ApiAgentAttachmentsAttachmentIdRoute: ApiAgentAttachmentsAttachmentIdRoute,
   ApiAppAppIdDownloadRoute: ApiAppAppIdDownloadRoute,
+  ApiAppAppIdNotificationsRoute: ApiAppAppIdNotificationsRoute,
   ApiAuthHandoffsCompleteRoute: ApiAuthHandoffsCompleteRoute,
   ApiAuthHandoffsConsumeRoute: ApiAuthHandoffsConsumeRoute,
+  ApiNotificationsChannelChannelIdRoute: ApiNotificationsChannelChannelIdRoute,
   ApiWorkflowWorkflowIdDownloadRoute: ApiWorkflowWorkflowIdDownloadRoute,
   ApiWorkflowWorkflowIdRunRoute: ApiWorkflowWorkflowIdRunRoute,
   AppAppSlugEmbedSplatRoute: AppAppSlugEmbedSplatRoute,

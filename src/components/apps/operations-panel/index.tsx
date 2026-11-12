@@ -15,6 +15,7 @@ import {
   appBackendsQueryOptions,
   appOpsQueryOptions,
   deploymentsQueryOptions,
+  normalizedManifestQueryOptions,
 } from '~queries/apps';
 import {
   deleteAppDataDatabaseFn,
@@ -25,6 +26,7 @@ import { CronSection } from './cron-section';
 import { DataTableSection } from './data-table-section';
 import { DatabaseSection } from './database-section';
 import { KvSection } from './kv-section';
+import { NotificationsSection } from './notifications-section';
 import { RetainedDataTableSection } from './retained-data-table-section';
 import { SectionHeader } from './section-header';
 import { WebhookSection } from './webhook-section';
@@ -164,6 +166,8 @@ export function OperationsPanel({
   runtimeSupported?: boolean;
 }) {
   const query = useQuery(appOpsQueryOptions(appId));
+  const manifestQuery = useQuery(normalizedManifestQueryOptions(appId));
+  const notifications = manifestQuery.data?.notifications;
   const queryClient = useQueryClient();
 
   const deleteDatabase = async (dbName: string, confirmation: string) => {
@@ -214,7 +218,8 @@ export function OperationsPanel({
     ops.cron.enabled ||
     ops.webhook.enabled ||
     ops.kv.enabled ||
-    dataTableVisible;
+    dataTableVisible ||
+    Boolean(notifications);
 
   return (
     <Box component="section">
@@ -225,7 +230,7 @@ export function OperationsPanel({
       {!hasOperations ? (
         <Text size="sm" c="dimmed">
           No database, Data Tables, persistent storage, backend, scheduled jobs,
-          webhook, or KV to manage for this app.
+          webhook, KV, or notifications to manage for this app.
         </Text>
       ) : (
         <Stack gap="lg">
@@ -267,6 +272,9 @@ export function OperationsPanel({
             <WebhookSection webhook={ops.webhook} />
           ) : null}
           {ops.kv.enabled ? <KvSection appId={appId} /> : null}
+          {notifications ? (
+            <NotificationsSection notifications={notifications} />
+          ) : null}
         </Stack>
       )}
     </Box>

@@ -11,11 +11,14 @@ import {
   AuthService,
   WorkflowService,
   WorkspaceService,
+  NotificationService,
   PublicErrorSchema,
 } from '@hatch/platform-api';
 import {
   appProjection,
   catalogProjection,
+  notificationDetailProjection,
+  notificationSummaryProjection,
   sessionProjection,
   summaryProjection,
 } from './rpc-projections';
@@ -39,6 +42,9 @@ import type {
   Attachment,
   CreateRunInput,
   AgentModelCatalog,
+  NotificationDetail,
+  NotificationSummary,
+  PushRegistration,
   RunCreated,
   SessionDetail,
   SessionHandoff,
@@ -95,6 +101,7 @@ export class HatchApiClient {
   private readonly authRpc: Client<typeof AuthService>;
   private readonly workflowRpc: Client<typeof WorkflowService>;
   private readonly workspaceRpc: Client<typeof WorkspaceService>;
+  private readonly notificationRpc: Client<typeof NotificationService>;
   private readonly onUnauthorized?: (origin: string) => void;
   constructor(options: ClientOptions) {
     this.origin = canonicalizeInstanceUrl(options.origin, options);
@@ -126,6 +133,7 @@ export class HatchApiClient {
     this.authRpc = createClient(AuthService, transport);
     this.workflowRpc = createClient(WorkflowService, transport);
     this.workspaceRpc = createClient(WorkspaceService, transport);
+    this.notificationRpc = createClient(NotificationService, transport);
   }
 
   private async fetchResponse(
@@ -353,6 +361,70 @@ export class HatchApiClient {
         this.workspaceRpc.setDashboardAutoRefresh({ id, seconds }, { signal }),
       signal,
     );
+  }
+  async notifications(
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<{ items: NotificationSummary[]; nextCursor: string | null }> {
+    const result = await this.rpcRequest(
+      (signal) =>
+        this.notificationRpc.listNotifications(
+          { cursor, limit: 50 },
+          { signal },
+        ),
+      signal,
+    );
+    return {
+      items: result.notifications.map(notificationSummaryProjection),
+      nextCursor: result.nextCursor ?? null,
+    };
+  }
+  async notification(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<NotificationDetail> {
+    const result = await this.rpcRequest(
+      (signal) => this.notificationRpc.getNotification({ id }, { signal }),
+      signal,
+    );
+    if (!result.notification?.summary)
+      throw new MobileError(
+        'invalid_response',
+        'The instance returned no notification.',
+      );
+    return notificationDetailProjection(result.notification);
+  }
+  /** Bind this phone's APNs token and end-to-end key to the current session. */
+  registerPushDevice(input: PushRegistration, signal?: AbortSignal) {
+    return this.rpcRequest(
+      (signal) =>
+        this.notificationRpc.registerDevice(
+          { ...input, platform: 'ios' },
+          { signal },
+        ),
+      signal,
+    ).then(() => undefined);
+  }
+  unregisterPushDevice(signal?: AbortSignal) {
+    return this.rpcRequest(
+      (signal) => this.notificationRpc.unregisterDevice({}, { signal }),
+      signal,
+    ).then(() => undefined);
+  }
+  async pushDevice(
+    signal?: AbortSignal,
+  ): Promise<{ enabled: boolean; lastError: string | null } | null> {
+    const result = await this.rpcRequest(
+      (signal) => this.notificationRpc.getCurrentDevice({}, { signal }),
+      signal,
+    );
+    const destination = result.destination;
+    return destination
+      ? {
+          enabled: destination.enabled,
+          lastError: destination.lastError ?? null,
+        }
+      : null;
   }
   async workflows(signal?: AbortSignal): Promise<AppSummary[]> {
     const result = await this.rpcRequest(

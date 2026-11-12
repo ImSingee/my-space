@@ -1,9 +1,16 @@
 /** Events broadcast by the Platform process to connected browser clients. */
-export type PlatformEvent = {
-  type: 'app.deployment.activated';
-  appId: string;
-  deploymentRevision: string;
-};
+export type PlatformEvent =
+  | {
+      type: 'app.deployment.activated';
+      appId: string;
+      deploymentRevision: string;
+    }
+  | { type: 'notification.created'; notificationId: string }
+  | {
+      type: 'notification.delivery.updated';
+      notificationId: string;
+      deliveryId: string;
+    };
 
 export type PlatformEventSubscriber = (event: PlatformEvent) => void;
 

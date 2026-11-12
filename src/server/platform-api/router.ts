@@ -11,11 +11,9 @@ import {
 } from '~server/agent-session-store';
 import { sessionOriginError } from '~server/session-http-auth';
 import { sdkPayload } from './sdk';
-import {
-  createContextKey,
-  type HandlerContext,
-  type ConnectRouter,
-} from '@connectrpc/connect';
+import { type HandlerContext, type ConnectRouter } from '@connectrpc/connect';
+import { publicApiContext } from './context';
+import { registerNotificationApi } from './notifications';
 import { AppService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/app_pb';
 import { WorkflowService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workflow_pb';
 import { AuthService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/auth_pb';
@@ -38,7 +36,7 @@ import {
 } from '~server/workflows/git';
 import { rollbackWorkflowToVersion } from '~server/workflows/manage';
 import { createWorkflow } from '~server/workflows/scaffold';
-import { authenticatePublicApi, type PublicApiContext } from './auth';
+import { authenticatePublicApi } from './auth';
 import { listAppsForAgent, getAppDetailForAgent } from '~server/apps/inspect';
 import {
   listWorkflowsForAgent,
@@ -65,9 +63,7 @@ import { associateAgentSessionApp } from '~server/agent-session-apps';
 import { WorkspaceService } from '../../../packages/hatch-platform-api/gen/hatch/platform/v1/workspace_pb';
 import { readWorkspace } from '~server/workspace-read';
 
-export const publicApiContext = createContextKey<PublicApiContext>({
-  run: null,
-});
+export { publicApiContext };
 const columns = {
   id: true,
   slug: true,
@@ -482,6 +478,7 @@ export function registerPlatformApi(
       };
     return { expiresAt, credential: { case: 'run', value: status.context } };
   });
+  registerNotificationApi(router);
   router.service(SdkService, {
     getSdk: async (input) => {
       // The interceptor validates the closed set before any domain access.

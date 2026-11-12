@@ -141,3 +141,36 @@ export type AgentStreamEvent =
   | { type: 'turn_end' | 'cancelled' | 'done' }
   | { type: 'error'; message: string };
 export type RunStreamEvent = { seq: number; event: AgentStreamEvent };
+
+export type NotificationSummary = {
+  id: string;
+  sourceType: string;
+  sourceName: string;
+  kind: string;
+  kindName: string;
+  title: string;
+  body: string | null;
+  url: string | null;
+  occurredAt: string;
+  status: string;
+};
+export type NotificationDelivery = {
+  id: string;
+  destinationType: string;
+  destinationName: string;
+  status: string;
+  attempts: number;
+  lastError: string | null;
+  result: string | null;
+  completedAt: string | null;
+};
+export type NotificationDetail = NotificationSummary & {
+  deliveries: NotificationDelivery[];
+};
+export type PushRegistration = {
+  name: string;
+  apnsToken: string;
+  apnsEnvironment: 'sandbox' | 'production';
+  e2eKeyId: string;
+  e2eKey: string;
+};

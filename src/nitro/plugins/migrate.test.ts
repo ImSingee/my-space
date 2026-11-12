@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     ensureScheduler: step('app-scheduler'),
     warmLongRunningBackends: asyncStep('backend-warmup'),
     ensureRetentionSweep: step('retention'),
+    startNotificationDelivery: step('notification-delivery'),
   };
 });
 
@@ -58,6 +59,9 @@ vi.mock('~server/apps/scheduler', () => ({
 }));
 vi.mock('~server/retention', () => ({
   ensureRetentionSweep: mocks.ensureRetentionSweep,
+}));
+vi.mock('~server/notifications/adapters', () => ({
+  startNotificationDelivery: mocks.startNotificationDelivery,
 }));
 vi.mock('~server/tailscale-manager', () => ({
   getTailscaleManager: () => ({ initialize: async () => {} }),
@@ -94,6 +98,7 @@ describe('platform startup migrations', () => {
       'app-scheduler',
       'backend-warmup',
       'retention',
+      'notification-delivery',
     ]);
   });
 

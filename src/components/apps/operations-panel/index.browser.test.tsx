@@ -47,6 +47,10 @@ vi.mock('~queries/apps', () => ({
     queryKey: ['test-cron-runs', id],
     queryFn: async () => [],
   }),
+  normalizedManifestQueryOptions: (id: string) => ({
+    queryKey: ['test-app-manifest', id],
+    queryFn: async () => null,
+  }),
 }));
 
 vi.mock('~server/apps', () => {

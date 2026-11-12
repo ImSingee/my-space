@@ -71,6 +71,7 @@ export const appManifestViewSchema = z.object({
     storage: z.boolean(),
     kv: z.boolean(),
     dataTable: z.boolean(),
+    notifications: z.boolean().optional(),
   }),
   backendMode: mode,
   backend: z
@@ -105,6 +106,15 @@ export const appManifestViewSchema = z.object({
     .optional(),
   kv: url.optional(),
   dataTable: url.optional(),
+  notifications: z
+    .object({
+      url: str,
+      kinds: z.array(
+        z.object({ kind: str, name: str, description: str.optional() }),
+      ),
+      destination: z.object({ description: str.optional() }).optional(),
+    })
+    .optional(),
   api: z
     .object({
       services: z.array(

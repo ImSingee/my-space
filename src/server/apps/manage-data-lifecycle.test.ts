@@ -143,6 +143,9 @@ vi.mock('./runtime', () => ({
   stopApp: mocks.stopApp,
 }));
 vi.mock('./scheduler', () => ({ reloadScheduler: mocks.reloadScheduler }));
+vi.mock('~server/notifications/app-destinations', () => ({
+  syncAppNotificationDestination: async () => {},
+}));
 vi.mock('~server/platform-events', () => ({
   publishPlatformEvent: mocks.publishPlatformEvent,
 }));
