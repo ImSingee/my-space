@@ -367,6 +367,12 @@ export function registerPlatformApi(
               completedAt: run.completedAt ?? undefined,
               error: run.error ?? undefined,
             })),
+            retry: session.retry
+              ? {
+                  ...session.retry,
+                  nextRetryAt: session.retry.nextRetryAt ?? undefined,
+                }
+              : undefined,
           },
         };
       },

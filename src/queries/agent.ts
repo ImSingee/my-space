@@ -47,5 +47,17 @@ export function sessionQueryOptions(sessionId: string) {
         clockOffsetMs: Date.parse(session.serverTime) - midpoint,
       };
     },
+    // The platform starts a scheduled automatic retry on its own. Re-read the
+    // session when it is due, then shortly after until the new run appears.
+    refetchInterval: (query) => {
+      const session = query.state.data;
+      const nextRetryAt = session?.retry?.nextRetryAt;
+      if (!session || !nextRetryAt || session.activeRun) return false;
+      const dueInMs =
+        Date.parse(nextRetryAt) - (Date.now() + session.clockOffsetMs);
+      return dueInMs > 0 ? dueInMs + 500 : AUTO_RETRY_POLL_MS;
+    },
   });
 }
+
+const AUTO_RETRY_POLL_MS = 1000;

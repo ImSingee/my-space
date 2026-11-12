@@ -40,7 +40,7 @@ describe('parseRetryableAgentTurn', () => {
       },
     ];
 
-    expect(parseRetryableAgentTurn(messages)).toEqual({
+    expect(parseRetryableAgentTurn(messages, 1)).toEqual({
       baseMessages,
       userText: 'Retry this',
       composerContent: [],
@@ -54,10 +54,13 @@ describe('parseRetryableAgentTurn', () => {
 
   it('supports legacy string-form user content', () => {
     expect(
-      parseRetryableAgentTurn([
-        { role: 'user', content: 'Retry this string' },
-        { role: 'assistant', content: [], stopReason: 'error' },
-      ]),
+      parseRetryableAgentTurn(
+        [
+          { role: 'user', content: 'Retry this string' },
+          { role: 'assistant', content: [], stopReason: 'error' },
+        ],
+        0,
+      ),
     ).toEqual({
       baseMessages: [],
       userText: 'Retry this string',
@@ -85,14 +88,17 @@ describe('parseRetryableAgentTurn', () => {
       { type: 'text', text: ' before publishing.' },
     ];
     expect(
-      parseRetryableAgentTurn([
-        {
-          role: 'user',
-          content: [{ type: 'text', text: 'model-visible persisted text' }],
-          composerContent,
-        },
-        { role: 'assistant', content: [], stopReason: 'error' },
-      ]),
+      parseRetryableAgentTurn(
+        [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'model-visible persisted text' }],
+            composerContent,
+          },
+          { role: 'assistant', content: [], stopReason: 'error' },
+        ],
+        0,
+      ),
     ).toEqual({
       baseMessages: [],
       userText:
@@ -107,31 +113,34 @@ describe('parseRetryableAgentTurn', () => {
 
   it('recovers attachment refs while hiding their model-only prompt context', () => {
     expect(
-      parseRetryableAgentTurn([
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text:
-                'Inspect it\n\n<hatch_attachments>\n' +
-                'These files are stored on the Platform and are not in the workspace yet.\n' +
-                'Call download_attachment with an id when you need a local copy.\n' +
-                '- id=file-a name="a.bin" type=application/octet-stream size=2\n' +
-                '</hatch_attachments>',
-            },
-          ],
-          attachments: [
-            {
-              id: 'file-a',
-              name: 'a.bin',
-              mimeType: 'application/octet-stream',
-              size: 2,
-            },
-          ],
-        },
-        { role: 'assistant', content: [], stopReason: 'error' },
-      ]),
+      parseRetryableAgentTurn(
+        [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text:
+                  'Inspect it\n\n<hatch_attachments>\n' +
+                  'These files are stored on the Platform and are not in the workspace yet.\n' +
+                  'Call download_attachment with an id when you need a local copy.\n' +
+                  '- id=file-a name="a.bin" type=application/octet-stream size=2\n' +
+                  '</hatch_attachments>',
+              },
+            ],
+            attachments: [
+              {
+                id: 'file-a',
+                name: 'a.bin',
+                mimeType: 'application/octet-stream',
+                size: 2,
+              },
+            ],
+          },
+          { role: 'assistant', content: [], stopReason: 'error' },
+        ],
+        0,
+      ),
     ).toEqual({
       baseMessages: [],
       userText: 'Inspect it',
@@ -152,10 +161,13 @@ describe('parseRetryableAgentTurn', () => {
     const literal =
       'Explain this XML:\n<hatch_attachments>literal</hatch_attachments>';
     expect(
-      parseRetryableAgentTurn([
-        { role: 'user', content: literal },
-        { role: 'assistant', content: [], stopReason: 'error' },
-      ]),
+      parseRetryableAgentTurn(
+        [
+          { role: 'user', content: literal },
+          { role: 'assistant', content: [], stopReason: 'error' },
+        ],
+        0,
+      ),
     ).toEqual({
       baseMessages: [],
       userText: literal,
@@ -165,52 +177,44 @@ describe('parseRetryableAgentTurn', () => {
     });
   });
 
-  it('requires the provider error to be the literal last message', () => {
-    const failed: JsonValue = {
-      role: 'assistant',
-      content: [],
-      stopReason: 'error',
-    };
-    const newerMessages: JsonValue[] = [
-      { role: 'user', content: 'New request' },
-      { role: 'toolResult', content: [], toolName: 'read_file' },
+  it('replays an interrupted turn that has no persisted reply', () => {
+    const baseMessages: JsonValue[] = [
+      { role: 'user', content: 'Earlier request' },
       { role: 'assistant', content: [], stopReason: 'stop' },
     ];
-
-    for (const newer of newerMessages) {
-      expect(
-        parseRetryableAgentTurn([
-          { role: 'user', content: 'Failed request' },
-          failed,
-          newer,
-        ]),
-      ).toBeNull();
-    }
+    expect(
+      parseRetryableAgentTurn(
+        [...baseMessages, { role: 'user', content: 'Interrupted request' }],
+        1,
+      ),
+    ).toMatchObject({ baseMessages, userText: 'Interrupted request' });
   });
 
-  it('rejects aborted, successful, missing-user, and empty turns', () => {
+  it("requires the failed run's user message to be the last one", () => {
+    const messages: JsonValue[] = [
+      { role: 'user', content: 'Failed request' },
+      { role: 'assistant', content: [], stopReason: 'error' },
+      { role: 'user', content: 'New request' },
+    ];
+    expect(parseRetryableAgentTurn(messages, 0)).toBeNull();
+    expect(parseRetryableAgentTurn(messages, 2)).toBeNull();
+  });
+
+  it('rejects missing-user and empty turns', () => {
     expect(
-      parseRetryableAgentTurn([
-        { role: 'user', content: 'Request' },
-        { role: 'assistant', content: [], stopReason: 'aborted' },
-      ]),
+      parseRetryableAgentTurn(
+        [{ role: 'assistant', content: [], stopReason: 'error' }],
+        0,
+      ),
     ).toBeNull();
     expect(
-      parseRetryableAgentTurn([
-        { role: 'user', content: 'Request' },
-        { role: 'assistant', content: [], stopReason: 'stop' },
-      ]),
-    ).toBeNull();
-    expect(
-      parseRetryableAgentTurn([
-        { role: 'assistant', content: [], stopReason: 'error' },
-      ]),
-    ).toBeNull();
-    expect(
-      parseRetryableAgentTurn([
-        { role: 'user', content: [{ type: 'text', text: '   ' }] },
-        { role: 'assistant', content: [], stopReason: 'error' },
-      ]),
+      parseRetryableAgentTurn(
+        [
+          { role: 'user', content: [{ type: 'text', text: '   ' }] },
+          { role: 'assistant', content: [], stopReason: 'error' },
+        ],
+        0,
+      ),
     ).toBeNull();
   });
 });

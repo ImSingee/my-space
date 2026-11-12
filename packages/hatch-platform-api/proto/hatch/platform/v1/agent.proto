@@ -89,6 +89,8 @@ message AgentSession {
   ActiveAgentRun active_run = 8;
   repeated AgentRunTiming runs = 9;
   string server_time = 10;
+  // Present when the latest run failed and its turn can be replayed.
+  AgentRetryState retry = 11;
 }
 message ActiveAgentRun {
   string id = 1;
@@ -106,6 +108,16 @@ message AgentRunTiming {
   string started_at = 4;
   optional string completed_at = 5;
   optional string error = 6;
+}
+message AgentRetryState {
+  // Failed run whose turn a retry replays.
+  string run_id = 1;
+  int32 user_turn = 2;
+  // Consecutive failed runs in the session; a completed run resets it.
+  int32 attempt = 3;
+  int32 max_attempts = 4;
+  // Set while an automatic retry is scheduled; absent once stopped or exhausted.
+  optional string next_retry_at = 5;
 }
 message AgentPendingAsk {
   string ask_id = 1;

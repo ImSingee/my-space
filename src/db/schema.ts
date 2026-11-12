@@ -12,7 +12,7 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { ulid as genUlid0 } from 'ulid';
+import { monotonicFactory } from 'ulid';
 import { user } from './auth-schema';
 import type { HomepageTarget } from '../homepage';
 
@@ -25,6 +25,10 @@ function timestamp(name?: string) {
   }
   return _timestamp(name, { withTimezone: true, mode: 'date' });
 }
+
+// Monotonic within a process, so ids also order rows created in the same
+// millisecond (Agent runs rely on id order to find a session's latest run).
+const genUlid0 = monotonicFactory();
 
 function genUlid() {
   return genUlid0().toLowerCase();
@@ -618,6 +622,17 @@ export const agentRuns = snakeCase.table(
     leaseExpiresAt: timestamp('lease_expires_at'),
     error: text(),
     completedAt: timestamp('completed_at'),
+    /**
+     * Consecutive failed runs in this session up to and including this run.
+     * A completed run resets it to 0; a cancelled run carries the previous
+     * value. Automatic retries stop once it exceeds the retry limit.
+     */
+    failureStreak: integer('failure_streak').notNull().default(0),
+    /**
+     * When the platform replays this failed run's turn automatically. Cleared
+     * when the retry fires, the user stops it, or any newer run starts.
+     */
+    autoRetryAt: timestamp('auto_retry_at'),
     createdAt,
     updatedAt,
   },
@@ -626,6 +641,9 @@ export const agentRuns = snakeCase.table(
     uniqueIndex('agent_runs_active_session_idx')
       .on(table.sessionId)
       .where(sql`"agent_runs"."status" in ('running', 'blocked')`),
+    index('agent_runs_auto_retry_at_idx')
+      .on(table.autoRetryAt)
+      .where(sql`"agent_runs"."auto_retry_at" is not null`),
   ],
 );
 

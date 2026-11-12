@@ -8,7 +8,7 @@ import {
   Text,
   ThemeIcon,
 } from '@mantine/core';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconSparkles } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -24,12 +24,13 @@ import {
   type ComposerImage,
   type ComposerSubmit,
 } from './composer';
+import type { AutoRetryStatus } from './agent-error-notice';
 import {
-  getRetryableErrorInput,
   groupTurns,
   isActiveRunStatus,
   persistedWorkPhase,
   replyMessage,
+  userMessageIndexOfTurn,
 } from './chat-turns';
 import { MessageView } from './message-view';
 import { useLastSelectedModel } from './model-preference';
@@ -40,6 +41,7 @@ import { StreamingBubble } from './streaming-bubble';
 import { type ChatMessage, pairToolResults } from './types';
 import {
   hasVisibleStreamOutput,
+  stopAgentAutoRetryRequest,
   type StreamSeed,
   useAgentStream,
 } from './use-agent-stream';
@@ -297,21 +299,36 @@ export function Chat({ sessionId }: { sessionId: string }) {
       ),
     [turns],
   );
-  const retryInput = useMemo(
-    () => getRetryableErrorInput(messages),
-    [messages],
+  // The server decides which failed turn can be replayed (the latest run
+  // failed or was interrupted and nothing newer exists in the transcript).
+  const retryState = session?.retry ?? null;
+  const retryInput = useMemo(() => {
+    if (!retryState) return null;
+    const userMessageIndex = userMessageIndexOfTurn(
+      messages,
+      retryState.userTurn,
+    );
+    return userMessageIndex === -1
+      ? null
+      : { userTurn: retryState.userTurn, userMessageIndex };
+  }, [messages, retryState]);
+  const autoRetry = useMemo<AutoRetryStatus | undefined>(
+    () =>
+      retryState
+        ? {
+            attempt: retryState.attempt,
+            maxAttempts: retryState.maxAttempts,
+            nextRetryAt: retryState.nextRetryAt
+              ? Date.parse(retryState.nextRetryAt) - clockOffsetMs
+              : null,
+          }
+        : undefined,
+    [clockOffsetMs, retryState],
   );
-  const retryableTurn = turns.at(-1);
-  const retryableTurnKey =
-    retryInput &&
-    retryableTurn?.kind === 'assistant' &&
-    retryableTurn.stopReason === 'error'
-      ? retryableTurn.key
-      : null;
   const retryRevision = retryInput ? (session?.updatedAt ?? null) : null;
   const retryIdentity =
-    retryableTurnKey && retryRevision
-      ? `${sessionId}:${retryableTurnKey}:${retryRevision}`
+    retryState && retryInput && retryRevision
+      ? `${sessionId}:${retryState.runId}:${retryRevision}`
       : null;
   const runBusy =
     streamState.active ||
@@ -390,6 +407,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
                   : old.messages,
               providerId: parsed.providerId,
               modelId: parsed.modelId,
+              retry: null,
               activeRun: {
                 id: started.runId,
                 status: 'running' as const,
@@ -474,6 +492,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
           messages: old.messages.slice(0, retryInput.userMessageIndex + 1),
           providerId: effectiveModelParts.providerId,
           modelId: effectiveModelParts.modelId,
+          retry: null,
           activeRun: {
             id: started.runId,
             status: 'running' as const,
@@ -510,6 +529,58 @@ export function Chat({ sessionId }: { sessionId: string }) {
     runBusy,
     sessionId,
   ]);
+
+  const sessionKey = sessionQueryOptions(sessionId).queryKey;
+  const stopAutoRetry = useMutation({
+    mutationFn: () => stopAgentAutoRetryRequest(sessionId),
+    onMutate: async () => {
+      // Stop the countdown immediately; the refetch below confirms it.
+      await qc.cancelQueries({ queryKey: sessionKey });
+      qc.setQueryData(sessionKey, (old) =>
+        old?.retry
+          ? { ...old, retry: { ...old.retry, nextRetryAt: null } }
+          : old,
+      );
+    },
+    onError: () => {
+      toast.error('Could not stop the automatic retry.');
+    },
+    onSettled: revalidateSession,
+  });
+  const stopAutoRetryMutate = stopAutoRetry.mutate;
+  const onStopAutoRetry = useCallback(
+    () => stopAutoRetryMutate(),
+    [stopAutoRetryMutate],
+  );
+  const stoppingAutoRetry = stopAutoRetry.isPending;
+  const retryControls = useCallback(
+    (userTurn: number | null) => {
+      const show =
+        retryInput !== null &&
+        userTurn === retryInput.userTurn &&
+        canOfferRetry;
+      return show
+        ? {
+            onRetry: retry,
+            retrying,
+            retryDisabled: !effectiveModelParts,
+            autoRetry,
+            onStopAutoRetry,
+            stoppingAutoRetry,
+          }
+        : {};
+    },
+    [
+      autoRetry,
+      canOfferRetry,
+      effectiveModelParts,
+      onStopAutoRetry,
+      retry,
+      retryInput,
+      retrying,
+      stoppingAutoRetry,
+    ],
+  );
 
   // A reader toggling a long prompt is reading history, so streamed output
   // must not pull them away before the next message. Collapsing can leave the
@@ -577,6 +648,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
               <MessageView
                 key={`${turn.key}:ended`}
                 message={replyMessage([], undefined, undefined, run)}
+                {...retryControls(turn.userTurn)}
                 work={workFrame(
                   run.id,
                   persistedWorkPhase(run, undefined),
@@ -588,7 +660,6 @@ export function Chat({ sessionId }: { sessionId: string }) {
           return rows;
         }
         if (liveUserTurn !== null && turn.userTurn === liveUserTurn) return [];
-        const showRetry = turn.key === retryableTurnKey && canOfferRetry;
         const run =
           turn.userTurn === null ? undefined : runsByTurn.get(turn.userTurn);
         return [
@@ -603,9 +674,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             toolResults={toolResults}
             apps={appsQuery.data}
             workflows={workflowsQuery.data}
-            onRetry={showRetry ? retry : undefined}
-            retrying={showRetry && retrying}
-            retryDisabled={showRetry && !effectiveModelParts}
+            {...retryControls(turn.userTurn)}
             work={workFrame(
               run?.id ?? turn.key,
               persistedWorkPhase(run, turn.stopReason),
@@ -616,15 +685,11 @@ export function Chat({ sessionId }: { sessionId: string }) {
       }),
     [
       answeredTurns,
-      canOfferRetry,
       appsQuery.data,
       workflowsQuery.data,
-      effectiveModelParts,
       liveUserTurn,
       onUserMessageToggle,
-      retry,
-      retryableTurnKey,
-      retrying,
+      retryControls,
       runsByTurn,
       toolResults,
       turns,
@@ -735,6 +800,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
     if (session.activeRun?.id === settledRunId) return;
     const run = session.runs.find((entry) => entry.id === settledRunId);
     if (run && isActiveRunStatus(run.status)) return;
+    // A newer run (an automatic or manual retry) now answers this turn, even
+    // if it already ended: history renders that run and its retry controls.
+    const turnRun =
+      liveUserTurn === null
+        ? undefined
+        : session.runs.find((entry) => entry.userTurn === liveUserTurn);
+    if (turnRun && turnRun.id !== settledRunId) {
+      releaseStream(settledRunId);
+      return;
+    }
     // `done` follows the persisted transcript, so a snapshot that no longer
     // runs a completed run holds its reply. A stop or interruption can end
     // the run before (or without) its partial transcript: keep what was shown
@@ -750,6 +825,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
     releaseStream(settledRunId);
   }, [
     liveReplyPersisted,
+    liveUserTurn,
     releaseStream,
     session,
     settledOutcome,
@@ -908,6 +984,11 @@ export function Chat({ sessionId }: { sessionId: string }) {
                     onAnswer={answer}
                     onSubmitEnv={submitEnv}
                     work={liveWork}
+                    retry={
+                      liveRunId && retryState?.runId === liveRunId
+                        ? retryControls(liveUserTurn)
+                        : undefined
+                    }
                   />
                 ) : null}
               </>

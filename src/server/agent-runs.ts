@@ -14,7 +14,7 @@
  *   A sweeper interrupts active runs whose lease expired (runner died).
  */
 import { toUSVString } from 'node:util';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { db, schema, type DB, type TX } from '~/db';
 import type { AgentRunStatus, JsonObject, JsonValue } from '~/db/schema';
@@ -46,7 +46,17 @@ import {
 } from '~agent/protocol';
 import { nextUserTurn, parseUserTurn } from '~agent/user-turns';
 import { AppError } from '~server/errors';
-import { parseRetryableAgentTurn } from './agent-retry';
+import {
+  AGENT_AUTO_RETRY_MAX_ATTEMPTS,
+  AGENT_AUTO_RETRY_IDLE_POLL_MS,
+  AGENT_AUTO_RETRY_STATUSES,
+  agentAutoRetryDelayMs,
+  shouldAutoRetry,
+} from './agent-auto-retry';
+import {
+  parseRetryableAgentTurn,
+  type RetryableAgentTurn,
+} from './agent-retry';
 import {
   connectedRunnerCount,
   dispatchRun,
@@ -77,7 +87,16 @@ export type AgentRunInput =
   | {
       sessionId: string;
       retry: true;
+      /** Revision of the session snapshot whose failure the user retried. */
       expectedSessionUpdatedAt: string;
+      providerId: string;
+      modelId: string;
+    }
+  | {
+      sessionId: string;
+      retry: true;
+      /** Platform-scheduled retry of this failed run (never client input). */
+      autoRetryOfRunId: string;
       providerId: string;
       modelId: string;
     }
@@ -139,7 +158,30 @@ export type SessionRunTiming = {
   error: string | null;
 };
 
+/**
+ * The session's latest run failed and its turn can be replayed. `attempt` is
+ * the consecutive failure streak; `nextRetryAt` is set while an automatic
+ * retry is scheduled and null once it was stopped or the limit was reached.
+ */
+export type SessionRetryState = {
+  runId: string;
+  /** See `~agent/user-turns`. */
+  userTurn: number;
+  attempt: number;
+  maxAttempts: number;
+  nextRetryAt: string | null;
+};
+
 type Subscriber = (event: AgentRunStreamEvent) => void;
+
+type AutoRetryScheduler = {
+  timer?: ReturnType<typeof setTimeout>;
+  /** Epoch ms the armed timer fires at. */
+  wakeAt?: number;
+  running: boolean;
+  /** Earliest wake requested while a cycle was running. */
+  pendingWake?: number;
+};
 
 type AgentRunsGlobal = typeof globalThis & {
   /** SSE subscribers per run (control plane fan-out). */
@@ -147,6 +189,7 @@ type AgentRunsGlobal = typeof globalThis & {
   /** Per-run ingest chains: serialize event processing in arrival order. */
   __hatchAgentRunChains__?: Map<string, Promise<unknown>>;
   __hatchAgentRunSweeper__?: ReturnType<typeof setInterval>;
+  __hatchAgentAutoRetryScheduler__?: AutoRetryScheduler;
 };
 
 export const ACTIVE_STATUSES: AgentRunStatus[] = ['running', 'blocked'];
@@ -307,12 +350,21 @@ async function appendEvent(
   return stored;
 }
 
-async function finishRun(
+type FinishedRun = { finished: boolean; autoRetryAt: Date | null };
+
+/**
+ * Make an active run terminal and record its failure streak, scheduling an
+ * automatic retry when it failed. Callers that already hold the session row
+ * lock pass their transaction; the lock order is always session, then run.
+ */
+async function finishRunInTx(
+  tx: TX,
   runId: string,
   status: AgentRunStatus,
   error?: string,
-): Promise<boolean> {
-  const rows = await db
+): Promise<FinishedRun> {
+  const now = new Date();
+  const [row] = await tx
     .update(schema.agentRuns)
     .set({
       status,
@@ -320,8 +372,8 @@ async function finishRun(
       pendingAsk: null,
       pendingAnswer: null,
       pendingEnvRequest: null,
-      completedAt: new Date(),
-      updatedAt: new Date(),
+      completedAt: now,
+      updatedAt: now,
     })
     .where(
       and(
@@ -329,8 +381,45 @@ async function finishRun(
         inArray(schema.agentRuns.status, ACTIVE_STATUSES),
       ),
     )
-    .returning({ id: schema.agentRuns.id });
-  return rows.length > 0;
+    .returning({ sessionId: schema.agentRuns.sessionId });
+  if (!row) return { finished: false, autoRetryAt: null };
+
+  // Only one run per session is active, so the previous run is terminal
+  // and its streak is final. ULIDs order runs by creation.
+  const previous = await tx.query.agentRuns.findFirst({
+    where: { sessionId: row.sessionId, id: { lt: runId } },
+    orderBy: { id: 'desc' },
+    columns: { failureStreak: true },
+  });
+  const previousStreak = previous?.failureStreak ?? 0;
+  const failed = (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(
+    status,
+  );
+  const failureStreak =
+    status === 'completed' ? 0 : failed ? previousStreak + 1 : previousStreak;
+  const autoRetryAt =
+    failed && shouldAutoRetry(failureStreak)
+      ? new Date(now.getTime() + agentAutoRetryDelayMs(failureStreak))
+      : null;
+  if (failureStreak !== 0 || autoRetryAt) {
+    await tx
+      .update(schema.agentRuns)
+      .set({ failureStreak, autoRetryAt })
+      .where(eq(schema.agentRuns.id, runId));
+  }
+  return { finished: true, autoRetryAt };
+}
+
+async function finishRun(
+  runId: string,
+  status: AgentRunStatus,
+  error?: string,
+): Promise<boolean> {
+  const result = await db.transaction((tx) =>
+    finishRunInTx(tx, runId, status, error),
+  );
+  if (result.autoRetryAt) wakeAgentAutoRetryScheduler(result.autoRetryAt);
+  return result.finished;
 }
 
 function isActiveRunConflict(error: unknown): boolean {
@@ -488,6 +577,58 @@ async function resolveRunModelConfig(
 
 /** ================== start / dispatch ================== */
 
+const NO_RETRYABLE_TURN = 'There is no failed Agent turn to retry.';
+
+type RetryTarget = {
+  run: typeof schema.agentRuns.$inferSelect;
+  userTurn: number;
+  turn: RetryableAgentTurn;
+};
+
+/**
+ * The session's failed turn, when its latest run failed or was interrupted
+ * and that run's user message is still the transcript's last user message.
+ */
+async function findRetryTarget(
+  executor: DB | TX,
+  sessionId: string,
+  messages: JsonValue[],
+): Promise<RetryTarget | null> {
+  const run = await executor.query.agentRuns.findFirst({
+    where: { sessionId },
+    orderBy: { id: 'desc' },
+  });
+  if (
+    !run ||
+    !(AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(run.status)
+  ) {
+    return null;
+  }
+  // A run that predates user-turn binding answered the last user message.
+  const userTurn =
+    parseUserTurn(run.input.userTurn) ?? nextUserTurn(messages) - 1;
+  if (userTurn < 0) return null;
+  const turn = parseRetryableAgentTurn(messages, userTurn);
+  return turn ? { run, userTurn, turn } : null;
+}
+
+/** Retry state for a session snapshot (see `SessionRetryState`). */
+export async function getSessionRetryState(
+  sessionId: string,
+  messages: JsonValue[],
+  executor: DB | TX = db,
+): Promise<SessionRetryState | null> {
+  const target = await findRetryTarget(executor, sessionId, messages);
+  if (!target) return null;
+  return {
+    runId: target.run.id,
+    userTurn: target.userTurn,
+    attempt: target.run.failureStreak,
+    maxAttempts: AGENT_AUTO_RETRY_MAX_ATTEMPTS,
+    nextRetryAt: target.run.autoRetryAt?.toISOString() ?? null,
+  };
+}
+
 export async function startAgentRun(input: AgentRunInput): Promise<{
   runId: string;
   startedAt: string;
@@ -502,21 +643,36 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
     throw new AppError('This chat already has a running Agent turn.', 409);
   }
 
+  const autoRetryOfRunId =
+    input.retry === true && 'autoRetryOfRunId' in input
+      ? input.autoRetryOfRunId
+      : null;
   if (input.retry === true) {
-    if (sessionRow.updatedAt.toISOString() !== input.expectedSessionUpdatedAt) {
-      throw new AppError('There is no failed Agent turn to retry.', 409);
+    if (
+      'expectedSessionUpdatedAt' in input &&
+      sessionRow.updatedAt.toISOString() !== input.expectedSessionUpdatedAt
+    ) {
+      throw new AppError(NO_RETRYABLE_TURN, 409);
     }
-    const initialRetry = parseRetryableAgentTurn(
+    const initialRetry = await findRetryTarget(
+      db,
+      input.sessionId,
       (sessionRow.messages ?? []) as JsonValue[],
     );
-    if (!initialRetry) {
-      throw new AppError('There is no failed Agent turn to retry.', 409);
+    if (
+      !initialRetry ||
+      (autoRetryOfRunId !== null && initialRetry.run.id !== autoRetryOfRunId)
+    ) {
+      throw new AppError(NO_RETRYABLE_TURN, 409);
     }
   }
 
   const model = await resolveRunModelConfig(input.providerId, input.modelId);
 
-  if (connectedRunnerCount() === 0) {
+  // An automatic retry still creates its run without a Runner: the dispatch
+  // failure below counts as another consecutive failure and backs off again,
+  // instead of silently dropping the schedule.
+  if (autoRetryOfRunId === null && connectedRunnerCount() === 0) {
     throw new AppError(
       'No Agent Runner is connected. Start the agent-runner service, then retry.',
       503,
@@ -561,9 +717,10 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
 
       if (
         input.retry === true &&
+        'expectedSessionUpdatedAt' in input &&
         lockedSession.updatedAt.toISOString() !== input.expectedSessionUpdatedAt
       ) {
-        throw new AppError('There is no failed Agent turn to retry.', 409);
+        throw new AppError(NO_RETRYABLE_TURN, 409);
       }
 
       const sessionMessages = (lockedSession.messages ?? []) as JsonValue[];
@@ -575,10 +732,30 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
       let requestedAttachmentIds: string[];
       let isRetry = false;
       if (input.retry === true) {
-        const retry = parseRetryableAgentTurn(sessionMessages);
-        if (!retry) {
-          throw new AppError('There is no failed Agent turn to retry.', 409);
+        const target = await findRetryTarget(
+          tx,
+          input.sessionId,
+          sessionMessages,
+        );
+        if (!target) throw new AppError(NO_RETRYABLE_TURN, 409);
+        if (autoRetryOfRunId !== null) {
+          // Claim the schedule in the same commit as the replacement run, so
+          // a stop, a newer run, or a concurrent scheduler pass wins cleanly.
+          const claimed = await tx
+            .update(schema.agentRuns)
+            .set({ autoRetryAt: null })
+            .where(
+              and(
+                eq(schema.agentRuns.id, autoRetryOfRunId),
+                isNotNull(schema.agentRuns.autoRetryAt),
+              ),
+            )
+            .returning({ id: schema.agentRuns.id });
+          if (claimed.length === 0 || target.run.id !== autoRetryOfRunId) {
+            throw new AppError(NO_RETRYABLE_TURN, 409);
+          }
         }
+        const retry = target.turn;
         baseMessages = retry.baseMessages;
         userText = retry.userText;
         composerContent = retry.composerContent;
@@ -604,6 +781,18 @@ export async function startAgentRun(input: AgentRunInput): Promise<{
         images = input.images ?? [];
         requestedAttachmentIds = input.attachmentIds ?? [];
       }
+
+      // Any new run (a message, a manual retry, or this automatic one)
+      // supersedes every pending automatic retry in the session.
+      await tx
+        .update(schema.agentRuns)
+        .set({ autoRetryAt: null })
+        .where(
+          and(
+            eq(schema.agentRuns.sessionId, input.sessionId),
+            isNotNull(schema.agentRuns.autoRetryAt),
+          ),
+        );
 
       const attachmentIds = [...new Set(requestedAttachmentIds)];
       const attachmentRows =
@@ -846,6 +1035,26 @@ export async function finalizeRunWorkspaceAffinity(
   expectedSessionId?: string,
 ): Promise<string> {
   return db.transaction(async (tx) => {
+    // Lock the session before the run, like every other session/run
+    // transaction, so this cannot deadlock with a run start. A run's session
+    // never changes, so the unlocked read only finds which session to lock.
+    const owner = await tx.query.agentRuns.findFirst({
+      where: { id: runId },
+      columns: { sessionId: true },
+    });
+    if (!owner) {
+      throw new Error('Agent run is no longer assigned to this Runner.');
+    }
+    const [session] = await tx
+      .select({
+        workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
+        workspaceRunnerId: schema.agentSessions.workspaceRunnerId,
+      })
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.id, owner.sessionId))
+      .for('update');
+    if (!session) throw new Error('Agent session no longer exists.');
+
     const [run] = await tx
       .select({
         sessionId: schema.agentRuns.sessionId,
@@ -861,16 +1070,6 @@ export async function finalizeRunWorkspaceAffinity(
     ) {
       throw new Error('Agent run is no longer assigned to this Runner.');
     }
-
-    const [session] = await tx
-      .select({
-        workspaceAffinityState: schema.agentSessions.workspaceAffinityState,
-        workspaceRunnerId: schema.agentSessions.workspaceRunnerId,
-      })
-      .from(schema.agentSessions)
-      .where(eq(schema.agentSessions.id, run.sessionId))
-      .for('update');
-    if (!session) throw new Error('Agent session no longer exists.');
 
     if (session.workspaceAffinityState === 'claimed') {
       if (session.workspaceRunnerId !== runnerId) {
@@ -1196,34 +1395,92 @@ export async function completeRunFromRunner(
     // retried report must also never clobber a NEWER turn's history: once a
     // more recent run exists on the session, this transcript is stale (ULIDs
     // order by creation time, so id comparison finds newer runs).
-    const newerRun = await db.query.agentRuns.findFirst({
-      where: { sessionId: run.sessionId, id: { gt: run.id } },
-      columns: { id: true },
-    });
-    if (message.messages.length > 0 && !newerRun) {
-      await db
-        .update(schema.agentSessions)
-        .set({ messages: message.messages as JsonValue[] })
-        .where(eq(schema.agentSessions.id, run.sessionId));
-    }
+    //
+    // The transcript, the run's terminal status and any automatic retry it
+    // schedules commit together under the session lock (then the run lock,
+    // the order every session/run transaction uses). The status is re-read
+    // under that lock. If the platform already failed or interrupted this run
+    // (lease expiry, dispatch timeout) and scheduled a replay, a successful
+    // report settles the turn instead: the run becomes completed, resetting
+    // the failure streak and dropping the schedule. A replay that started
+    // first makes this transcript stale; one that starts later finds nothing
+    // left to retry.
+    const outcome = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.agentSessions.id })
+        .from(schema.agentSessions)
+        .where(eq(schema.agentSessions.id, run.sessionId))
+        .for('update');
+      const [current] = await tx
+        .select({
+          status: schema.agentRuns.status,
+          error: schema.agentRuns.error,
+        })
+        .from(schema.agentRuns)
+        .where(eq(schema.agentRuns.id, run.id))
+        .for('update');
+      if (!current) return null;
 
-    if (isTerminalAgentRunStatus(run.status)) {
+      const newerRun = await tx.query.agentRuns.findFirst({
+        where: { sessionId: run.sessionId, id: { gt: run.id } },
+        columns: { id: true },
+      });
+      const persisted = message.messages.length > 0 && !newerRun;
+      if (persisted) {
+        await tx
+          .update(schema.agentSessions)
+          .set({ messages: message.messages as JsonValue[] })
+          .where(eq(schema.agentSessions.id, run.sessionId));
+      }
+
+      if (!isTerminalAgentRunStatus(current.status)) {
+        const finished = await finishRunInTx(
+          tx,
+          message.runId,
+          message.status,
+          message.status === 'failed'
+            ? (message.error ?? 'Agent run failed.')
+            : undefined,
+        );
+        return { kind: 'finished' as const, ...finished };
+      }
+
+      if (
+        persisted &&
+        message.status === 'completed' &&
+        (AGENT_AUTO_RETRY_STATUSES as readonly string[]).includes(
+          current.status,
+        )
+      ) {
+        await tx
+          .update(schema.agentRuns)
+          .set({
+            status: 'completed',
+            error: null,
+            failureStreak: 0,
+            autoRetryAt: null,
+          })
+          .where(eq(schema.agentRuns.id, run.id));
+        return {
+          kind: 'terminal' as const,
+          status: 'completed' as const,
+          error: null,
+        };
+      }
+      return { kind: 'terminal' as const, ...current };
+    });
+    if (!outcome) return null;
+
+    if (outcome.kind === 'terminal') {
       // Retry of a final report whose ack was lost. A crash between finishRun
       // and appendEvent leaves the run terminal without a terminal event, so
       // SSE clients would treat the closed stream as a disconnect — repair it.
-      await ensureTerminalEvent(message.runId, run.status, run.error);
+      await ensureTerminalEvent(message.runId, outcome.status, outcome.error);
       return run.sessionId;
     }
 
-    const finished = await finishRun(
-      message.runId,
-      message.status,
-      message.status === 'failed'
-        ? (message.error ?? 'Agent run failed.')
-        : undefined,
-    );
-    if (!finished) return null;
-
+    if (!outcome.finished) return null;
+    if (outcome.autoRetryAt) wakeAgentAutoRetryScheduler(outcome.autoRetryAt);
     await appendEvent(
       message.runId,
       terminalEventForStatus(message.status, message.error),
@@ -1508,4 +1765,169 @@ export function ensureAgentRunSweeper(): void {
       console.error('[agent-runs] lease sweep failed:', error);
     });
   }, LEASE_SWEEP_INTERVAL_MS);
+}
+
+/** ================== automatic retry ================== */
+
+/** Stop the session's scheduled automatic retry, if any. */
+export async function stopAgentAutoRetry(sessionId: string): Promise<void> {
+  await db
+    .update(schema.agentRuns)
+    .set({ autoRetryAt: null })
+    .where(
+      and(
+        eq(schema.agentRuns.sessionId, sessionId),
+        isNotNull(schema.agentRuns.autoRetryAt),
+      ),
+    );
+}
+
+async function fireAgentAutoRetry(run: {
+  id: string;
+  sessionId: string;
+  providerId: string;
+  modelId: string;
+}): Promise<void> {
+  try {
+    const session = await db.query.agentSessions.findFirst({
+      where: { id: run.sessionId },
+      columns: { providerId: true, modelId: true },
+    });
+    if (!session) return;
+    // Replay with the model the session last ran with.
+    await startAgentRun({
+      sessionId: run.sessionId,
+      retry: true,
+      autoRetryOfRunId: run.id,
+      providerId: session.providerId ?? run.providerId,
+      modelId: session.modelId ?? run.modelId,
+    });
+  } catch (error) {
+    if (isTransientDatabaseError(error)) {
+      // Keep the schedule: a deadlock victim or a dropped connection is not
+      // a verdict on the turn.
+      console.error('[agent-runs] automatic retry will try again:', error);
+      const retryAt = new Date(Date.now() + TRANSIENT_RETRY_DELAY_MS);
+      await db
+        .update(schema.agentRuns)
+        .set({ autoRetryAt: retryAt })
+        .where(
+          and(
+            eq(schema.agentRuns.id, run.id),
+            isNotNull(schema.agentRuns.autoRetryAt),
+          ),
+        );
+      wakeAgentAutoRetryScheduler(retryAt);
+      return;
+    }
+    // A conflict means a newer run, a stop, or a concurrent scheduler pass
+    // already settled this schedule. Anything else (for example a removed
+    // model) cannot start a run; leave the turn to a manual Retry.
+    if (!(error instanceof AppError && error.status === 409)) {
+      console.error('[agent-runs] automatic retry failed to start:', error);
+    }
+    await db
+      .update(schema.agentRuns)
+      .set({ autoRetryAt: null })
+      .where(eq(schema.agentRuns.id, run.id));
+  }
+}
+
+const TRANSIENT_RETRY_DELAY_MS = 5000;
+
+/** Deadlock, serialization failure, or a lost/closing database connection. */
+function isTransientDatabaseError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const pgError =
+    'cause' in error && error.cause && typeof error.cause === 'object'
+      ? error.cause
+      : error;
+  const code = (pgError as { code?: unknown }).code;
+  return (
+    typeof code === 'string' &&
+    (code === '40P01' ||
+      code === '40001' ||
+      code.startsWith('08') ||
+      code === '57P01' ||
+      code === 'CONNECTION_CLOSED' ||
+      code === 'CONNECTION_ENDED' ||
+      code === 'CONNECTION_DESTROYED')
+  );
+}
+
+/** Start every automatic retry that is due. */
+export async function fireDueAgentAutoRetries(
+  now: Date = new Date(),
+): Promise<void> {
+  const due = await db.query.agentRuns.findMany({
+    where: { autoRetryAt: { lte: now } },
+    columns: { id: true, sessionId: true, providerId: true, modelId: true },
+    orderBy: { autoRetryAt: 'asc' },
+  });
+  await Promise.all(due.map(fireAgentAutoRetry));
+}
+
+async function nextAgentAutoRetryAt(): Promise<number | null> {
+  const next = await db.query.agentRuns.findFirst({
+    where: { autoRetryAt: { isNotNull: true } },
+    orderBy: { autoRetryAt: 'asc' },
+    columns: { autoRetryAt: true },
+  });
+  return next?.autoRetryAt?.getTime() ?? null;
+}
+
+function armAutoRetryScheduler(state: AutoRetryScheduler, at: number): void {
+  const wakeAt = Math.min(
+    at,
+    state.pendingWake ?? Infinity,
+    Date.now() + AGENT_AUTO_RETRY_IDLE_POLL_MS,
+  );
+  state.pendingWake = undefined;
+  clearTimeout(state.timer);
+  state.wakeAt = wakeAt;
+  state.timer = setTimeout(
+    () => void runAutoRetryCycle(state),
+    Math.max(0, wakeAt - Date.now()),
+  );
+}
+
+async function runAutoRetryCycle(state: AutoRetryScheduler): Promise<void> {
+  state.running = true;
+  state.wakeAt = undefined;
+  let next: number | null = null;
+  try {
+    await fireDueAgentAutoRetries();
+    next = await nextAgentAutoRetryAt();
+  } catch (error) {
+    console.error('[agent-runs] automatic retry check failed:', error);
+  } finally {
+    state.running = false;
+  }
+  armAutoRetryScheduler(state, next ?? Infinity);
+}
+
+/** Make the scheduler check again no later than `at`. */
+function wakeAgentAutoRetryScheduler(at: Date): void {
+  const state = (globalThis as AgentRunsGlobal)
+    .__hatchAgentAutoRetryScheduler__;
+  if (!state) return;
+  const time = at.getTime();
+  if (state.running) {
+    state.pendingWake = Math.min(state.pendingWake ?? Infinity, time);
+    return;
+  }
+  if (state.wakeAt !== undefined && state.wakeAt <= time) return;
+  armAutoRetryScheduler(state, time);
+}
+
+/**
+ * Start the automatic retry scheduler (idempotent across dev reloads). It
+ * fires overdue retries right away, then sleeps until the next one is due.
+ */
+export function ensureAgentAutoRetryScheduler(): void {
+  const g = globalThis as AgentRunsGlobal;
+  if (g.__hatchAgentAutoRetryScheduler__) return;
+  const state: AutoRetryScheduler = { running: false };
+  g.__hatchAgentAutoRetryScheduler__ = state;
+  void runAutoRetryCycle(state);
 }

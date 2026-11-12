@@ -5,6 +5,22 @@ import { render } from 'vitest-browser-react';
 import { Chat } from './chat';
 import { LAST_SELECTED_MODEL_STORAGE_KEY } from './model-preference';
 
+const FAILED_MESSAGES = [
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'Retry exactly' },
+      { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+    ],
+  },
+  {
+    role: 'assistant',
+    content: [],
+    stopReason: 'error',
+    errorMessage: 'Provider unavailable',
+  },
+];
+
 const fixtures = vi.hoisted(() => ({
   failSessionFetch: false,
   sessionFetchCount: 0,
@@ -41,7 +57,21 @@ const fixtures = vi.hoisted(() => ({
         variables: { key: string; description: string; secret: boolean }[];
       };
     },
-    runs: [],
+    runs: [] as {
+      id: string;
+      status: 'failed' | 'interrupted';
+      userTurn: number;
+      startedAt: string;
+      completedAt: string | null;
+      error: string | null;
+    }[],
+    retry: null as null | {
+      runId: string;
+      userTurn: number;
+      attempt: number;
+      maxAttempts: number;
+      nextRetryAt: string | null;
+    },
     serverTime: '2026-07-11T12:00:00.000Z',
     clockOffsetMs: 0,
   },
@@ -150,6 +180,15 @@ beforeEach(() => {
   fixtures.sessionFetchCount = 0;
   fixtures.session.updatedAt = '2026-07-11T12:00:00.000Z';
   fixtures.session.activeRun = null;
+  fixtures.session.messages = structuredClone(FAILED_MESSAGES);
+  fixtures.session.runs = [];
+  fixtures.session.retry = {
+    runId: 'run-failed',
+    userTurn: 0,
+    attempt: 0,
+    maxAttempts: 5,
+    nextRetryAt: null,
+  };
   for (const provider of fixtures.providers) {
     provider.enabled = true;
     for (const model of provider.models) model.enabled = true;
@@ -418,6 +457,7 @@ test('refreshes a stale error after another tab has consumed its Retry', async (
     }
     if (url !== '/api/agent/runs') throw new Error(`Unexpected fetch: ${url}`);
     fixtures.session.updatedAt = '2026-07-11T12:01:00.000Z';
+    fixtures.session.retry = null;
     fixtures.session.activeRun = {
       id: 'run-from-another-tab',
       status: 'running',
@@ -549,4 +589,145 @@ test('sends a new message with the model currently shown in the picker', async (
     providerId: 'provider-latest',
     modelId: 'model-latest',
   });
+});
+
+function renderChat() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Chat sessionId="session-1" />
+      </MantineProvider>
+    </QueryClientProvider>,
+  );
+}
+
+test('counts down a scheduled automatic retry for an interrupted turn and stops it', async () => {
+  fixtures.session.messages = [
+    { role: 'user', content: [{ type: 'text', text: 'Build it' }] },
+  ];
+  fixtures.session.runs = [
+    {
+      id: 'run-failed',
+      status: 'interrupted',
+      userTurn: 0,
+      startedAt: '2026-07-11T11:59:00.000Z',
+      completedAt: '2026-07-11T11:59:30.000Z',
+      error: 'Agent run was interrupted because its Agent Runner went away.',
+    },
+  ];
+  fixtures.session.retry = {
+    runId: 'run-failed',
+    userTurn: 0,
+    attempt: 2,
+    maxAttempts: 5,
+    nextRetryAt: new Date(Date.now() + 90_000).toISOString(),
+  };
+  const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (
+      url === '/api/agent/sessions/session-1/auto-retry' &&
+      init?.method === 'DELETE'
+    ) {
+      fixtures.session.retry = {
+        ...fixtures.session.retry!,
+        nextRetryAt: null,
+      };
+      return Response.json({ ok: true });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const screen = await renderChat();
+
+  const status = screen.getByTestId('agent-auto-retry-status');
+  await expect
+    .element(status)
+    .toMatchTextContent(
+      /^Retrying automatically in 1:(29|30) · attempt 2 of 5$/,
+    );
+  await expect
+    .element(screen.getByText(/interrupted because its Agent Runner/))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Retry now' }))
+    .toBeVisible();
+
+  await screen.getByRole('button', { name: 'Stop retrying' }).click();
+
+  await expect.element(status).toHaveTextContent('Automatic retry stopped.');
+  await expect
+    .element(screen.getByRole('button', { name: 'Stop retrying' }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('button', { name: 'Retry' }))
+    .toBeVisible();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test('starts a scheduled retry immediately with Retry now', async () => {
+  fixtures.session.retry = {
+    runId: 'run-failed',
+    userTurn: 0,
+    attempt: 1,
+    maxAttempts: 5,
+    nextRetryAt: new Date(Date.now() + 10_000).toISOString(),
+  };
+  const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url === '/api/agent/runs') {
+      return Response.json({ runId: 'run-retry' });
+    }
+    if (url.includes('/events')) return openResponse(init?.signal);
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const screen = await renderChat();
+
+  await screen.getByRole('button', { name: 'Retry now' }).click();
+
+  await vi.waitFor(() => {
+    const start = fetchMock.mock.calls.find(
+      ([input]) => String(input) === '/api/agent/runs',
+    );
+    expect(JSON.parse(String(start?.[1]?.body))).toEqual({
+      sessionId: 'session-1',
+      retry: true,
+      expectedSessionUpdatedAt: '2026-07-11T12:00:00.000Z',
+      providerId: 'provider-original',
+      modelId: 'model:with-colon',
+    });
+  });
+  await expect
+    .element(screen.getByTestId('agent-auto-retry-status'))
+    .not.toBeInTheDocument();
+});
+
+test('offers a manual Retry once automatic retries are exhausted', async () => {
+  fixtures.session.retry = {
+    runId: 'run-failed',
+    userTurn: 0,
+    attempt: 6,
+    maxAttempts: 5,
+    nextRetryAt: null,
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (input) => {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    }),
+  );
+  const screen = await renderChat();
+
+  await expect
+    .element(screen.getByTestId('agent-auto-retry-status'))
+    .toHaveTextContent('Stopped after 5 automatic retries.');
+  await expect
+    .element(screen.getByRole('button', { name: 'Retry' }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Stop retrying' }))
+    .not.toBeInTheDocument();
 });

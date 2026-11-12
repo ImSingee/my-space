@@ -124,4 +124,17 @@ describe('POST /api/agent/runs', () => {
     await expect(response.text()).resolves.toBe('Bad request');
     expect(mocks.startAgentRun).not.toHaveBeenCalled();
   });
+
+  it('keeps platform-scheduled retries out of client requests', async () => {
+    const response = await postAgentRun({
+      request: runRequest({
+        ...baseBody,
+        retry: true,
+        autoRetryOfRunId: 'run-failed',
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.startAgentRun).not.toHaveBeenCalled();
+  });
 });

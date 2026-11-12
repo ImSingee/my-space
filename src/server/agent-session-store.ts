@@ -5,8 +5,10 @@ import type { JsonValue } from '~/db/schema';
 import { nextUserTurn } from '~agent/user-turns';
 import {
   getActiveAgentRun,
+  getSessionRetryState,
   listSessionRunTimings,
   type ActiveAgentRun,
+  type SessionRetryState,
   type SessionRunTiming,
 } from './agent-runs';
 
@@ -32,6 +34,8 @@ export type SessionDetail = {
   activeRun: ActiveAgentRun | null;
   /** Newest run per user turn, read in the same snapshot as `messages`. */
   runs: SessionRunTiming[];
+  /** The failed latest turn and its automatic retry, if it can be replayed. */
+  retry: SessionRetryState | null;
   /** Server clock when the snapshot was read, for live timer alignment. */
   serverTime: string;
 };
@@ -115,13 +119,14 @@ export async function loadSessionDetail(
         where: { id },
       });
       if (!row) return null;
-      const [associations, active, runs] = await Promise.all([
+      const [associations, active, runs, retry] = await Promise.all([
         tx
           .select({ appId: schema.agentSessionApps.appId })
           .from(schema.agentSessionApps)
           .where(eq(schema.agentSessionApps.sessionId, row.id)),
         getActiveAgentRun(row.id, tx),
         listSessionRunTimings(row.id, tx),
+        getSessionRetryState(row.id, row.messages, tx),
       ]);
       // A run created before runs recorded their user turn still answers the
       // last user message of this same snapshot: no other run can append one
@@ -141,6 +146,8 @@ export async function loadSessionDetail(
         messages: row.messages,
         activeRun,
         runs,
+        // An active run supersedes any failure still recorded on older runs.
+        retry: activeRun ? null : retry,
         serverTime: new Date().toISOString(),
       };
     },

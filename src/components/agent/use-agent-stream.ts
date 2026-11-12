@@ -483,6 +483,19 @@ export async function startAgentRunRequest(
   return (await res.json()) as StartedRun;
 }
 
+/** Stop the session's scheduled automatic retry. */
+export async function stopAgentAutoRetryRequest(
+  sessionId: string,
+): Promise<void> {
+  const res = await fetch(
+    `/api/agent/sessions/${encodeURIComponent(sessionId)}/auto-retry`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) {
+    throw new Error((await res.text()) || `Request failed (${res.status})`);
+  }
+}
+
 async function cancelAgentRunRequest(runId: string): Promise<void> {
   const res = await fetch(`/api/agent/runs/${runId}/cancel`, {
     method: 'POST',

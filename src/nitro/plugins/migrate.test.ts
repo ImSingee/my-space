@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     startAgentInternalServer: step('agent-server'),
     sweepExpiredAgentRuns: asyncStep('agent-sweep'),
     ensureAgentRunSweeper: step('agent-sweeper'),
+    ensureAgentAutoRetryScheduler: step('agent-auto-retry'),
     interruptStaleWorkflowRuns: asyncStep('workflow-interrupt'),
     ensureWorkflowScheduler: step('workflow-scheduler'),
     ensureScheduler: step('app-scheduler'),
@@ -36,6 +37,7 @@ vi.mock('~env', () => ({
 }));
 vi.mock('~db/migrate.ts', () => ({ runMigrations: mocks.runMigrations }));
 vi.mock('~server/agent-runs', () => ({
+  ensureAgentAutoRetryScheduler: mocks.ensureAgentAutoRetryScheduler,
   ensureAgentRunSweeper: mocks.ensureAgentRunSweeper,
   sweepExpiredAgentRuns: mocks.sweepExpiredAgentRuns,
 }));
@@ -86,6 +88,7 @@ describe('platform startup migrations', () => {
       'agent-server',
       'agent-sweep',
       'agent-sweeper',
+      'agent-auto-retry',
       'workflow-interrupt',
       'workflow-scheduler',
       'app-scheduler',

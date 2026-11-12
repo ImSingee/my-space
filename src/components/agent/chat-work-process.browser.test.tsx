@@ -95,8 +95,27 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+/** What the server reports when the session's latest run failed. */
+function retryFor(
+  runs: SessionSnapshot['runs'] = [],
+  activeRun: SessionSnapshot['activeRun'] = null,
+): SessionSnapshot['retry'] {
+  const latest = runs.at(-1);
+  return !activeRun &&
+    (latest?.status === 'failed' || latest?.status === 'interrupted')
+    ? {
+        runId: latest.id,
+        userTurn: latest.userTurn,
+        attempt: 0,
+        maxAttempts: 5,
+        nextRetryAt: null,
+      }
+    : null;
+}
+
 function snapshot(overrides: Partial<SessionSnapshot>): SessionSnapshot {
   return {
+    retry: retryFor(overrides.runs, overrides.activeRun),
     id: 'session-1',
     title: 'Tracker',
     appIds: [],
@@ -707,6 +726,13 @@ test('keeps an interrupted turn and its notice when its transcript never arrives
   fixtures.session = snapshot({
     messages: [prompt] as SessionSnapshot['messages'],
     runs: [{ ...failedRun, status: 'interrupted', error: interruption }],
+    retry: {
+      runId: failedRun.id,
+      userTurn: failedRun.userTurn,
+      attempt: 1,
+      maxAttempts: 5,
+      nextRetryAt: iso(Date.now() + 60_000),
+    },
   });
   stream.emit({ type: 'error', message: interruption });
   await expect
@@ -718,13 +744,63 @@ test('keeps an interrupted turn and its notice when its transcript never arrives
     .element(screen.getByRole('alert'))
     .toMatchTextContent(interruption);
   await expect.element(screen.getByText('Starting the build.')).toBeVisible();
+  // The retained live turn still owns its scheduled automatic retry.
+  await expect
+    .element(screen.getByRole('alert'))
+    .toMatchTextContent(/Retrying automatically in 0:5\d · attempt 1 of 5/);
+  await expect
+    .element(screen.getByRole('button', { name: 'Stop retrying' }))
+    .toBeVisible();
+  await expect
+    .element(screen.getByRole('button', { name: 'Retry now' }))
+    .toBeVisible();
   await expect
     .element(screen.getByRole('button', { name: 'Worked 3s · Failed' }))
     .toHaveAttribute('aria-expanded', 'true');
   expect(screen.getByText(interruption).all()).toHaveLength(1);
   expect(toast.error).not.toHaveBeenCalled();
 
+  // The scheduled replay already failed again before this browser saw it
+  // run (its Runner is still away). The replacement run now owns the turn.
+  const replayError = 'No Agent Runner is connected to the platform.';
+  fixtures.session = snapshot({
+    messages: [prompt] as SessionSnapshot['messages'],
+    runs: [
+      {
+        ...failedRun,
+        id: 'run-replay',
+        status: 'failed',
+        startedAt: iso(Date.now() - 1_000),
+        completedAt: iso(Date.now()),
+        error: replayError,
+      },
+    ],
+    retry: {
+      runId: 'run-replay',
+      userTurn: failedRun.userTurn,
+      attempt: 2,
+      maxAttempts: 5,
+      nextRetryAt: iso(Date.now() + 90_000),
+    },
+  });
+  await invalidateSession(queryClient);
+  await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole('note'))
+    .toMatchTextContent(replayError);
+  await expect
+    .element(screen.getByRole('note'))
+    .toMatchTextContent(/Retrying automatically in 1:[23]\d · attempt 2 of 5/);
+  await expect
+    .element(screen.getByRole('button', { name: 'Stop retrying' }))
+    .toBeVisible();
+  expect(document.body.textContent).not.toContain(interruption);
+
   // Coming back later, history still explains what happened to the turn.
+  fixtures.session = snapshot({
+    messages: [prompt] as SessionSnapshot['messages'],
+    runs: [{ ...failedRun, status: 'interrupted', error: interruption }],
+  });
   await screen.unmount();
   const revisit = await renderChat();
   await expect
