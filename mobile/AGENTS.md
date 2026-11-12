@@ -32,10 +32,14 @@ status bar and home indicator insets; never pad for the tab bar by hand. Drive a
 mounted, and never bind `refreshing` to query fetch state.
 
 Web surfaces decide every navigation in `src/core/surface-navigation.ts` and
-leave the app only through `useSystemBrowser`. New windows arrive through
+leave the app only through `useExternalLink`. New windows arrive through
 `onOpenWindow`; on Fabric `onShouldStartLoadWithRequest` cannot tell them apart.
-Every new window opens in the system browser. Keep the sign-in handshake,
-credential and frame boundaries covered by its tests.
+Every new window opens outside the app: web pages in the system browser, any
+other scheme (`mailto:`, `tel:`, `someapp://…`) in the app that owns it. Open
+such links with `Linking.openURL` directly; never gate them on `canOpenURL`,
+which needs every scheme declared in `LSApplicationQueriesSchemes` (iOS) or
+`<queries>` (Android). Keep the sign-in handshake, credential and frame
+boundaries covered by its tests.
 
 An App screen's back steps through WebKit's own `canGoBack` before leaving.
 While the page has history the screen turns off its native swipe

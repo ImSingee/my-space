@@ -229,7 +229,7 @@ historical. Physical-device and Android acceptance remain unverified. See
   changes, sign-out, or process termination. Successful sends clear that draft.
 - Chat text is selectable native text; full web Markdown/math rendering is not
   replicated. Generated application UIs remain WebViews.
-- App downloads, custom URL schemes, and arbitrary in-WebView browsing are not
-  implemented. Use Hatch web for these flows.
+- App downloads and arbitrary in-WebView browsing are not implemented. Use
+  Hatch web for these flows.
 - Physical-device/Android acceptance, TestFlight builds and store distribution
   remain separate, unperformed steps.

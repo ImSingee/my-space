@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decideLoad,
   decideNewWindow,
-  browserUrl,
+  externalUrl,
   stepsBackInPage,
   type SurfaceContext,
 } from './surface-navigation';
@@ -63,11 +63,11 @@ describe('surface navigation', () => {
         },
         context,
       );
-    const browser = { action: 'browser', url: 'https://docs.example/a?b=1#c' };
-    expect(top('click')).toEqual(browser);
+    const leaves = { action: 'external', url: 'https://docs.example/a?b=1#c' };
+    expect(top('click')).toEqual(leaves);
     // Android reports neither frame nor navigation type.
-    expect(top(undefined)).toEqual(browser);
-    expect(top('other')).toEqual(browser);
+    expect(top(undefined)).toEqual(leaves);
+    expect(top('other')).toEqual(leaves);
     expect(top('other', { ...app, ready: false }).action).toBe('block');
     expect(top('formsubmit').action).toBe('block');
   });
@@ -76,7 +76,7 @@ describe('surface navigation', () => {
     const frame = (url: string, navigationType: string) =>
       decideLoad({ url, isTopFrame: false, navigationType }, app).action;
     expect(frame('https://maps.example/embed', 'other')).toBe('block');
-    expect(frame('https://maps.example/place', 'click')).toBe('browser');
+    expect(frame('https://maps.example/place', 'click')).toBe('external');
     expect(frame(`${origin}/app/notes/embed/frame.html`, 'other')).toBe('load');
     expect(frame('about:srcdoc', 'other')).toBe('load');
     expect(
@@ -91,17 +91,59 @@ describe('surface navigation', () => {
       [`${origin}/workflow/weekly`, app],
       ['http://lan.example:8080/x', app],
     ] as const)
-      expect(decideNewWindow(url, context)).toEqual({ action: 'browser', url });
+      expect(decideNewWindow(url, context)).toEqual({
+        action: 'external',
+        url,
+      });
   });
 
-  it('never lets credentials, handoff pages, the ticket or other schemes leave', () => {
+  it('hands any other scheme to the app that owns it, under the same rules', () => {
+    const load = (url: string, request = {}, context = app) =>
+      decideLoad({ url, ...request }, context).action;
+    for (const url of [
+      'someapp://open/item?id=1',
+      'mailto:a@example.com',
+      'tel:+15550100',
+      'vnc://user:secret@host.example/',
+    ]) {
+      expect(decideNewWindow(url, app)).toEqual({ action: 'external', url });
+      expect(load(url, { isTopFrame: true, navigationType: 'click' })).toBe(
+        'external',
+      );
+      // Android reports neither frame nor navigation type.
+      expect(load(url)).toBe('external');
+      expect(load(url, { isTopFrame: false, navigationType: 'click' })).toBe(
+        'external',
+      );
+      // Never from a frame that loads itself, a page still loading, or sign-in.
+      expect(load(url, { isTopFrame: false, navigationType: 'other' })).toBe(
+        'block',
+      );
+      expect(
+        load(
+          url,
+          { isTopFrame: true, navigationType: 'other' },
+          { ...app, ready: false },
+        ),
+      ).toBe('block');
+      expect(
+        decideNewWindow(url, { ...app, signedIn: false, ready: false }).action,
+      ).toBe('block');
+    }
+    for (const url of [
+      `someapp://open?t=${ticket}`,
+      `someapp://open?t=%54${ticket.slice(1)}`,
+    ])
+      expect(decideNewWindow(url, app).action).toBe('block');
+  });
+
+  it('never lets credentials, handoff pages, the ticket or document schemes leave', () => {
     const urls = [
       'javascript:alert(1)',
       'data:text/html,<h1>x</h1>',
       'file:///etc/hosts',
       'blob:https://hatch.example/1',
       'about:blank',
-      'mailto:a@example.com',
       'not a url',
       'https://user:secret@docs.example/',
       'https://user@docs.example/',
@@ -114,7 +156,7 @@ describe('surface navigation', () => {
       (url) =>
         decideNewWindow(url, app).action !== 'block' ||
         decideLoad({ url, isTopFrame: true, navigationType: 'click' }, app)
-          .action === 'browser',
+          .action === 'external',
     );
     expect(leaked).toEqual([]);
   });
@@ -126,7 +168,7 @@ describe('surface navigation', () => {
       `https://docs.example/?bad=%FF#${escaped}`,
       `https://docs.example/?ticket=%2554${ticket.slice(1)}`,
     ]) {
-      expect(browserUrl(value, app)).toBeNull();
+      expect(externalUrl(value, app)).toBeNull();
       expect(decideNewWindow(value, app).action).toBe('block');
       expect(
         decideLoad({ url: value, navigationType: 'click' }, app).action,
@@ -143,11 +185,11 @@ describe('surface navigation', () => {
       '/api/auth%5chandoffs%5cconsume',
       '/api/auth/%68andoffs',
     ]) {
-      expect(browserUrl(`${origin}${path}`, app)).toBeNull();
+      expect(externalUrl(`${origin}${path}`, app)).toBeNull();
       expect(decideNewWindow(`${origin}${path}`, app).action).toBe('block');
     }
     expect(
-      browserUrl('https://docs.example/help%20page?price=100%25', app),
+      externalUrl('https://docs.example/help%20page?price=100%25', app),
     ).toBe('https://docs.example/help%20page?price=100%25');
   });
 
