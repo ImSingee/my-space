@@ -49,16 +49,21 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
       });
   };
   // Folding keeps the open conversation open: it moves over the list. The
-  // conversation screen returns here when there is room again.
+  // conversation screen returns here when there is room again. A fold while
+  // another screen covers this one is kept until the list is shown again,
+  // unless there is room for both again first.
   const wide = Boolean(split);
   const wasWide = useRef(wide);
+  const folded = useRef(false);
   useEffect(() => {
-    const folded = wasWide.current && !wide;
+    if (wasWide.current !== wide) folded.current = !wide;
     wasWide.current = wide;
-    if (folded && focused && selected) open(selected, true);
-    // `open` is recreated every render; only the layout change matters.
+    if (!folded.current || !focused) return;
+    folded.current = false;
+    if (selected) open(selected, true);
+    // `open` and `selected` are read when the layout or focus changes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [wide]);
+  }, [wide, focused]);
   const sessions = useQuery({
     queryKey: [origin, 'sessions'],
     queryFn: ({ signal }) => api!.sessions(undefined, signal),

@@ -142,7 +142,7 @@ function ConversationBody({
   const [following, setFollowing] = useState<string | null>(null);
   if (runId && runId !== following) setFollowing(runId);
   const streamRunId = runId ?? following;
-  const { held, end: holdReply, recheck } = useHeldReplies(refetchSession);
+  const { held, end: holdReply, recheck } = useHeldReplies(id, refetchSession);
   const refresh = useCallback(
     async (ended?: { runId: string; state: StreamState }) => {
       if (lifetimeSignal().aborted) return true;

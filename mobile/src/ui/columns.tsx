@@ -151,14 +151,17 @@ export function TileGrid<T>({
     minColumn: minTile,
     gap,
   });
-  const halves = split ? [split.leading, split.trailing] : [width];
+  // The row cap applies to the whole row: a row capped below two tiles is
+  // never split, so one tile keeps the full width.
+  const cap = maxPerRow ?? Infinity;
+  const halves = split && cap >= 2 ? [split.leading, split.trailing] : [width];
   // Both halves use the narrower one's width, mirrored around the fold: the
   // tiles stay one size and the gutter stays centered on the fold, while the
   // wider side (the one without a vertical bar) takes the slack as margin.
   const inner = Math.min(...halves);
-  const perHalf = Math.min(
-    maxPerRow ?? Infinity,
-    tilesPerRow(inner, minTile, gap),
+  const perHalf = Math.max(
+    1,
+    Math.min(Math.floor(cap / halves.length), tilesPerRow(inner, minTile, gap)),
   );
   const perRow = perHalf * halves.length;
   const tile = (inner - gap * (perHalf - 1)) / perHalf;
