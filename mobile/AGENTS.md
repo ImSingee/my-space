@@ -31,6 +31,22 @@ status bar and home indicator insets; never pad for the tab bar by hand. Drive a
 `RefreshControl` only from a user pull through `usePullToRefresh`, keep it
 mounted, and never bind `refreshing` to query fetch state.
 
+The app resizes while it runs: iPhone Duo moves it between a compact outer
+display and a regular-width inner display that can fold, beside another app
+or under a vertical bar. Size layouts from their container (`useFoldSplit`,
+`Reflow`, `Columns`, `TileGrid` in `src/ui/columns.tsx`), never from the
+screen, the device, orientation or a width read once. Two columns keep their
+gutter on the window center, where the inner display folds, and grids keep an
+even count per row. Toolbars, tab bars and navigation bars move to a vertical
+bar on the side; that bar, like any safe area, may sit on one edge only, so
+read each edge's inset from the view that lays out (a nested
+`SafeAreaProvider` or `SafeAreaView`), never the window's. Put header actions
+in `Stack.Toolbar` items with both an SF Symbol and a title; custom
+`headerLeft`/`headerRight` views cannot join the vertical bar. The Agent list
+shows the open conversation beside itself when both fit and pushes it on a
+compact width; folding or unfolding keeps that conversation open. Production
+builds need the iOS 27.1 SDK or later for the full-display Duo layout.
+
 Web surfaces decide every navigation in `src/core/surface-navigation.ts` and
 leave the app only through `useExternalLink`. New windows arrive through
 `onOpenWindow`; on Fabric `onShouldStartLoadWithRequest` cannot tell them apart.

@@ -50,7 +50,7 @@ function Navigation() {
         <Stack.Screen name="notifications/[id]" options={{ title: '' }} />
         <Stack.Screen
           name="settings"
-          options={{ headerShown: false, presentation: 'modal' }}
+          options={{ title: '', presentation: 'modal' }}
         />
       </Stack.Protected>
     </Stack>

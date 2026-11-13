@@ -7,7 +7,7 @@ import { appDestination, type BrowserDestination } from '../../src/core';
 import { SecureSurface, type SurfaceHandle } from '../../src/ui/secure-surface';
 import { useSession } from '../../src/state/session';
 import { useWebHistoryBack } from '../../src/state/use-web-history-back';
-import { IconButton } from '../../src/ui/button';
+import { glyphs } from '../../src/ui/glyph.types';
 import { Busy, Notice, errorText } from '../../src/ui/primitives';
 import { palette as c } from '../../src/ui/theme';
 
@@ -67,17 +67,15 @@ export default function AppScreen() {
           gestureEnabled: !inPageBack,
           headerTransparent: false,
           headerStyle: { backgroundColor: c.card },
-          headerRight: () => (
-            <IconButton
-              label="Reload app"
-              glyph="refresh"
-              tone="clear"
-              size={36}
-              onPress={retry}
-            />
-          ),
         }}
       />
+      {/* A native bar item, not a custom view, so the system can move it to
+          the vertical bar on iPhone Duo or into the overflow menu. */}
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button icon={glyphs.refresh} onPress={retry}>
+          Reload app
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
       {invalid || handoff.error || (app.error && !destination) ? (
         <View style={{ flex: 1, padding: 16, backgroundColor: c.paper }}>
           <Notice

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { router, useIsFocused } from 'expo-router';
 import { useState } from 'react';
 import { RefreshControl, useWindowDimensions, View } from 'react-native';
+import { Reflow, TileGrid } from '../ui/columns';
 import { useSession } from '../state/session';
 import { usePullToRefresh } from '../state/use-pull-to-refresh';
 import { Busy, EmptyState, Notice, Tag, errorText } from '../ui/primitives';
@@ -26,7 +27,7 @@ export function ResourcesScreen({
 }) {
   const { api, origin } = useSession();
   const focused = useIsFocused();
-  const { fontScale, width } = useWindowDimensions();
+  const { fontScale } = useWindowDimensions();
   const [scope, setScope] = useState<Scope>(all ? 'all' : 'pinned');
   const [search, setSearch] = useState('');
   const resources = useQuery({
@@ -99,11 +100,6 @@ export function ResourcesScreen({
         ? !pins.length && !pinnedWorkflows.length
         : !pinnedWorkflows.length
       : !rows.length;
-  const columns = fontScale > 1.3 ? 1 : 2;
-  const tileWidth = (width - 32 - 10 * (columns - 1)) / columns;
-  const pinRows: (typeof pins)[] = [];
-  for (let index = 0; index < pins.length; index += columns)
-    pinRows.push(pins.slice(index, index + columns));
   const open = (item: AppSummary, resourceKind: 'apps' | 'workflows') =>
     router.push({
       pathname: resourceKind === 'apps' ? '/apps/[id]' : '/workflows/[id]',
@@ -202,39 +198,36 @@ export function ResourcesScreen({
             {kind === 'apps' && pins.length ? (
               <>
                 <SectionLabel count={pins.length}>Pinned apps</SectionLabel>
-                <View style={{ gap: 10 }}>
-                  {pinRows.map((row) => (
-                    <View
-                      key={row.map((pin) => pin.id).join()}
-                      style={{ flexDirection: 'row', gap: 10 }}
-                    >
-                      {row.map((pin) => (
-                        <PinTile
-                          key={pin.id}
-                          width={tileWidth}
-                          label={pin.label}
-                          detail={
-                            appById.get(pin.appId)?.description ||
-                            appById.get(pin.appId)?.name ||
-                            'App'
-                          }
-                          hash={pin.entryHash || undefined}
-                          onPress={() =>
-                            router.push({
-                              pathname: '/apps/[id]',
-                              params: {
-                                id: pin.appId,
-                                slug: pin.appSlug,
-                                entryHash: pin.entryHash,
-                                label: pin.label,
-                              },
-                            })
-                          }
-                        />
-                      ))}
-                    </View>
-                  ))}
-                </View>
+                <TileGrid
+                  items={pins}
+                  keyOf={(pin) => pin.id}
+                  minTile={130}
+                  // Large text needs the full width for each tile.
+                  maxPerRow={fontScale > 1.3 ? 1 : undefined}
+                  render={(pin, width) => (
+                    <PinTile
+                      width={width}
+                      label={pin.label}
+                      detail={
+                        appById.get(pin.appId)?.description ||
+                        appById.get(pin.appId)?.name ||
+                        'App'
+                      }
+                      hash={pin.entryHash || undefined}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/apps/[id]',
+                          params: {
+                            id: pin.appId,
+                            slug: pin.appSlug,
+                            entryHash: pin.entryHash,
+                            label: pin.label,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                />
               </>
             ) : null}
             {pinnedWorkflows.length ? (
@@ -242,17 +235,22 @@ export function ResourcesScreen({
                 <SectionLabel count={pinnedWorkflows.length}>
                   Pinned workflows
                 </SectionLabel>
-                <Group>
-                  {pinnedWorkflows.map((item) => (
-                    <ListRow
-                      key={item.id}
-                      title={item.name}
-                      detail={item.description || 'Automation'}
-                      leading={<GlyphTile glyph="workflows" tone="lime" />}
-                      onPress={() => open(item, 'workflows')}
-                    />
-                  ))}
-                </Group>
+                <Reflow
+                  items={pinnedWorkflows}
+                  render={(column) => (
+                    <Group>
+                      {column.map((item) => (
+                        <ListRow
+                          key={item.id}
+                          title={item.name}
+                          detail={item.description || 'Automation'}
+                          leading={<GlyphTile glyph="workflows" tone="lime" />}
+                          onPress={() => open(item, 'workflows')}
+                        />
+                      ))}
+                    </Group>
+                  )}
+                />
               </>
             ) : null}
           </>
@@ -263,37 +261,42 @@ export function ResourcesScreen({
                 ? 'Matches'
                 : `Every ${kind === 'apps' ? 'app' : 'workflow'}`}
             </SectionLabel>
-            <Group>
-              {rows.map((item, index) => (
-                <IndexRow
-                  key={item.id}
-                  index={index + 1}
-                  title={item.name}
-                  detail={item.description || undefined}
-                  onPress={() => open(item, kind)}
-                  tags={
-                    <>
-                      <StatusTag status={item.status} />
-                      {kind === 'apps' && pinsByApp.get(item.id) ? (
-                        <Tag
-                          tone="outline"
-                          glyph="pin"
-                          label={
-                            pinsByApp.get(item.id) === 1
-                              ? 'Pinned'
-                              : `${pinsByApp.get(item.id)} pins`
-                          }
-                        />
-                      ) : null}
-                      {kind === 'workflows' &&
-                      pinnedWorkflowIds.includes(item.id) ? (
-                        <Tag tone="outline" glyph="pin" label="Pinned" />
-                      ) : null}
-                    </>
-                  }
-                />
-              ))}
-            </Group>
+            <Reflow
+              items={rows.map((item, index) => ({ item, number: index + 1 }))}
+              render={(column) => (
+                <Group>
+                  {column.map(({ item, number }) => (
+                    <IndexRow
+                      key={item.id}
+                      index={number}
+                      title={item.name}
+                      detail={item.description || undefined}
+                      onPress={() => open(item, kind)}
+                      tags={
+                        <>
+                          <StatusTag status={item.status} />
+                          {kind === 'apps' && pinsByApp.get(item.id) ? (
+                            <Tag
+                              tone="outline"
+                              glyph="pin"
+                              label={
+                                pinsByApp.get(item.id) === 1
+                                  ? 'Pinned'
+                                  : `${pinsByApp.get(item.id)} pins`
+                              }
+                            />
+                          ) : null}
+                          {kind === 'workflows' &&
+                          pinnedWorkflowIds.includes(item.id) ? (
+                            <Tag tone="outline" glyph="pin" label="Pinned" />
+                          ) : null}
+                        </>
+                      }
+                    />
+                  ))}
+                </Group>
+              )}
+            />
           </>
         ) : null}
       </View>
