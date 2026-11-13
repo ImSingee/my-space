@@ -143,7 +143,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
         throw new Error('Sign in to this instance first.');
       await queryClient.cancelQueries();
       if (signal?.aborted) return;
-      endConversationLifetimes();
       queryClient.clear();
       const recent = [next, ...origins.filter((item) => item !== next)].slice(
         0,
@@ -156,6 +155,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
         await SecureStore.deleteItemAsync(ACTIVE_KEY);
         return;
       }
+      // The identity changes here; work started under the previous one ends.
+      endConversationLifetimes();
       currentInstance = next;
       currentRevision++;
       setOrigins(recent);
