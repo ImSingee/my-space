@@ -31,9 +31,13 @@ import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import type { AskAnswer, JsonValue, StreamState } from '../core';
+import type { AskAnswer, JsonValue, PendingAsk, StreamState } from '../core';
 import { useSession } from '../state/session';
-import { useChatDraft, type Picked } from '../state/use-chat-draft';
+import {
+  useAskDraft,
+  useChatDraft,
+  type Picked,
+} from '../state/use-chat-draft';
 import { useRefreshOnReturn } from '../state/use-refresh-on-return';
 import { useRunStream } from '../state/use-run-stream';
 import {
@@ -86,13 +90,10 @@ function ConversationBody({
   const { api, origin } = useSession();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
-  const { draft, setDraft, files, setFiles } = useChatDraft(id);
+  const { draft, setDraft, files, setFiles, model, setModel } =
+    useChatDraft(id);
   const [problem, setProblem] = useConversationProblem(origin, id);
   const [optimisticRun, setOptimisticRun] = useState<string | null>(null);
-  const [model, setModel] = useState<{
-    providerId: string;
-    modelId: string;
-  } | null>(null);
   const [submittedAnswer, setSubmittedAnswer] = useState<{
     runId: string;
     askId: string;
@@ -297,6 +298,10 @@ function ConversationBody({
         lifetimeSignal(),
       ),
     onSuccess: async (_result, submission) => {
+      // The answer is on the server; its unsent copy is no longer needed.
+      queryClient.removeQueries({
+        queryKey: [origin, 'ask-draft', id, submission.askId],
+      });
       if (lifetimeSignal().aborted) return;
       setSubmittedAnswer({ runId: submission.runId, askId: submission.askId });
       await refresh();
@@ -631,8 +636,9 @@ function ConversationBody({
                       detail="Your answer is saved on the server. Waiting for your Agent to continue."
                     />
                   ) : (
-                    <AskCard
+                    <PendingAskCard
                       key={ask.askId}
+                      conversation={id}
                       ask={ask}
                       busy={answer.isPending}
                       onAnswer={(answers) =>
@@ -963,4 +969,28 @@ function useConversationProblem(origin: string | null, id: string) {
     [client, origin, id],
   );
   return [data, set] as const;
+}
+
+/** A pending question whose unsent answers belong to the conversation. */
+function PendingAskCard({
+  conversation,
+  ask,
+  busy,
+  onAnswer,
+}: {
+  conversation: string;
+  ask: PendingAsk;
+  busy: boolean;
+  onAnswer: (answers: AskAnswer[]) => void;
+}) {
+  const { saved, save } = useAskDraft(conversation, ask.askId);
+  return (
+    <AskCard
+      ask={ask}
+      busy={busy}
+      saved={saved}
+      onDraft={save}
+      onAnswer={onAnswer}
+    />
+  );
 }
