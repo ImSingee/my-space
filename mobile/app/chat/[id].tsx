@@ -6,6 +6,7 @@ import { Conversation } from '../../src/screens/conversation';
 import {
   conversationSplit,
   fromConversationList,
+  useShowsConversation,
 } from '../../src/state/use-agent-selection';
 import { useFoldSplit } from '../../src/ui/columns';
 
@@ -22,6 +23,7 @@ const returnSplit = {
 export default function ChatScreen() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const focused = useIsFocused();
+  useShowsConversation(id);
   // Opened from the conversation list on a compact width: once the list and
   // this conversation fit side by side again, the list shows it beside itself.
   const { ref, onLayout, split } = useFoldSplit(returnSplit);

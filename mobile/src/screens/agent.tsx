@@ -13,6 +13,7 @@ import {
   conversationSplit,
   fromConversationList,
   useAgentSelection,
+  useConversationScreens,
 } from '../state/use-agent-selection';
 import { useConversationListRefresh } from '../state/use-conversation-list-refresh';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
@@ -40,6 +41,7 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
   // edge on the fold; otherwise it is pushed over the list.
   const { ref, onLayout, split } = useFoldSplit(conversationSplit);
   const [selected, select] = useAgentSelection();
+  const onOwnScreen = useConversationScreens();
   const open = (id: string, push = !split) => {
     select(id);
     if (push)
@@ -259,7 +261,7 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
               />
             </View>
             <View style={{ width: split.trailing }}>
-              {selected ? (
+              {selected && onOwnScreen.includes(selected) ? null : selected ? (
                 <Conversation key={selected} id={selected} embedded />
               ) : (
                 <View
