@@ -13,7 +13,15 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   Alert,
   FlatList,
@@ -25,7 +33,11 @@ import {
   ScrollView,
   View,
   type ScrollViewInstance,
-  type ListViewToken,
+  type LayoutChangeEvent,
+  type LayoutRectangle,
+  type StyleProp,
+  type ViewProps,
+  type ViewStyle,
   type ViewInstance,
 } from 'react-native';
 import {
@@ -100,23 +112,40 @@ function ConversationBody({
     askId: string;
   } | null>(null);
   // Where the reader is belongs to the conversation: a fold or unfold that
-  // moves it to another screen reopens the same message, and follows new
+  // moves it to another screen reopens the same place, and follows new
   // messages only if the reader was already at the end.
   const reading = useReadingAnchor(origin, id);
   const [atBottom, setAtBottom] = useState(reading.initial.atBottom);
-  const restoreTo = useRef(
-    reading.initial.atBottom ? null : reading.initial.index,
+  // The place still to restore, until its message has been laid out here.
+  const restoreTo = useRef<ReadingAnchor | null>(
+    reading.initial.atBottom ? null : reading.initial,
   );
-  const firstVisible = useRef(reading.initial.index);
-  // A list needs the same callback for its whole life.
-  const onViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ListViewToken[] }) => {
-      const indexes = viewableItems.flatMap((item) =>
-        typeof item.index === 'number' ? [item.index] : [],
-      );
-      if (indexes.length) firstVisible.current = Math.min(...indexes);
+  const cells = useRef(new Map<number, { y: number; height: number }>());
+  const restore = useCallback(() => {
+    const target = restoreTo.current;
+    if (!target) return;
+    const cell = cells.current.get(target.index);
+    if (!cell) {
+      list.current?.scrollToIndex({
+        index: target.index,
+        viewPosition: 0,
+        animated: false,
+      });
+      return;
+    }
+    restoreTo.current = null;
+    // The same share of the message: this width wraps it differently.
+    list.current?.scrollToOffset({
+      offset: cell.y + target.fraction * cell.height,
+      animated: false,
+    });
+  }, []);
+  const recordCell = useCallback(
+    (index: number, layout: LayoutRectangle) => {
+      cells.current.set(index, { y: layout.y, height: layout.height });
+      if (restoreTo.current?.index === index) restore();
     },
-    [],
+    [restore],
   );
   const list = useRef<FlatList<JsonValue>>(null);
   const frame = useRef<ViewInstance>(null);
@@ -554,236 +583,238 @@ function ConversationBody({
             />
           </View>
         ) : (
-          <FlatList
-            style={{ flex: 1 }}
-            contentInsetAdjustmentBehavior="automatic"
-            ref={list}
-            data={detail?.messages ?? []}
-            extraData={held}
-            keyExtractor={(_, index) => String(index)}
-            contentContainerStyle={{
-              paddingHorizontal: 16,
-              paddingTop: 12,
-              paddingBottom: 24,
-              gap: 18,
-            }}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-            onScroll={(event) => {
-              const { contentOffset, layoutMeasurement, contentSize } =
-                event.nativeEvent;
-              const bottom =
-                contentOffset.y + layoutMeasurement.height >=
-                contentSize.height - 100;
-              setAtBottom(bottom);
-              if (restoreTo.current === null)
-                reading.save({ atBottom: bottom, index: firstVisible.current });
-            }}
-            scrollEventThrottle={100}
-            viewabilityConfig={readingViewability}
-            onViewableItemsChanged={onViewableItemsChanged}
-            onScrollToIndexFailed={(info) => {
-              // Rows above it are not measured yet: get near, then align.
-              list.current?.scrollToOffset({
-                offset: info.averageItemLength * info.index,
-                animated: false,
-              });
-              setTimeout(
-                () =>
-                  list.current?.scrollToIndex({
-                    index: info.index,
-                    viewPosition: 0,
-                    animated: false,
-                  }),
-                50,
-              );
-            }}
-            onContentSizeChange={() => {
-              const target = restoreTo.current;
-              if (target !== null) {
-                if ((detail?.messages.length ?? 0) <= target) return;
-                restoreTo.current = null;
-                list.current?.scrollToIndex({
-                  index: target,
-                  viewPosition: 0,
+          <RecordCell value={recordCell}>
+            <FlatList
+              style={{ flex: 1 }}
+              contentInsetAdjustmentBehavior="automatic"
+              ref={list}
+              data={detail?.messages ?? []}
+              extraData={held}
+              keyExtractor={(_, index) => String(index)}
+              contentContainerStyle={{
+                paddingHorizontal: 16,
+                paddingTop: 12,
+                paddingBottom: 24,
+                gap: 18,
+              }}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              onScroll={(event) => {
+                const { contentOffset, layoutMeasurement, contentSize } =
+                  event.nativeEvent;
+                const bottom =
+                  contentOffset.y + layoutMeasurement.height >=
+                  contentSize.height - 100;
+                setAtBottom(bottom);
+                if (restoreTo.current === null)
+                  reading.save(
+                    readingAt(cells.current, contentOffset.y, bottom),
+                  );
+              }}
+              scrollEventThrottle={100}
+              CellRendererComponent={RecordingCell}
+              onScrollToIndexFailed={(info) => {
+                // Rows above it are not measured yet: get near, then align.
+                list.current?.scrollToOffset({
+                  offset: info.averageItemLength * info.index,
                   animated: false,
                 });
-                return;
-              }
-              if (atBottom) list.current?.scrollToEnd({ animated: false });
-            }}
-            renderItem={({ item, index }) => {
-              const after = heldShown.after.get(index);
-              return after ? (
-                <View style={{ gap: 18 }}>
-                  <TranscriptMessage value={item} />
-                  {after.map(heldReply)}
-                </View>
-              ) : (
-                <TranscriptMessage value={item} />
-              );
-            }}
-            ListEmptyComponent={
-              !streamRunId && !heldShown.rest.length ? (
-                <View style={{ gap: 14, paddingTop: 24 }}>
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      gap: 8,
-                      alignItems: 'flex-end',
-                    }}
-                  >
-                    <Egg size={22} outline />
-                    <Egg size={30} />
+                setTimeout(
+                  () =>
+                    list.current?.scrollToIndex({
+                      index: info.index,
+                      viewPosition: 0,
+                      animated: false,
+                    }),
+                  50,
+                );
+              }}
+              onContentSizeChange={() => {
+                const target = restoreTo.current;
+                if (target !== null) {
+                  if ((detail?.messages.length ?? 0) > target.index) restore();
+                  return;
+                }
+                if (atBottom) list.current?.scrollToEnd({ animated: false });
+              }}
+              renderItem={({ item, index }) => {
+                const after = heldShown.after.get(index);
+                return after ? (
+                  <View style={{ gap: 18 }}>
+                    <TranscriptMessage value={item} />
+                    {after.map(heldReply)}
                   </View>
-                  <Text accessibilityRole="header" style={type.display}>
-                    Start with an idea.
-                  </Text>
-                  <Text style={type.callout}>
-                    Build an App, explore your data or pick up something
-                    unfinished. Photos and files can help explain what you mean.
-                  </Text>
-                  <View style={{ gap: 8, marginTop: 6 }}>
-                    {suggestions.map((text) => (
+                ) : (
+                  <TranscriptMessage value={item} />
+                );
+              }}
+              ListEmptyComponent={
+                !streamRunId && !heldShown.rest.length ? (
+                  <View style={{ gap: 14, paddingTop: 24 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        gap: 8,
+                        alignItems: 'flex-end',
+                      }}
+                    >
+                      <Egg size={22} outline />
+                      <Egg size={30} />
+                    </View>
+                    <Text accessibilityRole="header" style={type.display}>
+                      Start with an idea.
+                    </Text>
+                    <Text style={type.callout}>
+                      Build an App, explore your data or pick up something
+                      unfinished. Photos and files can help explain what you
+                      mean.
+                    </Text>
+                    <View style={{ gap: 8, marginTop: 6 }}>
+                      {suggestions.map((text) => (
+                        <Pressable
+                          key={text}
+                          accessibilityRole="button"
+                          accessibilityHint="Puts this in your message"
+                          disabled={busy}
+                          onPress={() => setDraft(text)}
+                          style={({ pressed }) => ({
+                            minHeight: 44,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 10,
+                            paddingHorizontal: 14,
+                            paddingVertical: 10,
+                            borderRadius: 16,
+                            backgroundColor: pressed ? c.limeSoft : c.card,
+                          })}
+                        >
+                          <Glyph name="sparkle" size={13} color={c.moss} />
+                          <Text
+                            style={[type.callout, { flex: 1, color: c.ink }]}
+                          >
+                            {text}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : undefined
+              }
+              ListFooterComponent={
+                <View style={{ gap: 16 }}>
+                  {heldShown.rest.map(heldReply)}
+                  {streamRunId ? (
+                    <LiveTranscript state={stream.state} status={status} />
+                  ) : null}
+                  {ask && runId ? (
+                    answerSubmitted ? (
+                      <Notice
+                        tone="info"
+                        title="Answer sent"
+                        detail="Your answer is saved on the server. Waiting for your Agent to continue."
+                      />
+                    ) : (
+                      <PendingAskCard
+                        key={ask.askId}
+                        conversation={id}
+                        ask={ask}
+                        busy={answer.isPending}
+                        onAnswer={(answers) =>
+                          answer.mutate({ runId, askId: ask.askId, answers })
+                        }
+                      />
+                    )
+                  ) : null}
+                  {env && runId ? (
+                    <Notice
+                      tone="info"
+                      title="Continue in Hatch web"
+                      detail={`${env.reason} Open this conversation in your browser to provide environment values securely.`}
+                      action={{
+                        label: 'Open conversation in browser',
+                        onPress: () =>
+                          void WebBrowser.openBrowserAsync(
+                            `${origin}/agent/${encodeURIComponent(id)}`,
+                          ).catch((error: unknown) =>
+                            setProblem(errorText(error)),
+                          ),
+                      }}
+                    />
+                  ) : null}
+                  {!runId &&
+                  lastRun &&
+                  ['failed', 'interrupted', 'cancelled'].includes(
+                    lastRun.status,
+                  ) ? (
+                    <Notice
+                      tone={
+                        lastRun.status === 'cancelled' ? 'neutral' : 'danger'
+                      }
+                      title={
+                        lastRun.status === 'cancelled'
+                          ? 'Run stopped'
+                          : 'The Agent couldn’t finish'
+                      }
+                      detail={
+                        lastRun.error ??
+                        'Your conversation is saved. You can continue with another message.'
+                      }
+                      action={
+                        selectedModel &&
+                        retryable &&
+                        lastRun.status !== 'cancelled'
+                          ? {
+                              label: retryRun.isPending
+                                ? 'Retrying…'
+                                : 'Retry this turn',
+                              onPress: () => {
+                                if (!requesting) retryRun.mutate();
+                              },
+                            }
+                          : undefined
+                      }
+                    />
+                  ) : null}
+                  {(detail?.appIds ?? []).map((appId) => {
+                    const name =
+                      apps.data?.find((app) => app.id === appId)?.name ?? 'App';
+                    return (
                       <Pressable
-                        key={text}
+                        key={appId}
                         accessibilityRole="button"
-                        accessibilityHint="Puts this in your message"
-                        disabled={busy}
-                        onPress={() => setDraft(text)}
+                        accessibilityLabel={`Open ${name}`}
+                        onPress={() =>
+                          router.push({
+                            pathname: '/apps/[id]',
+                            params: { id: appId },
+                          })
+                        }
                         style={({ pressed }) => ({
-                          minHeight: 44,
+                          minHeight: 56,
                           flexDirection: 'row',
                           alignItems: 'center',
-                          gap: 10,
-                          paddingHorizontal: 14,
-                          paddingVertical: 10,
-                          borderRadius: 16,
+                          gap: 12,
+                          padding: 10,
+                          paddingRight: 16,
+                          borderRadius: 20,
                           backgroundColor: pressed ? c.limeSoft : c.card,
                         })}
                       >
-                        <Glyph name="sparkle" size={13} color={c.moss} />
-                        <Text style={[type.callout, { flex: 1, color: c.ink }]}>
-                          {text}
-                        </Text>
+                        <Monogram name={name} size={36} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={type.meta}>Built here</Text>
+                          <Text style={type.heading} numberOfLines={1}>
+                            Open {name}
+                          </Text>
+                        </View>
+                        <Glyph name="chevron" size={12} color={c.inkFaint} />
                       </Pressable>
-                    ))}
-                  </View>
+                    );
+                  })}
                 </View>
-              ) : undefined
-            }
-            ListFooterComponent={
-              <View style={{ gap: 16 }}>
-                {heldShown.rest.map(heldReply)}
-                {streamRunId ? (
-                  <LiveTranscript state={stream.state} status={status} />
-                ) : null}
-                {ask && runId ? (
-                  answerSubmitted ? (
-                    <Notice
-                      tone="info"
-                      title="Answer sent"
-                      detail="Your answer is saved on the server. Waiting for your Agent to continue."
-                    />
-                  ) : (
-                    <PendingAskCard
-                      key={ask.askId}
-                      conversation={id}
-                      ask={ask}
-                      busy={answer.isPending}
-                      onAnswer={(answers) =>
-                        answer.mutate({ runId, askId: ask.askId, answers })
-                      }
-                    />
-                  )
-                ) : null}
-                {env && runId ? (
-                  <Notice
-                    tone="info"
-                    title="Continue in Hatch web"
-                    detail={`${env.reason} Open this conversation in your browser to provide environment values securely.`}
-                    action={{
-                      label: 'Open conversation in browser',
-                      onPress: () =>
-                        void WebBrowser.openBrowserAsync(
-                          `${origin}/agent/${encodeURIComponent(id)}`,
-                        ).catch((error: unknown) =>
-                          setProblem(errorText(error)),
-                        ),
-                    }}
-                  />
-                ) : null}
-                {!runId &&
-                lastRun &&
-                ['failed', 'interrupted', 'cancelled'].includes(
-                  lastRun.status,
-                ) ? (
-                  <Notice
-                    tone={lastRun.status === 'cancelled' ? 'neutral' : 'danger'}
-                    title={
-                      lastRun.status === 'cancelled'
-                        ? 'Run stopped'
-                        : 'The Agent couldn’t finish'
-                    }
-                    detail={
-                      lastRun.error ??
-                      'Your conversation is saved. You can continue with another message.'
-                    }
-                    action={
-                      selectedModel &&
-                      retryable &&
-                      lastRun.status !== 'cancelled'
-                        ? {
-                            label: retryRun.isPending
-                              ? 'Retrying…'
-                              : 'Retry this turn',
-                            onPress: () => {
-                              if (!requesting) retryRun.mutate();
-                            },
-                          }
-                        : undefined
-                    }
-                  />
-                ) : null}
-                {(detail?.appIds ?? []).map((appId) => {
-                  const name =
-                    apps.data?.find((app) => app.id === appId)?.name ?? 'App';
-                  return (
-                    <Pressable
-                      key={appId}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open ${name}`}
-                      onPress={() =>
-                        router.push({
-                          pathname: '/apps/[id]',
-                          params: { id: appId },
-                        })
-                      }
-                      style={({ pressed }) => ({
-                        minHeight: 56,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 12,
-                        padding: 10,
-                        paddingRight: 16,
-                        borderRadius: 20,
-                        backgroundColor: pressed ? c.limeSoft : c.card,
-                      })}
-                    >
-                      <Monogram name={name} size={36} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={type.meta}>Built here</Text>
-                        <Text style={type.heading} numberOfLines={1}>
-                          Open {name}
-                        </Text>
-                      </View>
-                      <Glyph name="chevron" size={12} color={c.inkFaint} />
-                    </Pressable>
-                  );
-                })}
-              </View>
-            }
-          />
+              }
+            />
+          </RecordCell>
         )}
         <View
           style={{
@@ -1045,10 +1076,61 @@ function PendingAskCard({
   );
 }
 
-const readingViewability = { itemVisiblePercentThreshold: 10 };
+type ReadingAnchor = { atBottom: boolean; index: number; fraction: number };
+const atEnd: ReadingAnchor = { atBottom: true, index: 0, fraction: 0 };
 
-type ReadingAnchor = { atBottom: boolean; index: number };
-const atEnd: ReadingAnchor = { atBottom: true, index: 0 };
+/** The message at the top of the view, and how far into it the reader is. */
+function readingAt(
+  cells: Map<number, { y: number; height: number }>,
+  top: number,
+  atBottom: boolean,
+): ReadingAnchor {
+  let next: { index: number; y: number } | null = null;
+  for (const [index, cell] of cells) {
+    if (top >= cell.y && top < cell.y + cell.height)
+      return {
+        atBottom,
+        index,
+        fraction: Math.round(((top - cell.y) / cell.height) * 100) / 100,
+      };
+    if (cell.y >= top && (!next || cell.y < next.y))
+      next = { index, y: cell.y };
+  }
+  return { atBottom, index: next?.index ?? 0, fraction: 0 };
+}
+
+const RecordCell = createContext<
+  (index: number, layout: LayoutRectangle) => void
+>(() => {});
+
+/** A transcript row that reports where it sits, for the reading anchor. */
+function RecordingCell({
+  index,
+  onLayout,
+  onFocusCapture,
+  style,
+  children,
+}: {
+  index: number;
+  onLayout?: (event: LayoutChangeEvent) => void;
+  onFocusCapture?: ViewProps['onFocusCapture'];
+  style?: StyleProp<ViewStyle>;
+  children?: ReactNode;
+}) {
+  const record = useContext(RecordCell);
+  return (
+    <View
+      style={style}
+      onFocusCapture={onFocusCapture}
+      onLayout={(event) => {
+        onLayout?.(event);
+        record(index, event.nativeEvent.layout);
+      }}
+    >
+      {children}
+    </View>
+  );
+}
 
 /**
  * The transcript position of a conversation, read when a screen showing it
@@ -1065,7 +1147,8 @@ function useReadingAnchor(origin: string | null, id: string) {
     (anchor: ReadingAnchor) => {
       if (
         anchor.atBottom === last.current.atBottom &&
-        anchor.index === last.current.index
+        anchor.index === last.current.index &&
+        anchor.fraction === last.current.fraction
       )
         return;
       last.current = anchor;

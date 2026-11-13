@@ -1,5 +1,5 @@
 import { NativeField, type NativeFieldRef } from './native-field';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import type { AskAnswer, PendingAsk } from '../core';
 import { updateAskAnswer } from '../core/ask-answer';
@@ -90,12 +90,17 @@ export function AskCard({
   onDraft: (answers: Record<string, AskAnswer>) => void;
 }) {
   // Local and synchronous, so the native answer field never gets a delayed
-  // echo of its own text; read from the conversation once and kept for it
-  // after every change.
-  const [answers, setAnswers] = useState(saved);
-  useEffect(() => {
-    onDraft(answers);
-  }, [answers, onDraft]);
+  // echo of its own text; read from the conversation once and written back
+  // with every change (also a field's last keystrokes as it unmounts).
+  const [answers, setLocalAnswers] = useState(saved);
+  const latest = useRef(saved);
+  const setAnswers = (
+    update: (value: Record<string, AskAnswer>) => Record<string, AskAnswer>,
+  ) => {
+    latest.current = update(latest.current);
+    setLocalAnswers(latest.current);
+    onDraft(latest.current);
+  };
   const fields = useRef<Record<string, NativeFieldRef | null>>({});
   const get = (id: string): AskAnswer =>
     answers[id] ?? { questionId: id, selectedOptionIds: [], customText: '' };
