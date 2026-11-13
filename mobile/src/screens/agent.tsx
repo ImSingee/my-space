@@ -58,14 +58,12 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
   const wasWide = useRef(wide);
   const folded = useRef(false);
   useEffect(() => {
-    // A conversation that already has its own screen needs no handoff.
-    if (wasWide.current !== wide)
-      folded.current =
-        !wide && !(selected !== null && onOwnScreen.includes(selected));
+    if (wasWide.current !== wide) folded.current = !wide;
     wasWide.current = wide;
     if (!folded.current || !focused) return;
     folded.current = false;
-    if (selected) open(selected, true);
+    // A conversation that already has its own screen needs no handoff.
+    if (selected && !onOwnScreen.includes(selected)) open(selected, true);
     // `open` and `selected` are read when the layout or focus changes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [wide, focused]);
