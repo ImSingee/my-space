@@ -15,6 +15,7 @@ import {
 import { AppState } from 'react-native';
 import { canonicalizeInstanceUrl, type HatchApiClient } from '../core';
 import { createNativeClient, createNativeVault } from '../core/native';
+import { endConversationLifetimes } from './conversation-lifetime';
 import { pushRegistrar } from './push-registrar';
 
 export const allowDevelopmentLoopback = __DEV__;
@@ -67,6 +68,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       setOrigin(null);
       setEpoch(currentRevision);
       await queryClient.cancelQueries();
+      endConversationLifetimes();
       queryClient.clear();
       await SecureStore.deleteItemAsync(ACTIVE_KEY);
     });
@@ -141,6 +143,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
         throw new Error('Sign in to this instance first.');
       await queryClient.cancelQueries();
       if (signal?.aborted) return;
+      endConversationLifetimes();
       queryClient.clear();
       const recent = [next, ...origins.filter((item) => item !== next)].slice(
         0,

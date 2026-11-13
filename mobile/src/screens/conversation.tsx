@@ -1,6 +1,12 @@
 import { AttachmentMenu, Choice } from '../ui/native-controls';
 import { NativeField, type NativeFieldRef } from '../ui/native-field';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  skipToken,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { Stack, router, useIsFocused } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
@@ -38,7 +44,7 @@ import {
 } from '../state/settled-run';
 import { useHeldReplies } from '../state/use-held-replies';
 import { markConversationWorking } from '../state/conversation-follow';
-import { useLifetimeSignal } from '../state/use-lifetime-signal';
+import { useConversationLifetime } from '../state/conversation-lifetime';
 import { AskCard } from '../ui/ask-card';
 import { Button, IconButton } from '../ui/button';
 import { Glyph } from '../ui/glyph';
@@ -81,7 +87,7 @@ function ConversationBody({
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { draft, setDraft, files, setFiles } = useChatDraft(id);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useConversationProblem(origin, id);
   const [optimisticRun, setOptimisticRun] = useState<string | null>(null);
   const [model, setModel] = useState<{
     providerId: string;
@@ -98,7 +104,14 @@ function ConversationBody({
   const sending = useRef(false);
   const composer = useRef<NativeFieldRef>(null);
   const composerScroll = useRef<ScrollViewInstance>(null);
-  const lifetimeSignal = useLifetimeSignal();
+  // Work outlives a fold or unfold that moves this conversation to another
+  // screen; it stops when no screen shows the conversation any more.
+  // A problem from an earlier visit does not greet a fresh one.
+  const clearProblem = useCallback(() => setProblem(null), [setProblem]);
+  const lifetimeSignal = useConversationLifetime(origin, id, clearProblem);
+  // One run request at a time per conversation, across every screen showing it.
+  const runKey = [origin, 'conversation-run', id];
+  const requesting = useIsMutating({ mutationKey: runKey }) > 0;
   const session = useQuery({
     queryKey: [origin, 'session', id],
     queryFn: ({ signal }) => api!.session(id, signal),
@@ -211,6 +224,7 @@ function ConversationBody({
     : detail?.activeRun?.pendingEnvRequest;
 
   const send = useMutation({
+    mutationKey: runKey,
     mutationFn: async () => {
       const signal = lifetimeSignal();
       const text = (composer.current?.getText() ?? draft).trim();
@@ -304,6 +318,7 @@ function ConversationBody({
     },
   });
   const retryRun = useMutation({
+    mutationKey: runKey,
     mutationFn: () => {
       markConversationWorking(queryClient, origin!, id);
       return api!.createRun(
@@ -408,7 +423,8 @@ function ConversationBody({
     }
   };
   const submit = () => {
-    if (sending.current) return;
+    if (sending.current || queryClient.isMutating({ mutationKey: runKey }))
+      return;
     sending.current = true;
     setProblem(null);
     send.mutate();
@@ -430,7 +446,7 @@ function ConversationBody({
   useEffect(() => {
     if (atBottom) list.current?.scrollToEnd({ animated: false });
   }, [stream.state.lastSeq, detail?.messages.length, atBottom]);
-  const busy = send.isPending || retryRun.isPending;
+  const busy = requesting || send.isPending || retryRun.isPending;
   const lastRun = detail?.runs.at(-1);
   const lastMessage = detail?.messages.at(-1);
   // Match the server's retry contract. An interrupted run can end with an
@@ -666,7 +682,7 @@ function ConversationBody({
                               ? 'Retrying…'
                               : 'Retry this turn',
                             onPress: () => {
-                              if (!retryRun.isPending) retryRun.mutate();
+                              if (!requesting) retryRun.mutate();
                             },
                           }
                         : undefined
@@ -923,4 +939,28 @@ function ConversationBody({
       </KeyboardAvoidingView>
     </View>
   );
+}
+
+/**
+ * The conversation's latest problem, shared by every screen showing it, so a
+ * send that fails after a fold handed the conversation over still says so.
+ */
+function useConversationProblem(origin: string | null, id: string) {
+  const client = useQueryClient();
+  const { data = null } = useQuery<string | null>({
+    queryKey: [origin, 'conversation-problem', id],
+    queryFn: skipToken,
+    initialData: null,
+    gcTime: Infinity,
+    staleTime: Infinity,
+  });
+  const set = useCallback(
+    (problem: string | null) =>
+      client.setQueryData<string | null>(
+        [origin, 'conversation-problem', id],
+        problem,
+      ),
+    [client, origin, id],
+  );
+  return [data, set] as const;
 }

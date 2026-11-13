@@ -27,10 +27,17 @@ describe('foldSplit', () => {
     });
   });
 
-  it('splits evenly when the window center leaves a column too narrow', () => {
+  it('keeps one column when the fold would leave a column too narrow', () => {
+    // The fold crosses the container 35 points right of its middle.
+    expect(
+      foldSplit({ ...base, width: 668, x: 16, windowWidth: 770 }),
+    ).toBeNull();
+  });
+
+  it('splits evenly beside the fold', () => {
     // A container that does not span the window center, e.g. a side pane.
     expect(
-      foldSplit({ ...base, width: 700, x: 600, windowWidth: 1300 }),
+      foldSplit({ ...base, width: 700, x: 700, windowWidth: 1300 }),
     ).toEqual({ leading: 342, trailing: 342 });
   });
 });

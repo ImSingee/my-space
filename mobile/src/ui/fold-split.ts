@@ -5,9 +5,9 @@
  * display, the window's center is the fold, but a page's content is rarely
  * centered on it: a vertical bar or other safe area sits along one edge only.
  * Splitting the content area in half would put the gutter beside the fold and
- * the fold through one column, so the split follows the window center whenever
- * both columns still have room. Everywhere else (a phone, a narrow window, a
- * container that does not span the center) two even columns are used.
+ * the fold through one column, so the split follows the window center, and a
+ * container the center crosses stays one column when either side lacks room.
+ * A container that does not span the center splits into two even columns.
  */
 export type SplitInput = {
   /** Container width. */
@@ -40,6 +40,9 @@ export function foldSplit({
   let left = center - gap / 2;
   let right = width - center - gap / 2;
   if (left < minColumn || right < minColumn) {
+    // A container the fold crosses keeps one column rather than put the fold
+    // through a column; one beside the fold splits evenly.
+    if (center > 0 && center < width) return null;
     left = (width - gap) / 2;
     right = left;
   }
