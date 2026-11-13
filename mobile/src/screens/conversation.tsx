@@ -614,20 +614,14 @@ function ConversationBody({
               scrollEventThrottle={100}
               CellRendererComponent={RecordingCell}
               onScrollToIndexFailed={(info) => {
-                // Rows above it are not measured yet: get near, then align.
+                // Rows above it are not measured yet: get near, then restore.
                 list.current?.scrollToOffset({
                   offset: info.averageItemLength * info.index,
                   animated: false,
                 });
-                setTimeout(
-                  () =>
-                    list.current?.scrollToIndex({
-                      index: info.index,
-                      viewPosition: 0,
-                      animated: false,
-                    }),
-                  50,
-                );
+                // Only while the place is still to restore: the rough scroll
+                // may already have laid out the row and restored it exactly.
+                setTimeout(restore, 50);
               }}
               onContentSizeChange={() => {
                 const target = restoreTo.current;
