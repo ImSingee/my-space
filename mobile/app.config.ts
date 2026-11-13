@@ -25,6 +25,10 @@ const config: ExpoConfig = {
                 targetName: 'HatchNotificationService',
                 bundleIdentifier: 'app.hatch.mobile.NotificationService',
                 entitlements: {
+                  'aps-environment':
+                    apnsEnvironment === 'production'
+                      ? 'production'
+                      : 'development',
                   'keychain-access-groups': [
                     '$(AppIdentifierPrefix)app.hatch.mobile.shared',
                   ],

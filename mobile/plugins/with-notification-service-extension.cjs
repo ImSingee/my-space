@@ -156,10 +156,13 @@ function extensionInfoPlist(version, buildNumber) {
 `;
 }
 
-const EXTENSION_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
+function extensionEntitlements(apnsEnvironment) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>aps-environment</key>
+  <string>${apnsEnvironment}</string>
   <key>keychain-access-groups</key>
   <array>
     <string>${SHARED_GROUP}</string>
@@ -167,6 +170,7 @@ const EXTENSION_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>
 `;
+}
 
 function withMainAppKeychain(config) {
   config = withEntitlementsPlist(config, (config) => {
@@ -203,7 +207,11 @@ function withExtensionFiles(config) {
       );
       fs.writeFileSync(
         path.join(dir, `${TARGET}.entitlements`),
-        EXTENSION_ENTITLEMENTS,
+        extensionEntitlements(
+          config.extra?.apnsEnvironment === 'production'
+            ? 'production'
+            : 'development',
+        ),
       );
       return config;
     },
