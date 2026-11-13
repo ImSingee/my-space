@@ -21,6 +21,11 @@ type DestinationUpdate = {
   disable?: boolean;
   /** Record or clear a configuration error shown in settings. */
   lastError?: string | null;
+  /**
+   * Apply only while the destination still has this APNs token, so a token
+   * the phone replaced mid-delivery is never blamed for the old one.
+   */
+  ifApnsToken?: string;
 };
 
 export type DeliveryOutcome =

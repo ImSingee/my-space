@@ -111,10 +111,16 @@ export class PushRegistrar {
       .then(Boolean);
   }
 
-  private async register(api: PushApi, record: PushRecord) {
+  private async register(
+    api: PushApi,
+    record: PushRecord,
+    suppliedToken?: string,
+  ) {
     if (!(await this.platform.sharedKeys.has(record.kid)))
       await this.platform.sharedKeys.set(record.kid, record.key);
-    const token = (await this.platform.apnsToken()).toLowerCase();
+    const token = (
+      suppliedToken ?? (await this.platform.apnsToken())
+    ).toLowerCase();
     if (!/^[0-9a-f]{16,200}$/.test(token))
       throw new MobileError(
         'push_unavailable',
@@ -144,21 +150,22 @@ export class PushRegistrar {
   }
 
   /**
-   * Re-send the current token for an instance that has push on (app start,
-   * token rotation). Never prompts; does nothing when push is off.
+   * Re-send the token for an instance that has push on. Never prompts; does
+   * nothing when push is off. A token-rotation listener passes the token it
+   * received: requesting one again from inside that listener re-triggers it.
    */
-  refresh(origin: string, api: PushApi): Promise<void> {
+  refresh(origin: string, api: PushApi, token?: string): Promise<void> {
     return this.exclusive(origin, async (key) => {
       const record = await this.platform.records.get(key);
       if (!record || !(await this.platform.permission(false))) return;
-      await this.register(api, record);
+      await this.register(api, record, token);
     });
   }
 
   /**
    * Turn push off: forget local keys first so no later push can decrypt, then
-   * tell the instance (best effort when signing out — the server also drops
-   * the device with the session).
+   * tell the instance, which disables the device but keeps its routing (best
+   * effort when signing out — the server drops the device with the session).
    */
   disable(origin: string, api: PushApi | null): Promise<void> {
     return this.exclusive(origin, async (key) => {

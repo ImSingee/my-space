@@ -838,8 +838,12 @@ export type NotificationSourceType = 'app' | 'channel' | 'platform';
 export type NotificationRouteSourceType = 'app' | 'channel' | 'any';
 export type NotificationDestinationType = 'device' | 'webhook' | 'app';
 export type NotificationApnsEnvironment = 'sandbox' | 'production';
-/** Why a destination is disabled; device refreshes may only undo `unregistered`. */
-export type NotificationDisabledReason = 'user' | 'unregistered';
+/**
+ * Why a destination is disabled: `user` in settings (only settings re-enable
+ * it), `device` turned push off on the phone (the phone re-enables it), or
+ * `unregistered` by APNs (a new token revives it).
+ */
+export type NotificationDisabledReason = 'user' | 'device' | 'unregistered';
 export type NotificationDeliveryStatus =
   | 'pending'
   | 'in_progress'

@@ -612,9 +612,17 @@ export async function updateDestination(input: {
 }): Promise<DestinationView> {
   const row = await db.query.notificationDestinations.findFirst({
     where: { id: input.id },
-    columns: { type: true },
+    columns: { type: true, enabled: true, disabledReason: true },
   });
   if (!row) notFound('Destination');
+  if (input.enabled && !row.enabled && row.disabledReason === 'device') {
+    // The phone dropped its decryption key when push was turned off there;
+    // enabling here would only deliver pushes it can no longer read.
+    throw new AppError(
+      'Push was turned off on this device; turn it back on in the Hatch app.',
+      409,
+    );
+  }
   if (input.url !== undefined && row.type !== 'webhook') {
     throw new AppError('Only webhook destinations have a URL.', 400);
   }
@@ -628,7 +636,12 @@ export async function updateDestination(input: {
     ...(input.enabled !== undefined
       ? {
           enabled: input.enabled,
-          disabledReason: input.enabled ? null : ('user' as const),
+          // Keep the original reason when it is already disabled.
+          disabledReason: input.enabled
+            ? null
+            : row.enabled
+              ? ('user' as const)
+              : row.disabledReason,
           ...(input.enabled ? { lastError: null } : {}),
         }
       : {}),
@@ -714,12 +727,14 @@ export async function registerDevice(
         ),
       );
     const destinationId = existing?.id ?? newNotificationId();
-    // The app re-registers on every launch and token change. That refresh
-    // must not undo a person's "disabled" choice; it only revives a device
-    // APNs disabled, once the device presents a different token.
+    // The app re-registers on every launch and token change, and when push
+    // is turned back on there. Registration revives a device the phone itself
+    // turned off, or one APNs disabled once it presents a different token; a
+    // device disabled in settings stays disabled until settings enable it.
     const revive =
       !existing ||
       existing.enabled ||
+      existing.disabledReason === 'device' ||
       (existing.disabledReason === 'unregistered' &&
         existing.apnsToken !== apnsToken);
     const values = {
@@ -751,9 +766,15 @@ export async function registerDevice(
   return destinationView(id);
 }
 
+/**
+ * Push turned off on the phone. The destination keeps its identity, routes and
+ * group memberships so turning push back on restores delivery; it is removed
+ * only with its sign-in session or from settings.
+ */
 export async function unregisterDevice(sessionId: string): Promise<void> {
   await db
-    .delete(schema.notificationDestinations)
+    .update(schema.notificationDestinations)
+    .set({ enabled: false, disabledReason: 'device' })
     .where(eq(schema.notificationDestinations.sessionId, sessionId));
 }
 

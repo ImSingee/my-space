@@ -100,6 +100,15 @@ describe('PushRegistrar', () => {
     expect(shared.get(registered[0].e2eKeyId)).toBe(registered[0].e2eKey);
   });
 
+  it('registers a rotated token without requesting another one', async () => {
+    const { registrar, api, registered, platform } = setup();
+    await registrar.enable(origin, api);
+    vi.mocked(platform.apnsToken).mockClear();
+    await registrar.refresh(origin, api, 'FEDCBA9876543210FEDCBA9876543210');
+    expect(platform.apnsToken).not.toHaveBeenCalled();
+    expect(registered[1].apnsToken).toBe('fedcba9876543210fedcba9876543210');
+  });
+
   it('never registers when alerts are denied or push is off', async () => {
     const denied = setup(false);
     await expect(denied.registrar.enable(origin, denied.api)).resolves.toBe(

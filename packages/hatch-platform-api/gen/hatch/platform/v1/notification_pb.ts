@@ -2041,6 +2041,9 @@ export const NotificationService: GenService<{
     output: typeof RegisterDeviceResponseSchema;
   };
   /**
+   * Push turned off on the phone: disables the device but keeps its routes and
+   * groups; RegisterDevice from the same session turns it back on.
+   *
    * @generated from rpc hatch.platform.v1.NotificationService.UnregisterDevice
    */
   unregisterDevice: {

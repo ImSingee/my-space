@@ -260,6 +260,61 @@ describe('device refresh', () => {
       e2eKey: DEVICE_KEY.toString('base64url'),
     });
 
+  it('does not disable a token the phone registered while the old one failed', async () => {
+    const device = await registerDevice();
+    const fresh = 'ab'.repeat(32);
+    const rotating = {
+      ...adapters,
+      device: createDeviceAdapter({
+        send: async () => {
+          await refresh(fresh);
+          return { status: 410, reason: 'Unregistered' };
+        },
+      }),
+    };
+    await ingestNotification({
+      source: { type: 'channel', channelId, name: 'Monitoring' },
+      kind: { kind: 'alert', name: 'Alert' },
+      push: {
+        kind: 'alert',
+        title: 'Hello',
+        body: null,
+        url: null,
+        data: null,
+        dedupeKey: null,
+        occurredAt: null,
+      },
+    });
+    for (const claimed of await claimDueDeliveries(5)) {
+      await runClaimedDelivery(claimed, rotating);
+    }
+    const [stored] = await service.listDestinations();
+    expect(stored).toMatchObject({ id: device.id, enabled: true });
+  });
+
+  it('keeps routes and groups when push is turned off and on in the app', async () => {
+    const device = await registerDevice();
+    const group = await service.createGroup({
+      name: 'Phones',
+      destinationIds: [device.id],
+    });
+    await service.unregisterDevice('session-1');
+    expect((await service.listDestinations())[0]).toMatchObject({
+      id: device.id,
+      enabled: false,
+    });
+    await expect(
+      service.updateDestination({ id: device.id, enabled: true }),
+    ).rejects.toThrow('turned off on this device');
+
+    expect(await refresh(TOKEN)).toMatchObject({
+      id: device.id,
+      enabled: true,
+      groupIds: [group.id],
+    });
+    expect(await service.listRoutes()).toHaveLength(1);
+  });
+
   it('keeps a device the user disabled disabled when the app re-registers', async () => {
     const device = await registerDevice();
     await service.updateDestination({ id: device.id, enabled: false });

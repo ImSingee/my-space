@@ -155,7 +155,17 @@ export async function recordOutcome(
           ? { lastError: outcome.destination.lastError }
           : {}),
       })
-      .where(eq(schema.notificationDestinations.id, destinationId));
+      .where(
+        and(
+          eq(schema.notificationDestinations.id, destinationId),
+          outcome.destination.ifApnsToken
+            ? eq(
+                schema.notificationDestinations.apnsToken,
+                outcome.destination.ifApnsToken,
+              )
+            : undefined,
+        ),
+      );
   }
 
   const row = updated[0];

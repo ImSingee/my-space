@@ -155,6 +155,18 @@ Device rows reference their sign-in session with `ON DELETE CASCADE`, so
 signing out or revoking the session removes the device. Deliveries to an
 expired session fail.
 
+A device records why it is disabled (`disabled_reason`), which decides who may
+turn it back on:
+
+- `user`: disabled in settings. The app's automatic re-registration (launch,
+  token rotation) keeps it disabled; only settings re-enable it.
+- `device`: push turned off in the app (`UnregisterDevice`). The phone drops
+  its key, so settings cannot re-enable it; turning push on in the app
+  re-registers the same destination with its routes and groups intact.
+- `unregistered`: APNs rejected the token. It revives when the phone registers
+  a different token. The rejection only disables the device if it still holds
+  the token that was rejected.
+
 ## Management API
 
 Web UI: Server Functions in `src/server/notifications.ts`. Native clients and

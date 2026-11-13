@@ -63,8 +63,12 @@ export function usePushLifecycle() {
   useEffect(() => {
     if (!pushSupported || !origin || !api) return;
     void pushRegistrar.refresh(origin, api).catch(() => {});
-    const subscription = Notifications.addPushTokenListener(() => {
-      void pushRegistrar.refresh(origin, api).catch(() => {});
+    // Register the token this listener received. Requesting a token again
+    // here would fire the listener again (Expo warns of an infinite loop).
+    const subscription = Notifications.addPushTokenListener((token) => {
+      void pushRegistrar
+        .refresh(origin, api, String(token.data))
+        .catch(() => {});
     });
     return () => subscription.remove();
   }, [origin, api]);

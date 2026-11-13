@@ -154,6 +154,17 @@ export function createDeviceAdapter(
     if (result.reason === 'ExpiredProviderToken') {
       invalidateProviderToken(credentials.teamId, key);
     }
-    return classifyApnsResult(result);
+    const outcome = classifyApnsResult(result);
+    // The verdict is about the token we sent; the phone may have registered a
+    // new one on this destination while the request was in flight.
+    return outcome.destination
+      ? {
+          ...outcome,
+          destination: {
+            ...outcome.destination,
+            ifApnsToken: destination.apnsToken,
+          },
+        }
+      : outcome;
   };
 }

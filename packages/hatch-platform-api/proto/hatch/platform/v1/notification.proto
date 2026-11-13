@@ -23,6 +23,8 @@ service NotificationService {
 
   // Session-only: the device is bound to the calling sign-in session.
   rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+  // Push turned off on the phone: disables the device but keeps its routes and
+  // groups; RegisterDevice from the same session turns it back on.
   rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
   rpc GetCurrentDevice(GetCurrentDeviceRequest) returns (GetCurrentDeviceResponse);
 
