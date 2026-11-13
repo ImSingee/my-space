@@ -628,6 +628,7 @@ export async function updateDestination(input: {
     ...(input.enabled !== undefined
       ? {
           enabled: input.enabled,
+          disabledReason: input.enabled ? null : ('user' as const),
           ...(input.enabled ? { lastError: null } : {}),
         }
       : {}),
@@ -695,7 +696,12 @@ export async function registerDevice(
   const id = await db.transaction(async (tx) => {
     const existing = await tx.query.notificationDestinations.findFirst({
       where: { sessionId: input.sessionId },
-      columns: { id: true },
+      columns: {
+        id: true,
+        enabled: true,
+        disabledReason: true,
+        apnsToken: true,
+      },
     });
     await tx
       .delete(schema.notificationDestinations)
@@ -708,11 +714,20 @@ export async function registerDevice(
         ),
       );
     const destinationId = existing?.id ?? newNotificationId();
+    // The app re-registers on every launch and token change. That refresh
+    // must not undo a person's "disabled" choice; it only revives a device
+    // APNs disabled, once the device presents a different token.
+    const revive =
+      !existing ||
+      existing.enabled ||
+      (existing.disabledReason === 'unregistered' &&
+        existing.apnsToken !== apnsToken);
     const values = {
       type: 'device' as const,
       name,
-      enabled: true,
-      lastError: null,
+      ...(revive
+        ? { enabled: true, disabledReason: null, lastError: null }
+        : {}),
       sessionId: input.sessionId,
       userId: input.userId,
       platform: input.platform,
@@ -907,7 +922,18 @@ function routeView(row: RouteRow): RouteView {
   };
 }
 
-async function routeValues(input: RouteInput) {
+/**
+ * Normalize a route and validate the parts being set. Declarations are only
+ * checked for matching criteria or targets that change, so a route whose
+ * source later stopped declaring its kind can still be renamed or disabled.
+ */
+async function routeValues(
+  input: RouteInput,
+  checks: { source: boolean; target: boolean } = {
+    source: true,
+    target: true,
+  },
+) {
   const sourceId = input.sourceId || null;
   const kind = input.kind || null;
   if (kind !== null && !NOTIFICATION_KIND_RE.test(kind)) {
@@ -916,7 +942,7 @@ async function routeValues(input: RouteInput) {
   if (input.sourceType === 'any' && sourceId) {
     throw new AppError('A route for any source cannot name a source.', 400);
   }
-  if (sourceId) {
+  if (sourceId && checks.source) {
     const sources = await listNotificationSources();
     const declared =
       input.sourceType === 'app'
@@ -928,7 +954,9 @@ async function routeValues(input: RouteInput) {
       throw new AppError(`The source does not declare kind "${kind}".`, 400);
     }
   }
-  if (input.targetType === 'group') {
+  if (!checks.target) {
+    // Unchanged target: it still exists, because deleting it cascades.
+  } else if (input.targetType === 'group') {
     const group = await db.query.notificationGroups.findFirst({
       where: { id: input.targetId },
       columns: { id: true },
@@ -992,9 +1020,18 @@ export async function updateRoute(
     targetId: input.targetId ?? current.targetId,
     enabled: input.enabled ?? current.enabled,
   };
+  const checks = {
+    source:
+      merged.sourceType !== current.sourceType ||
+      (merged.sourceId || null) !== current.sourceId ||
+      (merged.kind || null) !== current.kind,
+    target:
+      merged.targetType !== current.targetType ||
+      merged.targetId !== current.targetId,
+  };
   const [row] = await db
     .update(schema.notificationRoutes)
-    .set(await routeValues(merged))
+    .set(await routeValues(merged, checks))
     .where(eq(schema.notificationRoutes.id, input.id))
     .returning();
   return routeView(row);

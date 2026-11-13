@@ -5,10 +5,11 @@
  *
  * The keys are Apple *topic-specific* keys restricted to the
  * `app.hatch.mobile` topic and to one environment each, so they cannot push to
- * any other app of the team. A leaked key alone cannot reach a device: a
- * sender also needs that device's token, and notification content is
- * end-to-end encrypted with a per-device key that only the device and its own
- * instance know (see `docs/notifications.md`).
+ * any other app of the team. The key alone cannot reach a device: a sender
+ * also needs that device's token. Anyone holding a token can still show
+ * arbitrary alerts in the Hatch app on that device; Hatch's own pushes are
+ * end-to-end encrypted. See "iOS push without a relay" in
+ * `docs/notifications.md` for the accepted residual risk.
  *
  * `null` means the built-in key for that environment has not been published
  * yet; instances can still configure their own via `HATCH_APNS_*`.

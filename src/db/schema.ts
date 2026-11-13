@@ -838,6 +838,8 @@ export type NotificationSourceType = 'app' | 'channel' | 'platform';
 export type NotificationRouteSourceType = 'app' | 'channel' | 'any';
 export type NotificationDestinationType = 'device' | 'webhook' | 'app';
 export type NotificationApnsEnvironment = 'sandbox' | 'production';
+/** Why a destination is disabled; device refreshes may only undo `unregistered`. */
+export type NotificationDisabledReason = 'user' | 'unregistered';
 export type NotificationDeliveryStatus =
   | 'pending'
   | 'in_progress'
@@ -939,6 +941,8 @@ export const notificationDestinations = snakeCase.table(
     url: text(),
     secretCiphertext: text(),
     appId: text().references(() => apps.id, { onDelete: 'cascade' }),
+    /** Set while disabled: by a person, or by APNs rejecting the token. */
+    disabledReason: text().$type<NotificationDisabledReason>(),
     /** Last provider/configuration error, kept for the settings UI. */
     lastError: text(),
     createdAt,

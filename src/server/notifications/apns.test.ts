@@ -39,13 +39,19 @@ const TOKEN = 'cd'.repeat(32);
 
 type Seen = { headers: http2.IncomingHttpHeaders; body: string };
 const seen: Seen[] = [];
-let reply: { status: number; reason?: string } = { status: 200 };
+let reply: { status: number; reason?: string; reset?: boolean } = {
+  status: 200,
+};
 const apns = http2.createServer();
 apns.on('stream', (stream: http2.ServerHttp2Stream, headers) => {
   let body = '';
   stream.on('data', (chunk) => (body += chunk));
   stream.on('end', () => {
     seen.push({ headers, body });
+    if (reply.reset) {
+      stream.close(http2.constants.NGHTTP2_CANCEL);
+      return;
+    }
     stream.respond({ ':status': reply.status });
     stream.end(reply.reason ? JSON.stringify({ reason: reply.reason }) : '');
   });
@@ -230,6 +236,46 @@ describe('APNs delivery', () => {
     await registerDevice();
     reply = { status: 429, reason: 'TooManyRequests' };
     expect((await deliver('Hello', null)).status).toBe('pending');
+  });
+
+  it('retries a push whose stream closes before APNs responds', async () => {
+    await registerDevice();
+    reply = { status: 200, reset: true };
+    const delivery = await deliver('Hello', null);
+    expect(delivery).toMatchObject({ status: 'pending', httpStatus: null });
+    expect(delivery.lastError).toContain('without a response');
+  });
+});
+
+describe('device refresh', () => {
+  const refresh = (apnsToken: string) =>
+    service.registerDevice({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      name: 'iPhone',
+      platform: 'ios',
+      apnsToken,
+      apnsEnvironment: 'sandbox',
+      e2eKeyId: KEY_ID,
+      e2eKey: DEVICE_KEY.toString('base64url'),
+    });
+
+  it('keeps a device the user disabled disabled when the app re-registers', async () => {
+    const device = await registerDevice();
+    await service.updateDestination({ id: device.id, enabled: false });
+    expect(await refresh(TOKEN)).toMatchObject({ enabled: false });
+    expect(await refresh('ab'.repeat(32))).toMatchObject({ enabled: false });
+  });
+
+  it('revives a device APNs disabled only once it presents a new token', async () => {
+    await registerDevice();
+    reply = { status: 410, reason: 'Unregistered' };
+    await deliver('Hello', null);
+    expect(await refresh(TOKEN)).toMatchObject({ enabled: false });
+    expect(await refresh('ab'.repeat(32))).toMatchObject({
+      enabled: true,
+      lastError: null,
+    });
   });
 });
 

@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "2d0c6a5b-e5b3-43fa-bc4e-af2f5af5578c",
+  "id": "0105f18e-1fb6-4138-bbaf-eb3980b731b4",
   "prevIds": ["011edea9-774d-4d9c-a94f-2bb145726964"],
   "ddl": [
     {
@@ -2607,6 +2607,19 @@
       "generated": null,
       "identity": null,
       "name": "app_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "notification_destinations"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "disabled_reason",
       "entityType": "columns",
       "schema": "public",
       "table": "notification_destinations"

@@ -115,14 +115,17 @@ export function sendApnsRequest(
       'content-type': 'application/json',
     });
     let status = 0;
+    let settled = false;
     const chunks: Buffer[] = [];
-    const done = (error?: Error) => {
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
       client.unref();
-      if (error) reject(error);
+      reject(error);
     };
     stream.setTimeout(REQUEST_TIMEOUT_MS, () => {
       stream.close(http2.constants.NGHTTP2_CANCEL);
-      done(new Error('APNs request timed out.'));
+      fail(new Error('APNs request timed out.'));
     });
     stream.on('response', (headers) => {
       status = Number(headers[':status'] ?? 0);
@@ -130,8 +133,19 @@ export function sendApnsRequest(
     stream.on('data', (chunk: Buffer) => {
       if (chunks.length < 16) chunks.push(chunk);
     });
-    stream.on('error', (error) => done(error));
+    stream.on('error', fail);
+    // A stream reset before response headers ends without an error event;
+    // treat it as a transport failure so the delivery is retried.
+    stream.on('close', () =>
+      fail(new Error('APNs closed the stream without a response.')),
+    );
     stream.on('end', () => {
+      if (settled) return;
+      if (status < 100) {
+        fail(new Error('APNs closed the stream without a response.'));
+        return;
+      }
+      settled = true;
       let reason: string | null = null;
       const text = Buffer.concat(chunks).toString('utf8');
       if (text) {
@@ -142,7 +156,7 @@ export function sendApnsRequest(
           reason = text.slice(0, 200);
         }
       }
-      done();
+      client.unref();
       resolve({ status, reason });
     });
     stream.end(request.payload);

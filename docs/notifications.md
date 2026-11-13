@@ -120,23 +120,31 @@ _topic-specific_ keys restricted to `app.hatch.mobile`, one per environment.
 for instances that ship their own iOS build. Settings shows which source is in
 use and the last credential error.
 
-Why sharing the key is acceptable:
+What the shared key does and does not protect:
 
 - The key can only push to the Hatch app (topic-specific), not other apps of
   the team.
-- Pushing needs a device token. Tokens reach only the instance the device
-  signed in to (session-only `RegisterDevice`) and are never shown in UI, CLI
-  or logs.
-- Content is end-to-end encrypted. At registration the device generates a
-  32-byte key per instance and sends it with its token over TLS; the instance
-  stores it envelope-encrypted. Pushes carry only a placeholder alert plus
-  `h: { v: 1, kid, c }` where `c` is AES-256-GCM in CryptoKit combined layout
-  (nonce ‖ ciphertext ‖ tag) with AAD `hatch-push-v1|<kid>`. The Notification
-  Service Extension decrypts it; anything it cannot authenticate is shown as
-  coming from an unverified source, never with forged content. Apple sees no
-  notification text.
-- Residual risk: someone holding both the shared key and a leaked device token
-  can send placeholder pushes to that one device.
+- Pushing needs a device token. Tokens reach only the instances the device
+  enabled push on (session-only `RegisterDevice`) and are never shown in UI,
+  CLI or logs.
+- Content sent by Hatch is end-to-end encrypted. At registration the device
+  generates a 32-byte key per instance and sends it with its token over TLS;
+  the instance stores it envelope-encrypted. Pushes carry only a placeholder
+  alert plus `h: { v: 1, kid, c }` where `c` is AES-256-GCM in CryptoKit
+  combined layout (nonce ‖ ciphertext ‖ tag) with AAD `hatch-push-v1|<kid>`,
+  and set `mutable-content: 1` so the Notification Service Extension decrypts
+  it. Apple sees no notification text from Hatch.
+- The extension only authenticates pushes that invoke it. A push marked
+  `mutable-content` that it cannot decrypt is shown as coming from an
+  unverified source, without sender text. iOS runs the extension only when the
+  sender sets `mutable-content: 1`, so this check is advisory, not a boundary.
+- **Residual risk (accepted):** anyone who holds a device token can use the
+  published key to show arbitrary alert text in the Hatch app on that device,
+  by omitting `mutable-content`. Token holders are the instances where push
+  was enabled, including an instance whose operator kept the token after the
+  device signed out. Enable push only on instances you trust. Enforcing the
+  encrypted format would require a trusted relay that holds the key; that is
+  deliberately out of scope (no Expo push service, no hosted relay).
 
 APNs responses: 410 / `BadDeviceToken` / `Unregistered` /
 `DeviceTokenNotForTopic` fail the delivery and disable the device; credential

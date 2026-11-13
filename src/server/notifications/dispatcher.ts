@@ -148,7 +148,9 @@ export async function recordOutcome(
     await db
       .update(schema.notificationDestinations)
       .set({
-        ...(outcome.destination.disable ? { enabled: false } : {}),
+        ...(outcome.destination.disable
+          ? { enabled: false, disabledReason: 'unregistered' as const }
+          : {}),
         ...(outcome.destination.lastError !== undefined
           ? { lastError: outcome.destination.lastError }
           : {}),

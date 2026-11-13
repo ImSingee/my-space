@@ -43,6 +43,7 @@ CREATE TABLE "notification_destinations" (
 	"url" text,
 	"secret_ciphertext" text,
 	"app_id" text,
+	"disabled_reason" text,
 	"last_error" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,

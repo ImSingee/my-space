@@ -234,6 +234,38 @@ describe('routing', () => {
     expect(second).toEqual({ id: first.id, deduplicated: true });
   });
 
+  it('can still disable a route after its source stops declaring the kind', async () => {
+    const { destination } = await service.createWebhook({
+      name: 'Hook',
+      url: webhookUrl,
+    });
+    const { channel } = await service.createChannel({
+      name: 'Monitoring',
+      kinds: [
+        { kind: 'alert', name: 'Alert' },
+        { kind: 'recovery', name: 'Recovery' },
+      ],
+    });
+    const route = await service.createRoute({
+      sourceType: 'channel',
+      sourceId: channel.id,
+      kind: 'recovery',
+      targetType: 'destination',
+      targetId: destination.id,
+    });
+    await service.updateChannel({
+      id: channel.id,
+      kinds: [{ kind: 'alert', name: 'Alert' }],
+    });
+
+    expect(
+      await service.updateRoute({ id: route.id, enabled: false }),
+    ).toMatchObject({ enabled: false, kind: 'recovery' });
+    await expect(
+      service.updateRoute({ id: route.id, kind: 'missing' }),
+    ).rejects.toThrow('does not declare kind');
+  });
+
   it('rejects routes for kinds the source does not declare', async () => {
     const { destination } = await service.createWebhook({
       name: 'Hook',
