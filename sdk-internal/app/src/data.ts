@@ -1,6 +1,8 @@
 // @ts-self-types="./data.d.ts"
 /** @hatch/app/data — schema DSL and runtime client for managed Data Tables. */
 
+import { hmacHeaders, runtimeEnv } from './signing.js';
+
 declare const __DATA_DEPLOYMENT_ID__: string;
 
 export const DATA_DEPLOYMENT_HEADER = 'x-hatch-data-deployment';
@@ -407,37 +409,7 @@ function runtimeDeploymentId(): string | undefined {
   if (typeof __DATA_DEPLOYMENT_ID__ !== 'undefined' && __DATA_DEPLOYMENT_ID__) {
     return __DATA_DEPLOYMENT_ID__;
   }
-  const runtime = globalThis as typeof globalThis & {
-    Deno?: { env?: { get(name: string): string | undefined } };
-  };
-  try {
-    return runtime.Deno?.env?.get('HATCH_DEPLOYMENT_ID') || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function hmacHeaders(secret: string, body: string): Promise<HeadersInit> {
-  const timestamp = String(Date.now());
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(`${timestamp}.${body}`),
-  );
-  const hex = [...new Uint8Array(signature)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-  return {
-    'x-hatch-timestamp': timestamp,
-    'x-hatch-signature': `sha256=${hex}`,
-  };
+  return runtimeEnv('HATCH_DEPLOYMENT_ID');
 }
 
 async function responseError(

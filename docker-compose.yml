@@ -61,6 +61,14 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-${SECRET}}
       # Optional comma-separated beta features distributed to Agent Runners.
       HATCH_BETA: ${HATCH_BETA:-}
+      # Optional: own APNs credentials for a self-built iOS app. Leave unset to
+      # use the built-in keys of the official app (docs/notifications.md).
+      HATCH_APNS_TEAM_ID: ${HATCH_APNS_TEAM_ID:-}
+      HATCH_APNS_TOPIC: ${HATCH_APNS_TOPIC:-}
+      HATCH_APNS_PRODUCTION_KEY_ID: ${HATCH_APNS_PRODUCTION_KEY_ID:-}
+      HATCH_APNS_PRODUCTION_PRIVATE_KEY: ${HATCH_APNS_PRODUCTION_PRIVATE_KEY:-}
+      HATCH_APNS_SANDBOX_KEY_ID: ${HATCH_APNS_SANDBOX_KEY_ID:-}
+      HATCH_APNS_SANDBOX_PRIVATE_KEY: ${HATCH_APNS_SANDBOX_PRIVATE_KEY:-}
       # Self-service sign-up is a runtime platform setting (Settings → Users),
       # not an env var. It starts open so you can create the owner account;
       # turn it off there once your account exists.

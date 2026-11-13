@@ -24,6 +24,7 @@ import {
   isAppNameWithinMaxLength,
 } from '~/app-identity';
 import { publishPlatformEvent } from '~server/platform-events';
+import { syncAppNotificationDestination } from '~server/notifications/app-destinations';
 import { AppError } from '~server/errors';
 import { buildMatchesDeployment } from './build-identity';
 import { appDeployLock } from './deploy';
@@ -428,6 +429,7 @@ async function rollbackAppInner(
           dataActivationId: dataMigrationResolved ? null : app.dataActivationId,
         })
         .where(eq(schema.apps.id, id));
+      await syncAppNotificationDestination(tx, id, restoredName, manifest);
     });
 
   if (requiresDatabase) {

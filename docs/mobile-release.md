@@ -81,6 +81,37 @@ pnpm mobile:submit:ios --path /absolute/path/Hatch.ipa
 The IPA must have a build number Apple has not already accepted. Do not submit
 the same released build again to test the configuration.
 
+## Push notifications
+
+The app registers its own APNs device token with each instance and decrypts
+pushes in a Notification Service Extension, `HatchNotificationService`
+(bundle ID `app.hatch.mobile.NotificationService`). The Expo push service is not
+used. Before the first release that contains the extension:
+
+1. In the Apple Developer account (team `SM96W8VVK9`), enable Push
+   Notifications for `app.hatch.mobile` and register the extension bundle ID.
+   Both IDs need the Keychain Sharing group `app.hatch.mobile.shared`
+   (`$(AppIdentifierPrefix)app.hatch.mobile.shared`), which the extension uses
+   to read the per-instance decryption keys.
+2. Run `pnpm --dir mobile eas credentials --platform ios` for the production
+   profile. EAS reads the extension from
+   `extra.eas.build.experimental.ios.appExtensions` in `mobile/app.config.ts` and
+   needs an App Store provisioning profile for each bundle ID. Reuse the existing
+   distribution certificate.
+3. Create the shared APNs keys the instances use (topic-specific keys for
+   `app.hatch.mobile`, one for Production and one for Sandbox) and publish them
+   in `src/server/notifications/apns/shared-credentials.ts`. See
+   `docs/notifications.md`.
+
+The `production` EAS profile sets `aps-environment` to `production` and makes
+the app register its tokens as production; every other build (development
+clients and Simulator builds) uses the sandbox APNs environment. Set
+`HATCH_APNS_ENVIRONMENT=production` for a local Release build that should use
+production APNs.
+
+The extension's version and build number are copied from the app config at
+prebuild, so they always match the containing app.
+
 ## Source archive and completion
 
 EAS runs from `mobile/` but archives the monorepo root. The root `.easignore`

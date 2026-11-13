@@ -15,6 +15,7 @@ import {
 import { AppState } from 'react-native';
 import { canonicalizeInstanceUrl, type HatchApiClient } from '../core';
 import { createNativeClient, createNativeVault } from '../core/native';
+import { pushRegistrar } from './push-registrar';
 
 export const allowDevelopmentLoopback = __DEV__;
 export const vault = createNativeVault({ allowDevelopmentLoopback });
@@ -83,6 +84,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
               )
                 return;
               setAuthError('Your session expired. Sign in again to continue.');
+              // The instance dropped this device with the session; forget the key.
+              void pushRegistrar.disable(expiredOrigin, null).catch(() => {});
               void clear(expiredOrigin, epoch).catch(() =>
                 setAuthError('Your session expired. Please reconnect.'),
               );
@@ -165,6 +168,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
       ? await vault.get(expectedOrigin)
       : null;
     let failure: unknown;
+    // Forget this instance's push key before the session goes away. The local
+    // key is removed first, so a failed server call still stops decryption.
+    if (expectedOrigin)
+      await pushRegistrar.disable(expectedOrigin, api).catch(() => {});
     try {
       await api?.signOut();
     } catch (error) {

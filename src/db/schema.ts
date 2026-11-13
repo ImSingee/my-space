@@ -13,7 +13,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { monotonicFactory } from 'ulid';
-import { user } from './auth-schema';
+import { session, user } from './auth-schema';
 import type { HomepageTarget } from '../homepage';
 
 export * from './auth-schema';
@@ -74,6 +74,8 @@ export type AppCapabilities = {
   kv: boolean;
   /** Platform-managed typed tables with migrations and realtime queries. */
   dataTable?: boolean;
+  /** Declares notification kinds and/or accepts routed notifications. */
+  notifications?: boolean;
 };
 
 export type AppStatus =
@@ -822,3 +824,275 @@ export const userPreferences = snakeCase.table('user_preferences', {
   homepage: jsonb().$type<HomepageTarget>().notNull(),
   updatedAt,
 });
+
+/** ================== notifications ================== */
+
+/** A notification kind declared by an App manifest or a Channel. */
+export type NotificationKindDeclaration = {
+  kind: string;
+  name: string;
+  description?: string;
+};
+
+export type NotificationSourceType = 'app' | 'channel' | 'platform';
+export type NotificationRouteSourceType = 'app' | 'channel' | 'any';
+export type NotificationDestinationType = 'device' | 'webhook' | 'app';
+export type NotificationApnsEnvironment = 'sandbox' | 'production';
+/**
+ * Why a destination is disabled: `user` in settings (only settings re-enable
+ * it), `device` turned push off on the phone (the phone re-enables it), or
+ * `unregistered` by APNs (a new token revives it).
+ */
+export type NotificationDisabledReason = 'user' | 'device' | 'unregistered';
+export type NotificationDeliveryStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'succeeded'
+  | 'failed';
+
+/**
+ * External notification sources. Callers authenticate with a channel token
+ * whose sha256 is stored here; the plaintext is shown once at creation.
+ */
+export const notificationChannels = snakeCase.table(
+  'notification_channels',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    name: text().notNull(),
+    description: text(),
+    kinds: jsonb().$type<NotificationKindDeclaration[]>().notNull(),
+    tokenHash: text().notNull(),
+    enabled: boolean().notNull().default(true),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    uniqueIndex('notification_channels_token_hash_idx').on(table.tokenHash),
+  ],
+);
+
+/**
+ * Every accepted notification. Source names and kind names are snapshots so
+ * history stays readable after the App or Channel is renamed or removed.
+ */
+export const notifications = snakeCase.table(
+  'notifications',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    sourceType: text().$type<NotificationSourceType>().notNull(),
+    appId: text().references(() => apps.id, { onDelete: 'set null' }),
+    channelId: ulid().references(() => notificationChannels.id, {
+      onDelete: 'set null',
+    }),
+    sourceName: text().notNull(),
+    kind: text().notNull(),
+    kindName: text().notNull(),
+    title: text().notNull(),
+    body: text(),
+    url: text(),
+    data: jsonb().$type<JsonObject>(),
+    dedupeKey: text(),
+    occurredAt: timestamp('occurred_at').notNull(),
+    createdAt,
+  },
+  (table) => [
+    index('notifications_created_idx').on(table.createdAt),
+    index('notifications_app_created_idx').on(table.appId, table.createdAt),
+    index('notifications_channel_created_idx').on(
+      table.channelId,
+      table.createdAt,
+    ),
+    uniqueIndex('notifications_app_dedupe_idx')
+      .on(table.appId, table.dedupeKey)
+      .where(
+        sql`"notifications"."app_id" is not null and "notifications"."dedupe_key" is not null`,
+      ),
+    uniqueIndex('notifications_channel_dedupe_idx')
+      .on(table.channelId, table.dedupeKey)
+      .where(
+        sql`"notifications"."channel_id" is not null and "notifications"."dedupe_key" is not null`,
+      ),
+    check(
+      'notifications_source_check',
+      sql`(
+        ("notifications"."source_type" = 'app' and "notifications"."channel_id" is null)
+        or ("notifications"."source_type" = 'channel' and "notifications"."app_id" is null)
+        or ("notifications"."source_type" = 'platform' and "notifications"."app_id" is null and "notifications"."channel_id" is null)
+      )`,
+    ),
+  ],
+);
+
+/**
+ * Where notifications can be delivered. A device is one signed-in mobile
+ * session; a webhook is an outbound URL; an app is an App whose manifest
+ * accepts routed notifications.
+ */
+export const notificationDestinations = snakeCase.table(
+  'notification_destinations',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    type: text().$type<NotificationDestinationType>().notNull(),
+    name: text().notNull(),
+    enabled: boolean().notNull().default(true),
+    sessionId: text().references(() => session.id, { onDelete: 'cascade' }),
+    userId: text().references(() => user.id, { onDelete: 'cascade' }),
+    platform: text().$type<'ios'>(),
+    apnsToken: text(),
+    apnsEnvironment: text().$type<NotificationApnsEnvironment>(),
+    e2eKeyId: text(),
+    e2eKeyCiphertext: text(),
+    url: text(),
+    secretCiphertext: text(),
+    appId: text().references(() => apps.id, { onDelete: 'cascade' }),
+    /** Set while disabled: by a person, or by APNs rejecting the token. */
+    disabledReason: text().$type<NotificationDisabledReason>(),
+    /** Last provider/configuration error, kept for the settings UI. */
+    lastError: text(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    uniqueIndex('notification_destinations_session_idx')
+      .on(table.sessionId)
+      .where(sql`"notification_destinations"."session_id" is not null`),
+    uniqueIndex('notification_destinations_apns_token_idx')
+      .on(table.apnsToken)
+      .where(sql`"notification_destinations"."apns_token" is not null`),
+    uniqueIndex('notification_destinations_app_idx')
+      .on(table.appId)
+      .where(sql`"notification_destinations"."app_id" is not null`),
+    check(
+      'notification_destinations_type_check',
+      sql`(
+        ("notification_destinations"."type" = 'device'
+          and "notification_destinations"."session_id" is not null
+          and "notification_destinations"."user_id" is not null
+          and "notification_destinations"."platform" is not null
+          and "notification_destinations"."apns_token" is not null
+          and "notification_destinations"."apns_environment" is not null
+          and "notification_destinations"."e2e_key_id" is not null
+          and "notification_destinations"."e2e_key_ciphertext" is not null
+          and "notification_destinations"."url" is null
+          and "notification_destinations"."app_id" is null)
+        or ("notification_destinations"."type" = 'webhook'
+          and "notification_destinations"."url" is not null
+          and "notification_destinations"."secret_ciphertext" is not null
+          and "notification_destinations"."session_id" is null
+          and "notification_destinations"."app_id" is null)
+        or ("notification_destinations"."type" = 'app'
+          and "notification_destinations"."app_id" is not null
+          and "notification_destinations"."session_id" is null
+          and "notification_destinations"."url" is null)
+      )`,
+    ),
+  ],
+);
+
+export const notificationGroups = snakeCase.table('notification_groups', {
+  id: ulid().$defaultFn(genUlid).primaryKey(),
+  name: text().notNull(),
+  description: text(),
+  createdAt,
+  updatedAt,
+});
+
+export const notificationGroupMembers = snakeCase.table(
+  'notification_group_members',
+  {
+    groupId: ulid()
+      .notNull()
+      .references(() => notificationGroups.id, { onDelete: 'cascade' }),
+    destinationId: ulid()
+      .notNull()
+      .references(() => notificationDestinations.id, { onDelete: 'cascade' }),
+    createdAt,
+  },
+  (table) => [
+    primaryKey({ columns: [table.groupId, table.destinationId] }),
+    index('notification_group_members_destination_idx').on(table.destinationId),
+  ],
+);
+
+/**
+ * Routing rule: notifications matching (source, kind) go to one group or one
+ * destination. A null sourceId/kind matches any value.
+ */
+export const notificationRoutes = snakeCase.table(
+  'notification_routes',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    name: text(),
+    sourceType: text().$type<NotificationRouteSourceType>().notNull(),
+    appId: text().references(() => apps.id, { onDelete: 'cascade' }),
+    channelId: ulid().references(() => notificationChannels.id, {
+      onDelete: 'cascade',
+    }),
+    kind: text(),
+    targetGroupId: ulid().references(() => notificationGroups.id, {
+      onDelete: 'cascade',
+    }),
+    targetDestinationId: ulid().references(() => notificationDestinations.id, {
+      onDelete: 'cascade',
+    }),
+    enabled: boolean().notNull().default(true),
+    createdAt,
+    updatedAt,
+  },
+  () => [
+    check(
+      'notification_routes_target_check',
+      sql`(("notification_routes"."target_group_id" is null) <> ("notification_routes"."target_destination_id" is null))`,
+    ),
+    check(
+      'notification_routes_source_check',
+      sql`(
+        ("notification_routes"."source_type" = 'app' and "notification_routes"."channel_id" is null)
+        or ("notification_routes"."source_type" = 'channel' and "notification_routes"."app_id" is null)
+        or ("notification_routes"."source_type" = 'any' and "notification_routes"."app_id" is null and "notification_routes"."channel_id" is null)
+      )`,
+    ),
+  ],
+);
+
+/** One delivery per (notification, destination), with durable retry state. */
+export const notificationDeliveries = snakeCase.table(
+  'notification_deliveries',
+  {
+    id: ulid().$defaultFn(genUlid).primaryKey(),
+    notificationId: ulid()
+      .notNull()
+      .references(() => notifications.id, { onDelete: 'cascade' }),
+    destinationId: ulid().references(() => notificationDestinations.id, {
+      onDelete: 'set null',
+    }),
+    destinationType: text().$type<NotificationDestinationType>().notNull(),
+    destinationName: text().notNull(),
+    status: text()
+      .$type<NotificationDeliveryStatus>()
+      .notNull()
+      .default('pending'),
+    attempts: integer().notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    lastError: text(),
+    httpStatus: integer(),
+    /** Free-form string returned by an App destination; never interpreted. */
+    result: text(),
+    routeIds: jsonb().$type<string[]>().notNull(),
+    completedAt: timestamp('completed_at'),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    uniqueIndex('notification_deliveries_notification_destination_idx').on(
+      table.notificationId,
+      table.destinationId,
+    ),
+    index('notification_deliveries_due_idx')
+      .on(table.status, table.nextAttemptAt)
+      .where(
+        sql`"notification_deliveries"."status" in ('pending', 'in_progress')`,
+      ),
+  ],
+);

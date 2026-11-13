@@ -61,6 +61,12 @@ export default function MoreScreen() {
         <SectionLabel>This phone</SectionLabel>
         <Group>
           <ListRow
+            title="Notifications"
+            detail="History and delivery from this instance"
+            leading={<GlyphTile glyph="bell" />}
+            onPress={() => router.push('/notifications')}
+          />
+          <ListRow
             title="Tabs & start page"
             detail={`Opens to ${start} · ${preferences.visible.length} of ${preferences.order.length} in the tab bar`}
             leading={<GlyphTile glyph="sliders" />}

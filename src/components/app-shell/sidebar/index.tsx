@@ -1,6 +1,6 @@
 import { Box, NavLink, ScrollArea, Stack } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { IconSparkles } from '@tabler/icons-react';
+import { IconBell, IconSparkles } from '@tabler/icons-react';
 import { Brand } from '../brand';
 import { PinnedApps } from './pinned-apps';
 import { PinnedDashboards } from './pinned-dashboards';
@@ -25,6 +25,13 @@ export function Sidebar() {
             label="Agent"
             leftSection={<IconSparkles size={18} stroke={1.6} />}
             active={isActive('/agent')}
+            variant="light"
+          />
+          <NavLink
+            renderRoot={(props) => <Link to="/notifications" {...props} />}
+            label="Notifications"
+            leftSection={<IconBell size={18} stroke={1.6} />}
+            active={isActive('/notifications')}
             variant="light"
           />
         </Stack>

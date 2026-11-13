@@ -39,7 +39,10 @@ owns business error details. All files retain the `hatch.platform.v1` package.
 The contract defines `hatch.platform.v1.AppService`, `WorkflowService`, `AuthService` and
 `SdkService`, plus session-only `AgentService`. Both lifecycle services provide list, create, get, get-source,
 deploy and rollback RPCs. Auth provides `GetStatus` and session-only
-`CreateHandoff`; Sdk provides `GetSdk`.
+`CreateHandoff`; Sdk provides `GetSdk`. `NotificationService` manages the
+notification center for session and API-key callers and rejects Run
+credentials; its device RPCs are session-only (see
+[notifications](notifications.md)).
 There are no REST aliases or OpenAPI endpoint. Former `/api/v1/*`, including
 `openapi.json`, and `/api/cli/v1/*` return JSON 404 rather than the SPA shell.
 

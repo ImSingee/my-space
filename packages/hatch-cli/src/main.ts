@@ -6,6 +6,7 @@ import { runLifecycle } from './lifecycle';
 import { runData } from './data';
 import { runBackendInvocation, BackendInvocationError } from './invoke';
 import { runWebhook } from './webhook';
+import { runNotification } from './notifications';
 import { publicError } from './client';
 import { refreshRunEnvironment } from './run-credential';
 import { CliError } from './error';
@@ -60,7 +61,17 @@ try {
           ? [
               name,
               ...(operation && !operation.startsWith('--') ? [operation] : []),
-              ...(['invoke', 'kv', 'data-table', 'db'].includes(operation) &&
+              ...([
+                'invoke',
+                'kv',
+                'data-table',
+                'db',
+                'destination',
+                'webhook',
+                'group',
+                'route',
+                'channel',
+              ].includes(operation) &&
               args[offset + 2] &&
               !args[offset + 2].startsWith('--')
                 ? [args[offset + 2]]
@@ -99,6 +110,8 @@ try {
     await runData(args, offset, controller.signal);
   else if (['app', 'workflow'].includes(name))
     await runLifecycle(args, offset, controller.signal);
+  else if (name === 'notification')
+    await runNotification(args, offset, controller.signal);
   else
     throw new CliError(
       'unknown_command',

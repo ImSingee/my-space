@@ -32,6 +32,7 @@ const CAPABILITY_KEYS = [
   'storage',
   'kv',
   'dataTable',
+  'notifications',
 ] as const satisfies readonly (keyof AppCapabilities)[];
 
 function enabledCapabilities(

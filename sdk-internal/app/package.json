@@ -14,6 +14,10 @@
     "./data/react": {
       "types": "./dist/data-react.d.ts",
       "default": "./dist/data-react.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications.d.ts",
+      "default": "./dist/notifications.js"
     }
   },
   "sideEffects": false,

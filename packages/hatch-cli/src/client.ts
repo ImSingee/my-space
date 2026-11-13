@@ -377,6 +377,15 @@ export function platformClient(
   timeout: number,
   signal: AbortSignal,
 ) {
+  return cliClient(platformTransport(credential, timeout, signal));
+}
+
+/** Authenticated Connect transport that converts errors to safe CLI errors. */
+export function platformTransport(
+  credential: Profile,
+  timeout: number,
+  signal: AbortSignal,
+): Transport {
   const headers = credentialHeaders(credential);
   const transport = createConnectTransport({
     baseUrl: `${credential.url}/api/rpc`,
@@ -392,7 +401,7 @@ export function platformClient(
     fetch: async (input, init) => fetch(input, { ...init, redirect: 'error' }),
   });
   // Convert errors after Connect's call boundary, which wraps interceptor errors.
-  return cliClient({
+  return {
     ...transport,
     unary: async (
       method,
@@ -419,7 +428,7 @@ export function platformClient(
         throw new CliError(safe.code, message, safe.exitCode, safe.httpStatus);
       }
     },
-  });
+  };
 }
 
 export function publicError(error: unknown): CliError {

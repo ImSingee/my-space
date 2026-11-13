@@ -156,6 +156,142 @@ const definitions: readonly CliCommandDefinition[] = [
     description:
       'Execute the App data operation with domain limits and complete results.',
   },
+  {
+    path: ['notification', 'list'],
+    usage:
+      'notification list [--source-type app|channel|platform] [--source <id>] [--kind <kind>] [--status unrouted|pending|delivered|partial|failed] [--limit <1-100>] [--cursor <id>]',
+    description: 'List notifications, newest first.',
+  },
+  {
+    path: ['notification', 'get'],
+    usage: 'notification get <id>',
+    description:
+      'Inspect a notification and every delivery, including App result strings.',
+  },
+  {
+    path: ['notification', 'test'],
+    usage: 'notification test <destination-id>',
+    description: 'Send a test notification straight to one destination.',
+  },
+  {
+    path: ['notification', 'retry'],
+    usage: 'notification retry <delivery-id>',
+    description: 'Queue a failed delivery for a fresh series of attempts.',
+  },
+  {
+    path: ['notification', 'sources'],
+    usage: 'notification sources',
+    description:
+      'List Apps and Channels with the notification kinds they declare.',
+  },
+  {
+    path: ['notification', 'destination', 'list'],
+    usage: 'notification destination list',
+    description: 'List devices, webhooks and App destinations.',
+  },
+  ...(['enable', 'disable', 'delete'] as const).map((verb) => ({
+    path: ['notification', 'destination', verb],
+    usage: `notification destination ${verb} <id>`,
+    description: `${verb[0].toUpperCase()}${verb.slice(1)} a destination. App destinations can only be enabled or disabled.`,
+  })),
+  {
+    path: ['notification', 'destination', 'rename'],
+    usage: 'notification destination rename <id> <name>',
+    description: 'Rename a device or webhook destination.',
+  },
+  {
+    path: ['notification', 'webhook', 'create'],
+    usage: 'notification webhook create --name <name> --url <url>',
+    description: 'Add a webhook destination; prints its signing secret once.',
+  },
+  {
+    path: ['notification', 'webhook', 'update'],
+    usage: 'notification webhook update <id> [--name <name>] [--url <url>]',
+    description: 'Change a webhook name or URL.',
+  },
+  {
+    path: ['notification', 'webhook', 'rotate-secret'],
+    usage: 'notification webhook rotate-secret <id>',
+    description: 'Replace a webhook signing secret; prints it once.',
+  },
+  {
+    path: ['notification', 'webhook', 'delete'],
+    usage: 'notification webhook delete <id>',
+    description: 'Delete a webhook destination.',
+  },
+  {
+    path: ['notification', 'group', 'list'],
+    usage: 'notification group list',
+    description: 'List destination groups.',
+  },
+  {
+    path: ['notification', 'group', 'create'],
+    usage:
+      'notification group create --name <name> [--description <text>] [--destination <id>]...',
+    description: 'Create a destination group.',
+  },
+  {
+    path: ['notification', 'group', 'update'],
+    usage:
+      'notification group update <id> [--name <name>] [--description <text>] [--destination <id>... | --clear-destinations]',
+    description: 'Change a group; --destination replaces the full member list.',
+  },
+  {
+    path: ['notification', 'group', 'delete'],
+    usage: 'notification group delete <id>',
+    description: 'Delete a group and the routes that target it.',
+  },
+  {
+    path: ['notification', 'route', 'list'],
+    usage: 'notification route list',
+    description: 'List routing rules.',
+  },
+  {
+    path: ['notification', 'route', 'create'],
+    usage:
+      'notification route create --source-type app|channel|any [--source <id>] [--kind <kind>] (--group <id> | --destination <id>) [--name <name>] [--disabled]',
+    description:
+      'Route matching notifications to a group or one destination. Omit --source/--kind to match any.',
+  },
+  {
+    path: ['notification', 'route', 'update'],
+    usage:
+      'notification route update <id> [--source-type app|channel|any] [--source <id> | --any-source] [--kind <kind> | --any-kind] [--group <id> | --destination <id>] [--name <name>] [--enable | --disable]',
+    description: 'Change a routing rule.',
+  },
+  {
+    path: ['notification', 'route', 'delete'],
+    usage: 'notification route delete <id>',
+    description: 'Delete a routing rule.',
+  },
+  {
+    path: ['notification', 'channel', 'list'],
+    usage: 'notification channel list',
+    description: 'List external notification channels and their push URLs.',
+  },
+  {
+    path: ['notification', 'channel', 'create'],
+    usage:
+      'notification channel create --name <name> [--description <text>] --kind <kind>[:<display name>]...',
+    description:
+      'Create a channel for external systems; prints its push URL and token once.',
+  },
+  {
+    path: ['notification', 'channel', 'update'],
+    usage:
+      'notification channel update <id> [--name <name>] [--description <text>] [--kind <kind>[:<display name>]...] [--enable | --disable]',
+    description: 'Change a channel; --kind replaces the full kind list.',
+  },
+  {
+    path: ['notification', 'channel', 'rotate-token'],
+    usage: 'notification channel rotate-token <id>',
+    description: 'Replace a channel token; prints it once.',
+  },
+  {
+    path: ['notification', 'channel', 'delete'],
+    usage: 'notification channel delete <id>',
+    description: 'Delete a channel and the routes that name it.',
+  },
 ];
 
 export const commandDefinitions = definitions.map((definition) => ({

@@ -1409,3 +1409,121 @@ describe('session workspace navigation', () => {
     ]);
   });
 });
+
+describe('notification center authority', () => {
+  async function signUp() {
+    const response = await authCall('sign-up/email', {
+      name: 'Notification test',
+      email: `${randomUUID()}@notify.test`,
+      password: 'Notify-test-password-93',
+    });
+    expect(response.status).toBe(200);
+    return {
+      cookie: cookies(response),
+      token: ((await response.json()) as { token: string }).token,
+    };
+  }
+
+  it('lets users manage delivery, keeps Runs out, and binds devices to sessions', async () => {
+    const user = await signUp();
+    const keyResponse = await authCall(
+      'api-key/create',
+      { name: 'Notification boundary test' },
+      { cookie: user.cookie },
+    );
+    const key = ((await keyResponse.json()) as { key: string }).key;
+    const runSession = randomUUID();
+    const runId = randomUUID();
+    await db.insert(schema.agentSessions).values({ id: runSession });
+    await db.insert(schema.agentRuns).values({
+      id: runId,
+      sessionId: runSession,
+      runnerId: 'notification-test-runner',
+      providerId: 'fixture',
+      modelId: 'fixture',
+      input: { text: 'fixture' },
+      leaseExpiresAt: new Date(Date.now() + 90_000),
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = await auth.api.signJWT({
+      body: {
+        payload: {
+          sub: runId,
+          sid: runSession,
+          rnr: 'notification-test-runner',
+          iat: now,
+          exp: now + 90,
+          jti: randomUUID(),
+        },
+      },
+    });
+    const device = {
+      name: 'iPhone',
+      platform: 'ios',
+      apnsToken: 'ef'.repeat(32),
+      apnsEnvironment: 'sandbox',
+      e2eKeyId: 'device-key-1',
+      e2eKey: randomBytes(32).toString('base64url'),
+    };
+    const errorCode = async (response: Response) =>
+      errorFromJson(
+        await response.json(),
+        undefined,
+        new ConnectError('Invalid error'),
+      ).findDetails(PublicErrorSchema)[0]?.code;
+
+    // API keys manage configuration but cannot register a device.
+    const apiKey = { 'x-api-key': key };
+    const created = await call('NotificationService/CreateChannel', {
+      headers: apiKey,
+      body: {
+        name: 'Monitoring',
+        kinds: { kinds: [{ kind: 'alert', name: 'Alert' }] },
+      },
+    });
+    expect(created.status).toBe(200);
+    const register = await call('NotificationService/RegisterDevice', {
+      headers: apiKey,
+      body: device,
+    });
+    expect(register.status).toBe(403);
+    expect(await errorCode(register)).toBe('SESSION_REQUIRED');
+
+    // Run credentials cannot read or change notification configuration.
+    for (const path of [
+      'NotificationService/ListDestinations',
+      'NotificationService/ListChannels',
+      'NotificationService/CreateGroup',
+    ]) {
+      const response = await call(path, {
+        headers: { authorization: `Bearer ${jwt.token}` },
+        body: path.endsWith('CreateGroup') ? { name: 'Agents' } : {},
+      });
+      expect(response.status).toBe(403);
+      expect(await errorCode(response)).toBe('SESSION_REQUIRED');
+    }
+
+    // A session registers its own device; revoking the session removes it.
+    const session = { authorization: `Bearer ${user.token}` };
+    const registered = await call('NotificationService/RegisterDevice', {
+      headers: session,
+      body: device,
+    });
+    expect(registered.status).toBe(200);
+    const current = await call('NotificationService/GetCurrentDevice', {
+      headers: session,
+    });
+    expect(
+      ((await current.json()) as { destination?: { type: string } })
+        .destination,
+    ).toMatchObject({ type: 'device' });
+
+    await authCall('sign-out', {}, { cookie: user.cookie });
+    const after = await call('NotificationService/ListDestinations', {
+      headers: apiKey,
+    });
+    expect(
+      ((await after.json()) as { destinations?: unknown[] }).destinations ?? [],
+    ).toEqual([]);
+  });
+});

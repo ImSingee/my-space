@@ -24,6 +24,7 @@ export const APP_SDK: SdkDefinition = {
     '.': { source: 'app.ts' },
     './data': { source: 'data.ts' },
     './data/react': { source: 'data-react.ts' },
+    './notifications': { source: 'notifications.ts' },
   },
 };
 

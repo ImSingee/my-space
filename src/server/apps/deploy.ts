@@ -17,6 +17,7 @@ import type { JsonObject } from '~/db/schema';
 import { workspaceRelative } from '~server/deploy-lock';
 import { appDeployLock } from './deploy-lock';
 import { publishPlatformEvent } from '~server/platform-events';
+import { syncAppNotificationDestination } from '~server/notifications/app-destinations';
 import { buildApp, type BuildResult } from './build';
 import {
   buildMatchesDeployment,
@@ -930,6 +931,12 @@ async function deployAppInner(
             currentDeploymentId: deploymentId,
           })
           .where(eq(schema.apps.id, id));
+        await syncAppNotificationDestination(
+          tx,
+          id,
+          releaseBuild.source.name,
+          releaseBuild.normalized,
+        );
 
         // Live swap is the last statement so an insert/update failure leaves
         // the previous build untouched. Data access stays fenced until COMMIT.
