@@ -25,6 +25,7 @@ import {
   ScrollView,
   View,
   type ScrollViewInstance,
+  type ListViewToken,
   type ViewInstance,
 } from 'react-native';
 import {
@@ -98,7 +99,25 @@ function ConversationBody({
     runId: string;
     askId: string;
   } | null>(null);
-  const [atBottom, setAtBottom] = useState(true);
+  // Where the reader is belongs to the conversation: a fold or unfold that
+  // moves it to another screen reopens the same message, and follows new
+  // messages only if the reader was already at the end.
+  const reading = useReadingAnchor(origin, id);
+  const [atBottom, setAtBottom] = useState(reading.initial.atBottom);
+  const restoreTo = useRef(
+    reading.initial.atBottom ? null : reading.initial.index,
+  );
+  const firstVisible = useRef(reading.initial.index);
+  // A list needs the same callback for its whole life.
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+      const indexes = viewableItems.flatMap((item) =>
+        typeof item.index === 'number' ? [item.index] : [],
+      );
+      if (indexes.length) firstVisible.current = Math.min(...indexes);
+    },
+    [],
+  );
   const list = useRef<FlatList<JsonValue>>(null);
   const frame = useRef<ViewInstance>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
@@ -553,13 +572,44 @@ function ConversationBody({
             onScroll={(event) => {
               const { contentOffset, layoutMeasurement, contentSize } =
                 event.nativeEvent;
-              setAtBottom(
+              const bottom =
                 contentOffset.y + layoutMeasurement.height >=
-                  contentSize.height - 100,
-              );
+                contentSize.height - 100;
+              setAtBottom(bottom);
+              if (restoreTo.current === null)
+                reading.save({ atBottom: bottom, index: firstVisible.current });
             }}
             scrollEventThrottle={100}
+            viewabilityConfig={readingViewability}
+            onViewableItemsChanged={onViewableItemsChanged}
+            onScrollToIndexFailed={(info) => {
+              // Rows above it are not measured yet: get near, then align.
+              list.current?.scrollToOffset({
+                offset: info.averageItemLength * info.index,
+                animated: false,
+              });
+              setTimeout(
+                () =>
+                  list.current?.scrollToIndex({
+                    index: info.index,
+                    viewPosition: 0,
+                    animated: false,
+                  }),
+                50,
+              );
+            }}
             onContentSizeChange={() => {
+              const target = restoreTo.current;
+              if (target !== null) {
+                if ((detail?.messages.length ?? 0) <= target) return;
+                restoreTo.current = null;
+                list.current?.scrollToIndex({
+                  index: target,
+                  viewPosition: 0,
+                  animated: false,
+                });
+                return;
+              }
               if (atBottom) list.current?.scrollToEnd({ animated: false });
             }}
             renderItem={({ item, index }) => {
@@ -993,4 +1043,35 @@ function PendingAskCard({
       onAnswer={onAnswer}
     />
   );
+}
+
+const readingViewability = { itemVisiblePercentThreshold: 10 };
+
+type ReadingAnchor = { atBottom: boolean; index: number };
+const atEnd: ReadingAnchor = { atBottom: true, index: 0 };
+
+/**
+ * The transcript position of a conversation, read when a screen showing it
+ * mounts and written as the reader scrolls. Kept by message rather than
+ * offset: the other screen's width reflows the text.
+ */
+function useReadingAnchor(origin: string | null, id: string) {
+  const client = useQueryClient();
+  const [initial] = useState(
+    () => client.getQueryData<ReadingAnchor>([origin, 'reading', id]) ?? atEnd,
+  );
+  const last = useRef(initial);
+  const save = useCallback(
+    (anchor: ReadingAnchor) => {
+      if (
+        anchor.atBottom === last.current.atBottom &&
+        anchor.index === last.current.index
+      )
+        return;
+      last.current = anchor;
+      client.setQueryData<ReadingAnchor>([origin, 'reading', id], anchor);
+    },
+    [client, origin, id],
+  );
+  return { initial, save };
 }
