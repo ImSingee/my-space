@@ -116,37 +116,51 @@ function ConversationBody({
   // messages only if the reader was already at the end.
   const reading = useReadingAnchor(origin, id);
   const [atBottom, setAtBottom] = useState(reading.initial.atBottom);
-  // The place still to restore, until its message has been laid out here.
-  const restoreTo = useRef<ReadingAnchor | null>(
-    reading.initial.atBottom ? null : reading.initial,
+  // The reader's place, changed only by the reader's own scrolling: a
+  // resize rewraps the text under a fixed offset, which is not a new place.
+  const anchor = useRef(reading.initial);
+  // While settling, every new layout of the anchored message scrolls back to
+  // the place; a resize or a handoff lays text out more than once. The
+  // reader's first drag ends it.
+  const settle = useRef<number | null>(
+    reading.initial.atBottom ? null : Number.POSITIVE_INFINITY,
   );
   const cells = useRef(new Map<number, { y: number; height: number }>());
-  const restore = useCallback(() => {
-    const target = restoreTo.current;
-    if (!target) return;
-    const cell = cells.current.get(target.index);
-    if (!cell) {
-      list.current?.scrollToIndex({
-        index: target.index,
-        viewPosition: 0,
-        animated: false,
-      });
+  const width = useRef<number | null>(null);
+  const settleAgain = () => {
+    if (!anchor.current.atBottom) settle.current = Date.now() + SETTLE_MS;
+  };
+  const apply = useCallback(() => {
+    if (settle.current === null || anchor.current.atBottom) return;
+    if (Date.now() > settle.current) {
+      settle.current = null;
       return;
     }
-    restoreTo.current = null;
+    const { index, fraction } = anchor.current;
+    const cell = cells.current.get(index);
+    if (!cell) {
+      list.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
+      return;
+    }
     // The same share of the message: this width wraps it differently.
     list.current?.scrollToOffset({
-      offset: cell.y + target.fraction * cell.height,
+      offset: cell.y + fraction * cell.height,
       animated: false,
     });
+    if (settle.current === Number.POSITIVE_INFINITY)
+      settle.current = Date.now() + SETTLE_MS;
   }, []);
   const recordCell = useCallback(
     (index: number, layout: LayoutRectangle) => {
       cells.current.set(index, { y: layout.y, height: layout.height });
-      if (restoreTo.current?.index === index) restore();
+      if (anchor.current.index === index) apply();
     },
-    [restore],
+    [apply],
   );
+  const keepPlace = (offset: number, bottom: boolean) => {
+    anchor.current = readingAt(cells.current, offset, bottom);
+    reading.save(anchor.current);
+  };
   const list = useRef<FlatList<JsonValue>>(null);
   const frame = useRef<ViewInstance>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
@@ -316,6 +330,9 @@ function ConversationBody({
       setFiles([]);
       setProblem(null);
       setAtBottom(true);
+      // A sent message is read from the end.
+      anchor.current = { ...anchor.current, atBottom: true };
+      reading.save(anchor.current);
       await session.refetch();
     },
     onError: async (error) => {
@@ -599,17 +616,42 @@ function ConversationBody({
               }}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
+              onLayout={(event) => {
+                const next = event.nativeEvent.layout.width;
+                if (width.current !== null && width.current !== next) {
+                  settleAgain();
+                  apply();
+                }
+                width.current = next;
+              }}
               onScroll={(event) => {
                 const { contentOffset, layoutMeasurement, contentSize } =
                   event.nativeEvent;
-                const bottom =
+                setAtBottom(
                   contentOffset.y + layoutMeasurement.height >=
-                  contentSize.height - 100;
-                setAtBottom(bottom);
-                if (restoreTo.current === null)
-                  reading.save(
-                    readingAt(cells.current, contentOffset.y, bottom),
-                  );
+                    contentSize.height - 100,
+                );
+              }}
+              onScrollBeginDrag={() => {
+                settle.current = null;
+              }}
+              onScrollEndDrag={(event) => {
+                const { contentOffset, layoutMeasurement, contentSize } =
+                  event.nativeEvent;
+                keepPlace(
+                  contentOffset.y,
+                  contentOffset.y + layoutMeasurement.height >=
+                    contentSize.height - 100,
+                );
+              }}
+              onMomentumScrollEnd={(event) => {
+                const { contentOffset, layoutMeasurement, contentSize } =
+                  event.nativeEvent;
+                keepPlace(
+                  contentOffset.y,
+                  contentOffset.y + layoutMeasurement.height >=
+                    contentSize.height - 100,
+                );
               }}
               scrollEventThrottle={100}
               CellRendererComponent={RecordingCell}
@@ -619,14 +661,14 @@ function ConversationBody({
                   offset: info.averageItemLength * info.index,
                   animated: false,
                 });
-                // Only while the place is still to restore: the rough scroll
-                // may already have laid out the row and restored it exactly.
-                setTimeout(restore, 50);
+                // Only while settling: the rough scroll may already have laid
+                // out the row and restored the place exactly.
+                setTimeout(apply, 50);
               }}
               onContentSizeChange={() => {
-                const target = restoreTo.current;
-                if (target !== null) {
-                  if ((detail?.messages.length ?? 0) > target.index) restore();
+                if (settle.current !== null) {
+                  if ((detail?.messages.length ?? 0) > anchor.current.index)
+                    apply();
                   return;
                 }
                 if (atBottom) list.current?.scrollToEnd({ animated: false });
@@ -1069,6 +1111,9 @@ function PendingAskCard({
     />
   );
 }
+
+/** How long layout passes after a resize or handoff may still move text. */
+const SETTLE_MS = 1200;
 
 type ReadingAnchor = { atBottom: boolean; index: number; fraction: number };
 const atEnd: ReadingAnchor = { atBottom: true, index: 0, fraction: 0 };
