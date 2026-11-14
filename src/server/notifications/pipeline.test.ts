@@ -232,7 +232,11 @@ describe('routing', () => {
       kind: KINDS[0],
       push: push('order.shipped', { dedupeKey: 'order-1' }),
     });
-    expect(second).toEqual({ id: first.id, deduplicated: true });
+    expect(second).toEqual({
+      id: first.id,
+      deduplicated: true,
+      deliveries: 0,
+    });
   });
 
   it('can still disable a route after its source stops declaring the kind', async () => {
@@ -502,7 +506,7 @@ describe('ingress authentication', () => {
     expect((await send(rotated)).status).toBe(202);
   });
 
-  it('opens a link on tap only together with that link', async () => {
+  it('opens the link on tap unless the sender keeps the notification', async () => {
     const { channel, token } = await service.createChannel({
       name: 'Monitoring',
       kinds: [{ kind: 'alert', name: 'Alert' }],
@@ -538,20 +542,114 @@ describe('ingress authentication', () => {
     expect(await missing.text()).toContain('autoOpenUrl requires url');
     expect((await send({ autoOpenUrl: true, url: '' })).status).toBe(400);
 
+    const stored = async (body: Record<string, unknown>) => {
+      const response = await send(body);
+      expect(response.status).toBe(202);
+      const { id } = (await response.json()) as { id: string };
+      return (await service.getNotification(id)).autoOpenUrl;
+    };
     const url = 'https://status.example.com/db-1';
-    const accepted = await send({ url, autoOpenUrl: true });
-    expect(accepted.status).toBe(202);
+    // A link opens on tap unless the sender keeps the notification page.
+    expect(await stored({ url })).toBe(true);
+    expect(await stored({ url, autoOpenUrl: null })).toBe(true);
+    expect(await stored({ url, autoOpenUrl: true })).toBe(true);
+    expect(await stored({ url, autoOpenUrl: false })).toBe(false);
+    expect(await stored({})).toBe(false);
+    expect(await stored({ autoOpenUrl: false })).toBe(false);
+
+    const accepted = await send({ url });
     const { id } = (await accepted.json()) as { id: string };
-    expect((await service.getNotification(id)).autoOpenUrl).toBe(true);
     await runAllDue();
-    expect(JSON.parse(received.at(-1)!.body)).toMatchObject({
+    const envelope = received
+      .map((request) => JSON.parse(request.body))
+      .find((body) => body.notification.id === id);
+    expect(envelope).toMatchObject({
       notification: { id, url, autoOpenUrl: true },
     });
+  });
+});
 
-    const plain = await send({ url, autoOpenUrl: null });
-    expect(plain.status).toBe(202);
-    const plainId = ((await plain.json()) as { id: string }).id;
-    expect((await service.getNotification(plainId)).autoOpenUrl).toBe(false);
+describe('user channel sends', () => {
+  const CI_KIND = { kind: 'build.failed', name: 'Build failed' };
+  const red = (extra: Record<string, unknown> = {}) => ({
+    kind: CI_KIND.kind,
+    title: 'master is red',
+    ...extra,
+  });
+
+  it('route like a token push and enforce channel state and kinds', async () => {
+    const { channel } = await service.createChannel({
+      name: 'CI',
+      kinds: [CI_KIND],
+    });
+    const { destination: hook } = await service.createWebhook({
+      name: 'Ops hook',
+      url: webhookUrl,
+    });
+
+    const unrouted = await service.sendChannelNotification(channel.id, red());
+    expect(unrouted).toMatchObject({ deduplicated: false, deliveries: 0 });
+    expect((await service.getNotification(unrouted.id)).status).toBe(
+      'unrouted',
+    );
+
+    await service.createRoute({
+      sourceType: 'channel',
+      sourceId: channel.id,
+      targetType: 'destination',
+      targetId: hook.id,
+    });
+    const sent = await service.sendChannelNotification(
+      channel.id,
+      red({ dedupeKey: 'build-42', data: { build: 42 } }),
+    );
+    expect(sent).toMatchObject({ deduplicated: false, deliveries: 1 });
+    expect(await service.getNotification(sent.id)).toMatchObject({
+      sourceType: 'channel',
+      sourceId: channel.id,
+      sourceName: 'CI',
+      kindName: 'Build failed',
+      data: { build: 42 },
+    });
+    expect(await runAllDue()).toBe(1);
+    expect(received).toHaveLength(1);
+
+    // The dedupe key is shared with token pushes from the same channel.
+    const token = await service.rotateChannelToken(channel.id);
+    const tokenPush = await handleChannelPush(
+      new Request(channel.pushUrl, {
+        method: 'POST',
+        headers: { 'x-hatch-secret': token },
+        body: JSON.stringify(red({ dedupeKey: 'build-42' })),
+      }),
+      channel.id,
+    );
+    expect(await tokenPush.json()).toEqual({ id: sent.id, deduplicated: true });
+
+    await expect(
+      service.sendChannelNotification(channel.id, red({ kind: 'deploy.done' })),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.sendChannelNotification(channel.id, red({ url: 'ftp://x' })),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.sendChannelNotification(channel.id, red({ autoOpenUrl: true })),
+    ).rejects.toMatchObject({ status: 400 });
+    const opening = await service.sendChannelNotification(
+      channel.id,
+      red({ url: 'https://ci.example/42', autoOpenUrl: true }),
+    );
+    expect(await service.getNotification(opening.id)).toMatchObject({
+      url: 'https://ci.example/42',
+      autoOpenUrl: true,
+    });
+    await service.updateChannel({ id: channel.id, enabled: false });
+    await expect(
+      service.sendChannelNotification(channel.id, red()),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      service.sendChannelNotification('missing-channel', red()),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
 

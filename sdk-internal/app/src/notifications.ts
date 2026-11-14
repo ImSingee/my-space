@@ -21,8 +21,10 @@ export type NotificationInput = {
   /** Absolute http(s) URL opened from the notification. */
   url?: string;
   /**
-   * Tapping the notification on a phone opens `url` directly instead of the
-   * notification's page in the Hatch app. Requires `url`.
+   * Whether tapping the notification on a phone opens `url` directly instead
+   * of the notification's page in the Hatch app. Defaults to `true` when `url`
+   * is set; pass `false` when the link is only a reference. `true` requires
+   * `url`.
    */
   autoOpenUrl?: boolean;
   /** Extra structured data delivered to webhook and App destinations. */

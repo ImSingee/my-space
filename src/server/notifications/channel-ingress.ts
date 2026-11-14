@@ -8,6 +8,7 @@
  * is stored, compared in constant time.
  */
 import { db } from '~/db';
+import type { notificationChannels } from '~/db/schema';
 import { readCappedText } from '~server/http-body';
 import { secretsMatch } from '~server/secrets';
 import {
@@ -15,8 +16,10 @@ import {
   findKind,
   notificationPushSchema,
 } from './contract';
-import { ingestNotification } from './ingest';
+import { ingestNotification, type IngestResult } from './ingest';
 import { hashChannelToken } from './secrets';
+
+type NotificationChannel = typeof notificationChannels.$inferSelect;
 
 export const CHANNEL_SECRET_HEADER = 'x-hatch-secret';
 
@@ -63,23 +66,47 @@ export async function handleChannelPush(
   } catch {
     return new Response('Body must be JSON', { status: 400 });
   }
-  const push = notificationPushSchema.safeParse(json);
+  const result = await ingestChannelPush(channel, json);
+  if (!result.ok) {
+    return new Response(result.message, { status: result.status });
+  }
+  return Response.json(
+    { id: result.id, deduplicated: result.deduplicated },
+    { status: 202 },
+  );
+}
+
+/**
+ * Validate a push body against one Channel's declared kinds and ingest it.
+ * Callers authenticate the sender and reject disabled channels first.
+ */
+export async function ingestChannelPush(
+  channel: Pick<NotificationChannel, 'id' | 'name' | 'kinds'>,
+  body: unknown,
+): Promise<
+  | ({ ok: true } & IngestResult)
+  | { ok: false; status: 400 | 422; message: string }
+> {
+  const push = notificationPushSchema.safeParse(body);
   if (!push.success) {
-    return new Response(push.error.issues[0]?.message ?? 'Invalid request', {
+    return {
+      ok: false,
       status: 400,
-    });
+      message: push.error.issues[0]?.message ?? 'Invalid request',
+    };
   }
   const kind = findKind(channel.kinds, push.data.kind);
   if (!kind) {
-    return new Response(
-      `Notification kind "${push.data.kind}" is not declared by this channel`,
-      { status: 422 },
-    );
+    return {
+      ok: false,
+      status: 422,
+      message: `Notification kind "${push.data.kind}" is not declared by this channel`,
+    };
   }
   const result = await ingestNotification({
     source: { type: 'channel', channelId: channel.id, name: channel.name },
     kind,
     push: push.data,
   });
-  return Response.json(result, { status: 202 });
+  return { ok: true, ...result };
 }

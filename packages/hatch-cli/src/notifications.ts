@@ -265,6 +265,70 @@ const specs: Record<string, Spec> = {
         `Sent test notification ${field(response, 'notificationId')}.`,
     }),
   },
+  send: {
+    positionals: ['channel-id'],
+    options: {
+      kind: { type: 'string' },
+      title: { type: 'string' },
+      body: { type: 'string' },
+      url: { type: 'string' },
+      'no-auto-open-url': { type: 'boolean' },
+      data: { type: 'string' },
+      'dedupe-key': { type: 'string' },
+      'occurred-at': { type: 'string' },
+    },
+    build: ([channelId], values) => {
+      const kind = str(values, 'kind');
+      const title = str(values, 'title');
+      if (!kind || !title?.trim()) invalid('Supply --kind and --title.');
+      if (!KIND_RE.test(kind))
+        invalid(
+          `Invalid kind "${kind}": use 1-64 lowercase letters, digits, ".", "_" or "-".`,
+        );
+      const data = str(values, 'data');
+      if (data !== undefined) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          invalid('--data must be a JSON object.');
+        }
+        if (
+          parsed === null ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed)
+        )
+          invalid('--data must be a JSON object.');
+      }
+      return {
+        method: 'sendNotification',
+        request: {
+          channelId,
+          kind,
+          title,
+          body: str(values, 'body'),
+          url: str(values, 'url'),
+          // Unset lets the platform open --url on phone tap by default.
+          autoOpenUrl: values['no-auto-open-url'] ? false : undefined,
+          dataJson: data,
+          dedupeKey: str(values, 'dedupe-key'),
+          occurredAt: str(values, 'occurred-at'),
+        },
+        text: (response) => {
+          const notificationId = field(response, 'notificationId');
+          if (response.deduplicated === true)
+            return `Notification ${notificationId} already exists for this dedupe key; nothing new was sent.`;
+          const count = Number(response.deliveryCount ?? 0);
+          if (count === 0)
+            return [
+              `Sent notification ${notificationId}, but nothing was delivered: no route matched it, or every matched destination is disabled.`,
+              'Check hatch notification route list and hatch notification destination list.',
+            ].join('\n');
+          return `Sent notification ${notificationId} to ${count} destination${count === 1 ? '' : 's'}.`;
+        },
+      };
+    },
+  },
   retry: {
     positionals: ['delivery-id'],
     build: ([deliveryId]) => ({

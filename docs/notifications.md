@@ -41,16 +41,17 @@ Both endpoints accept the same JSON body (≤64 KiB):
   "title": "Order 42 shipped",
   "body": "optional, ≤4000",
   "url": "https://optional.example/absolute",
-  "autoOpenUrl": false,
+  "autoOpenUrl": "optional boolean; defaults to whether url is set",
   "data": { "optional": "JSON object ≤32 KiB" },
   "dedupeKey": "optional; repeats return the first notification",
   "occurredAt": "optional ISO-8601"
 }
 ```
 
-`autoOpenUrl` (optional, default `false`, requires `url`) makes tapping the
-notification on a phone open `url` instead of the notification's page in the
-app. Other destinations receive the flag in their envelope; the web UI shows
+`autoOpenUrl` makes tapping the notification on a phone open `url` instead of
+the notification's page in the app. It defaults to `true` when `url` is set and
+`false` otherwise; `false` keeps the notification page, and `true` without
+`url` is rejected. Other destinations receive the flag in their envelope; the web UI shows
 it on the notification detail.
 
 Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
@@ -65,6 +66,17 @@ Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
   token in `x-hatch-secret` (header presence wins, even empty) or `?secret=`.
   Only the token's sha256 is stored; create and rotate return it once.
   Disabled channels answer 403.
+- **Channel, as a user**: `SendNotification` (`hatch notification send
+  <channel-id> --kind … --title …`) pushes the same body as that Channel
+  without its token, authenticated by a user session or API key. An unset
+  `auto_open_url` takes the same default as `autoOpenUrl`; the CLI sends
+  `false` only for `--no-auto-open-url`. It shares
+  the kind check, dedupe scope and routing with token pushes
+  (`ingestChannelPush`), answers `CONFLICT` for a disabled channel and
+  `BAD_REQUEST` for an invalid body or undeclared kind, and returns the
+  queued delivery count so callers can spot sends that reached no enabled
+  destination. `NotificationService` reads requests up to 128 KiB (twice the
+  Channel push cap) because `data_json` is escaped inside the request.
 
 ## Delivery
 
@@ -212,7 +224,8 @@ Web UI: Server Functions in `src/server/notifications.ts`. Native clients and
 the CLI: `NotificationService` (`notification.proto`) at `/api/rpc`. Both call
 `service.ts`. Session and API-key credentials may manage everything; Run
 credentials are rejected (`SESSION_REQUIRED`), so Agents cannot reconfigure
-delivery and there is intentionally no Agent tool. `RegisterDevice`,
+delivery or push through `SendNotification`, and there is intentionally no
+Agent tool. `RegisterDevice`,
 `UnregisterDevice` and `GetCurrentDevice` require a user session.
 
 ## Compatibility
