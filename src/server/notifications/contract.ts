@@ -3,6 +3,7 @@
  * outbound delivery (webhook and App destinations).
  */
 import { z } from 'zod';
+import { parseHatchLink } from '../../../packages/hatch-platform-api/deep-link';
 import {
   NOTIFICATION_KIND_RE,
   notificationKindSchema,
@@ -44,8 +45,8 @@ export const notificationPushSchema = z
       .max(MAX_NOTIFICATION_URL)
       .nullish()
       .transform((value) => (value ? value : null))
-      .refine((value) => value === null || isHttpUrl(value), {
-        message: 'url must be an absolute http(s) URL',
+      .refine((value) => value === null || isNotificationUrl(value), {
+        message: 'url must be an absolute http(s) URL or a hatch:// link',
       }),
     /**
      * Tapping the phone push opens `url` instead of the notification. Defaults
@@ -111,6 +112,19 @@ export const channelKindsSchema = z
       seen.add(entry.kind);
     });
   });
+
+/**
+ * A notification links to a web page or to a Hatch page by deep link
+ * (`hatch://app/<slug>#/route`), which phones open natively and the web opens
+ * on the instance. Development loopback instances are accepted in links; the
+ * phone decides whether it may open them.
+ */
+export function isNotificationUrl(value: string): boolean {
+  return (
+    isHttpUrl(value) ||
+    parseHatchLink(value, { allowLoopbackHttp: true }) !== null
+  );
+}
 
 export function isHttpUrl(value: string): boolean {
   try {

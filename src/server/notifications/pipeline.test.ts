@@ -566,6 +566,25 @@ describe('ingress authentication', () => {
     expect(envelope).toMatchObject({
       notification: { id, url, autoOpenUrl: true },
     });
+
+    // A deep link to a Hatch page is a URL too, forwarded as written.
+    const link = 'hatch://app/status#/db/1?instance=hatch.example.test';
+    const deep = await send({ url: link });
+    expect(deep.status).toBe(202);
+    const deepId = ((await deep.json()) as { id: string }).id;
+    await runAllDue();
+    expect(
+      received
+        .map((request) => JSON.parse(request.body))
+        .find((body) => body.notification.id === deepId),
+    ).toMatchObject({ notification: { url: link, autoOpenUrl: true } });
+    for (const unsafe of [
+      'hatch://api/rpc',
+      'hatch://app/%2e%2e/api',
+      'hatch://app/x?instance=http://evil.example',
+      'javascript:alert(1)',
+    ])
+      expect((await send({ url: unsafe })).status).toBe(400);
   });
 });
 

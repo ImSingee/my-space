@@ -12,8 +12,10 @@ import {
   decideLoad,
   decideNewWindow,
   destinationUrl,
+  surfaceRoute,
   webViewHandoffSource,
   type BrowserDestination,
+  type DeepLink,
   type SessionHandoff,
   type SurfaceDecision,
 } from '../core';
@@ -30,7 +32,14 @@ const SurfaceWebView = WebView as unknown as ComponentType<
   WebViewProps & { ref?: Ref<WebViewHandle> }
 >;
 
-export type SurfaceHandle = { goBack: () => void };
+export type SurfaceHandle = {
+  goBack: () => void;
+  /**
+   * Moves the page to another route of its own (the part after `#`) as a
+   * new history entry, so back returns to the page it left.
+   */
+  showRoute: (hash: string) => void;
+};
 
 function sameInstance(origin: string, value: string): URL | null {
   try {
@@ -58,7 +67,7 @@ export function SecureSurface({
   handoff,
   destination,
   retry,
-  onOpenApp,
+  onRoute,
   dashboardRefresh,
   onReady,
   onHistoryBack,
@@ -68,7 +77,8 @@ export function SecureSurface({
   handoff: SessionHandoff;
   destination: BrowserDestination;
   retry: () => void;
-  onOpenApp?: (slug: string) => void;
+  /** Opens a Hatch page that a link in this page leads to. */
+  onRoute?: (link: DeepLink) => void;
   dashboardRefresh?: { id: string; revision: number };
   onReady?: (ready: boolean) => void;
   /**
@@ -104,7 +114,13 @@ export function SecureSurface({
   }, [historyBack, onHistoryBack]);
   useImperativeHandle(
     ref,
-    () => ({ goBack: () => view.current?.goBack() }),
+    () => ({
+      goBack: () => view.current?.goBack(),
+      showRoute: (hash) =>
+        view.current?.injectJavaScript(
+          `location.hash = ${JSON.stringify(`#${hash}`)}; true;`,
+        ),
+    }),
     [],
   );
   // A freshly loaded canvas is already current: only revisions requested after
@@ -147,15 +163,16 @@ export function SecureSurface({
     handoff,
     signedIn,
     ready,
-    canOpenApp: Boolean(onOpenApp),
+    canRoute: Boolean(onRoute),
+    allowDevelopmentLoopback: __DEV__,
   };
   const follow = (decision: SurfaceDecision) => {
     switch (decision.action) {
       case 'external':
         openOutside(decision.url);
         break;
-      case 'app':
-        onOpenApp?.(decision.slug);
+      case 'route':
+        onRoute?.(decision.link);
         break;
       case 'expired':
         fail('Your session expired. Try again to reconnect securely.');
@@ -193,7 +210,7 @@ export function SecureSurface({
         onNavigationStateChange={(state) => {
           // Single-page routing changes the URL without a load request, so it
           // bypasses onShouldStartLoadWithRequest. Keep the surface on its page;
-          // App links open natively instead of inside this view.
+          // links to Hatch pages open natively instead of inside this view.
           if (!signedIn) return;
           setWebCanGoBack(state.canGoBack);
           if (state.loading) return;
@@ -206,10 +223,11 @@ export function SecureSurface({
             fail('Your session expired. Try again to reconnect securely.');
             return;
           }
-          const app = url.pathname.match(/^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/);
           if (state.canGoBack) view.current?.goBack();
           else replacePage(view.current, href);
-          if (app && onOpenApp) onOpenApp(app[1]);
+          // Script routing counts only once the page is showing.
+          const decision = ready ? surfaceRoute(url.href, context) : null;
+          if (decision?.action === 'route') onRoute?.(decision.link);
         }}
         onLoad={({ nativeEvent }) => {
           if (failed.current) return;

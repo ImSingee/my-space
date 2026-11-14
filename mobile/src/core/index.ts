@@ -5,3 +5,4 @@ export * from './vault';
 export * from './client';
 export * from './device-login';
 export * from './stream';
+export * from './deep-link';

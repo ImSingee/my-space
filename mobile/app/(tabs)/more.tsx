@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { View } from 'react-native';
 import type { TabId } from '../../src/core/navigation-preferences';
 import { useNavigationPreferences } from '../../src/state/navigation';
+import { openSection } from '../../src/state/open-section';
 import { useSession } from '../../src/state/session';
 import { tabDetails } from '../../src/ui/navigation';
 import { Tag, Wordmark } from '../../src/ui/primitives';
@@ -15,14 +16,7 @@ export default function MoreScreen() {
   const { origin } = useSession();
   const { preferences } = useNavigationPreferences();
   const host = origin?.replace(/^https?:\/\//, '') ?? 'Not connected';
-  const open = (id: TabId) => {
-    if (preferences.visible.includes(id)) router.navigate(`/(tabs)/${id}`);
-    else
-      router.push({
-        pathname: '/library',
-        params: { kind: id === 'dashboard' ? 'dashboard' : id },
-      });
-  };
+  const open = (id: TabId) => openSection(id, preferences);
   const start =
     preferences.defaultTab === 'more'
       ? 'More'

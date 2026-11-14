@@ -1,5 +1,7 @@
 import { canonicalizeInstanceUrl, MobileError } from './security';
 import type { InstanceUrlOptions } from './security';
+import { parseHatchLink } from '@hatch/platform-api';
+import { isDeepLink } from './deep-link';
 import { externalUrl } from './surface-navigation';
 import type { PushRegistration } from './types';
 
@@ -235,7 +237,14 @@ export function pushTap(
   const mac = text(fields.hatchTapMac);
   const url =
     fields.hatchAutoOpenUrl === true && rawUrl && kid && mac
-      ? externalUrl(rawUrl, { origin, handoff: NO_HANDOFF })
+      ? isDeepLink(rawUrl)
+        ? // A Hatch page by deep link; the app opens it itself.
+          parseHatchLink(rawUrl, {
+            allowLoopbackHttp: options.allowDevelopmentLoopback,
+          })
+          ? rawUrl
+          : null
+        : externalUrl(rawUrl, { origin, handoff: NO_HANDOFF })
       : null;
   return {
     origin,

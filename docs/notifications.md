@@ -48,6 +48,14 @@ Both endpoints accept the same JSON body (≤64 KiB):
 }
 ```
 
+`url` is an absolute http(s) URL or a Hatch deep link: the page's path on the
+instance after `hatch://`, such as `hatch://app/<slug>#/orders/42` or
+`hatch://agent/<id>`, optionally `?instance=<origin>` for a page on another
+instance. Phones open deep links natively; the web opens them on the instance.
+Deep links to `/api`, `/cli` or `/login`, with dot segments, or with an
+instance that is not a bare HTTPS origin are rejected with `400`. Destinations
+receive `url` as written.
+
 `autoOpenUrl` makes tapping the notification on a phone open `url` instead of
 the notification's page in the app. It defaults to `true` when `url` is set and
 `false` otherwise; `false` keeps the notification page, and `true` without
@@ -186,8 +194,11 @@ extension signs the fields it decrypted, `HMAC-SHA256` over
 HKDF-SHA256 (`info = hatch-tap-v1`) from the device key. The app opens the URL
 only when its native key module verifies that signature with this phone's key
 for that instance; otherwise the tap opens the notification, which still shows
-its link. Only the URL leaves the app, through the same external-link policy as
-web surfaces, so it needs no session on that instance.
+its link. A Hatch page (the instance's own web address or a `hatch://` deep
+link) opens in the app, on the sending instance unless the link names another
+one, which the app asks before switching to; a deep link never leaves the app.
+Any other URL leaves the app through the same external-link policy as web
+surfaces, so it needs no session on that instance.
 Device rows reference their sign-in session with `ON DELETE CASCADE`, so
 signing out or revoking the session removes the device. Better Auth deletes an
 expired session only when it is presented again, which a replaced or wiped

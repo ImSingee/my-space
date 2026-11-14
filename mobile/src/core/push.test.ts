@@ -218,6 +218,8 @@ describe('push taps', () => {
       'https://user:secret@tracking.example.com/',
       `${origin}/api/auth/handoffs/complete`,
       `${origin}/api/auth/%68andoffs/complete`,
+      'hatch://api/auth/handoffs/consume',
+      'hatch://app/%2e%2e/api',
       'not a url',
     ]) {
       expect(signed({ hatchUrl })).toMatchObject({
@@ -225,6 +227,14 @@ describe('push taps', () => {
         autoOpen: null,
       });
     }
+  });
+
+  it('lets a signed Hatch deep link open on tap', () => {
+    const hatchUrl = 'hatch://app/status#/db/1';
+    expect(signed({ hatchUrl })?.autoOpen).toMatchObject({
+      url: hatchUrl,
+      signed: { url: hatchUrl },
+    });
   });
 
   it('opens nothing for pushes it cannot attribute', () => {

@@ -3,9 +3,15 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { useId, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { appDestination, type BrowserDestination } from '../../src/core';
+import {
+  appDestination,
+  type BrowserDestination,
+  type DeepLink,
+} from '../../src/core';
+import { openSurfaceLink } from '../../src/state/deep-links';
 import { SecureSurface, type SurfaceHandle } from '../../src/ui/secure-surface';
 import { useSession } from '../../src/state/session';
+import { useLinkedId } from '../../src/state/use-linked-id';
 import { useWebHistoryBack } from '../../src/state/use-web-history-back';
 import { glyphs } from '../../src/ui/glyph.types';
 import { Busy, Notice, errorText } from '../../src/ui/primitives';
@@ -27,10 +33,11 @@ export default function AppScreen() {
   const surface = useRef<SurfaceHandle>(null);
   const [inPageBack, setInPageBack] = useState(false);
   useWebHistoryBack(inPageBack, () => surface.current?.goBack());
+  const linked = useLinkedId('apps', id, slug);
   const app = useQuery({
-    queryKey: [origin, 'app', id],
-    queryFn: ({ signal }) => api!.app(id, signal),
-    enabled: Boolean(api),
+    queryKey: [origin, 'app', linked.id],
+    queryFn: ({ signal }) => api!.app(linked.id!, signal),
+    enabled: Boolean(api && linked.id),
   });
   const appSlug = slug || app.data?.slug;
   let destination: BrowserDestination | null = null;
@@ -51,8 +58,22 @@ export default function AppScreen() {
     refetchOnReconnect: false,
   });
   const retry = () => {
+    linked.retry();
     void app.refetch();
     setAttempt((value) => value + 1);
+  };
+  // A link to this App's own route moves this page there as a step in its
+  // history, so back returns to the page it came from; anything else opens
+  // over it.
+  const route = (link: DeepLink) => {
+    const { target } = link;
+    if (
+      (link.instance ?? origin) === origin &&
+      target.kind === 'app' &&
+      target.slug === appSlug
+    )
+      surface.current?.showRoute(target.hash ?? '');
+    else openSurfaceLink(link);
   };
   const data = handoff.data;
   const name = label || app.data?.name || 'App';
@@ -76,12 +97,17 @@ export default function AppScreen() {
           Reload app
         </Stack.Toolbar.Button>
       </Stack.Toolbar>
-      {invalid || handoff.error || (app.error && !destination) ? (
+      {invalid ||
+      linked.error ||
+      handoff.error ||
+      (app.error && !destination) ? (
         <View style={{ flex: 1, padding: 16, backgroundColor: c.paper }}>
           <Notice
             tone="danger"
             title="Couldn’t open this app"
-            detail={errorText(invalid ?? handoff.error ?? app.error)}
+            detail={errorText(
+              invalid ?? linked.error ?? handoff.error ?? app.error,
+            )}
             action={{ label: 'Try again', onPress: retry }}
           />
         </View>
@@ -96,6 +122,7 @@ export default function AppScreen() {
           destination={destination}
           retry={retry}
           onHistoryBack={setInPageBack}
+          onRoute={route}
         />
       )}
     </SafeAreaView>
