@@ -123,8 +123,9 @@ function ConversationBody({
   // resize rewraps the text under a fixed offset, which is not a new place.
   const anchor = useRef(reading.initial);
   // While settling, every new layout of the anchored message scrolls back to
-  // the place; a resize or a handoff lays text out more than once. The
-  // reader's first drag ends it.
+  // the place, or to the end for a reader following it; a resize or a
+  // handoff lays text out more than once, and the list learns the new end
+  // only as its rows report their sizes. The reader's first drag ends it.
   const settle = useRef<number | null>(
     reading.initial.atBottom ? null : Number.POSITIVE_INFINITY,
   );
@@ -134,18 +135,27 @@ function ConversationBody({
   // reflows lands mid-way and must not be taken for the reader's place.
   const dragged = useRef(false);
   const width = useRef<number | null>(null);
+  const list = useRef<FlatList<JsonValue>>(null);
+  // The native end: the list's own estimate leaves out the content padding
+  // and the bar insets, and lags behind rows still reflowing.
+  const toEnd = () =>
+    list.current?.getNativeScrollRef()?.scrollToEnd({ animated: false });
   const settleAgain = () => {
-    if (!anchor.current.atBottom) settle.current = Date.now() + SETTLE_MS;
+    settle.current = Date.now() + SETTLE_MS;
   };
   const apply = useCallback(() => {
-    if (settle.current === null || anchor.current.atBottom) return;
+    if (settle.current === null) return;
     if (Date.now() > settle.current) {
       settle.current = null;
       return;
     }
+    dragged.current = false;
+    if (anchor.current.atBottom) {
+      toEnd();
+      return;
+    }
     const { index, fraction } = anchor.current;
     const cell = cells.current.get(index);
-    dragged.current = false;
     if (!cell) {
       list.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
       return;
@@ -161,7 +171,7 @@ function ConversationBody({
   const recordCell = useCallback(
     (index: number, layout: LayoutRectangle) => {
       cells.current.set(index, { y: layout.y, height: layout.height });
-      if (anchor.current.index === index) apply();
+      if (anchor.current.atBottom || anchor.current.index === index) apply();
     },
     [apply],
   );
@@ -170,7 +180,6 @@ function ConversationBody({
     reading.save(anchor.current);
     setAtBottom(bottom);
   };
-  const list = useRef<FlatList<JsonValue>>(null);
   const frame = useRef<ViewInstance>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const sending = useRef(false);
@@ -523,7 +532,7 @@ function ConversationBody({
     };
   }, []);
   useEffect(() => {
-    if (atBottom) list.current?.scrollToEnd({ animated: false });
+    if (atBottom) toEnd();
   }, [stream.state.lastSeq, detail?.messages.length, atBottom]);
   const busy = requesting || send.isPending || retryRun.isPending;
   const lastRun = detail?.runs.at(-1);
@@ -670,11 +679,14 @@ function ConversationBody({
               }}
               onContentSizeChange={() => {
                 if (settle.current !== null) {
-                  if ((detail?.messages.length ?? 0) > anchor.current.index)
+                  if (
+                    anchor.current.atBottom ||
+                    (detail?.messages.length ?? 0) > anchor.current.index
+                  )
                     apply();
                   return;
                 }
-                if (atBottom) list.current?.scrollToEnd({ animated: false });
+                if (atBottom) toEnd();
               }}
               renderItem={({ item, index }) => {
                 const after = heldShown.after.get(index);
