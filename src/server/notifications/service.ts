@@ -737,9 +737,10 @@ export async function registerDevice(
       existing.disabledReason === 'device' ||
       (existing.disabledReason === 'unregistered' &&
         existing.apnsToken !== apnsToken);
+    // The phone's name only seeds a new device: a name chosen later on the
+    // phone or the web must survive the re-registration on every launch.
     const values = {
       type: 'device' as const,
-      name,
       ...(revive
         ? { enabled: true, disabledReason: null, lastError: null }
         : {}),
@@ -759,7 +760,7 @@ export async function registerDevice(
     } else {
       await tx
         .insert(schema.notificationDestinations)
-        .values({ id: destinationId, ...values });
+        .values({ id: destinationId, name, ...values });
     }
     return destinationId;
   });

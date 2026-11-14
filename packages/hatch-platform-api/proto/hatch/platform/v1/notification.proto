@@ -292,6 +292,8 @@ message DeleteDestinationRequest {
 message DeleteDestinationResponse {}
 
 message RegisterDeviceRequest {
+  // Initial display name. An already registered device keeps its current
+  // name; rename it with UpdateDestination.
   string name = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 80

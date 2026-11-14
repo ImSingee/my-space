@@ -30,6 +30,7 @@ export const glyphs = {
   eyeSlash: 'eye.slash',
   sparkle: 'sparkle',
   bell: 'bell',
+  settings: 'gearshape',
 } as const;
 
 export type GlyphName = keyof typeof glyphs;

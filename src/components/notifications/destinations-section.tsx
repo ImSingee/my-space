@@ -215,6 +215,54 @@ function RotatedSecretModal({
   );
 }
 
+function RenameDeviceModal({
+  device,
+  onClose,
+}: {
+  device: DestinationView;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(device.name);
+  const rename = useNotificationMutation(
+    (input: { id: string; name: string }) =>
+      updateDestinationFn({ data: input }),
+    { success: 'Device renamed', onSuccess: () => onClose() },
+  );
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    rename.mutate({ id: device.id, name: name.trim() });
+  };
+  return (
+    <Modal opened onClose={onClose} title="Rename device" centered>
+      <form onSubmit={submit}>
+        <Stack gap="md">
+          <TextInput
+            label="Name"
+            description="The app keeps this name when it registers again."
+            value={name}
+            onChange={(event) => setName(event.currentTarget.value)}
+            maxLength={80}
+            required
+            data-autofocus
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              loading={rename.isPending}
+              disabled={!name.trim()}
+            >
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </form>
+    </Modal>
+  );
+}
+
 export function DestinationsSection() {
   const { data: destinations } = useSuspenseQuery(
     notificationDestinationsQueryOptions,
@@ -223,6 +271,7 @@ export function DestinationsSection() {
     editing: DestinationView | null;
   } | null>(null);
   const [rotated, setRotated] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<DestinationView | null>(null);
 
   const toggle = useNotificationMutation(
     (input: { id: string; enabled: boolean }) =>
@@ -366,6 +415,14 @@ export function DestinationsSection() {
                       >
                         Send test
                       </Menu.Item>
+                      {destination.type === 'device' ? (
+                        <Menu.Item
+                          leftSection={<IconPencil size={14} stroke={1.6} />}
+                          onClick={() => setRenaming(destination)}
+                        >
+                          Rename
+                        </Menu.Item>
+                      ) : null}
                       {destination.type === 'webhook' ? (
                         <>
                           <Menu.Item
@@ -408,6 +465,13 @@ export function DestinationsSection() {
           opened
           editing={webhookModal.editing}
           onClose={() => setWebhookModal(null)}
+        />
+      ) : null}
+      {renaming ? (
+        <RenameDeviceModal
+          key={renaming.id}
+          device={renaming}
+          onClose={() => setRenaming(null)}
         />
       ) : null}
       <RotatedSecretModal secret={rotated} onClose={() => setRotated(null)} />
