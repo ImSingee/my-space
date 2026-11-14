@@ -28,6 +28,7 @@ import {
   retryDelivery,
   rotateChannelToken,
   rotateWebhookSecret,
+  sendChannelNotification,
   sendTestNotification,
   unregisterDevice,
   updateChannel,
@@ -39,6 +40,7 @@ import {
   type NotificationStatus,
   type NotificationSummaryView,
 } from '~server/notifications/service';
+import { MAX_NOTIFICATION_BODY_BYTES } from '~server/notifications/contract';
 import { sessionOriginError } from '~server/session-http-auth';
 import { authenticatePublicApi } from './auth';
 import { publicApiError, publicError } from './errors';
@@ -93,6 +95,21 @@ function kindInput(
   }));
 }
 
+/** `data_json` must be a JSON object; empty or absent means no data. */
+function dataObject(json: string | undefined): unknown {
+  if (!json) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw publicApiError('BAD_REQUEST', 'data_json must be valid JSON.');
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw publicApiError('BAD_REQUEST', 'data_json must be a JSON object.');
+  }
+  return value;
+}
+
 function sessionOf(context: HandlerContext) {
   const auth = context.values.get(publicApiContext);
   if (auth.status?.credentialType !== 'session' || !auth.session) {
@@ -101,11 +118,20 @@ function sessionOf(context: HandlerContext) {
   return { sessionId: auth.session.id, userId: auth.status.user.id };
 }
 
+/**
+ * SendNotification carries `data_json` as a string inside the request, so
+ * escaping can double the 32 KiB data and text fields of a Channel push. The
+ * request gate runs before the body is read, so only session and API-key
+ * callers can send bodies this large.
+ */
+export const NOTIFICATION_RPC_BODY_LIMIT = 2 * MAX_NOTIFICATION_BODY_BYTES;
+
 export function registerNotificationApi(router: ConnectRouter) {
   // Users (session or API key) manage delivery; Run credentials never do.
   const userCredentials = {
     grpc: false,
     grpcWeb: false,
+    readMaxBytes: NOTIFICATION_RPC_BODY_LIMIT,
     requestGate: async (context: HandlerContext) => {
       try {
         const request = new Request(context.url, {
@@ -167,6 +193,23 @@ export function registerNotificationApi(router: ConnectRouter) {
       sendTestNotification: async (input) => ({
         notificationId: (await sendTestNotification(input.destinationId)).id,
       }),
+      sendNotification: async (input) => {
+        const result = await sendChannelNotification(input.channelId, {
+          kind: input.kind,
+          title: input.title,
+          body: input.body,
+          url: input.url,
+          autoOpenUrl: input.autoOpenUrl,
+          data: dataObject(input.dataJson),
+          dedupeKey: input.dedupeKey,
+          occurredAt: input.occurredAt,
+        });
+        return {
+          notificationId: result.id,
+          deduplicated: result.deduplicated,
+          deliveryCount: result.deliveries,
+        };
+      },
       listNotificationSources: async () => {
         const sources = await listNotificationSources();
         return {

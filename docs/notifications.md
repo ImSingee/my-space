@@ -61,6 +61,17 @@ Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
   token in `x-hatch-secret` (header presence wins, even empty) or `?secret=`.
   Only the token's sha256 is stored; create and rotate return it once.
   Disabled channels answer 403.
+- **Channel, as a user**: `SendNotification` (`hatch notification send
+  <channel-id> --kind … --title …`) pushes the same body as that Channel
+  without its token, authenticated by a user session or API key. An unset
+  `auto_open_url` takes the same default as `autoOpenUrl`; the CLI sends
+  `false` only for `--no-auto-open-url`. It shares
+  the kind check, dedupe scope and routing with token pushes
+  (`ingestChannelPush`), answers `CONFLICT` for a disabled channel and
+  `BAD_REQUEST` for an invalid body or undeclared kind, and returns the
+  queued delivery count so callers can spot sends that reached no enabled
+  destination. `NotificationService` reads requests up to 128 KiB (twice the
+  Channel push cap) because `data_json` is escaped inside the request.
 
 ## Delivery
 
@@ -208,7 +219,8 @@ Web UI: Server Functions in `src/server/notifications.ts`. Native clients and
 the CLI: `NotificationService` (`notification.proto`) at `/api/rpc`. Both call
 `service.ts`. Session and API-key credentials may manage everything; Run
 credentials are rejected (`SESSION_REQUIRED`), so Agents cannot reconfigure
-delivery and there is intentionally no Agent tool. `RegisterDevice`,
+delivery or push through `SendNotification`, and there is intentionally no
+Agent tool. `RegisterDevice`,
 `UnregisterDevice` and `GetCurrentDevice` require a user session.
 
 ## Compatibility

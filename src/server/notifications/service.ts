@@ -33,6 +33,7 @@ import {
   isHttpUrl,
   type NotificationPush,
 } from './contract';
+import { ingestChannelPush } from './channel-ingress';
 import {
   ingestNotification,
   newNotificationId,
@@ -1205,6 +1206,31 @@ export async function sendTestNotification(
     onlyDestinationId: destination.id,
   });
   return { id: result.id };
+}
+
+/**
+ * Push a notification as a Channel on behalf of a signed-in user: the same
+ * body rules, kind check and routing as a token-authenticated Channel push.
+ */
+export async function sendChannelNotification(
+  channelId: string,
+  body: unknown,
+): Promise<{ id: string; deduplicated: boolean; deliveries: number }> {
+  const channel = await db.query.notificationChannels.findFirst({
+    where: { id: channelId },
+    columns: { id: true, name: true, kinds: true, enabled: true },
+  });
+  if (!channel) notFound('Channel');
+  if (!channel.enabled) {
+    throw new AppError('Enable the channel before sending to it.', 409);
+  }
+  const result = await ingestChannelPush(channel, body);
+  if (!result.ok) throw new AppError(`${result.message}.`, 400);
+  return {
+    id: result.id,
+    deduplicated: result.deduplicated,
+    deliveries: result.deliveries,
+  };
 }
 
 export function apnsStatus(): ApnsStatusView {

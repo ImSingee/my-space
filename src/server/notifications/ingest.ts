@@ -15,7 +15,12 @@ export type NotificationSource =
   | { type: 'channel'; channelId: string; name: string }
   | { type: 'platform'; name: string };
 
-export type IngestResult = { id: string; deduplicated: boolean };
+/** `deliveries` counts the deliveries queued now; 0 for a duplicate. */
+export type IngestResult = {
+  id: string;
+  deduplicated: boolean;
+  deliveries: number;
+};
 
 export function newNotificationId(): string {
   return ulid().toLowerCase();
@@ -215,7 +220,7 @@ export async function ingestNotification(args: {
     });
     if (outcome.deliveries > 0) wakeNotificationDispatcher();
   }
-  return { id: outcome.id, deduplicated: outcome.deduplicated };
+  return outcome;
 }
 
 /** Re-queue a failed delivery for an immediate fresh attempt series. */

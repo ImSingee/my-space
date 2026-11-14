@@ -12,6 +12,9 @@ service NotificationService {
   rpc GetNotification(GetNotificationRequest) returns (GetNotificationResponse);
   rpc RetryDelivery(RetryDeliveryRequest) returns (RetryDeliveryResponse);
   rpc SendTestNotification(SendTestNotificationRequest) returns (SendTestNotificationResponse);
+  // Push a notification as a Channel without its token; routed like a
+  // Channel push. Run credentials are rejected like every other method.
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
   rpc ListNotificationSources(ListNotificationSourcesRequest) returns (ListNotificationSourcesResponse);
   rpc GetApnsStatus(GetApnsStatusRequest) returns (GetApnsStatusResponse);
 
@@ -158,6 +161,38 @@ message SendTestNotificationRequest {
 }
 message SendTestNotificationResponse {
   string notification_id = 1;
+}
+
+// Same fields and limits as the Channel push body.
+message SendNotificationRequest {
+  string channel_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+  string kind = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,63}$"];
+  // At most 200 characters after trimming, checked by the shared Channel
+  // push rules so both paths accept the same titles.
+  string title = 3 [(buf.validate.field).string.min_len = 1];
+  optional string body = 4 [(buf.validate.field).string.max_len = 4000];
+  // Absolute http(s) URL.
+  optional string url = 5 [(buf.validate.field).string.max_len = 2048];
+  // JSON object, at most 32 KiB serialized.
+  optional string data_json = 6 [(buf.validate.field).string.max_len = 65536];
+  // Repeats from the same Channel return the first notification.
+  optional string dedupe_key = 7 [(buf.validate.field).string.max_len = 200];
+  // ISO-8601 timestamp; defaults to now.
+  optional string occurred_at = 8 [(buf.validate.field).string.max_len = 64];
+  // Tapping the phone push opens url instead of the notification. Unset
+  // defaults to whether url is set; false keeps the notification page; true
+  // requires url.
+  optional bool auto_open_url = 9;
+}
+message SendNotificationResponse {
+  string notification_id = 1;
+  // True when dedupe_key matched an earlier notification from this Channel.
+  bool deduplicated = 2;
+  // Deliveries queued by matching routes; 0 for a duplicate.
+  uint32 delivery_count = 3;
 }
 
 message NotificationKind {

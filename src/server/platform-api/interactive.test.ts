@@ -1482,6 +1482,66 @@ describe('notification center authority', () => {
       },
     });
     expect(created.status).toBe(200);
+    const channelId = ((await created.json()) as { channel: { id: string } })
+      .channel.id;
+    const alert = { channelId, kind: 'alert', title: 'Disk full' };
+    // Users send as a channel without its token; routing still applies.
+    const sent = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: alert,
+    });
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({
+      notificationId: expect.any(String),
+    });
+    // Titles are limited after trimming, exactly like a token push.
+    const padded = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, title: ` ${'a'.repeat(200)} ` },
+    });
+    expect(padded.status).toBe(200);
+    const tooLong = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, title: 'a'.repeat(201) },
+    });
+    expect(tooLong.status).toBe(400);
+    // Data at the 32 KiB Channel push limit fits even when escaping doubles
+    // it inside data_json.
+    const quotes = { blob: '"'.repeat(16_000) };
+    expect(Buffer.byteLength(JSON.stringify(quotes))).toBeLessThan(32 * 1024);
+    const largeData = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, dataJson: JSON.stringify(quotes) },
+    });
+    expect(largeData.status).toBe(200);
+    // auto_open_url presence survives the RPC: unset follows url, false keeps
+    // the notification page.
+    const autoOpen = async (extra: Record<string, unknown>) => {
+      const response = await call('NotificationService/SendNotification', {
+        headers: apiKey,
+        body: { ...alert, url: 'https://status.example.com/1', ...extra },
+      });
+      expect(response.status).toBe(200);
+      const { notificationId } = (await response.json()) as {
+        notificationId: string;
+      };
+      const detail = await call('NotificationService/GetNotification', {
+        headers: apiKey,
+        body: { id: notificationId },
+      });
+      return (
+        (await detail.json()) as {
+          notification: { summary: { autoOpenUrl?: boolean } };
+        }
+      ).notification.summary.autoOpenUrl;
+    };
+    expect(await autoOpen({})).toBe(true);
+    expect(await autoOpen({ autoOpenUrl: false })).toBeFalsy();
+    const undeclared = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, kind: 'other' },
+    });
+    expect(undeclared.status).toBe(400);
     const register = await call('NotificationService/RegisterDevice', {
       headers: apiKey,
       body: device,
@@ -1494,10 +1554,15 @@ describe('notification center authority', () => {
       'NotificationService/ListDestinations',
       'NotificationService/ListChannels',
       'NotificationService/CreateGroup',
+      'NotificationService/SendNotification',
     ]) {
       const response = await call(path, {
         headers: { authorization: `Bearer ${jwt.token}` },
-        body: path.endsWith('CreateGroup') ? { name: 'Agents' } : {},
+        body: path.endsWith('CreateGroup')
+          ? { name: 'Agents' }
+          : path.endsWith('SendNotification')
+            ? alert
+            : {},
       });
       expect(response.status).toBe(403);
       expect(await errorCode(response)).toBe('SESSION_REQUIRED');
