@@ -115,6 +115,9 @@ function ConversationBody({
   // moves it to another screen reopens the same place, and follows new
   // messages only if the reader was already at the end.
   const reading = useReadingAnchor(origin, id);
+  // Following the end, like the place itself, changes only when the reader
+  // scrolls or sends: a restore that briefly lands on the end while text
+  // reflows must not start following it.
   const [atBottom, setAtBottom] = useState(reading.initial.atBottom);
   // The reader's place, changed only by the reader's own scrolling: a
   // resize rewraps the text under a fixed offset, which is not a new place.
@@ -126,6 +129,10 @@ function ConversationBody({
     reading.initial.atBottom ? null : Number.POSITIVE_INFINITY,
   );
   const cells = useRef(new Map<number, { y: number; height: number }>());
+  // Whether the scroll now ending began with the reader's finger. UIKit also
+  // ends programmatic scrolls with a momentum event; a restore while text
+  // reflows lands mid-way and must not be taken for the reader's place.
+  const dragged = useRef(false);
   const width = useRef<number | null>(null);
   const settleAgain = () => {
     if (!anchor.current.atBottom) settle.current = Date.now() + SETTLE_MS;
@@ -138,6 +145,7 @@ function ConversationBody({
     }
     const { index, fraction } = anchor.current;
     const cell = cells.current.get(index);
+    dragged.current = false;
     if (!cell) {
       list.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
       return;
@@ -160,6 +168,7 @@ function ConversationBody({
   const keepPlace = (offset: number, bottom: boolean) => {
     anchor.current = readingAt(cells.current, offset, bottom);
     reading.save(anchor.current);
+    setAtBottom(bottom);
   };
   const list = useRef<FlatList<JsonValue>>(null);
   const frame = useRef<ViewInstance>(null);
@@ -624,15 +633,8 @@ function ConversationBody({
                 }
                 width.current = next;
               }}
-              onScroll={(event) => {
-                const { contentOffset, layoutMeasurement, contentSize } =
-                  event.nativeEvent;
-                setAtBottom(
-                  contentOffset.y + layoutMeasurement.height >=
-                    contentSize.height - 100,
-                );
-              }}
               onScrollBeginDrag={() => {
+                dragged.current = true;
                 settle.current = null;
               }}
               onScrollEndDrag={(event) => {
@@ -645,6 +647,8 @@ function ConversationBody({
                 );
               }}
               onMomentumScrollEnd={(event) => {
+                if (!dragged.current) return;
+                dragged.current = false;
                 const { contentOffset, layoutMeasurement, contentSize } =
                   event.nativeEvent;
                 keepPlace(
@@ -653,7 +657,6 @@ function ConversationBody({
                     contentSize.height - 100,
                 );
               }}
-              scrollEventThrottle={100}
               CellRendererComponent={RecordingCell}
               onScrollToIndexFailed={(info) => {
                 // Rows above it are not measured yet: get near, then restore.
