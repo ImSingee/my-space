@@ -800,12 +800,19 @@ export async function currentDevice(
  * devices. Only creation joins: re-registering an existing device never
  * re-adds it to a group it was removed from. Full groups are skipped rather
  * than failing the registration.
+ *
+ * The group rows are locked (in id order, so concurrent registrations cannot
+ * deadlock) before members are counted. Concurrent registrations and
+ * `updateGroup`, which updates the group row before replacing its members,
+ * therefore serialize per group and cannot push it past the member limit.
  */
 async function joinAutoAddGroups(tx: TX, destinationId: string): Promise<void> {
-  const groups = await tx.query.notificationGroups.findMany({
-    where: { autoAddDevices: true },
-    columns: { id: true },
-  });
+  const groups = await tx
+    .select({ id: schema.notificationGroups.id })
+    .from(schema.notificationGroups)
+    .where(eq(schema.notificationGroups.autoAddDevices, true))
+    .orderBy(schema.notificationGroups.id)
+    .for('update');
   if (groups.length === 0) return;
   const counts = await tx
     .select({
