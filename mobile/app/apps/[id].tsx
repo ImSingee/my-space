@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { useId, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -59,8 +59,9 @@ export default function AppScreen() {
     void app.refetch();
     setAttempt((value) => value + 1);
   };
-  // A link to this App's own route moves this page there; anything else
-  // opens over it.
+  // A link to this App's own route moves this page there as a step in its
+  // history, so back returns to the page it came from; anything else opens
+  // over it.
   const route = (link: DeepLink) => {
     const { target } = link;
     if (
@@ -68,7 +69,7 @@ export default function AppScreen() {
       target.kind === 'app' &&
       target.slug === appSlug
     )
-      router.setParams({ entryHash: target.hash ?? '' });
+      surface.current?.showRoute(target.hash ?? '');
     else openSurfaceLink(link);
   };
   const data = handoff.data;

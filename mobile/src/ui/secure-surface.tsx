@@ -32,7 +32,14 @@ const SurfaceWebView = WebView as unknown as ComponentType<
   WebViewProps & { ref?: Ref<WebViewHandle> }
 >;
 
-export type SurfaceHandle = { goBack: () => void };
+export type SurfaceHandle = {
+  goBack: () => void;
+  /**
+   * Moves the page to another route of its own (the part after `#`) as a
+   * new history entry, so back returns to the page it left.
+   */
+  showRoute: (hash: string) => void;
+};
 
 function sameInstance(origin: string, value: string): URL | null {
   try {
@@ -107,7 +114,13 @@ export function SecureSurface({
   }, [historyBack, onHistoryBack]);
   useImperativeHandle(
     ref,
-    () => ({ goBack: () => view.current?.goBack() }),
+    () => ({
+      goBack: () => view.current?.goBack(),
+      showRoute: (hash) =>
+        view.current?.injectJavaScript(
+          `location.hash = ${JSON.stringify(`#${hash}`)}; true;`,
+        ),
+    }),
     [],
   );
   // A freshly loaded canvas is already current: only revisions requested after
