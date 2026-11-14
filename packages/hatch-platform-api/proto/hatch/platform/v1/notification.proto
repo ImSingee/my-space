@@ -168,10 +168,9 @@ message SendNotificationRequest {
     max_len: 64
   }];
   string kind = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,63}$"];
-  string title = 3 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 200
-  }];
+  // At most 200 characters after trimming, checked by the shared Channel
+  // push rules so both paths accept the same titles.
+  string title = 3 [(buf.validate.field).string.min_len = 1];
   optional string body = 4 [(buf.validate.field).string.max_len = 4000];
   // Absolute http(s) URL.
   optional string url = 5 [(buf.validate.field).string.max_len = 2048];

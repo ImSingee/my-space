@@ -312,8 +312,8 @@ const specs: Record<string, Spec> = {
           const count = Number(response.deliveryCount ?? 0);
           if (count === 0)
             return [
-              `Sent notification ${notificationId}, but no route matched it, so nothing was delivered.`,
-              'Add one with hatch notification route create --source-type channel ...',
+              `Sent notification ${notificationId}, but nothing was delivered: no route matched it, or every matched destination is disabled.`,
+              'Check hatch notification route list and hatch notification destination list.',
             ].join('\n');
           return `Sent notification ${notificationId} to ${count} destination${count === 1 ? '' : 's'}.`;
         },

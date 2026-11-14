@@ -60,7 +60,8 @@ Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
   the kind check, dedupe scope and routing with token pushes
   (`ingestChannelPush`), answers `CONFLICT` for a disabled channel and
   `BAD_REQUEST` for an invalid body or undeclared kind, and returns the
-  queued delivery count so callers can spot unrouted sends.
+  queued delivery count so callers can spot sends that reached no enabled
+  destination.
 
 ## Delivery
 

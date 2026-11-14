@@ -1494,6 +1494,17 @@ describe('notification center authority', () => {
     expect(await sent.json()).toMatchObject({
       notificationId: expect.any(String),
     });
+    // Titles are limited after trimming, exactly like a token push.
+    const padded = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, title: ` ${'a'.repeat(200)} ` },
+    });
+    expect(padded.status).toBe(200);
+    const tooLong = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, title: 'a'.repeat(201) },
+    });
+    expect(tooLong.status).toBe(400);
     const undeclared = await call('NotificationService/SendNotification', {
       headers: apiKey,
       body: { ...alert, kind: 'other' },

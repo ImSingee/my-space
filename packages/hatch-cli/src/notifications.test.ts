@@ -221,7 +221,7 @@ describe('notification send', () => {
       deduplicated: false,
       deliveryCount: 0,
     });
-    expect(result.text).toMatch(/no route matched/);
+    expect(result.text).toMatch(/nothing was delivered/);
   });
 
   it('rejects incomplete or malformed input before calling the platform', () => {
