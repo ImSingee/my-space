@@ -48,10 +48,11 @@ export const notificationPushSchema = z
       .refine((value) => value === null || isNotificationUrl(value), {
         message: 'url must be an absolute http(s) URL or a hatch:// link',
       }),
-    autoOpenUrl: z
-      .boolean()
-      .nullish()
-      .transform((value) => value === true),
+    /**
+     * Tapping the phone push opens `url` instead of the notification. Defaults
+     * to whether there is a `url`; `false` keeps the notification page.
+     */
+    autoOpenUrl: z.boolean().nullish(),
     data: z
       .record(z.string(), z.json())
       .nullish()
@@ -78,14 +79,18 @@ export const notificationPushSchema = z
   })
   .strict()
   .superRefine((push, ctx) => {
-    if (push.autoOpenUrl && !push.url) {
+    if (push.autoOpenUrl === true && !push.url) {
       ctx.addIssue({
         code: 'custom',
         message: 'autoOpenUrl requires url',
         path: ['autoOpenUrl'],
       });
     }
-  });
+  })
+  .transform((push) => ({
+    ...push,
+    autoOpenUrl: push.autoOpenUrl ?? push.url !== null,
+  }));
 
 export type NotificationPush = z.output<typeof notificationPushSchema>;
 

@@ -84,6 +84,26 @@ describe('surface navigation', () => {
     expect(decideNewWindow('hatch://api/rpc', dashboard)).toEqual({
       action: 'block',
     });
+    // Pages without a screen here stay put, as with the instance's addresses.
+    expect(decideNewWindow('hatch://settings/providers', dashboard)).toEqual({
+      action: 'block',
+    });
+    // The handoff ticket never travels in a Hatch link either, however
+    // encoded, nor in an address on this instance.
+    const encoded = ticket.replace(/^T/, '%54');
+    for (const url of [
+      `hatch://app/reading#${ticket}`,
+      `hatch://app/reading#${encoded}`,
+      `hatch://agent/s1?q=${ticket}`,
+      `${origin}/app/reading#${ticket}`,
+    ])
+      expect({
+        url,
+        decision: decideLoad(
+          { url, isTopFrame: true, navigationType: 'click' },
+          dashboard,
+        ),
+      }).toEqual({ url, decision: { action: 'block' } });
     expect(
       decideNewWindow('hatch://app/reading', { ...dashboard, signedIn: false }),
     ).toEqual({ action: 'block' });

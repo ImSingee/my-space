@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSession } from '../../src/state/session';
+import { useLinkedId } from '../../src/state/use-linked-id';
 import { usePullToRefresh } from '../../src/state/use-pull-to-refresh';
 import { Button } from '../../src/ui/button';
 import { Busy, Card, Notice, Tag, errorText } from '../../src/ui/primitives';
@@ -24,13 +25,14 @@ function when(iso: string) {
 }
 
 export default function WorkflowScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, slug } = useLocalSearchParams<{ id: string; slug?: string }>();
   const { api, origin } = useSession();
   const [problem, setProblem] = useState<string | null>(null);
+  const linked = useLinkedId('workflows', id, slug);
   const query = useQuery({
-    queryKey: [origin, 'workflow', id],
-    queryFn: ({ signal }) => api!.workflow(id, signal),
-    enabled: Boolean(api),
+    queryKey: [origin, 'workflow', linked.id],
+    queryFn: ({ signal }) => api!.workflow(linked.id!, signal),
+    enabled: Boolean(api && linked.id),
   });
   const workspace = useQuery({
     queryKey: [origin, 'workspace'],
@@ -45,14 +47,21 @@ export default function WorkflowScreen() {
   const pinned =
     (data && workspace.data?.pinnedWorkflowIds.includes(data.id)) ?? false;
   // A failed refresh keeps what was already loaded.
-  if (query.error && !query.data)
+  const failure = linked.error ?? (query.data ? null : query.error);
+  if (failure)
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: c.paper }}>
         <Notice
           tone="danger"
           title="Couldn’t load this workflow"
-          detail={errorText(query.error)}
-          action={{ label: 'Try again', onPress: () => void query.refetch() }}
+          detail={errorText(failure)}
+          action={{
+            label: 'Try again',
+            onPress: () => {
+              linked.retry();
+              void query.refetch();
+            },
+          }}
         />
       </View>
     );

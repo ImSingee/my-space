@@ -502,7 +502,7 @@ describe('ingress authentication', () => {
     expect((await send(rotated)).status).toBe(202);
   });
 
-  it('opens a link on tap only together with that link', async () => {
+  it('opens the link on tap unless the sender keeps the notification', async () => {
     const { channel, token } = await service.createChannel({
       name: 'Monitoring',
       kinds: [{ kind: 'alert', name: 'Alert' }],
@@ -538,32 +538,41 @@ describe('ingress authentication', () => {
     expect(await missing.text()).toContain('autoOpenUrl requires url');
     expect((await send({ autoOpenUrl: true, url: '' })).status).toBe(400);
 
+    const stored = async (body: Record<string, unknown>) => {
+      const response = await send(body);
+      expect(response.status).toBe(202);
+      const { id } = (await response.json()) as { id: string };
+      return (await service.getNotification(id)).autoOpenUrl;
+    };
     const url = 'https://status.example.com/db-1';
-    const accepted = await send({ url, autoOpenUrl: true });
-    expect(accepted.status).toBe(202);
+    // A link opens on tap unless the sender keeps the notification page.
+    expect(await stored({ url })).toBe(true);
+    expect(await stored({ url, autoOpenUrl: null })).toBe(true);
+    expect(await stored({ url, autoOpenUrl: true })).toBe(true);
+    expect(await stored({ url, autoOpenUrl: false })).toBe(false);
+    expect(await stored({})).toBe(false);
+    expect(await stored({ autoOpenUrl: false })).toBe(false);
+
+    const accepted = await send({ url });
     const { id } = (await accepted.json()) as { id: string };
-    expect((await service.getNotification(id)).autoOpenUrl).toBe(true);
     await runAllDue();
-    expect(JSON.parse(received.at(-1)!.body)).toMatchObject({
+    const envelope = received
+      .map((request) => JSON.parse(request.body))
+      .find((body) => body.notification.id === id);
+    expect(envelope).toMatchObject({
       notification: { id, url, autoOpenUrl: true },
     });
 
-    const plain = await send({ url, autoOpenUrl: null });
-    expect(plain.status).toBe(202);
-    const plainId = ((await plain.json()) as { id: string }).id;
-    expect((await service.getNotification(plainId)).autoOpenUrl).toBe(false);
-
     // A deep link to a Hatch page is a URL too, forwarded as written.
     const link = 'hatch://app/status#/db/1?instance=hatch.example.test';
-    const deep = await send({ url: link, autoOpenUrl: true });
+    const deep = await send({ url: link });
     expect(deep.status).toBe(202);
     const deepId = ((await deep.json()) as { id: string }).id;
     await runAllDue();
-    const envelopes = received.map(
-      (request) => JSON.parse(request.body) as { notification: { id: string } },
-    );
     expect(
-      envelopes.find((envelope) => envelope.notification.id === deepId),
+      received
+        .map((request) => JSON.parse(request.body))
+        .find((body) => body.notification.id === deepId),
     ).toMatchObject({ notification: { url: link, autoOpenUrl: true } });
     for (const unsafe of [
       'hatch://api/rpc',

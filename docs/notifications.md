@@ -36,7 +36,7 @@ Both endpoints accept the same JSON body (≤64 KiB):
   "title": "Order 42 shipped",
   "body": "optional, ≤4000",
   "url": "https://optional.example/absolute",
-  "autoOpenUrl": false,
+  "autoOpenUrl": "optional boolean; defaults to whether url is set",
   "data": { "optional": "JSON object ≤32 KiB" },
   "dedupeKey": "optional; repeats return the first notification",
   "occurredAt": "optional ISO-8601"
@@ -51,9 +51,10 @@ Deep links to `/api`, `/cli` or `/login`, with dot segments, or with an
 instance that is not a bare HTTPS origin are rejected with `400`. Destinations
 receive `url` as written.
 
-`autoOpenUrl` (optional, default `false`, requires `url`) makes tapping the
-notification on a phone open `url` instead of the notification's page in the
-app. Other destinations receive the flag in their envelope; the web UI shows
+`autoOpenUrl` makes tapping the notification on a phone open `url` instead of
+the notification's page in the app. It defaults to `true` when `url` is set and
+`false` otherwise; `false` keeps the notification page, and `true` without
+`url` is rejected. Other destinations receive the flag in their envelope; the web UI shows
 it on the notification detail.
 
 Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,

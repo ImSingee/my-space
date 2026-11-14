@@ -57,7 +57,10 @@ function openTarget(
       });
       return;
     case 'workflow':
-      router.push({ pathname: '/workflows/[id]', params: { id: target.slug } });
+      router.push({
+        pathname: '/workflows/[id]',
+        params: { id: target.slug, slug: target.slug },
+      });
       return;
     case 'notifications':
       router.push('/notifications');

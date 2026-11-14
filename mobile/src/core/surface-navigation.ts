@@ -119,30 +119,44 @@ export function externalUrl(
 
 function leave(value: string, context: SurfaceContext): SurfaceDecision {
   if (!context.signedIn) return BLOCK;
-  // Hatch's own links open here, never through the system and back.
+  // Hatch's own links open here, never through the system and back, under
+  // the same rules as the instance's own addresses (see `surfaceRoute`).
   if (isDeepLink(value)) {
-    const link = context.canRoute
-      ? parseDeepLink(value, {
-          allowDevelopmentLoopback: context.allowDevelopmentLoopback,
-        })
-      : null;
-    return link ? { action: 'route', link } : BLOCK;
+    const link =
+      context.canRoute && externalUrl(value, context)
+        ? parseDeepLink(value, {
+            allowDevelopmentLoopback: context.allowDevelopmentLoopback,
+          })
+        : null;
+    return routeTo(link);
   }
   const url = externalUrl(value, context);
   return url ? { action: 'external', url } : BLOCK;
 }
 
 /**
- * A page on this instance outside the surface opens natively when the app has
- * a screen for it. Pages it has none for stay where they are: they would need
- * a browser session the system browser does not have.
+ * Opens a Hatch page natively when the app has a screen for it. Pages it has
+ * none for stay where they are: they would need a browser session the system
+ * browser does not have.
+ */
+function routeTo(link: DeepLink | null): SurfaceDecision {
+  return link && link.target.kind !== 'web' ? { action: 'route', link } : BLOCK;
+}
+
+/**
+ * A page on this instance outside the surface. Like anything leaving the
+ * surface, it never carries the handoff ticket or credentials, however
+ * encoded.
  */
 export function surfaceRoute(
   value: string,
-  context: Pick<SurfaceContext, 'origin' | 'canRoute'>,
+  context: Pick<SurfaceContext, 'origin' | 'canRoute' | 'handoff'>,
 ): SurfaceDecision {
-  const link = context.canRoute ? instanceLink(value, context.origin) : null;
-  return link && link.target.kind !== 'web' ? { action: 'route', link } : BLOCK;
+  return routeTo(
+    context.canRoute && externalUrl(value, context)
+      ? instanceLink(value, context.origin)
+      : null,
+  );
 }
 
 /** A load request inside the WebView (`onShouldStartLoadWithRequest`). */
