@@ -93,7 +93,11 @@ export function createDeviceAdapter(
       columns: { expiresAt: true },
     });
     if (!session || session.expiresAt.getTime() <= Date.now()) {
-      return { kind: 'fail', error: 'The device sign-in session expired.' };
+      return {
+        kind: 'fail',
+        error: 'The device sign-in session ended; the device was removed.',
+        destination: { remove: true },
+      };
     }
 
     let credentials;

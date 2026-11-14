@@ -6,6 +6,7 @@ import {
 } from 'node:crypto';
 import http2 from 'node:http2';
 import type { AddressInfo } from 'node:net';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('~/db', async () => {
@@ -26,7 +27,8 @@ vi.stubEnv('HATCH_APNS_SANDBOX_PRIVATE_KEY', pem.replaceAll('\n', '\\n'));
 const { db, schema } = await import('~/db');
 const service = await import('./service');
 const { ingestNotification } = await import('./ingest');
-const { claimDueDeliveries, runClaimedDelivery } = await import('./dispatcher');
+const { claimDueDeliveries, pruneEndedDeviceDestinations, runClaimedDelivery } =
+  await import('./dispatcher');
 const { createDeviceAdapter } = await import('./adapters/device');
 type DeliveryAdapter = import('./delivery').DeliveryAdapter;
 const { closeApnsSessions, sendApnsRequest } = await import('./apns/client');
@@ -220,6 +222,50 @@ describe('APNs delivery', () => {
     expect(delivery).toMatchObject({ status: 'failed', httpStatus: 410 });
     const [stored] = await service.listDestinations();
     expect(stored).toMatchObject({ id: device.id, enabled: false });
+  });
+
+  it('removes a device whose sign-in session ended without contacting APNs', async () => {
+    await registerDevice();
+    await db
+      .update(schema.session)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.session.id, 'session-1'));
+    const delivery = await deliver('Hello', null);
+    expect(delivery.status).toBe('failed');
+    expect(seen).toHaveLength(0);
+    expect(await service.listDestinations()).toEqual([]);
+    expect(await service.listRoutes()).toEqual([]);
+  });
+
+  it('prunes ended devices that receive nothing and keeps live ones', async () => {
+    const live = await registerDevice();
+    await db.insert(schema.session).values({
+      id: 'session-2',
+      token: 'session-token-2',
+      userId: 'user-1',
+      expiresAt: new Date(Date.now() - 1000),
+      updatedAt: new Date(),
+    });
+    const ended = await service.registerDevice({
+      sessionId: 'session-2',
+      userId: 'user-1',
+      name: 'Old iPhone',
+      platform: 'ios',
+      apnsToken: 'ef'.repeat(32),
+      apnsEnvironment: 'sandbox',
+      e2eKeyId: KEY_ID,
+      e2eKey: DEVICE_KEY.toString('base64url'),
+    });
+    await service.updateDestination({ id: ended.id, enabled: false });
+    const webhook = await service.createWebhook({
+      name: 'Hook',
+      url: 'https://hooks.example.test/in',
+    });
+
+    expect(await pruneEndedDeviceDestinations()).toBe(1);
+    expect(
+      (await service.listDestinations()).map((entry) => entry.id).sort(),
+    ).toEqual([live.id, webhook.destination.id].sort());
   });
 
   it('keeps the device enabled when this instance credentials are rejected', async () => {
