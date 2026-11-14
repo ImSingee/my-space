@@ -718,6 +718,10 @@ export async function registerDevice(
         apnsToken: true,
       },
     });
+    // A new device joins auto-add groups. Lock them before the delete below
+    // cascades into memberships: group row, then member rows is the order
+    // `updateGroup` and `deleteGroup` use, so they cannot deadlock with this.
+    const autoAddGroupIds = existing ? [] : await lockAutoAddGroups(tx);
     await tx
       .delete(schema.notificationDestinations)
       .where(
@@ -763,7 +767,7 @@ export async function registerDevice(
       await tx
         .insert(schema.notificationDestinations)
         .values({ id: destinationId, name, ...values });
-      await joinAutoAddGroups(tx, destinationId);
+      await joinGroups(tx, autoAddGroupIds, destinationId);
     }
     return destinationId;
   });
@@ -796,45 +800,50 @@ export async function currentDevice(
 /** ================== groups ================== */
 
 /**
- * Add a newly created device destination to every group that auto-adds
- * devices. Only creation joins: re-registering an existing device never
- * re-adds it to a group it was removed from. Full groups are skipped rather
- * than failing the registration.
- *
- * The group rows are locked (in id order, so concurrent registrations cannot
- * deadlock) before members are counted. Concurrent registrations and
- * `updateGroup`, which updates the group row before replacing its members,
- * therefore serialize per group and cannot push it past the member limit.
+ * Lock the groups that auto-add devices, in id order so concurrent
+ * registrations cannot deadlock. Concurrent registrations, `updateGroup`
+ * (which updates the group row before replacing its members) and
+ * `deleteGroup` then serialize per group, so the member count read by
+ * `joinGroups` stays valid until commit. Only device creation joins:
+ * re-registering an existing device never re-adds it to a group it was
+ * removed from.
  */
-async function joinAutoAddGroups(tx: TX, destinationId: string): Promise<void> {
+async function lockAutoAddGroups(tx: TX): Promise<string[]> {
   const groups = await tx
     .select({ id: schema.notificationGroups.id })
     .from(schema.notificationGroups)
     .where(eq(schema.notificationGroups.autoAddDevices, true))
     .orderBy(schema.notificationGroups.id)
     .for('update');
-  if (groups.length === 0) return;
+  return groups.map((group) => group.id);
+}
+
+/**
+ * Add a destination to groups locked by `lockAutoAddGroups`. Full groups are
+ * skipped rather than failing the registration.
+ */
+async function joinGroups(
+  tx: TX,
+  groupIds: string[],
+  destinationId: string,
+): Promise<void> {
+  if (groupIds.length === 0) return;
   const counts = await tx
     .select({
       groupId: schema.notificationGroupMembers.groupId,
       count: sql<number>`count(*)::int`,
     })
     .from(schema.notificationGroupMembers)
-    .where(
-      inArray(
-        schema.notificationGroupMembers.groupId,
-        groups.map((group) => group.id),
-      ),
-    )
+    .where(inArray(schema.notificationGroupMembers.groupId, groupIds))
     .groupBy(schema.notificationGroupMembers.groupId);
   const size = new Map(counts.map((row) => [row.groupId, row.count]));
-  const open = groups.filter(
-    (group) => (size.get(group.id) ?? 0) < MAX_GROUP_MEMBERS,
+  const open = groupIds.filter(
+    (groupId) => (size.get(groupId) ?? 0) < MAX_GROUP_MEMBERS,
   );
   if (open.length === 0) return;
   await tx
     .insert(schema.notificationGroupMembers)
-    .values(open.map((group) => ({ groupId: group.id, destinationId })))
+    .values(open.map((groupId) => ({ groupId, destinationId })))
     .onConflictDoNothing();
 }
 
