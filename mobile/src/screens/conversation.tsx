@@ -1276,6 +1276,16 @@ function RecordingCell({
  */
 function useReadingAnchor(origin: string | null, id: string) {
   const client = useQueryClient();
+  // Kept as long as the conversation's drafts: a fold after the reader has
+  // stayed put for a while still reopens their place. Saving it re-renders
+  // nothing; the place is read once, when a screen mounts.
+  useQuery<ReadingAnchor | null>({
+    queryKey: [origin, 'reading', id],
+    queryFn: skipToken,
+    gcTime: Infinity,
+    staleTime: Infinity,
+    notifyOnChangeProps: [],
+  });
   const [initial] = useState(
     () => client.getQueryData<ReadingAnchor>([origin, 'reading', id]) ?? atEnd,
   );
