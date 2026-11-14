@@ -399,6 +399,7 @@ const specs: Record<string, Spec> = {
             field(row, 'id'),
             field(row, 'name'),
             `${Array.isArray(row.destinationIds) ? row.destinationIds.length : 0} destination(s)`,
+            row.autoAddDevices === true ? 'auto-adds new devices' : '',
           ]),
         ),
     }),
@@ -409,6 +410,7 @@ const specs: Record<string, Spec> = {
       name: { type: 'string' },
       description: { type: 'string' },
       destination: { type: 'string', multiple: true },
+      'auto-add-devices': { type: 'boolean' },
     },
     build: (_positionals, values) => {
       const name = str(values, 'name');
@@ -418,6 +420,7 @@ const specs: Record<string, Spec> = {
         request: {
           name,
           description: str(values, 'description'),
+          autoAddDevices: values['auto-add-devices'] ? true : undefined,
           destinationIds: { ids: list(values, 'destination') ?? [] },
         },
         text: (response) =>
@@ -432,9 +435,12 @@ const specs: Record<string, Spec> = {
       description: { type: 'string' },
       destination: { type: 'string', multiple: true },
       'clear-destinations': { type: 'boolean' },
+      'auto-add-devices': { type: 'boolean' },
+      'no-auto-add-devices': { type: 'boolean' },
     },
     build: ([groupId], values) => {
       exclusive(values, 'destination', 'clear-destinations');
+      exclusive(values, 'auto-add-devices', 'no-auto-add-devices');
       const destinations = values['clear-destinations']
         ? []
         : list(values, 'destination');
@@ -442,16 +448,22 @@ const specs: Record<string, Spec> = {
         id: groupId,
         name: str(values, 'name'),
         description: str(values, 'description'),
+        autoAddDevices: values['auto-add-devices']
+          ? true
+          : values['no-auto-add-devices']
+            ? false
+            : undefined,
         destinationIds:
           destinations === undefined ? undefined : { ids: destinations },
       };
       if (
         request.name === undefined &&
         request.description === undefined &&
+        request.autoAddDevices === undefined &&
         request.destinationIds === undefined
       )
         invalid(
-          'Supply --name, --description, --destination or --clear-destinations.',
+          'Supply --name, --description, --destination, --clear-destinations or --[no-]auto-add-devices.',
         );
       return {
         method: 'updateGroup',

@@ -169,6 +169,7 @@ export const listGroupsFn = createServerFn({ method: 'GET' })
 const groupSchema = z.object({
   name: shortText,
   description: z.string().max(500).nullable().optional(),
+  autoAddDevices: z.boolean().optional(),
   destinationIds: z.array(idSchema).max(200).optional(),
 });
 
