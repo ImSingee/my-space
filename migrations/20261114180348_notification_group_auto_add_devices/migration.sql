@@ -1,0 +1,1 @@
+ALTER TABLE "notification_groups" ADD COLUMN "auto_add_devices" boolean DEFAULT false NOT NULL;

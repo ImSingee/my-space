@@ -234,13 +234,14 @@ const definitions: readonly CliCommandDefinition[] = [
   {
     path: ['notification', 'group', 'create'],
     usage:
-      'notification group create --name <name> [--description <text>] [--destination <id>]...',
-    description: 'Create a destination group.',
+      'notification group create --name <name> [--description <text>] [--destination <id>]... [--auto-add-devices]',
+    description:
+      'Create a destination group; --auto-add-devices adds devices registered later.',
   },
   {
     path: ['notification', 'group', 'update'],
     usage:
-      'notification group update <id> [--name <name>] [--description <text>] [--destination <id>... | --clear-destinations]',
+      'notification group update <id> [--name <name>] [--description <text>] [--destination <id>... | --clear-destinations] [--auto-add-devices | --no-auto-add-devices]',
     description: 'Change a group; --destination replaces the full member list.',
   },
   {

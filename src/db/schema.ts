@@ -995,6 +995,11 @@ export const notificationGroups = snakeCase.table('notification_groups', {
   id: ulid().$defaultFn(genUlid).primaryKey(),
   name: text().notNull(),
   description: text(),
+  /**
+   * Device destinations created later join this group on creation. Existing
+   * members are untouched, and a removed device stays removed.
+   */
+  autoAddDevices: boolean().notNull().default(false),
   createdAt,
   updatedAt,
 });

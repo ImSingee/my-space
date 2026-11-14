@@ -151,6 +151,7 @@ beforeEach(async () => {
   await db.delete(schema.notifications);
   await db.delete(schema.notificationRoutes);
   await db.delete(schema.notificationDestinations);
+  await db.delete(schema.notificationGroups);
   await db.delete(schema.notificationChannels);
   await db.delete(schema.user);
   channelId = (
@@ -432,6 +433,55 @@ describe('device refresh', () => {
       enabled: true,
       lastError: null,
     });
+  });
+});
+
+describe('groups that auto-add devices', () => {
+  it('add newly registered devices, but not webhooks', async () => {
+    const auto = await service.createGroup({
+      name: 'All phones',
+      autoAddDevices: true,
+    });
+    const manual = await service.createGroup({ name: 'Manual' });
+    expect(auto.destinationIds).toEqual([]);
+
+    const device = await registerDevice();
+    const webhook = await service.createWebhook({
+      name: 'Later',
+      url: 'https://hooks.example.test/later',
+    });
+    const groups = await service.listGroups();
+    expect(groups.find((group) => group.id === auto.id)).toMatchObject({
+      autoAddDevices: true,
+      destinationIds: [device.id],
+    });
+    expect(groups.find((group) => group.id === manual.id)).toMatchObject({
+      autoAddDevices: false,
+      destinationIds: [],
+    });
+    expect(webhook.destination.groupIds).toEqual([]);
+  });
+
+  it('keep a removed device out when the phone registers again', async () => {
+    const group = await service.createGroup({
+      name: 'All phones',
+      autoAddDevices: true,
+    });
+    const device = await registerDevice();
+    expect(device.groupIds).toEqual([group.id]);
+    await service.updateGroup({ id: group.id, destinationIds: [] });
+
+    const again = await service.registerDevice({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      name: 'iPhone',
+      platform: 'ios',
+      apnsToken: TOKEN,
+      apnsEnvironment: 'sandbox',
+      e2eKeyId: KEY_ID,
+      e2eKey: DEVICE_KEY.toString('base64url'),
+    });
+    expect(again).toMatchObject({ id: device.id, groupIds: [] });
   });
 });
 

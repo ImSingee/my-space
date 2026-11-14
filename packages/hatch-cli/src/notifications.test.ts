@@ -297,4 +297,19 @@ describe('notification group commands', () => {
       ),
     ).toThrow(/only one of/);
   });
+
+  it('sends an explicit false to stop auto-adding devices', async () => {
+    const { transport, received } = recordingTransport();
+    await executeNotificationCall(
+      transport,
+      parse('group', 'update', 'group-1', '--no-auto-add-devices'),
+    );
+    expect(received.updateGroup?.autoAddDevices).toBe(false);
+
+    await executeNotificationCall(
+      transport,
+      parse('group', 'update', 'group-1', '--name', 'Phones'),
+    );
+    expect(received.updateGroup?.autoAddDevices).toBeUndefined();
+  });
 });

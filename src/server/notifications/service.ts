@@ -14,7 +14,7 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
-import { db, schema } from '~/db';
+import { db, schema, type TX } from '~/db';
 import type {
   NotificationDeliveryStatus,
   NotificationDestinationType,
@@ -168,6 +168,8 @@ export type GroupView = {
   id: string;
   name: string;
   description: string | null;
+  /** New device destinations join the group when they are created. */
+  autoAddDevices: boolean;
   destinationIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -719,6 +721,10 @@ export async function registerDevice(
         apnsToken: true,
       },
     });
+    // A new device joins auto-add groups. Lock them before the delete below
+    // cascades into memberships: group row, then member rows is the order
+    // `updateGroup` and `deleteGroup` use, so they cannot deadlock with this.
+    const autoAddGroupIds = existing ? [] : await lockAutoAddGroups(tx);
     await tx
       .delete(schema.notificationDestinations)
       .where(
@@ -764,6 +770,7 @@ export async function registerDevice(
       await tx
         .insert(schema.notificationDestinations)
         .values({ id: destinationId, name, ...values });
+      await joinGroups(tx, autoAddGroupIds, destinationId);
     }
     return destinationId;
   });
@@ -795,6 +802,54 @@ export async function currentDevice(
 
 /** ================== groups ================== */
 
+/**
+ * Lock the groups that auto-add devices, in id order so concurrent
+ * registrations cannot deadlock. Concurrent registrations, `updateGroup`
+ * (which updates the group row before replacing its members) and
+ * `deleteGroup` then serialize per group, so the member count read by
+ * `joinGroups` stays valid until commit. Only device creation joins:
+ * re-registering an existing device never re-adds it to a group it was
+ * removed from.
+ */
+async function lockAutoAddGroups(tx: TX): Promise<string[]> {
+  const groups = await tx
+    .select({ id: schema.notificationGroups.id })
+    .from(schema.notificationGroups)
+    .where(eq(schema.notificationGroups.autoAddDevices, true))
+    .orderBy(schema.notificationGroups.id)
+    .for('update');
+  return groups.map((group) => group.id);
+}
+
+/**
+ * Add a destination to groups locked by `lockAutoAddGroups`. Full groups are
+ * skipped rather than failing the registration.
+ */
+async function joinGroups(
+  tx: TX,
+  groupIds: string[],
+  destinationId: string,
+): Promise<void> {
+  if (groupIds.length === 0) return;
+  const counts = await tx
+    .select({
+      groupId: schema.notificationGroupMembers.groupId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(schema.notificationGroupMembers)
+    .where(inArray(schema.notificationGroupMembers.groupId, groupIds))
+    .groupBy(schema.notificationGroupMembers.groupId);
+  const size = new Map(counts.map((row) => [row.groupId, row.count]));
+  const open = groupIds.filter(
+    (groupId) => (size.get(groupId) ?? 0) < MAX_GROUP_MEMBERS,
+  );
+  if (open.length === 0) return;
+  await tx
+    .insert(schema.notificationGroupMembers)
+    .values(open.map((groupId) => ({ groupId, destinationId })))
+    .onConflictDoNothing();
+}
+
 async function assertDestinationsExist(ids: string[]): Promise<string[]> {
   const unique = [...new Set(ids)];
   if (unique.length > MAX_GROUP_MEMBERS) {
@@ -824,6 +879,7 @@ export async function listGroups(): Promise<GroupView[]> {
     id: group.id,
     name: group.name,
     description: group.description,
+    autoAddDevices: group.autoAddDevices,
     destinationIds: members
       .filter((member) => member.groupId === group.id)
       .map((member) => member.destinationId),
@@ -841,6 +897,7 @@ async function groupView(id: string): Promise<GroupView> {
 export async function createGroup(input: {
   name: string;
   description?: string | null;
+  autoAddDevices?: boolean;
   destinationIds?: string[];
 }): Promise<GroupView> {
   const destinationIds = await assertDestinationsExist(
@@ -852,6 +909,7 @@ export async function createGroup(input: {
       id,
       name: cleanName(input.name, 'Group name'),
       description: cleanDescription(input.description),
+      autoAddDevices: input.autoAddDevices ?? false,
     });
     if (destinationIds.length > 0) {
       await tx.insert(schema.notificationGroupMembers).values(
@@ -869,6 +927,7 @@ export async function updateGroup(input: {
   id: string;
   name?: string;
   description?: string | null;
+  autoAddDevices?: boolean;
   destinationIds?: string[];
 }): Promise<GroupView> {
   const group = await db.query.notificationGroups.findFirst({
@@ -887,6 +946,9 @@ export async function updateGroup(input: {
         : {}),
       ...(input.description !== undefined
         ? { description: cleanDescription(input.description) }
+        : {}),
+      ...(input.autoAddDevices !== undefined
+        ? { autoAddDevices: input.autoAddDevices }
         : {}),
     };
     await tx

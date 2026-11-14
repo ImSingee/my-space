@@ -15,7 +15,12 @@ signed-in user can see and change it.
   deploy or rollback cutover that first declares it and is kept when the
   declaration is later dropped, so groups and routes survive; delivery then
   fails with "App no longer accepts notifications".
-- **Group**: a set of destinations.
+- **Group**: a set of destinations. A group with `autoAddDevices` gains every
+  device destination created afterwards (a phone that turns on push, or signs
+  in again and registers a new session). Turning it on does not add existing
+  devices, re-registering an existing device never re-adds it after it was
+  removed, and webhooks and Apps never join automatically. A full group
+  (200 members) is skipped instead of failing the registration.
 - **Route**: `(sourceType app|channel|any, sourceId?, kind?) → group | destination`.
   Null source/kind match anything. All matching routes are expanded, then
   deduplicated per destination; each destination gets one delivery recording

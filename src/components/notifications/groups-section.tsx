@@ -6,6 +6,7 @@ import {
   Modal,
   MultiSelect,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -44,11 +45,15 @@ function GroupModal({
   const [members, setMembers] = useState<string[]>(
     editing?.destinationIds ?? [],
   );
+  const [autoAddDevices, setAutoAddDevices] = useState(
+    editing?.autoAddDevices ?? false,
+  );
 
   const save = useNotificationMutation(
     (input: {
       name: string;
       description: string | null;
+      autoAddDevices: boolean;
       destinationIds: string[];
     }) =>
       editing
@@ -77,6 +82,7 @@ function GroupModal({
     save.mutate({
       name,
       description: description.trim() || null,
+      autoAddDevices,
       destinationIds: members,
     });
   };
@@ -113,6 +119,12 @@ function GroupModal({
             onChange={setMembers}
             searchable
             nothingFoundMessage="No destinations"
+          />
+          <Switch
+            label="Add new devices automatically"
+            description="Devices that turn on notifications later join this group. Existing devices are not added, and you can remove any device."
+            checked={autoAddDevices}
+            onChange={(event) => setAutoAddDevices(event.currentTarget.checked)}
           />
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>
@@ -196,6 +208,11 @@ export function GroupsSection() {
                   {group.description ? (
                     <Text size="xs" c="dimmed" truncate>
                       {group.description}
+                    </Text>
+                  ) : null}
+                  {group.autoAddDevices ? (
+                    <Text size="xs" c="dimmed">
+                      Adds new devices automatically
                     </Text>
                   ) : null}
                 </Table.Td>

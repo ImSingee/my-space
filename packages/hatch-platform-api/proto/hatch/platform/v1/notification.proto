@@ -372,6 +372,8 @@ message NotificationGroup {
   repeated string destination_ids = 4;
   string created_at = 5;
   string updated_at = 6;
+  // Device destinations created later join this group automatically.
+  bool auto_add_devices = 7;
 }
 
 message NotificationDestinationIds {
@@ -398,6 +400,9 @@ message CreateGroupRequest {
   }];
   optional string description = 2 [(buf.validate.field).string.max_len = 500];
   NotificationDestinationIds destination_ids = 3;
+  // New device destinations join the group when they register. Existing
+  // devices are not added. Defaults to false.
+  optional bool auto_add_devices = 4;
 }
 message CreateGroupResponse {
   NotificationGroup group = 1;
@@ -415,6 +420,9 @@ message UpdateGroupRequest {
   optional string description = 3 [(buf.validate.field).string.max_len = 500];
   // When present, replaces the full member list.
   NotificationDestinationIds destination_ids = 4;
+  // Changes whether device destinations created from now on join the group.
+  // Current members are unchanged.
+  optional bool auto_add_devices = 5;
 }
 message UpdateGroupResponse {
   NotificationGroup group = 1;

@@ -298,6 +298,7 @@ export function registerNotificationApi(router: ConnectRouter) {
         const group = await createGroup({
           name: input.name,
           description: input.description,
+          autoAddDevices: input.autoAddDevices,
           destinationIds: input.destinationIds?.ids ?? [],
         });
         return { group: { ...group, description: none(group.description) } };
@@ -307,6 +308,7 @@ export function registerNotificationApi(router: ConnectRouter) {
           id: input.id,
           name: input.name,
           description: input.description,
+          autoAddDevices: input.autoAddDevices,
           destinationIds: input.destinationIds?.ids,
         });
         return { group: { ...group, description: none(group.description) } };
