@@ -174,6 +174,13 @@ const definitions: readonly CliCommandDefinition[] = [
     description: 'Send a test notification straight to one destination.',
   },
   {
+    path: ['notification', 'send'],
+    usage:
+      'notification send <channel-id> --kind <kind> --title <title> [--body <text>] [--url <url>] [--data <json-object>] [--dedupe-key <key>] [--occurred-at <iso-8601>]',
+    description:
+      'Push a notification as a Channel; routes decide where it is delivered.',
+  },
+  {
     path: ['notification', 'retry'],
     usage: 'notification retry <delivery-id>',
     description: 'Queue a failed delivery for a fresh series of attempts.',

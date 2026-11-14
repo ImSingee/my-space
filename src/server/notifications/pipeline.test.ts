@@ -231,7 +231,11 @@ describe('routing', () => {
       kind: KINDS[0],
       push: push('order.shipped', { dedupeKey: 'order-1' }),
     });
-    expect(second).toEqual({ id: first.id, deduplicated: true });
+    expect(second).toEqual({
+      id: first.id,
+      deduplicated: true,
+      deliveries: 0,
+    });
   });
 
   it('can still disable a route after its source stops declaring the kind', async () => {
@@ -499,6 +503,79 @@ describe('ingress authentication', () => {
     const rotated = await service.rotateChannelToken(channel.id);
     expect((await send(token)).status).toBe(401);
     expect((await send(rotated)).status).toBe(202);
+  });
+});
+
+describe('user channel sends', () => {
+  const CI_KIND = { kind: 'build.failed', name: 'Build failed' };
+  const red = (extra: Record<string, unknown> = {}) => ({
+    kind: CI_KIND.kind,
+    title: 'master is red',
+    ...extra,
+  });
+
+  it('route like a token push and enforce channel state and kinds', async () => {
+    const { channel } = await service.createChannel({
+      name: 'CI',
+      kinds: [CI_KIND],
+    });
+    const { destination: hook } = await service.createWebhook({
+      name: 'Ops hook',
+      url: webhookUrl,
+    });
+
+    const unrouted = await service.sendChannelNotification(channel.id, red());
+    expect(unrouted).toMatchObject({ deduplicated: false, deliveries: 0 });
+    expect((await service.getNotification(unrouted.id)).status).toBe(
+      'unrouted',
+    );
+
+    await service.createRoute({
+      sourceType: 'channel',
+      sourceId: channel.id,
+      targetType: 'destination',
+      targetId: hook.id,
+    });
+    const sent = await service.sendChannelNotification(
+      channel.id,
+      red({ dedupeKey: 'build-42', data: { build: 42 } }),
+    );
+    expect(sent).toMatchObject({ deduplicated: false, deliveries: 1 });
+    expect(await service.getNotification(sent.id)).toMatchObject({
+      sourceType: 'channel',
+      sourceId: channel.id,
+      sourceName: 'CI',
+      kindName: 'Build failed',
+      data: { build: 42 },
+    });
+    expect(await runAllDue()).toBe(1);
+    expect(received).toHaveLength(1);
+
+    // The dedupe key is shared with token pushes from the same channel.
+    const token = await service.rotateChannelToken(channel.id);
+    const tokenPush = await handleChannelPush(
+      new Request(channel.pushUrl, {
+        method: 'POST',
+        headers: { 'x-hatch-secret': token },
+        body: JSON.stringify(red({ dedupeKey: 'build-42' })),
+      }),
+      channel.id,
+    );
+    expect(await tokenPush.json()).toEqual({ id: sent.id, deduplicated: true });
+
+    await expect(
+      service.sendChannelNotification(channel.id, red({ kind: 'deploy.done' })),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.sendChannelNotification(channel.id, red({ url: 'ftp://x' })),
+    ).rejects.toMatchObject({ status: 400 });
+    await service.updateChannel({ id: channel.id, enabled: false });
+    await expect(
+      service.sendChannelNotification(channel.id, red()),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      service.sendChannelNotification('missing-channel', red()),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
 

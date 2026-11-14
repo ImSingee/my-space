@@ -1482,6 +1482,23 @@ describe('notification center authority', () => {
       },
     });
     expect(created.status).toBe(200);
+    const channelId = ((await created.json()) as { channel: { id: string } })
+      .channel.id;
+    const alert = { channelId, kind: 'alert', title: 'Disk full' };
+    // Users send as a channel without its token; routing still applies.
+    const sent = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: alert,
+    });
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({
+      notificationId: expect.any(String),
+    });
+    const undeclared = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, kind: 'other' },
+    });
+    expect(undeclared.status).toBe(400);
     const register = await call('NotificationService/RegisterDevice', {
       headers: apiKey,
       body: device,
@@ -1494,10 +1511,15 @@ describe('notification center authority', () => {
       'NotificationService/ListDestinations',
       'NotificationService/ListChannels',
       'NotificationService/CreateGroup',
+      'NotificationService/SendNotification',
     ]) {
       const response = await call(path, {
         headers: { authorization: `Bearer ${jwt.token}` },
-        body: path.endsWith('CreateGroup') ? { name: 'Agents' } : {},
+        body: path.endsWith('CreateGroup')
+          ? { name: 'Agents' }
+          : path.endsWith('SendNotification')
+            ? alert
+            : {},
       });
       expect(response.status).toBe(403);
       expect(await errorCode(response)).toBe('SESSION_REQUIRED');

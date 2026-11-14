@@ -112,5 +112,8 @@ export async function handleNotificationRequest({
     kind,
     push: push.data,
   });
-  return Response.json(result, { status: 202 });
+  return Response.json(
+    { id: result.id, deduplicated: result.deduplicated },
+    { status: 202 },
+  );
 }

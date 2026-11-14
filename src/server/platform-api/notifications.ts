@@ -28,6 +28,7 @@ import {
   retryDelivery,
   rotateChannelToken,
   rotateWebhookSecret,
+  sendChannelNotification,
   sendTestNotification,
   unregisterDevice,
   updateChannel,
@@ -91,6 +92,21 @@ function kindInput(
     name: entry.name,
     ...(entry.description ? { description: entry.description } : {}),
   }));
+}
+
+/** `data_json` must be a JSON object; empty or absent means no data. */
+function dataObject(json: string | undefined): unknown {
+  if (!json) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw publicApiError('BAD_REQUEST', 'data_json must be valid JSON.');
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw publicApiError('BAD_REQUEST', 'data_json must be a JSON object.');
+  }
+  return value;
 }
 
 function sessionOf(context: HandlerContext) {
@@ -167,6 +183,22 @@ export function registerNotificationApi(router: ConnectRouter) {
       sendTestNotification: async (input) => ({
         notificationId: (await sendTestNotification(input.destinationId)).id,
       }),
+      sendNotification: async (input) => {
+        const result = await sendChannelNotification(input.channelId, {
+          kind: input.kind,
+          title: input.title,
+          body: input.body,
+          url: input.url,
+          data: dataObject(input.dataJson),
+          dedupeKey: input.dedupeKey,
+          occurredAt: input.occurredAt,
+        });
+        return {
+          notificationId: result.id,
+          deduplicated: result.deduplicated,
+          deliveryCount: result.deliveries,
+        };
+      },
       listNotificationSources: async () => {
         const sources = await listNotificationSources();
         return {
