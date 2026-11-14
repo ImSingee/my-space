@@ -14,6 +14,7 @@ const marks: Partial<Record<GlyphName, string>> = {
   refresh: '↻',
   check: '✓',
   warning: '!',
+  settings: '⚙',
 };
 
 export function Glyph({ name, size = 18, color = palette.ink }: GlyphProps) {

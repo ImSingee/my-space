@@ -47,6 +47,7 @@ function Navigation() {
         <Stack.Screen name="chat/[id]" options={{ title: 'Conversation' }} />
         <Stack.Screen name="apps/[id]" options={{ title: 'App' }} />
         <Stack.Screen name="notifications/index" options={{ title: '' }} />
+        <Stack.Screen name="notifications/settings" options={{ title: '' }} />
         <Stack.Screen name="notifications/[id]" options={{ title: '' }} />
         <Stack.Screen
           name="settings"

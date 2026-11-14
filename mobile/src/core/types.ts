@@ -167,6 +167,14 @@ export type NotificationDelivery = {
 export type NotificationDetail = NotificationSummary & {
   deliveries: NotificationDelivery[];
 };
+/** This phone's destination on the connected instance. */
+export type PushDevice = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  lastError: string | null;
+};
+
 export type PushRegistration = {
   name: string;
   apnsToken: string;
