@@ -91,15 +91,16 @@ export function Egg({
         ],
       }}
     >
+      {/* An ellipse drawn at its own size: a stretched circle blurs its
+          outline and thickens it at the top and bottom. */}
       <View
         style={{
           width: size,
-          height: size,
-          borderRadius: size / 2,
+          height,
+          borderRadius: '50%',
           backgroundColor: outline ? 'transparent' : color,
-          borderWidth: outline ? 2 / 1.27 : 0,
+          borderWidth: outline ? 2 : 0,
           borderColor: c.ink,
-          transform: [{ scaleY: 1.27 }],
         }}
       />
     </Animated.View>
@@ -284,11 +285,8 @@ export function EmptyState({
 }) {
   return (
     <View style={styles.empty}>
-      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
-        <Egg size={26} outline />
-        <Egg size={34} />
-        <Egg size={20} outline />
-      </View>
+      {/* One egg: a row of them reads as a "more" (…) control. */}
+      <Egg size={30} />
       <Text accessibilityRole="header" style={[styles.title]}>
         {title}
       </Text>

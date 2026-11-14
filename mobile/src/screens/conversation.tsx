@@ -739,16 +739,7 @@ function ConversationBody({
               ListEmptyComponent={
                 !streamRunId && !heldShown.rest.length ? (
                   <View style={{ gap: 14, paddingTop: 24 }}>
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        gap: 8,
-                        alignItems: 'flex-end',
-                      }}
-                    >
-                      <Egg size={22} outline />
-                      <Egg size={30} />
-                    </View>
+                    <Egg size={30} />
                     <Text accessibilityRole="header" style={type.display}>
                       Start with an idea.
                     </Text>
