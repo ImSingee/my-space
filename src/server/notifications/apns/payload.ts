@@ -29,6 +29,8 @@ export type PushPlaintext = {
   /** Thread grouping key (source id). */
   g: string;
   u: string | null;
+  /** Tapping opens `u` instead of the notification. Only sent with `u`. */
+  ao?: true;
   at: string;
 };
 
@@ -83,10 +85,17 @@ function longestFitting(
   return low > 0 ? `${chars.slice(0, low).join('')}…` : null;
 }
 
+/** The same content without its URL, which also drops opening it on tap. */
+function withoutUrl({ ao: _ao, ...content }: PushPlaintext): PushPlaintext {
+  return { ...content, u: null };
+}
+
 /**
  * Build the APNs JSON body, shortening the body text (then dropping the URL,
- * then shortening the title) until the payload fits Apple's 4 KiB limit. The
- * full text stays available in the app's notification detail.
+ * then shortening the title) until the payload fits Apple's 4 KiB limit. When
+ * a tap opens the URL, the URL is what the tap does, so the title is shortened
+ * before the URL is dropped. The full text stays available in the app's
+ * notification detail.
  */
 export function buildEncryptedApnsPayload(
   key: Buffer,
@@ -97,14 +106,21 @@ export function buildEncryptedApnsPayload(
   const full = render(plaintext);
   if (fits(full)) return full;
 
-  let current: PushPlaintext = { ...plaintext, b: null };
+  const shortenTitle = (content: PushPlaintext) => {
+    if (fits(render(content))) return render(content);
+    const title = longestFitting(content.t, (t) => render({ ...content, t }));
+    return title ? render({ ...content, t: title }) : null;
+  };
+
+  const current: PushPlaintext = { ...plaintext, b: null };
   if (plaintext.b && fits(render(current))) {
     const body = longestFitting(plaintext.b, (b) => render({ ...current, b }));
     return render({ ...current, b: body });
   }
-  current = { ...current, u: null };
-  if (fits(render(current))) return render(current);
-  const title = longestFitting(current.t, (t) => render({ ...current, t }));
-  if (!title) throw new Error('Notification cannot fit into an APNs payload.');
-  return render({ ...current, t: title });
+  const keepingUrl = current.ao ? shortenTitle(current) : null;
+  if (keepingUrl) return keepingUrl;
+  const payload = shortenTitle(withoutUrl(current));
+  if (!payload)
+    throw new Error('Notification cannot fit into an APNs payload.');
+  return payload;
 }

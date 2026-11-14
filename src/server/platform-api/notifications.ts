@@ -199,6 +199,7 @@ export function registerNotificationApi(router: ConnectRouter) {
           title: input.title,
           body: input.body,
           url: input.url,
+          autoOpenUrl: input.autoOpenUrl,
           data: dataObject(input.dataJson),
           dedupeKey: input.dedupeKey,
           occurredAt: input.occurredAt,

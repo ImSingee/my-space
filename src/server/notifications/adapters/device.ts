@@ -132,6 +132,9 @@ export function createDeviceAdapter(
         k: notification.kindName,
         g: notification.appId ?? notification.channelId ?? 'platform',
         u: notification.url,
+        ...(notification.url && notification.autoOpenUrl
+          ? { ao: true as const }
+          : {}),
         at: notification.occurredAt.toISOString(),
       },
     );

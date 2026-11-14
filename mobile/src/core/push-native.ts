@@ -12,7 +12,12 @@ export const nativePushPlatform: PushPlatform = {
   permission: () => Promise.resolve(false),
   apnsToken: unsupported,
   randomBytes: () => new Uint8Array(),
-  sharedKeys: { set: unsupported, has: unsupported, remove: unsupported },
+  sharedKeys: {
+    set: unsupported,
+    has: unsupported,
+    remove: unsupported,
+    verifyTap: () => Promise.resolve(false),
+  },
   records: {
     get: () => Promise.resolve(null),
     set: unsupported,

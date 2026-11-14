@@ -31,6 +31,7 @@ private struct HatchPushPlaintext: Decodable {
   let k: String
   let g: String
   let u: String?
+  let ao: Bool?
   let at: String
 }
 
@@ -85,6 +86,14 @@ final class NotificationService: UNNotificationServiceExtension {
     return SymmetricKey(data: data)
   }
 
+  /// Keep in sync with \`HatchPushTap\` in modules/hatch-push-keys, which verifies it.
+  static func tapSignature(origin: String, id: String, url: String, key: SymmetricKey) -> String {
+    let tapKey = HKDF<SHA256>.deriveKey(
+      inputKeyMaterial: key, info: Data("hatch-tap-v1".utf8), outputByteCount: 32)
+    let message = "hatch-tap-v1|\\(origin.utf8.count)|\\(origin)|\\(id.utf8.count)|\\(id)|\\(url.utf8.count)|\\(url)"
+    return Data(HMAC<SHA256>.authenticationCode(for: Data(message.utf8), using: tapKey)).base64EncodedString()
+  }
+
   /// Returns nil unless the payload authenticates with this phone's key.
   static func decrypt(
     _ original: UNNotificationContent, key lookup: (String) -> SymmetricKey?
@@ -112,7 +121,16 @@ final class NotificationService: UNNotificationServiceExtension {
     content.threadIdentifier = "\\(message.o)|\\(message.g)"
     // expo-notifications exposes a remote push's \`body\` dictionary as \`data\`.
     var data: [String: Any] = ["hatchNotificationId": message.id, "hatchOrigin": message.o]
-    if let url = message.u { data["hatchUrl"] = url }
+    if let url = message.u {
+      data["hatchUrl"] = url
+      // A push that skips this extension can write the same fields, so the
+      // app opens the URL on tap only with this phone's signature over them.
+      if message.ao == true {
+        data["hatchAutoOpenUrl"] = true
+        data["hatchKid"] = kid
+        data["hatchTapMac"] = tapSignature(origin: message.o, id: message.id, url: url, key: key)
+      }
+    }
     content.userInfo = ["body": data]
     return content
   }

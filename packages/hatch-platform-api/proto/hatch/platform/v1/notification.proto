@@ -73,6 +73,8 @@ message NotificationSummary {
   // unrouted | pending | delivered | partial | failed
   string status = 12;
   NotificationDeliveryCounts deliveries = 13;
+  // Tapping the phone push opens url instead of the notification.
+  bool auto_open_url = 14;
 }
 
 message NotificationDelivery {
@@ -180,6 +182,8 @@ message SendNotificationRequest {
   optional string dedupe_key = 7 [(buf.validate.field).string.max_len = 200];
   // ISO-8601 timestamp; defaults to now.
   optional string occurred_at = 8 [(buf.validate.field).string.max_len = 64];
+  // Tapping the phone push opens url instead of the notification; requires url.
+  optional bool auto_open_url = 9;
 }
 message SendNotificationResponse {
   string notification_id = 1;

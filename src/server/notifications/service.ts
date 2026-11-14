@@ -110,6 +110,7 @@ export type NotificationSummaryView = {
   title: string;
   body: string | null;
   url: string | null;
+  autoOpenUrl: boolean;
   occurredAt: string;
   createdAt: string;
   status: NotificationStatus;
@@ -275,6 +276,7 @@ function summaryView(
     title: row.title,
     body: row.body,
     url: row.url,
+    autoOpenUrl: row.autoOpenUrl,
     occurredAt: iso(row.occurredAt),
     createdAt: iso(row.createdAt),
     status: deliveryStatus(deliveries),
@@ -1192,6 +1194,7 @@ export async function sendTestNotification(
     title: 'Test notification',
     body: `This is a test sent to "${destination.name}" from Hatch.`,
     url: null,
+    autoOpenUrl: false,
     data: null,
     dedupeKey: null,
     occurredAt: null,

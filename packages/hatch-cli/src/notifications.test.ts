@@ -201,6 +201,9 @@ describe('notification send', () => {
         'master is red',
         '--body',
         'Build 42 failed',
+        '--url',
+        'https://ci.example/42',
+        '--auto-open-url',
         '--data',
         '{"build":42}',
         '--dedupe-key',
@@ -212,10 +215,11 @@ describe('notification send', () => {
       kind: 'build.failed',
       title: 'master is red',
       body: 'Build 42 failed',
+      url: 'https://ci.example/42',
+      autoOpenUrl: true,
       dataJson: '{"build":42}',
       dedupeKey: 'build-42',
     });
-    expect(received.sendNotification?.url).toBeUndefined();
     expect(result.json).toMatchObject({
       notificationId: 'notification-1',
       deduplicated: false,
@@ -243,6 +247,17 @@ describe('notification send', () => {
         '[]',
       ),
     ).toThrow(/JSON object/);
+    expect(() =>
+      parse(
+        'send',
+        'channel-1',
+        '--kind',
+        'a',
+        '--title',
+        'Hi',
+        '--auto-open-url',
+      ),
+    ).toThrow(/requires --url/);
     expect(() => parse('send', '--kind', 'a', '--title', 'Hi')).toThrow(
       /<channel-id>/,
     );
