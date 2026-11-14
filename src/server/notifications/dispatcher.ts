@@ -5,7 +5,7 @@
  * crashed worker's rows become claimable again once the lease expires and
  * concurrent platform processes never deliver the same attempt twice.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gt, notExists, sql } from 'drizzle-orm';
 import { db, schema } from '~/db';
 import { publishPlatformEvent } from '~server/platform-events';
 import type { NotificationRecord } from './contract';
@@ -23,6 +23,8 @@ export const RETRY_BACKOFF_MS = [
 ] as const;
 const LEASE_MS = 2 * 60_000;
 const POLL_INTERVAL_MS = 5_000;
+/** Devices that receive nothing still disappear once their session ends. */
+const DEVICE_PRUNE_INTERVAL_MS = 60 * 60_000;
 const CONCURRENCY = 8;
 const MAX_ERROR_LENGTH = 1000;
 
@@ -35,6 +37,7 @@ type DispatcherState = {
   adapters: DeliveryAdapters;
   active: number;
   timer: ReturnType<typeof setInterval> | null;
+  pruneTimer: ReturnType<typeof setInterval> | null;
   ticking: boolean;
   again: boolean;
 };
@@ -84,6 +87,41 @@ export async function claimDueDeliveries(
     id: String(row.id),
     attempts: Number(row.attempts),
   }));
+}
+
+/**
+ * Delete device destinations whose sign-in session has ended (one, or all).
+ *
+ * A device lives only as long as its session, but Better Auth deletes an
+ * expired session only when it is presented again. A phone the user replaced
+ * or wiped never presents it, so the session cascade alone would keep that
+ * device, its routes and its group memberships forever.
+ */
+export async function pruneEndedDeviceDestinations(
+  destinationId?: string,
+): Promise<number> {
+  const destinations = schema.notificationDestinations;
+  const removed = await db
+    .delete(destinations)
+    .where(
+      and(
+        eq(destinations.type, 'device'),
+        destinationId ? eq(destinations.id, destinationId) : undefined,
+        notExists(
+          db
+            .select({ id: schema.session.id })
+            .from(schema.session)
+            .where(
+              and(
+                eq(schema.session.id, destinations.sessionId),
+                gt(schema.session.expiresAt, new Date()),
+              ),
+            ),
+        ),
+      ),
+    )
+    .returning({ id: destinations.id });
+  return removed.length;
 }
 
 function truncate(value: string, max: number): string {
@@ -144,7 +182,9 @@ export async function recordOutcome(
       notificationId: schema.notificationDeliveries.notificationId,
     });
 
-  if (destinationId && outcome.destination) {
+  if (destinationId && outcome.destination?.remove) {
+    await pruneEndedDeviceDestinations(destinationId);
+  } else if (destinationId && outcome.destination) {
     await db
       .update(schema.notificationDestinations)
       .set({
@@ -281,12 +321,20 @@ export function ensureNotificationDispatcher(adapters: DeliveryAdapters): void {
     adapters,
     active: 0,
     timer: null,
+    pruneTimer: null,
     ticking: false,
     again: false,
   };
   global.__hatchNotificationDispatcher__ = current;
   current.timer = setInterval(() => void tick(current), POLL_INTERVAL_MS);
   current.timer.unref?.();
+  const prune = () =>
+    void pruneEndedDeviceDestinations().catch((error) => {
+      console.error('Pruning ended device destinations failed.', error);
+    });
+  current.pruneTimer = setInterval(prune, DEVICE_PRUNE_INTERVAL_MS);
+  current.pruneTimer.unref?.();
+  prune();
   void tick(current);
 }
 

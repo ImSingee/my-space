@@ -19,6 +19,11 @@ export type DeliveryContext = {
 type DestinationUpdate = {
   /** Disable the destination (e.g. APNs reports the token is gone). */
   disable?: boolean;
+  /**
+   * Remove the device destination because its sign-in session ended. The
+   * removal re-checks the session, so a live device is never removed.
+   */
+  remove?: boolean;
   /** Record or clear a configuration error shown in settings. */
   lastError?: string | null;
   /**

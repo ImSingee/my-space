@@ -152,8 +152,13 @@ errors (403, `InvalidProviderToken`, …) fail without disabling and record the
 error on the destination; 429 and 5xx retry. Bodies are shortened to keep the
 payload within 4 KiB; the full text stays in the app's notification detail.
 Device rows reference their sign-in session with `ON DELETE CASCADE`, so
-signing out or revoking the session removes the device. Deliveries to an
-expired session fail.
+signing out or revoking the session removes the device. Better Auth deletes an
+expired session only when it is presented again, which a replaced or wiped
+phone never does, so the platform removes a device whose session has expired
+itself: a delivery to it fails without contacting APNs and removes the device,
+and an hourly sweep removes the ones nothing is delivered to. APNs is not
+relied on for this; it may keep accepting pushes for a device that is simply
+never online again instead of answering `Unregistered`.
 
 A device records why it is disabled (`disabled_reason`), which decides who may
 turn it back on:
