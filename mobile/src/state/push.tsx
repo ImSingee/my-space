@@ -1,8 +1,14 @@
 import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
-import { canonicalizeInstanceUrl } from '../core';
+import { Linking } from 'react-native';
+import { resolveLink } from '../core/deep-link';
+import { pushTap, verifiedTapUrl, type PushTap } from '../core/push';
 import { linkInbox } from './link-inbox';
-import { pushRegistrar, pushSupported } from './push-registrar';
+import {
+  nativePushPlatform,
+  pushRegistrar,
+  pushSupported,
+} from './push-registrar';
 import { allowDevelopmentLoopback, useSession } from './session';
 
 // Show Hatch notifications as banners while the app is open too.
@@ -15,28 +21,44 @@ Notifications.setNotificationHandler({
   }),
 });
 
-type PushTarget = { origin: string; notificationId: string };
+/**
+ * Opens the notification itself on the instance that sent it. Only the
+ * extension writes this payload after decrypting it with the instance's key,
+ * so it may switch to that instance without asking.
+ */
+function openNotification(target: PushTap) {
+  linkInbox.put({
+    link: {
+      instance: target.origin,
+      target: { kind: 'notification', id: target.notificationId },
+    },
+    trusted: true,
+    from: 'system',
+  });
+}
 
-/** Tap payload written by the Notification Service Extension after decrypting. */
-export function pushTarget(
-  response: Notifications.NotificationResponse | null,
-): PushTarget | null {
-  const data = response?.notification.request.content.data as
-    | Record<string, unknown>
-    | null
-    | undefined;
-  const origin = data?.hatchOrigin;
-  const notificationId = data?.hatchNotificationId;
-  if (typeof origin !== 'string' || typeof notificationId !== 'string')
-    return null;
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(notificationId)) return null;
+/**
+ * Opens a verified tap URL. A Hatch page opens in the app, on the instance
+ * that sent the push unless the link names another one (which then asks
+ * before switching); anything else leaves for the system. Returns false when
+ * nothing could open it.
+ */
+async function openTapUrl(target: PushTap, url: string) {
+  const link = resolveLink(url, target.origin, { allowDevelopmentLoopback });
+  if (link && link.target.kind !== 'web') {
+    const instance = link.instance ?? target.origin;
+    linkInbox.put({
+      link: { instance, target: link.target },
+      trusted: instance === target.origin,
+      from: 'system',
+    });
+    return true;
+  }
   try {
-    return {
-      origin: canonicalizeInstanceUrl(origin, { allowDevelopmentLoopback }),
-      notificationId,
-    };
+    await Linking.openURL(url);
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -64,29 +86,27 @@ export function usePushLifecycle() {
   useEffect(() => {
     // Wait for the saved instance to be restored before taking a cold-start tap.
     if (!pushSupported || !ready) return;
-    const open = (response: Notifications.NotificationResponse) => {
-      const target = pushTarget(response);
-      if (!target) return;
-      // Only the extension writes this payload after decrypting it with the
-      // instance's key, so it may switch to that instance without asking.
-      linkInbox.put({
-        link: {
-          instance: target.origin,
-          target: { kind: 'notification', id: target.notificationId },
-        },
-        trusted: true,
-        from: 'system',
+    const open = async (response: Notifications.NotificationResponse) => {
+      const target = pushTap(response.notification.request.content.data, {
+        allowDevelopmentLoopback,
       });
+      if (!target) return;
+      // The sender asked for the link instead of the notification. If it is
+      // not verified or nothing can open it, the notification opens and
+      // still shows its link.
+      const url = await verifiedTapUrl(target, nativePushPlatform);
+      if (url && (await openTapUrl(target, url))) return;
+      openNotification(target);
     };
     const last = Notifications.getLastNotificationResponse();
     if (last) {
       Notifications.clearLastNotificationResponse();
-      open(last);
+      void open(last);
     }
     const subscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         Notifications.clearLastNotificationResponse();
-        open(response);
+        void open(response);
       },
     );
     return () => subscription.remove();

@@ -1,5 +1,6 @@
 import { canonicalizeInstanceUrl, MobileError } from './security';
 import type { InstanceUrlOptions } from './security';
+import { externalUrl } from './surface-navigation';
 import type { PushRegistration } from './types';
 
 /** What this phone remembers about push for one instance (app-private). */
@@ -29,6 +30,12 @@ export type PushPlatform = {
     set(kid: string, key: string): Promise<void>;
     has(kid: string): Promise<boolean>;
     remove(kid: string): Promise<void>;
+    /** Whether the key `kid` signed these tap fields (see the extension). */
+    verifyTap(
+      kid: string,
+      mac: string,
+      fields: PushTapFields,
+    ): Promise<boolean>;
   };
   /** App-private per-instance records. */
   records: {
@@ -174,5 +181,98 @@ export class PushRegistrar {
       await this.platform.records.remove(key);
       if (api) await api.unregisterPushDevice();
     });
+  }
+}
+
+/** What tapping a Hatch push opens. */
+export type PushTap = {
+  origin: string;
+  notificationId: string;
+  /**
+   * The sender asked for this URL to open on tap instead of the notification.
+   * Only a URL the shared external-link policy lets leave the app, and only
+   * once `verifiedTapUrl` confirms the extension decrypted it.
+   */
+  autoOpen: {
+    url: string;
+    /** Signed fields exactly as the extension wrote them. */
+    signed: PushTapFields;
+    kid: string;
+    mac: string;
+  } | null;
+};
+
+export type PushTapFields = { origin: string; id: string; url: string };
+
+const NO_HANDOFF = { ticket: '', completionUrl: '' };
+
+const text = (value: unknown) => (typeof value === 'string' ? value : null);
+
+/**
+ * Read the tap payload the Notification Service Extension writes after
+ * decrypting. A push the extension never saw can carry the same fields, so
+ * opening its URL waits for `verifiedTapUrl`; everything else only opens the
+ * notification inside the app.
+ */
+export function pushTap(
+  data: unknown,
+  options: InstanceUrlOptions = {},
+): PushTap | null {
+  if (!data || typeof data !== 'object') return null;
+  const fields = data as Record<string, unknown>;
+  const rawOrigin = text(fields.hatchOrigin);
+  const notificationId = text(fields.hatchNotificationId);
+  if (!rawOrigin || !notificationId) return null;
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(notificationId)) return null;
+  let origin: string;
+  try {
+    origin = canonicalizeInstanceUrl(rawOrigin, options);
+  } catch {
+    return null;
+  }
+  const rawUrl = text(fields.hatchUrl);
+  const kid = text(fields.hatchKid);
+  const mac = text(fields.hatchTapMac);
+  const url =
+    fields.hatchAutoOpenUrl === true && rawUrl && kid && mac
+      ? externalUrl(rawUrl, { origin, handoff: NO_HANDOFF })
+      : null;
+  return {
+    origin,
+    notificationId,
+    autoOpen:
+      url && kid && mac && rawUrl
+        ? {
+            url,
+            signed: { origin: rawOrigin, id: notificationId, url: rawUrl },
+            kid,
+            mac,
+          }
+        : null,
+  };
+}
+
+/**
+ * The URL a tap opens, once the phone confirms that its own key for that
+ * instance signed the tap fields: only the extension, after decrypting the
+ * sender's push, can produce that signature.
+ */
+export async function verifiedTapUrl(
+  tap: PushTap,
+  platform: Pick<PushPlatform, 'records' | 'sharedKeys'>,
+): Promise<string | null> {
+  const { autoOpen } = tap;
+  if (!autoOpen) return null;
+  try {
+    const record = await platform.records.get(tap.origin);
+    if (record?.kid !== autoOpen.kid) return null;
+    const valid = await platform.sharedKeys.verifyTap(
+      autoOpen.kid,
+      autoOpen.mac,
+      autoOpen.signed,
+    );
+    return valid ? autoOpen.url : null;
+  } catch {
+    return null;
   }
 }

@@ -36,11 +36,17 @@ Both endpoints accept the same JSON body (≤64 KiB):
   "title": "Order 42 shipped",
   "body": "optional, ≤4000",
   "url": "https://optional.example/absolute",
+  "autoOpenUrl": false,
   "data": { "optional": "JSON object ≤32 KiB" },
   "dedupeKey": "optional; repeats return the first notification",
   "occurredAt": "optional ISO-8601"
 }
 ```
+
+`autoOpenUrl` (optional, default `false`, requires `url`) makes tapping the
+notification on a phone open `url` instead of the notification's page in the
+app. Other destinations receive the flag in their envelope; the web UI shows
+it on the notification detail.
 
 Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
 `422` undeclared kind.
@@ -86,6 +92,7 @@ Webhook and App destinations receive the same envelope:
     "title": "…",
     "body": null,
     "url": null,
+    "autoOpenUrl": false,
     "data": null,
     "dedupeKey": null,
     "occurredAt": "…",
@@ -150,7 +157,22 @@ APNs responses: 410 / `BadDeviceToken` / `Unregistered` /
 `DeviceTokenNotForTopic` fail the delivery and disable the device; credential
 errors (403, `InvalidProviderToken`, …) fail without disabling and record the
 error on the destination; 429 and 5xx retry. Bodies are shortened to keep the
-payload within 4 KiB; the full text stays in the app's notification detail.
+payload within 4 KiB, then the URL is dropped, then the title is shortened;
+the full text stays in the app's notification detail. When the URL opens on
+tap (`ao: true` in the encrypted content), the title is shortened before the
+URL is dropped, and dropping the URL always drops `ao`.
+
+Opening the URL on tap is gated on the extension. A push that bypasses it (no
+`mutable-content`, see the residual risk above) can write any tap data, so the
+extension signs the fields it decrypted, `HMAC-SHA256` over
+`hatch-tap-v1|<len>|<origin>|<len>|<id>|<len>|<url>` with a key derived by
+HKDF-SHA256 (`info = hatch-tap-v1`) from the device key. The app opens the URL
+only when its native key module verifies that signature with this phone's key
+for that instance; otherwise the tap opens the notification, which still shows
+its link. A URL naming a Hatch page on that instance (its own web address or
+a `hatch://` link) opens that page in the app instead; any other URL leaves the
+app through the same external-link policy as web surfaces, so it needs no
+session on that instance.
 Device rows reference their sign-in session with `ON DELETE CASCADE`, so
 signing out or revoking the session removes the device. Better Auth deletes an
 expired session only when it is presented again, which a replaced or wiped

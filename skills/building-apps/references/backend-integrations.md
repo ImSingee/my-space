@@ -295,6 +295,7 @@ await notify({
   title: `Order ${order.id} shipped`,
   body: 'Arrives Thursday',
   url: 'https://tracking.example.com/123',
+  autoOpenUrl: true,
   data: { orderId: order.id },
   dedupeKey: `shipped:${order.id}`,
 });
@@ -303,8 +304,13 @@ await notify({
 `notify` POSTs to `HATCH_NOTIFICATIONS_URL`, signed with
 `HATCH_SIGNING_SECRET`; both are injected only when the capability and backend
 are enabled. Title is required (≤200 characters); body ≤4000; `url` must be
-absolute http(s); `data` is a JSON object ≤32 KiB; the request body is capped
-at 64 KiB. A repeated `dedupeKey` returns the first notification with
+absolute http(s); `autoOpenUrl: true` (requires `url`) makes tapping the
+notification on a phone open `url` directly instead of the notification in the
+Hatch app, so set it only when the link is the whole point of the
+notification. A `url` on this Hatch instance, such as
+`<origin>/app/<slug>#/orders/42`, opens that page natively in the phone app,
+both from the notification and on tap; `data` is a JSON object ≤32 KiB; the request body is capped at
+64 KiB. A repeated `dedupeKey` returns the first notification with
 `deduplicated: true`. Errors throw `NotificationError` with the HTTP status.
 Pushing returns once the notification is stored; delivery happens afterwards
 with retries, so never wait for or retry delivery yourself.
@@ -314,7 +320,7 @@ with retries, so never wait for or retry delivery yourself.
 Declaring `destination` adds the App to the notification destinations users
 can select. Routed notifications arrive as `POST /__notification` with a JSON
 envelope that includes the source (App or Channel id, slug and name), kind,
-title, body, url, data, dedupe key and timestamps. The handler may do anything
+title, body, url, `autoOpenUrl`, data, dedupe key and timestamps. The handler may do anything
 with it (ignore it, forward it to another service, store it). Return 2xx when
 handled; optionally return a free-form `result` string (≤2000 characters) that
 users see in the notification history. Non-2xx, timeouts (30 s) and network

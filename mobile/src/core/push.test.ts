@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { PushRegistrar, base64url, type PushPlatform } from './push';
+import {
+  PushRegistrar,
+  base64url,
+  pushTap,
+  verifiedTapUrl,
+  type PushPlatform,
+} from './push';
 import type { PushRegistration } from './types';
 
 const origin = 'https://hatch.example.test';
@@ -23,6 +29,7 @@ function setup(granted = true) {
         shared.set(kid, key);
       },
       has: async (kid) => shared.has(kid),
+      verifyTap: async () => false,
       remove: async (kid) => {
         calls.push('shared.remove');
         shared.delete(kid);
@@ -132,5 +139,100 @@ describe('PushRegistrar', () => {
     expect(shared.size).toBe(0);
     expect(calls.slice(-2)).toEqual(['shared.remove', 'server.unregister']);
     await expect(registrar.enabled(origin)).resolves.toBe(false);
+  });
+});
+
+describe('push taps', () => {
+  const url = 'https://tracking.example.com/123';
+  const tap = (fields: Record<string, unknown>) =>
+    pushTap({
+      hatchOrigin: origin,
+      hatchNotificationId: '01JNOTIFICATION',
+      ...fields,
+    });
+  const signed = (fields: Record<string, unknown> = {}) =>
+    tap({
+      hatchUrl: url,
+      hatchAutoOpenUrl: true,
+      hatchKid: 'key-00001',
+      hatchTapMac: 'mac',
+      ...fields,
+    });
+  // A phone that holds key-00001 for this instance and checks one signature.
+  const phone = (validMac = 'mac') => ({
+    records: {
+      get: async (value: string) =>
+        value === origin ? { kid: 'key-00001', key: 'k'.repeat(43) } : null,
+      set: async () => {},
+      remove: async () => {},
+    },
+    sharedKeys: {
+      set: async () => {},
+      has: async () => true,
+      remove: async () => {},
+      verifyTap: async (
+        kid: string,
+        mac: string,
+        fields: { origin: string; id: string; url: string },
+      ) =>
+        kid === 'key-00001' &&
+        mac === validMac &&
+        fields.origin === origin &&
+        fields.id === '01JNOTIFICATION' &&
+        fields.url === url,
+    },
+  });
+
+  it('opens the URL only when the sender asked and the phone signed it', async () => {
+    expect(await verifiedTapUrl(signed()!, phone())).toBe(url);
+    for (const target of [
+      tap({ hatchUrl: url }),
+      signed({ hatchAutoOpenUrl: 'true' }),
+      signed({ hatchUrl: undefined }),
+      signed({ hatchTapMac: undefined }),
+      signed({ hatchKid: undefined }),
+    ]) {
+      expect(target).toMatchObject({ notificationId: '01JNOTIFICATION' });
+      expect(await verifiedTapUrl(target!, phone())).toBeNull();
+    }
+  });
+
+  it('opens the notification for a push the extension did not sign', async () => {
+    // Forged fields from a push that skipped the extension.
+    expect(await verifiedTapUrl(signed(), phone('other'))).toBeNull();
+    // Signed with a key that is not this phone's key for the instance.
+    expect(
+      await verifiedTapUrl(signed({ hatchKid: 'key-00002' })!, phone()),
+    ).toBeNull();
+    const failing = phone();
+    failing.sharedKeys.verifyTap = async () => {
+      throw new Error('keychain unavailable');
+    };
+    expect(await verifiedTapUrl(signed()!, failing)).toBeNull();
+  });
+
+  it('keeps URLs the external-link policy blocks inside the app', () => {
+    for (const hatchUrl of [
+      'javascript:alert(1)',
+      'data:text/html,hi',
+      'https://user:secret@tracking.example.com/',
+      `${origin}/api/auth/handoffs/complete`,
+      `${origin}/api/auth/%68andoffs/complete`,
+      'not a url',
+    ]) {
+      expect(signed({ hatchUrl })).toMatchObject({
+        notificationId: '01JNOTIFICATION',
+        autoOpen: null,
+      });
+    }
+  });
+
+  it('opens nothing for pushes it cannot attribute', () => {
+    expect(pushTap(null)).toBeNull();
+    expect(pushTap({})).toBeNull();
+    expect(
+      pushTap({ hatchOrigin: origin, hatchNotificationId: '../settings' }),
+    ).toBeNull();
+    expect(signed({ hatchOrigin: 'javascript:alert(1)' })).toBeNull();
   });
 });
