@@ -20,6 +20,8 @@ export type ButtonProps = {
   disabled?: boolean;
   busy?: boolean;
   fullWidth?: boolean;
+  /** Keep the label on one line, cut off where the button runs out of room. */
+  singleLine?: boolean;
   accessibilityHint?: string;
 };
 
@@ -33,6 +35,7 @@ export function Button({
   disabled,
   busy,
   fullWidth,
+  singleLine,
   accessibilityHint,
 }: ButtonProps) {
   const tone = variants[variant];
@@ -67,6 +70,7 @@ export function Button({
         <Glyph name={glyph} size={size === 'small' ? 12 : 15} color={tone.fg} />
       ) : null}
       <Text
+        numberOfLines={singleLine ? 1 : undefined}
         style={{
           color: tone.fg,
           fontSize: size === 'large' ? 17 : size === 'small' ? 14 : 16,

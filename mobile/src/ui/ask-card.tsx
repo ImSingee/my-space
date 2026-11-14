@@ -78,12 +78,29 @@ export function AskCard({
   ask,
   onAnswer,
   busy,
+  saved,
+  onDraft,
 }: {
   ask: PendingAsk;
   onAnswer: (answers: AskAnswer[]) => void;
   busy: boolean;
+  /** Answers kept from an earlier screen of this conversation. */
+  saved: Record<string, AskAnswer>;
+  /** Keeps every change for the conversation's next screen. */
+  onDraft: (answers: Record<string, AskAnswer>) => void;
 }) {
-  const [answers, setAnswers] = useState<Record<string, AskAnswer>>({});
+  // Local and synchronous, so the native answer field never gets a delayed
+  // echo of its own text; read from the conversation once and written back
+  // with every change (also a field's last keystrokes as it unmounts).
+  const [answers, setLocalAnswers] = useState(saved);
+  const latest = useRef(saved);
+  const setAnswers = (
+    update: (value: Record<string, AskAnswer>) => Record<string, AskAnswer>,
+  ) => {
+    latest.current = update(latest.current);
+    setLocalAnswers(latest.current);
+    onDraft(latest.current);
+  };
   const fields = useRef<Record<string, NativeFieldRef | null>>({});
   const get = (id: string): AskAnswer =>
     answers[id] ?? { questionId: id, selectedOptionIds: [], customText: '' };

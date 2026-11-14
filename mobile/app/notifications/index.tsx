@@ -4,6 +4,7 @@ import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useSession } from '../../src/state/session';
 import { usePullToRefresh } from '../../src/state/use-pull-to-refresh';
 import { Button } from '../../src/ui/button';
+import { Reflow } from '../../src/ui/columns';
 import { Busy, EmptyState, Notice, errorText } from '../../src/ui/primitives';
 import {
   NotificationStatusTag,
@@ -59,36 +60,41 @@ export default function NotificationsScreen() {
           />
         ) : null}
         {items.length > 0 ? (
-          <Group>
-            {items.map((item) => (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.title}, from ${item.sourceName}`}
-                onPress={() => router.push(`/notifications/${item.id}`)}
-                style={({ pressed }) => [
-                  styles.row,
-                  pressed && { backgroundColor: c.limeSoft },
-                ]}
-              >
-                <View style={styles.header}>
-                  <Text style={[type.meta, styles.grow]} numberOfLines={1}>
-                    {item.sourceName} · {item.kindName}
-                  </Text>
-                  <Text style={type.meta}>
-                    {notificationTime(item.occurredAt)}
-                  </Text>
-                </View>
-                <Text style={type.heading}>{item.title}</Text>
-                {item.body ? (
-                  <Text style={type.small} numberOfLines={3}>
-                    {item.body}
-                  </Text>
-                ) : null}
-                <NotificationStatusTag status={item.status} />
-              </Pressable>
-            ))}
-          </Group>
+          <Reflow
+            items={items}
+            render={(column) => (
+              <Group>
+                {column.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.title}, from ${item.sourceName}`}
+                    onPress={() => router.push(`/notifications/${item.id}`)}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed && { backgroundColor: c.limeSoft },
+                    ]}
+                  >
+                    <View style={styles.header}>
+                      <Text style={[type.meta, styles.grow]} numberOfLines={1}>
+                        {item.sourceName} · {item.kindName}
+                      </Text>
+                      <Text style={type.meta}>
+                        {notificationTime(item.occurredAt)}
+                      </Text>
+                    </View>
+                    <Text style={type.heading}>{item.title}</Text>
+                    {item.body ? (
+                      <Text style={type.small} numberOfLines={3}>
+                        {item.body}
+                      </Text>
+                    ) : null}
+                    <NotificationStatusTag status={item.status} />
+                  </Pressable>
+                ))}
+              </Group>
+            )}
+          />
         ) : null}
         {query.hasNextPage ? (
           <Button

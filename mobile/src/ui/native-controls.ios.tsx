@@ -1,5 +1,13 @@
 import { Host } from '@expo/ui';
-import { Button, HStack, Image, Menu, Picker, Text } from '@expo/ui/swift-ui';
+import {
+  Button,
+  HStack,
+  Image,
+  Menu,
+  Picker,
+  Section,
+  Text,
+} from '@expo/ui/swift-ui';
 import {
   accessibilityElement,
   accessibilityLabel,
@@ -21,7 +29,11 @@ import {
 import { useState } from 'react';
 import { glyphs } from './glyph.types';
 import { palette as c } from './theme';
-import type { AttachmentMenuProps, ChoiceProps } from './native-controls.types';
+import type {
+  AttachmentMenuProps,
+  ChoiceProps,
+  RefreshMenuProps,
+} from './native-controls.types';
 
 // System menus keep native selection, VoiceOver and dismissal behavior; the
 // trigger is drawn as a Field Guide chip.
@@ -32,13 +44,17 @@ export function Choice({
   onChange,
   disabled: unavailable,
   glyph,
+  compact = false,
 }: ChoiceProps) {
-  const current = options.find((option) => option.value === value)?.label;
+  const chosen = options.find((option) => option.value === value);
+  const current = chosen?.short ?? chosen?.label;
   // Menu labels report their ideal width; cap them to the width RN assigns.
   const [width, setWidth] = useState<number>();
   return (
-    // RN owns the width; the chip hugs its label and wraps instead of
-    // overflowing at large Dynamic Type sizes.
+    // RN owns the width: the chip takes what its row leaves and hugs its
+    // label inside it. A full chip wraps its label at large Dynamic Type
+    // sizes; a compact one keeps one line and cuts it off, so the row's
+    // other actions always stay on screen.
     <Host
       colorScheme="light"
       seedColor={c.moss}
@@ -79,7 +95,7 @@ export function Choice({
               modifiers={[
                 font({ textStyle: 'subheadline', weight: 'semibold' }),
                 foregroundStyle(c.ink),
-                lineLimit(3),
+                lineLimit(compact ? 1 : 3),
                 multilineTextAlignment('leading'),
                 fixedSize({ horizontal: false, vertical: true }),
                 layoutPriority(1),
@@ -157,6 +173,95 @@ export function AttachmentMenu({
           systemImage="doc"
           onPress={() => onChoose('file')}
         />
+      </Menu>
+    </Host>
+  );
+}
+
+/**
+ * One control for refreshing now and for refreshing on a schedule: the
+ * refresh button opens a system menu with both. With auto refresh on, the
+ * button names its interval.
+ */
+export function RefreshMenu({
+  label,
+  interval,
+  intervalLabel,
+  options,
+  onRefresh,
+  onInterval,
+  disabled: unavailable,
+  intervalDisabled,
+}: RefreshMenuProps) {
+  const auto = interval !== '0';
+  return (
+    <Host
+      colorScheme="light"
+      seedColor={c.moss}
+      matchContents
+      ignoreSafeArea="all"
+      style={{ minHeight: 44 }}
+    >
+      <Menu
+        label={
+          <HStack
+            spacing={6}
+            modifiers={[
+              padding({ horizontal: auto ? 14 : 0 }),
+              frame({ minWidth: 44, minHeight: 44 }),
+              background(c.card, shapes.capsule()),
+              contentShape(shapes.capsule()),
+              accessibilityElement('combine'),
+              accessibilityLabel(
+                auto ? `${label}, auto refresh ${intervalLabel}` : label,
+              ),
+            ]}
+          >
+            <Image
+              systemName={glyphs.refresh}
+              modifiers={[
+                font({ textStyle: 'body', weight: 'semibold' }),
+                foregroundStyle(c.ink),
+              ]}
+            />
+            {auto && intervalLabel ? (
+              <Text
+                modifiers={[
+                  font({ textStyle: 'subheadline', weight: 'semibold' }),
+                  foregroundStyle(c.ink),
+                  lineLimit(1),
+                ]}
+              >
+                {intervalLabel}
+              </Text>
+            ) : null}
+          </HStack>
+        }
+        modifiers={[accessibilityLabel(label)]}
+      >
+        <Button
+          label="Refresh now"
+          systemImage={glyphs.refresh}
+          onPress={onRefresh}
+          modifiers={[disabled(Boolean(unavailable))]}
+        />
+        <Section title="Auto refresh">
+          <Picker
+            label="Auto refresh"
+            selection={interval}
+            onSelectionChange={onInterval}
+            modifiers={[
+              pickerStyle('inline'),
+              disabled(Boolean(intervalDisabled)),
+            ]}
+          >
+            {options.map((option) => (
+              <Text key={option.value} modifiers={[tag(option.value)]}>
+                {option.label}
+              </Text>
+            ))}
+          </Picker>
+        </Section>
       </Menu>
     </Host>
   );

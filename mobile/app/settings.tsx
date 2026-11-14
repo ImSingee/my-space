@@ -1,12 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Alert, Linking, ScrollView, Switch, View } from 'react-native';
 import { pushRegistrar, pushSupported } from '../src/state/push-registrar';
 import { useSession } from '../src/state/session';
-import { Button, IconButton } from '../src/ui/button';
-import type { GlyphName } from '../src/ui/glyph.types';
+import { Button } from '../src/ui/button';
+import { glyphs, type GlyphName } from '../src/ui/glyph.types';
 import { Card, errorText } from '../src/ui/primitives';
 import { GlyphTile } from '../src/ui/rows';
 import { Masthead, pageScrollProps } from '../src/ui/screen';
@@ -148,19 +148,14 @@ export default function SettingsScreen() {
       style={{ flex: 1, backgroundColor: c.paper }}
       contentContainerStyle={{ paddingBottom: 32 }}
     >
-      <View style={{ paddingTop: 14 }}>
-        <Masthead
-          eyebrow="Connected instance"
-          title="Your instance"
-          actions={
-            <IconButton
-              label="Close"
-              glyph="close"
-              onPress={() => router.back()}
-            />
-          }
-        />
-      </View>
+      {/* Close leads the sheet's bar: horizontal at the top here, first on
+          the vertical bar where iPhone Duo puts the bar on the side. */}
+      <Stack.Toolbar placement="left">
+        <Stack.Toolbar.Button icon={glyphs.close} onPress={() => router.back()}>
+          Close
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
+      <Masthead nested eyebrow="Connected instance" title="Your instance" />
       <View style={{ paddingHorizontal: 16, gap: 14 }}>
         <Card style={{ backgroundColor: c.ink, gap: 14 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

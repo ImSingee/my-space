@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { REFRESH_PRESETS, formatInterval } from '@hatch/platform-api';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { router, useIsFocused } from 'expo-router';
-import { Animated, Easing, View } from 'react-native';
+import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { dashboardDestination, type BrowserDestination } from '../core';
 import { useSession } from '../state/session';
@@ -10,16 +10,8 @@ import { useAppActive } from '../state/use-app-active';
 import { useDashboardAutoRefresh } from '../state/use-dashboard-auto-refresh';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
 import { useSurfaceHandoff } from '../state/use-surface-handoff';
-import { IconButton } from '../ui/button';
-import { Choice } from '../ui/native-controls';
-import {
-  Busy,
-  EmptyState,
-  Notice,
-  Tag,
-  errorText,
-  useReducedMotion,
-} from '../ui/primitives';
+import { RefreshMenu } from '../ui/native-controls';
+import { Busy, EmptyState, Notice, errorText } from '../ui/primitives';
 import { ScopeTabs } from '../ui/scope-tabs';
 import { Screen } from '../ui/screen';
 import { SecureSurface } from '../ui/secure-surface';
@@ -115,12 +107,23 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
       title="Dashboard"
       nested={nested}
       actions={
-        <RefreshButton
-          revision={refreshRevision}
-          onPress={refresh}
+        <RefreshMenu
+          label="Refresh dashboard"
           // With no dashboards there is no canvas to wait for; a refresh
           // can still find one created on the web.
           disabled={!ready && !(workspace.data && !dashboards.length)}
+          onRefresh={refresh}
+          interval={String(current ? seconds : 0)}
+          intervalLabel={seconds ? formatInterval(seconds) : undefined}
+          intervalDisabled={!current || saveInterval.isPending}
+          options={intervals.map((preset) => ({
+            value: String(preset.seconds),
+            label: preset.seconds ? 'Every ' + preset.label : 'Off',
+          }))}
+          onInterval={(value) => {
+            if (current)
+              saveInterval.mutate({ id: current.id, seconds: Number(value) });
+          }}
         />
       }
     >
@@ -132,35 +135,13 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
           onChange={setSelection}
         />
       ) : null}
-      {current ? (
-        <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            {current.pinned ? (
-              <Tag tone="lime" glyph="pin" label="Pinned" />
-            ) : null}
-            <Choice
-              label="Auto refresh"
-              value={String(seconds)}
-              glyph="refresh"
-              disabled={saveInterval.isPending}
-              options={intervals.map((preset) => ({
-                value: String(preset.seconds),
-                label: preset.seconds
-                  ? 'Every ' + preset.label
-                  : 'Auto refresh off',
-              }))}
-              onChange={(value) =>
-                saveInterval.mutate({ id: current.id, seconds: Number(value) })
-              }
-            />
-          </View>
-          {saveInterval.error ? (
-            <Notice
-              tone="danger"
-              title="Couldn’t save refresh interval"
-              detail={errorText(saveInterval.error)}
-            />
-          ) : null}
+      {saveInterval.error ? (
+        <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+          <Notice
+            tone="danger"
+            title="Couldn’t save refresh interval"
+            detail={errorText(saveInterval.error)}
+          />
         </View>
       ) : null}
       <View
@@ -256,52 +237,5 @@ function DashboardSurface({
         })
       }
     />
-  );
-}
-
-/** Turns once per refresh, so a tap or a timed refresh is visible. */
-function RefreshButton({
-  revision,
-  onPress,
-  disabled,
-}: {
-  revision: number;
-  onPress: () => void;
-  disabled: boolean;
-}) {
-  const reduced = useReducedMotion();
-  const [turn] = useState(() => new Animated.Value(0));
-  useEffect(() => {
-    if (!revision || reduced) return;
-    turn.setValue(0);
-    const spin = Animated.timing(turn, {
-      toValue: 1,
-      duration: 650,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    });
-    spin.start();
-    return () => spin.stop();
-  }, [revision, reduced, turn]);
-  return (
-    <Animated.View
-      style={{
-        transform: [
-          {
-            rotate: turn.interpolate({
-              inputRange: [0, 1],
-              outputRange: ['0deg', '360deg'],
-            }),
-          },
-        ],
-      }}
-    >
-      <IconButton
-        label="Refresh dashboard"
-        glyph="refresh"
-        onPress={onPress}
-        disabled={disabled}
-      />
-    </Animated.View>
   );
 }
