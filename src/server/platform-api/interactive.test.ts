@@ -1505,6 +1505,15 @@ describe('notification center authority', () => {
       body: { ...alert, title: 'a'.repeat(201) },
     });
     expect(tooLong.status).toBe(400);
+    // Data at the 32 KiB Channel push limit fits even when escaping doubles
+    // it inside data_json.
+    const quotes = { blob: '"'.repeat(16_000) };
+    expect(Buffer.byteLength(JSON.stringify(quotes))).toBeLessThan(32 * 1024);
+    const largeData = await call('NotificationService/SendNotification', {
+      headers: apiKey,
+      body: { ...alert, dataJson: JSON.stringify(quotes) },
+    });
+    expect(largeData.status).toBe(200);
     const undeclared = await call('NotificationService/SendNotification', {
       headers: apiKey,
       body: { ...alert, kind: 'other' },

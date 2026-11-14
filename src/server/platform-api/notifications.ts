@@ -40,6 +40,7 @@ import {
   type NotificationStatus,
   type NotificationSummaryView,
 } from '~server/notifications/service';
+import { MAX_NOTIFICATION_BODY_BYTES } from '~server/notifications/contract';
 import { sessionOriginError } from '~server/session-http-auth';
 import { authenticatePublicApi } from './auth';
 import { publicApiError, publicError } from './errors';
@@ -117,11 +118,20 @@ function sessionOf(context: HandlerContext) {
   return { sessionId: auth.session.id, userId: auth.status.user.id };
 }
 
+/**
+ * SendNotification carries `data_json` as a string inside the request, so
+ * escaping can double the 32 KiB data and text fields of a Channel push. The
+ * request gate runs before the body is read, so only session and API-key
+ * callers can send bodies this large.
+ */
+export const NOTIFICATION_RPC_BODY_LIMIT = 2 * MAX_NOTIFICATION_BODY_BYTES;
+
 export function registerNotificationApi(router: ConnectRouter) {
   // Users (session or API key) manage delivery; Run credentials never do.
   const userCredentials = {
     grpc: false,
     grpcWeb: false,
+    readMaxBytes: NOTIFICATION_RPC_BODY_LIMIT,
     requestGate: async (context: HandlerContext) => {
       try {
         const request = new Request(context.url, {

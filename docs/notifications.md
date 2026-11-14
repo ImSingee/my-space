@@ -61,7 +61,8 @@ Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
   (`ingestChannelPush`), answers `CONFLICT` for a disabled channel and
   `BAD_REQUEST` for an invalid body or undeclared kind, and returns the
   queued delivery count so callers can spot sends that reached no enabled
-  destination.
+  destination. `NotificationService` reads requests up to 128 KiB (twice the
+  Channel push cap) because `data_json` is escaped inside the request.
 
 ## Delivery
 
