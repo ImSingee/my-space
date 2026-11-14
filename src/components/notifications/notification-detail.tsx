@@ -1,5 +1,6 @@
 import {
   Anchor,
+  Badge,
   Box,
   Button,
   Code,
@@ -76,6 +77,13 @@ export function NotificationDetail({ id }: { id: string }) {
               >
                 {data.url}
               </Anchor>
+              {data.autoOpenUrl ? (
+                <Tooltip label="Tapping the phone notification opens this link instead of the notification.">
+                  <Badge variant="light" color="gray" style={{ flex: 'none' }}>
+                    Opens on tap
+                  </Badge>
+                </Tooltip>
+              ) : null}
             </Group>
           ) : null}
         </Stack>

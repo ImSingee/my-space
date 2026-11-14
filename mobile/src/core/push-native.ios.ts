@@ -10,6 +10,13 @@ type HatchPushKeysModule = {
   setKey(kid: string, key: string): Promise<void>;
   hasKey(kid: string): Promise<boolean>;
   deleteKey(kid: string): Promise<void>;
+  verifyTap(
+    kid: string,
+    mac: string,
+    origin: string,
+    id: string,
+    url: string,
+  ): Promise<boolean>;
 };
 
 const nativeKeys =
@@ -73,6 +80,8 @@ export const nativePushPlatform: PushPlatform = {
     set: (kid, key) => keys().setKey(kid, key),
     has: (kid) => keys().hasKey(kid),
     remove: (kid) => keys().deleteKey(kid),
+    verifyTap: (kid, mac, fields) =>
+      keys().verifyTap(kid, mac, fields.origin, fields.id, fields.url),
   },
   records: {
     async get(origin) {
