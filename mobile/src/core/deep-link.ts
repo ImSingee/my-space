@@ -158,6 +158,21 @@ export function resolveLink(
   return origin ? instanceLink(value, origin) : null;
 }
 
+/**
+ * The browser address of an instance page the app has no screen for, with
+ * its query and fragment. Null if the path would leave the instance.
+ */
+export function webPageUrl(
+  target: Extract<LinkTarget, { kind: 'web' }>,
+  origin: string,
+): string | null {
+  const url = new URL(target.path, origin);
+  if (url.origin !== origin || url.pathname !== target.path) return null;
+  if (target.search) url.search = target.search;
+  if (target.hash) url.hash = target.hash;
+  return url.href;
+}
+
 /** How the phone opens the URL a notification carries. */
 export type NotificationUrlAction =
   /** A Hatch page: opened in the app, on `link.instance`. */

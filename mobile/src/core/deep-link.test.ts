@@ -5,6 +5,7 @@ import {
   instanceLink,
   isDevClientLink,
   notificationUrlAction,
+  webPageUrl,
   parseDeepLink,
   resolveLink,
   type LinkTarget,
@@ -213,6 +214,15 @@ describe('deep links', () => {
     // A deep link never leaves for the system, not even unreadable ones.
     for (const url of ['hatch://more/unknown', 'hatch://api/rpc'])
       expect(notificationUrlAction(url, origin)).toEqual({ open: 'none' });
+  });
+
+  it('opens pages without a phone screen at their full address', () => {
+    const page = parseDeepLink('hatch://settings/providers?tab=keys#top');
+    expect(page?.target.kind).toBe('web');
+    if (page?.target.kind !== 'web') return;
+    expect(webPageUrl(page.target, origin)).toBe(
+      `${origin}/settings/providers?tab=keys#top`,
+    );
   });
 
   it('writes links that read back as the same page', () => {

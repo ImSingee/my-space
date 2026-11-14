@@ -2,7 +2,12 @@ import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
-import { deliveryPlan, type DeepLink, type LinkTarget } from '../core';
+import {
+  deliveryPlan,
+  webPageUrl,
+  type DeepLink,
+  type LinkTarget,
+} from '../core';
 import type { NavigationPreferences } from '../core/navigation-preferences';
 import { errorText } from '../ui/primitives';
 import { linkInbox, type LinkEntry } from './link-inbox';
@@ -81,10 +86,9 @@ function openTarget(
       );
       return;
     case 'web': {
-      const url = new URL(target.path, origin);
-      if (url.origin !== origin || url.pathname !== target.path) return;
-      if (target.hash) url.hash = target.hash;
-      void WebBrowser.openBrowserAsync(url.href).catch((error: unknown) =>
+      const url = webPageUrl(target, origin);
+      if (!url) return;
+      void WebBrowser.openBrowserAsync(url).catch((error: unknown) =>
         Alert.alert('Couldn’t open this page', errorText(error)),
       );
     }
