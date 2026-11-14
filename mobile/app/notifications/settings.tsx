@@ -28,6 +28,8 @@ export default function NotificationSettingsScreen() {
   });
   const host = origin?.replace(/^https?:\/\//, '') ?? '';
   const on = local.data === true;
+  // Undefined while loading or after a failed read: neither on nor off.
+  const known = local.data !== undefined;
   const device = on ? remote.data : null;
   const problem =
     remote.data === null && on
@@ -128,7 +130,7 @@ export default function NotificationSettingsScreen() {
                 <Switch
                   accessibilityLabel="Push notifications from this instance"
                   value={on}
-                  disabled={saving || local.isLoading}
+                  disabled={saving || !known}
                   trackColor={{ true: c.moss, false: c.rule }}
                   ios_backgroundColor={c.rule}
                   onValueChange={toggle}
@@ -143,6 +145,32 @@ export default function NotificationSettingsScreen() {
                 </Text>
               ) : null}
             </Card>
+            {local.error ? (
+              <View style={{ marginTop: 14 }}>
+                <Notice
+                  tone="danger"
+                  title="Couldn’t read push settings on this phone"
+                  detail={errorText(local.error)}
+                  action={{
+                    label: 'Try again',
+                    onPress: () => void local.refetch(),
+                  }}
+                />
+              </View>
+            ) : null}
+            {remote.error ? (
+              <View style={{ marginTop: 14 }}>
+                <Notice
+                  tone="danger"
+                  title="Couldn’t load this phone from the instance"
+                  detail={errorText(remote.error)}
+                  action={{
+                    label: 'Try again',
+                    onPress: () => void remote.refetch(),
+                  }}
+                />
+              </View>
+            ) : null}
             {device ? (
               <>
                 <SectionLabel>This phone</SectionLabel>
