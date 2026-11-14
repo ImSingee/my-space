@@ -292,6 +292,14 @@ describe('device refresh', () => {
     expect(stored).toMatchObject({ id: device.id, enabled: true });
   });
 
+  it('keeps a renamed device name when the phone registers again', async () => {
+    const device = await registerDevice();
+    await service.updateDestination({ id: device.id, name: 'Work phone' });
+    await refresh(TOKEN);
+    const [stored] = await service.listDestinations();
+    expect(stored).toMatchObject({ id: device.id, name: 'Work phone' });
+  });
+
   it('keeps routes and groups when push is turned off and on in the app', async () => {
     const device = await registerDevice();
     const group = await service.createGroup({

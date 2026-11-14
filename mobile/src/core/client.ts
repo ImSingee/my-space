@@ -44,6 +44,7 @@ import type {
   AgentModelCatalog,
   NotificationDetail,
   NotificationSummary,
+  PushDevice,
   PushRegistration,
   RunCreated,
   SessionDetail,
@@ -411,9 +412,7 @@ export class HatchApiClient {
       signal,
     ).then(() => undefined);
   }
-  async pushDevice(
-    signal?: AbortSignal,
-  ): Promise<{ enabled: boolean; lastError: string | null } | null> {
+  async pushDevice(signal?: AbortSignal): Promise<PushDevice | null> {
     const result = await this.rpcRequest(
       (signal) => this.notificationRpc.getCurrentDevice({}, { signal }),
       signal,
@@ -421,10 +420,20 @@ export class HatchApiClient {
     const destination = result.destination;
     return destination
       ? {
+          id: destination.id,
+          name: destination.name,
           enabled: destination.enabled,
           lastError: destination.lastError ?? null,
         }
       : null;
+  }
+  /** Rename this phone's destination; registration never overwrites it. */
+  renamePushDevice(id: string, name: string, signal?: AbortSignal) {
+    return this.rpcRequest(
+      (signal) =>
+        this.notificationRpc.updateDestination({ id, name }, { signal }),
+      signal,
+    ).then(() => undefined);
   }
   async workflows(signal?: AbortSignal): Promise<AppSummary[]> {
     const result = await this.rpcRequest(

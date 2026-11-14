@@ -155,6 +155,15 @@ Device rows reference their sign-in session with `ON DELETE CASCADE`, so
 signing out or revoking the session removes the device. Deliveries to an
 expired session fail.
 
+The name a phone sends with `RegisterDevice` only names a new device row; the
+app re-registers on every launch and token change without touching the name,
+so a rename from the app, the Web UI or `hatch notification destination
+rename` sticks. The app's default is the user-assigned device name when iOS
+exposes it (that needs the managed
+`com.apple.developer.device-information.user-assigned-device-name`
+entitlement, which the app does not hold), otherwise the model name such as
+"iPhone 17 Pro".
+
 A device records why it is disabled (`disabled_reason`), which decides who may
 turn it back on:
 

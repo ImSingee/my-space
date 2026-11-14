@@ -74,7 +74,7 @@ export default function MoreScreen() {
               <Group>
                 <ListRow
                   title="Notifications"
-                  detail="History and delivery from this instance"
+                  detail="History and push for this phone"
                   leading={<GlyphTile glyph="bell" />}
                   onPress={() => router.push('/notifications')}
                 />

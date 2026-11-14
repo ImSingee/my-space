@@ -1001,6 +1001,9 @@ export const DeleteDestinationResponseSchema: GenMessage<DeleteDestinationRespon
 export type RegisterDeviceRequest =
   Message<'hatch.platform.v1.RegisterDeviceRequest'> & {
     /**
+     * Initial display name. An already registered device keeps its current
+     * name; rename it with UpdateDestination.
+     *
      * @generated from field: string name = 1;
      */
     name: string;

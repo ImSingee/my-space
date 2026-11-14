@@ -1,10 +1,11 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { router, useIsFocused } from 'expo-router';
+import { Stack, router, useIsFocused } from 'expo-router';
 import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useSession } from '../../src/state/session';
 import { usePullToRefresh } from '../../src/state/use-pull-to-refresh';
 import { Button } from '../../src/ui/button';
 import { Reflow } from '../../src/ui/columns';
+import { glyphs } from '../../src/ui/glyph.types';
 import { Busy, EmptyState, Notice, errorText } from '../../src/ui/primitives';
 import {
   NotificationStatusTag,
@@ -41,6 +42,15 @@ export default function NotificationsScreen() {
         />
       }
     >
+      {/* A native bar item so iPhone Duo can move it to the vertical bar. */}
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          icon={glyphs.settings}
+          onPress={() => router.push('/notifications/settings')}
+        >
+          Notification settings
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
       <View style={{ paddingHorizontal: 16, gap: 14 }}>
         {query.error ? (
           <Notice

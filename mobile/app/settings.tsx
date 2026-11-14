@@ -1,9 +1,7 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Alert, Linking, ScrollView, Switch, View } from 'react-native';
-import { pushRegistrar, pushSupported } from '../src/state/push-registrar';
+import { Alert, ScrollView, View } from 'react-native';
 import { useSession } from '../src/state/session';
 import { Button } from '../src/ui/button';
 import { glyphs, type GlyphName } from '../src/ui/glyph.types';
@@ -33,90 +31,6 @@ const notes: { glyph: GlyphName; title: string; detail: string }[] = [
       'Your session is stored securely on this device. Hatch accounts have full access to their instance.',
   },
 ];
-
-function PushCard() {
-  const { origin, api } = useSession();
-  const queryClient = useQueryClient();
-  const [saving, setSaving] = useState(false);
-  const local = useQuery({
-    queryKey: [origin, 'push', 'local'],
-    queryFn: () => pushRegistrar.enabled(origin!),
-    enabled: Boolean(origin),
-  });
-  const remote = useQuery({
-    queryKey: [origin, 'push', 'device'],
-    queryFn: ({ signal }) => api!.pushDevice(signal),
-    enabled: Boolean(api) && local.data === true,
-  });
-  if (!pushSupported || !origin || !api) return null;
-  const on = local.data === true;
-  const problem =
-    remote.data === null && on
-      ? 'This instance has not registered this phone yet.'
-      : remote.data && !remote.data.enabled
-        ? (remote.data.lastError ??
-          'This phone was turned off for notifications on the instance.')
-        : null;
-  const toggle = (next: boolean) => {
-    setSaving(true);
-    void (
-      next
-        ? pushRegistrar.enable(origin, api)
-        : pushRegistrar.disable(origin, api)
-    )
-      .then((result) => {
-        if (next && result === false)
-          Alert.alert(
-            'Notifications are off',
-            'Allow notifications for Hatch in Settings, then try again.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Settings',
-                onPress: () => void Linking.openSettings(),
-              },
-            ],
-          );
-      })
-      .catch((error: unknown) =>
-        Alert.alert('Couldn’t change notifications', errorText(error)),
-      )
-      .finally(() => {
-        setSaving(false);
-        void queryClient.invalidateQueries({ queryKey: [origin, 'push'] });
-      });
-  };
-  return (
-    <Card style={{ gap: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <GlyphTile glyph="bell" size={36} />
-        <View style={{ flex: 1, gap: 3 }}>
-          <Text style={type.heading}>Push notifications</Text>
-          <Text style={type.small}>
-            Notifications are end-to-end encrypted for this phone. Apple only
-            sees that something arrived.
-          </Text>
-        </View>
-        <Switch
-          accessibilityLabel="Push notifications from this instance"
-          value={on}
-          disabled={saving || local.isLoading}
-          trackColor={{ true: c.moss, false: c.rule }}
-          ios_backgroundColor={c.rule}
-          onValueChange={toggle}
-        />
-      </View>
-      {problem ? (
-        <Text
-          accessibilityRole="alert"
-          style={[type.small, { color: c.danger }]}
-        >
-          {problem}
-        </Text>
-      ) : null}
-    </Card>
-  );
-}
 
 export default function SettingsScreen() {
   const { origin, disconnect } = useSession();
@@ -188,7 +102,6 @@ export default function SettingsScreen() {
             }}
           />
         </Card>
-        <PushCard />
         <Card style={{ gap: 18 }}>
           {notes.map((note) => (
             <View

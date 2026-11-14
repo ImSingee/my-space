@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
+import * as Device from 'expo-device';
 import { requireOptionalNativeModule } from 'expo';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
@@ -37,12 +38,23 @@ function keys(): HatchPushKeysModule {
 
 export const pushSupported = Boolean(nativeKeys);
 
+// iOS reports only the generic model ("iPhone") as the device name unless the
+// app holds the user-assigned-device-name entitlement; the marketing model
+// ("iPhone 17 Pro") tells a user's phones apart better than that.
+const genericNames = new Set(['iPhone', 'iPad', 'iPod touch']);
+
+function defaultDeviceName(): string {
+  const name = Device.deviceName?.trim();
+  if (name && !genericNames.has(name)) return name;
+  return Device.modelName ?? name ?? 'iPhone';
+}
+
 export const nativePushPlatform: PushPlatform = {
   environment:
     Constants.expoConfig?.extra?.apnsEnvironment === 'production'
       ? 'production'
       : 'sandbox',
-  deviceName: () => Constants.deviceName ?? 'iPhone',
+  deviceName: defaultDeviceName,
   async permission(prompt) {
     const current = await Notifications.getPermissionsAsync();
     if (current.granted) return true;
