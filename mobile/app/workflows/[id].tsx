@@ -41,7 +41,9 @@ export default function WorkflowScreen() {
     Promise.all([query.refetch(), workspace.refetch()]),
   );
   const data = query.data;
-  const pinned = workspace.data?.pinnedWorkflowIds.includes(id) ?? false;
+  // Links open a workflow by its handle; pins are kept by id.
+  const pinned =
+    (data && workspace.data?.pinnedWorkflowIds.includes(data.id)) ?? false;
   // A failed refresh keeps what was already loaded.
   if (query.error && !query.data)
     return (

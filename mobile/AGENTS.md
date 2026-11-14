@@ -60,6 +60,19 @@ which needs every scheme declared in `LSApplicationQueriesSchemes` (iOS) or
 `<queries>` (Android). Keep the sign-in handshake, credential and frame
 boundaries covered by its tests.
 
+Deep links name pages by their Hatch web paths (`hatch://app/<slug>#<route>`,
+`hatch://agent/<id>`, optional `?instance=<origin>`); phone-only pages live
+under `/more`. `src/core/deep-link.ts` owns the grammar and the path table:
+a new screen gets a path there and in its tests, never a route of its own in
+Expo Router's linking. `app/+native-intent.ts` hands system links to the
+inbox and returns null, so Expo Router never routes them;
+`useDeepLinkLifecycle` opens them once the saved sign-in is restored, and
+notification taps and links followed in web surfaces go through the same
+inbox. A link only navigates: it never changes data, starts a run, fills a
+draft, signs in or adds an instance. It may switch to another instance this
+phone is signed in to, after asking unless it is a decrypted push. Pages
+without a screen open in the browser; a web surface leaves those in place.
+
 An App screen's back steps through WebKit's own `canGoBack` before leaving.
 While the page has history the screen turns off its native swipe
 (`gestureEnabled`), WKWebView's swipe takes over, and `useWebHistoryBack` turns

@@ -1,10 +1,9 @@
 import * as Notifications from 'expo-notifications';
-import { router } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { Alert } from 'react-native';
+import { useEffect } from 'react';
 import { canonicalizeInstanceUrl } from '../core';
+import { linkInbox } from './link-inbox';
 import { pushRegistrar, pushSupported } from './push-registrar';
-import { allowDevelopmentLoopback, useSession, vault } from './session';
+import { allowDevelopmentLoopback, useSession } from './session';
 
 // Show Hatch notifications as banners while the app is open too.
 Notifications.setNotificationHandler({
@@ -41,24 +40,13 @@ export function pushTarget(
   }
 }
 
-let pending: PushTarget | null = null;
-
-/** Open a notification on the root stack, above any sheet left open. */
-function openNotification(id: string) {
-  if (router.canDismiss()) router.dismissAll();
-  router.push(`/notifications/${id}`);
-}
-
 /**
- * Keeps the active instance's push registration fresh and routes notification
- * taps to the instance that sent them. Mounted once inside the session.
+ * Keeps the active instance's push registration fresh and hands notification
+ * taps to the link inbox, which opens them on the instance that sent them.
+ * Mounted once inside the session.
  */
 export function usePushLifecycle() {
-  const { ready, origin, api, epoch, connect } = useSession();
-  const current = useRef({ origin, connect });
-  useEffect(() => {
-    current.current = { origin, connect };
-  });
+  const { ready, origin, api } = useSession();
 
   useEffect(() => {
     if (!pushSupported || !origin || !api) return;
@@ -74,45 +62,31 @@ export function usePushLifecycle() {
   }, [origin, api]);
 
   useEffect(() => {
-    if (pending && origin && pending.origin === origin) {
-      const id = pending.notificationId;
-      pending = null;
-      // Let the re-keyed stack mount before pushing onto it.
-      setTimeout(() => openNotification(id), 0);
-    }
-  }, [origin, epoch]);
-
-  useEffect(() => {
-    // Wait for the saved instance to be restored before routing a cold-start tap.
+    // Wait for the saved instance to be restored before taking a cold-start tap.
     if (!pushSupported || !ready) return;
-    const open = async (response: Notifications.NotificationResponse) => {
+    const open = (response: Notifications.NotificationResponse) => {
       const target = pushTarget(response);
       if (!target) return;
-      if (target.origin === current.current.origin) {
-        openNotification(target.notificationId);
-        return;
-      }
-      if (!(await vault.get(target.origin))) {
-        Alert.alert(
-          'Sign in to open this notification',
-          `It came from ${target.origin.replace(/^https?:\/\//, '')}, which this phone is not signed in to.`,
-        );
-        return;
-      }
-      pending = target;
-      await current.current.connect(target.origin).catch(() => {
-        pending = null;
+      // Only the extension writes this payload after decrypting it with the
+      // instance's key, so it may switch to that instance without asking.
+      linkInbox.put({
+        link: {
+          instance: target.origin,
+          target: { kind: 'notification', id: target.notificationId },
+        },
+        trusted: true,
+        from: 'system',
       });
     };
     const last = Notifications.getLastNotificationResponse();
     if (last) {
       Notifications.clearLastNotificationResponse();
-      void open(last);
+      open(last);
     }
     const subscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         Notifications.clearLastNotificationResponse();
-        void open(response);
+        open(response);
       },
     );
     return () => subscription.remove();

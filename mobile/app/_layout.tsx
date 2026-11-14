@@ -3,6 +3,7 @@ import { Appearance } from 'react-native';
 import { useEffect } from 'react';
 import { fonts, palette as c } from '../src/ui/theme';
 import { SessionProvider, useSession } from '../src/state/session';
+import { useDeepLinkLifecycle } from '../src/state/deep-links';
 import { usePushLifecycle } from '../src/state/push';
 import { Busy } from '../src/ui/primitives';
 import {
@@ -14,6 +15,7 @@ function Navigation() {
   const { ready, origin, epoch } = useSession();
   const navigation = useNavigationPreferences();
   usePushLifecycle();
+  useDeepLinkLifecycle();
   if (!ready || !navigation.ready) return <Busy label="Opening Hatch…" />;
   return (
     <Stack

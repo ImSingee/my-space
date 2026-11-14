@@ -18,12 +18,12 @@ const app: SurfaceContext = {
   },
   signedIn: true,
   ready: true,
-  canOpenApp: false,
+  canRoute: false,
 };
 const dashboard: SurfaceContext = {
   ...app,
   target: '/mobile/dashboard/default',
-  canOpenApp: true,
+  canRoute: true,
 };
 
 describe('surface navigation', () => {
@@ -40,17 +40,53 @@ describe('surface navigation', () => {
     });
   });
 
-  it('keeps the App’s own pages and opens Apps natively from a dashboard', () => {
-    const top = (url: string, context = app) =>
-      decideLoad({ url, isTopFrame: true, navigationType: 'click' }, context);
+  it('keeps the App’s own pages and opens Hatch pages natively, App routes included', () => {
+    const top = (url: string, context = app, navigationType = 'click') =>
+      decideLoad({ url, isTopFrame: true, navigationType }, context);
     expect(top(`${origin}/app/notes/embed/#/detail`).action).toBe('load');
     expect(top(`${origin}/app/notes/embed/page.html?x=1`).action).toBe('load');
-    expect(top(`${origin}/app/reading`, dashboard)).toEqual({
-      action: 'app',
-      slug: 'reading',
+    expect(top(`${origin}/app/reading#/books/7`, dashboard)).toEqual({
+      action: 'route',
+      link: {
+        instance: origin,
+        target: { kind: 'app', slug: 'reading', hash: '/books/7' },
+      },
     });
+    expect(top(`${origin}/agent/s1`, dashboard)).toEqual({
+      action: 'route',
+      link: { instance: origin, target: { kind: 'conversation', id: 's1' } },
+    });
+    // Script navigation opens a page only once this one is showing.
+    const loading = { ...dashboard, ready: false };
+    expect(top(`${origin}/agent/s1`, loading, 'other').action).toBe('block');
+    expect(top(`${origin}/agent/s1`, dashboard, 'formsubmit').action).toBe(
+      'block',
+    );
+    // Pages without a screen here need a browser session; they stay put.
+    expect(top(`${origin}/app/reading/manage`, dashboard).action).toBe('block');
+    expect(top(`${origin}/api/rpc`, dashboard).action).toBe('block');
     expect(top(`${origin}/dashboard`).action).toBe('block');
     expect(top(`${origin}/login`).action).toBe('expired');
+  });
+
+  it('opens Hatch links here instead of through the system', () => {
+    const link = 'hatch://app/reading?instance=other.example#/books';
+    expect(decideNewWindow(link, dashboard)).toEqual({
+      action: 'route',
+      link: {
+        instance: 'https://other.example',
+        target: { kind: 'app', slug: 'reading', hash: '/books' },
+      },
+    });
+    expect(
+      decideLoad({ url: link, isTopFrame: true, navigationType: 'click' }, app),
+    ).toEqual({ action: 'block' });
+    expect(decideNewWindow('hatch://api/rpc', dashboard)).toEqual({
+      action: 'block',
+    });
+    expect(
+      decideNewWindow('hatch://app/reading', { ...dashboard, signedIn: false }),
+    ).toEqual({ action: 'block' });
   });
 
   it('sends followed cross-site links to the system browser, never while loading', () => {

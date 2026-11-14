@@ -143,6 +143,18 @@ owns the listener, so source must not call `listen()` or read `PORT`. The field
 does not change `backendMode`, which controls lazy versus long-running lifecycle.
 Runtime selection is preserved in each deployment artifact and on rollback.
 
+## Links to Hatch pages
+
+Give an App page its own address with hash routing: the web host at
+`/app/<slug>#<route>` and pins pass `<route>` to the App. Link to Hatch pages
+with same-origin paths: `/app/<slug>#<route>` (another App, or this one at a
+route), `/agent/<session id>`, `/workflow/<slug>`, `/dashboard/<id>`,
+`/notifications/<id>`. In the Hatch phone app these links open the matching
+native page; `hatch://<same path>` names the same page from outside Hatch.
+Follow them as normal links in the same window: `target="_blank"` and
+`window.open` always leave for the system browser, and navigation a page
+starts on its own before it has loaded is ignored.
+
 ## Persistent Storage
 
 For mutable files, enable both `capabilities.backend` and

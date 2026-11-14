@@ -12,8 +12,10 @@ import {
   decideLoad,
   decideNewWindow,
   destinationUrl,
+  surfaceRoute,
   webViewHandoffSource,
   type BrowserDestination,
+  type DeepLink,
   type SessionHandoff,
   type SurfaceDecision,
 } from '../core';
@@ -58,7 +60,7 @@ export function SecureSurface({
   handoff,
   destination,
   retry,
-  onOpenApp,
+  onRoute,
   dashboardRefresh,
   onReady,
   onHistoryBack,
@@ -68,7 +70,8 @@ export function SecureSurface({
   handoff: SessionHandoff;
   destination: BrowserDestination;
   retry: () => void;
-  onOpenApp?: (slug: string) => void;
+  /** Opens a Hatch page that a link in this page leads to. */
+  onRoute?: (link: DeepLink) => void;
   dashboardRefresh?: { id: string; revision: number };
   onReady?: (ready: boolean) => void;
   /**
@@ -147,15 +150,16 @@ export function SecureSurface({
     handoff,
     signedIn,
     ready,
-    canOpenApp: Boolean(onOpenApp),
+    canRoute: Boolean(onRoute),
+    allowDevelopmentLoopback: __DEV__,
   };
   const follow = (decision: SurfaceDecision) => {
     switch (decision.action) {
       case 'external':
         openOutside(decision.url);
         break;
-      case 'app':
-        onOpenApp?.(decision.slug);
+      case 'route':
+        onRoute?.(decision.link);
         break;
       case 'expired':
         fail('Your session expired. Try again to reconnect securely.');
@@ -193,7 +197,7 @@ export function SecureSurface({
         onNavigationStateChange={(state) => {
           // Single-page routing changes the URL without a load request, so it
           // bypasses onShouldStartLoadWithRequest. Keep the surface on its page;
-          // App links open natively instead of inside this view.
+          // links to Hatch pages open natively instead of inside this view.
           if (!signedIn) return;
           setWebCanGoBack(state.canGoBack);
           if (state.loading) return;
@@ -206,10 +210,11 @@ export function SecureSurface({
             fail('Your session expired. Try again to reconnect securely.');
             return;
           }
-          const app = url.pathname.match(/^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/);
           if (state.canGoBack) view.current?.goBack();
           else replacePage(view.current, href);
-          if (app && onOpenApp) onOpenApp(app[1]);
+          // Script routing counts only once the page is showing.
+          const decision = ready ? surfaceRoute(url.href, context) : null;
+          if (decision?.action === 'route') onRoute?.(decision.link);
         }}
         onLoad={({ nativeEvent }) => {
           if (failed.current) return;

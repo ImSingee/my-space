@@ -1,9 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useId, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { appDestination, type BrowserDestination } from '../../src/core';
+import {
+  appDestination,
+  type BrowserDestination,
+  type DeepLink,
+} from '../../src/core';
+import { openSurfaceLink } from '../../src/state/deep-links';
 import { SecureSurface, type SurfaceHandle } from '../../src/ui/secure-surface';
 import { useSession } from '../../src/state/session';
 import { useWebHistoryBack } from '../../src/state/use-web-history-back';
@@ -54,6 +59,18 @@ export default function AppScreen() {
     void app.refetch();
     setAttempt((value) => value + 1);
   };
+  // A link to this App's own route moves this page there; anything else
+  // opens over it.
+  const route = (link: DeepLink) => {
+    const { target } = link;
+    if (
+      (link.instance ?? origin) === origin &&
+      target.kind === 'app' &&
+      target.slug === appSlug
+    )
+      router.setParams({ entryHash: target.hash ?? '' });
+    else openSurfaceLink(link);
+  };
   const data = handoff.data;
   const name = label || app.data?.name || 'App';
   return (
@@ -96,6 +113,7 @@ export default function AppScreen() {
           destination={destination}
           retry={retry}
           onHistoryBack={setInPageBack}
+          onRoute={route}
         />
       )}
     </SafeAreaView>

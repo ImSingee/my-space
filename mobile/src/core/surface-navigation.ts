@@ -1,4 +1,11 @@
+import {
+  instanceLink,
+  isDeepLink,
+  parseDeepLink,
+  type DeepLink,
+} from './deep-link';
 import { HANDOFF_CONSUME_PATH } from './security';
+import { decodeUrlAscii } from './url-text';
 
 /** What an authenticated web surface does with a navigation request. */
 export type SurfaceDecision =
@@ -6,8 +13,8 @@ export type SurfaceDecision =
   | { action: 'load' }
   /** Ignore it; the current page stays as it is. */
   | { action: 'block' }
-  /** Open the native App page instead. */
-  | { action: 'app'; slug: string }
+  /** Open this page natively instead (see `deep-link.ts`). */
+  | { action: 'route'; link: DeepLink }
   /** The browser session ended. */
   | { action: 'expired' }
   /**
@@ -25,7 +32,10 @@ export type SurfaceContext = {
   signedIn: boolean;
   /** The destination page finished loading. */
   ready: boolean;
-  canOpenApp: boolean;
+  /** The screen opens Hatch pages natively when links lead to them. */
+  canRoute: boolean;
+  /** Development builds accept `http://` loopback instances in links. */
+  allowDevelopmentLoopback?: boolean;
 };
 
 export type SurfaceRequest = {
@@ -40,22 +50,6 @@ const LOAD = { action: 'load' } as const;
 const BLOCK = { action: 'block' } as const;
 // Consume, completion and any later handoff step.
 const HANDOFF_PREFIX = '/api/auth/handoffs/';
-const APP_PATH = /^\/app\/([A-Za-z0-9_-]+)(?:\/|$)/;
-
-// Paths and tickets use ASCII. Decode those escapes independently so an
-// unrelated malformed escape or invalid UTF-8 cannot hide a credential.
-// Reject excessive nesting rather than passing an ambiguous URL outside.
-function decodeUrlAscii(value: string): string | null {
-  let text = value;
-  for (let depth = 0; depth < 4; depth++) {
-    const decoded = text.replace(/%([0-7][0-9a-f])/gi, (_escape, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16)),
-    );
-    if (decoded === text) return text;
-    text = decoded;
-  }
-  return /%[0-7][0-9a-f]/i.test(text) ? null : text;
-}
 
 function parse(value: string) {
   try {
@@ -125,8 +119,30 @@ export function externalUrl(
 
 function leave(value: string, context: SurfaceContext): SurfaceDecision {
   if (!context.signedIn) return BLOCK;
+  // Hatch's own links open here, never through the system and back.
+  if (isDeepLink(value)) {
+    const link = context.canRoute
+      ? parseDeepLink(value, {
+          allowDevelopmentLoopback: context.allowDevelopmentLoopback,
+        })
+      : null;
+    return link ? { action: 'route', link } : BLOCK;
+  }
   const url = externalUrl(value, context);
   return url ? { action: 'external', url } : BLOCK;
+}
+
+/**
+ * A page on this instance outside the surface opens natively when the app has
+ * a screen for it. Pages it has none for stay where they are: they would need
+ * a browser session the system browser does not have.
+ */
+export function surfaceRoute(
+  value: string,
+  context: Pick<SurfaceContext, 'origin' | 'canRoute'>,
+): SurfaceDecision {
+  const link = context.canRoute ? instanceLink(value, context.origin) : null;
+  return link && link.target.kind !== 'web' ? { action: 'route', link } : BLOCK;
 }
 
 /** A load request inside the WebView (`onShouldStartLoadWithRequest`). */
@@ -155,19 +171,17 @@ export function decideLoad(
         own.href === context.handoff.completionUrl)
       ? LOAD
       : BLOCK;
-  if (own) {
-    if (inTarget(own, context.target)) return LOAD;
-    const app = own.pathname.match(APP_PATH);
-    if (app && context.canOpenApp) return { action: 'app', slug: app[1] };
-    if (own.pathname === '/login') return { action: 'expired' };
-    return BLOCK;
-  }
-  // Followed links leave the app. Script navigation counts only once the page
-  // is showing, so a page cannot bounce the person out while it loads.
+  // Followed links leave the surface. Script navigation counts only once the
+  // page is showing, so a page cannot bounce the person away while it loads.
   const followed =
     request.navigationType === undefined ||
     request.navigationType === 'click' ||
     (request.navigationType === 'other' && context.ready);
+  if (own) {
+    if (inTarget(own, context.target)) return LOAD;
+    if (own.pathname === '/login') return { action: 'expired' };
+    return followed ? surfaceRoute(own.href, context) : BLOCK;
+  }
   return followed ? leave(request.url, context) : BLOCK;
 }
 

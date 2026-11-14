@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { REFRESH_PRESETS, formatInterval } from '@hatch/platform-api';
 import { useCallback, useState } from 'react';
-import { router, useIsFocused } from 'expo-router';
+import { useIsFocused, useLocalSearchParams } from 'expo-router';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { dashboardDestination, type BrowserDestination } from '../core';
 import { useSession } from '../state/session';
+import { openSurfaceLink } from '../state/deep-links';
 import { useAppActive } from '../state/use-app-active';
 import { useDashboardAutoRefresh } from '../state/use-dashboard-auto-refresh';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
@@ -28,7 +29,15 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
   // Native tabs mount hidden screens: the surface's sign-in and the refresh
   // timer wait until this one is on screen.
   const focused = useIsFocused();
-  const [selection, setSelection] = useState<string | null>(null);
+  // A link names a dashboard; each delivery (a new `at`) selects it again.
+  const linked = useLocalSearchParams<{ dashboard?: string; at?: string }>();
+  const delivery = linked.dashboard ? `${linked.dashboard} ${linked.at}` : null;
+  const [selection, setSelection] = useState(linked.dashboard ?? null);
+  const [delivered, setDelivered] = useState(delivery);
+  if (delivery !== delivered) {
+    setDelivered(delivery);
+    if (linked.dashboard) setSelection(linked.dashboard);
+  }
   const [attempt, setAttempt] = useState(0);
   const workspace = useQuery({
     queryKey: [origin, 'workspace'],
@@ -36,6 +45,10 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
     enabled: Boolean(api),
   });
   const dashboards = workspace.data?.dashboards ?? [];
+  const missing =
+    Boolean(workspace.data && selection) &&
+    selection === linked.dashboard &&
+    !dashboards.some((d) => d.id === selection);
   const current =
     dashboards.find((d) => d.id === selection) ??
     dashboards.find((d) => d.pinned) ??
@@ -135,6 +148,15 @@ export function DashboardScreen({ nested = false }: { nested?: boolean }) {
           onChange={setSelection}
         />
       ) : null}
+      {missing ? (
+        <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+          <Notice
+            tone="danger"
+            title="Couldn’t find that dashboard"
+            detail="It may have been deleted. Showing another dashboard."
+          />
+        </View>
+      ) : null}
       {saveInterval.error ? (
         <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
           <Notice
@@ -230,12 +252,7 @@ function DashboardSurface({
       retry={retry}
       dashboardRefresh={dashboardRefresh}
       onReady={onReady}
-      onOpenApp={(slug) =>
-        router.push({
-          pathname: '/apps/[id]',
-          params: { id: slug, slug },
-        })
-      }
+      onRoute={openSurfaceLink}
     />
   );
 }

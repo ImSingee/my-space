@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { router, useIsFocused } from 'expo-router';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
 import {
   Pressable,
   RefreshControl,
@@ -50,6 +50,16 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
         params: { id, from: fromConversationList },
       });
   };
+  // A link names a conversation: open it as a tap on its row would, beside
+  // the list or over it. Each delivery carries a new `at`.
+  const linked = useLocalSearchParams<{ open?: string; at?: string }>();
+  useEffect(() => {
+    if (!linked.open || !linked.at) return;
+    open(linked.open);
+    router.setParams({ open: undefined, at: undefined });
+    // Only a new delivery opens it; layout changes are handled below.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked.at]);
   // Folding keeps the open conversation open: it moves over the list. The
   // conversation screen returns here when there is room again. A fold while
   // another screen covers this one is kept until the list is shown again,
