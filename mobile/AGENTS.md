@@ -72,6 +72,9 @@ inbox. A link only navigates: it never changes data, starts a run, fills a
 draft, signs in or adds an instance. It may switch to another instance this
 phone is signed in to, after asking unless it is a decrypted push. Pages
 without a screen open in the browser; a web surface leaves those in place.
+Notification URLs (the detail's link and a verified auto-open on tap) go
+through `notificationUrlAction`: Hatch pages by address or deep link open in
+the app, and a `hatch:` link never leaves for the system.
 
 An App screen's back steps through WebKit's own `canGoBack` before leaving.
 While the page has history the screen turns off its native swipe

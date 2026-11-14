@@ -1,11 +1,21 @@
+import {
+  RESERVED_LINK_ROOTS,
+  formatHatchLink,
+  isDeepLink,
+  linkFragment,
+  linkPathSegments,
+  parseHatchLink,
+} from '@hatch/platform-api';
 import type { TabId } from './navigation-preferences';
-import { canonicalizeInstanceUrl, type InstanceUrlOptions } from './security';
-import { decodeUrlAscii } from './url-text';
+import type { InstanceUrlOptions } from './security';
+
+export { isDeepLink, isDevClientLink } from '@hatch/platform-api';
 
 /**
- * Deep links name Hatch pages by their web paths. Replacing an instance
- * origin with `hatch://` turns any Hatch web address into a link that opens
- * the same page in this app:
+ * Deep links name Hatch pages by their web paths (the grammar lives in
+ * `deep-link.ts` of `@hatch/platform-api`, shared with the platform). Replacing an
+ * instance origin with `hatch://` turns any Hatch web address into a link that
+ * opens the same page in this app:
  *
  *   hatch://app/sales#/reports              an App page, at its own route
  *   hatch://agent/<conversation id>
@@ -29,7 +39,7 @@ export type LinkTarget =
   | { kind: 'notification'; id: string }
   | { kind: 'phone'; page: PhonePage }
   /** An instance page this app has no screen for. */
-  | { kind: 'web'; path: string; hash?: string };
+  | { kind: 'web'; path: string; search?: string; hash?: string };
 
 export type PhonePage = 'tabs' | 'instance' | 'notifications';
 export type DeepLink = {
@@ -38,74 +48,29 @@ export type DeepLink = {
   target: LinkTarget;
 };
 
-export const DEEP_LINK_SCHEME = 'hatch';
-const MAX_LINK_LENGTH = 4096;
-const MAX_FRAGMENT_LENGTH = 2048;
 // The same rules the App and resource screens apply to what they load.
 const SLUG = /^[A-Za-z0-9_-]{1,191}$/;
 const ID = /^[A-Za-z0-9_-]{1,256}$/;
-// A decoded path segment: unreserved URL characters only.
-const SEGMENT = /^[A-Za-z0-9._~-]{1,256}$/;
-// Reject URL controls, whitespace and backslashes anywhere in a link.
-// oxlint-disable-next-line no-control-regex
-const forbidden = /[\u0000- \u007f\\]/;
-// Sign-in, device login and API endpoints are never pages to open.
-const RESERVED = new Set(['api', 'cli', 'login']);
+// Addresses are read with the same length bound as links.
+const MAX_ADDRESS_LENGTH = 4096;
 const PHONE_PAGES = new Set<string>(['tabs', 'instance', 'notifications']);
-const HATCH_LINK = /^hatch:(?:\/\/)?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/i;
-
-/** The development client opens its own `hatch://expo-development-client` links. */
-export function isDevClientLink(value: string) {
-  return /^hatch:\/\/expo-development-client(?:[/?#]|$)/i.test(value);
-}
-
-export function isDeepLink(value: string) {
-  return /^hatch:/i.test(value);
-}
-
-/**
- * Splits a raw path into decoded segments. Segments are split before decoding
- * so an encoded slash never becomes a separator, and dot segments are refused
- * rather than resolved.
- */
-function segmentsOf(path: string): string[] | null {
-  const trimmed = path.replace(/^\/+/, '').replace(/\/$/, '');
-  if (!trimmed) return [];
-  const segments: string[] = [];
-  for (const raw of trimmed.split('/')) {
-    const segment = decodeUrlAscii(raw);
-    if (
-      segment === null ||
-      !SEGMENT.test(segment) ||
-      segment === '.' ||
-      segment === '..'
-    )
-      return null;
-    segments.push(segment);
-  }
-  return segments;
-}
-
-function fragmentOf(value: string | undefined) {
-  const hash = value?.replace(/^#/, '') ?? '';
-  if (hash.length > MAX_FRAGMENT_LENGTH) return null;
-  return hash || undefined;
-}
 
 /** The page a web path names, or null when it names none that may open. */
 export function platformTarget(
   segments: string[],
   hash?: string,
+  search?: string,
 ): LinkTarget | null {
   const [first, second, third] = segments;
   const count = segments.length;
   const web = (): LinkTarget => ({
     kind: 'web',
     path: `/${segments.join('/')}`,
+    ...(search ? { search } : {}),
     ...(hash ? { hash } : {}),
   });
   if (!count) return { kind: 'start' };
-  if (RESERVED.has(first)) return null;
+  if (RESERVED_LINK_ROOTS.has(first)) return null;
   switch (first) {
     case 'dashboard':
     case 'dashboards':
@@ -153,54 +118,22 @@ export function platformTarget(
   }
 }
 
-/** An instance origin, or a bare host that means HTTPS. */
-function instanceOf(value: string, options: InstanceUrlOptions) {
-  try {
-    return canonicalizeInstanceUrl(
-      /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`,
-      options,
-    );
-  } catch {
-    return null;
-  }
-}
-
 /** Reads a `hatch:` link. Anything malformed or unsafe is null. */
 export function parseDeepLink(
   value: string,
   options: InstanceUrlOptions = {},
 ): DeepLink | null {
-  if (value.length > MAX_LINK_LENGTH || forbidden.test(value)) return null;
-  if (isDevClientLink(value)) return null;
-  const match = HATCH_LINK.exec(value);
-  if (!match) return null;
-  const [, path, query = '', fragment] = match;
-  let instance: string | null = null;
-  for (const pair of query.split('&')) {
-    const split = pair.indexOf('=');
-    const key = split < 0 ? pair : pair.slice(0, split);
-    if (key !== 'instance') continue;
-    // A link naming two instances names neither.
-    if (instance !== null) return null;
-    let text: string;
-    try {
-      text = decodeURIComponent(split < 0 ? '' : pair.slice(split + 1));
-    } catch {
-      return null;
-    }
-    instance = instanceOf(text, options);
-    if (!instance) return null;
-  }
-  const segments = segmentsOf(path);
-  const hash = fragmentOf(fragment);
-  if (!segments || hash === null) return null;
-  const target = platformTarget(segments, hash);
-  return target ? { instance, target } : null;
+  const link = parseHatchLink(value, {
+    allowLoopbackHttp: options.allowDevelopmentLoopback,
+  });
+  if (!link) return null;
+  const target = platformTarget(link.segments, link.hash, link.search);
+  return target ? { instance: link.instance, target } : null;
 }
 
 /** Reads an address on `origin` itself, as a link to the same page. */
 export function instanceLink(value: string, origin: string): DeepLink | null {
-  if (value.length > MAX_LINK_LENGTH || forbidden.test(value)) return null;
+  if (value.length > MAX_ADDRESS_LENGTH) return null;
   let url: URL;
   try {
     url = new URL(value);
@@ -208,10 +141,10 @@ export function instanceLink(value: string, origin: string): DeepLink | null {
     return null;
   }
   if (url.origin !== origin || url.username || url.password) return null;
-  const segments = segmentsOf(url.pathname);
-  const hash = fragmentOf(url.hash);
+  const segments = linkPathSegments(url.pathname);
+  const hash = linkFragment(url.hash);
   if (!segments || hash === null) return null;
-  const target = platformTarget(segments, hash);
+  const target = platformTarget(segments, hash, url.search || undefined);
   return target ? { instance: origin, target } : null;
 }
 
@@ -225,39 +158,75 @@ export function resolveLink(
   return origin ? instanceLink(value, origin) : null;
 }
 
-function pathOf(target: LinkTarget): string {
+/** How the phone opens the URL a notification carries. */
+export type NotificationUrlAction =
+  /** A Hatch page: opened in the app, on `link.instance`. */
+  | { open: 'page'; link: DeepLink & { instance: string } }
+  /** Any other page or scheme, through the system. */
+  | { open: 'outside'; url: string }
+  /** A `hatch:` link this app cannot read. */
+  | { open: 'none' };
+
+/**
+ * A notification URL from `origin`: its own address or a `hatch:` link opens
+ * the page in the app (on `origin` unless the link names an instance), and a
+ * `hatch:` link never leaves for the system, not even for a page the app has
+ * no screen for (that page opens in the in-app browser on its instance).
+ */
+export function notificationUrlAction(
+  url: string,
+  origin: string,
+  options: InstanceUrlOptions = {},
+): NotificationUrlAction {
+  const deep = isDeepLink(url);
+  const link = deep ? parseDeepLink(url, options) : instanceLink(url, origin);
+  if (link && (deep || link.target.kind !== 'web'))
+    return {
+      open: 'page',
+      link: { instance: link.instance ?? origin, target: link.target },
+    };
+  return deep ? { open: 'none' } : { open: 'outside', url };
+}
+
+function segmentsOf(target: LinkTarget): string[] {
   switch (target.kind) {
     case 'start':
-      return '';
+      return [];
     case 'tab':
-      return target.tab;
+      return [target.tab];
     case 'dashboard':
-      return `dashboard/${target.id}`;
+      return ['dashboard', target.id];
     case 'app':
-      return `app/${target.slug}`;
+      return ['app', target.slug];
     case 'conversation':
-      return `agent/${target.id}`;
+      return ['agent', target.id];
     case 'workflow':
-      return `workflow/${target.slug}`;
+      return ['workflow', target.slug];
     case 'notifications':
-      return 'notifications';
+      return ['notifications'];
     case 'notification':
-      return `notifications/${target.id}`;
+      return ['notifications', target.id];
     case 'phone':
-      return `more/${target.page}`;
+      return ['more', target.page];
     case 'web':
-      return target.path.replace(/^\//, '');
+      return target.path.split('/').filter(Boolean);
   }
 }
 
 /** The `hatch:` link for a page, optionally on a named instance. */
 export function deepLinkFor(target: LinkTarget, instance?: string | null) {
-  const hash =
-    (target.kind === 'app' || target.kind === 'web') && target.hash
-      ? `#${target.hash}`
-      : '';
-  const query = instance ? `?instance=${encodeURIComponent(instance)}` : '';
-  return `${DEEP_LINK_SCHEME}://${pathOf(target)}${query}${hash}`;
+  return formatHatchLink(
+    {
+      segments: segmentsOf(target),
+      ...(target.kind === 'web' && target.search
+        ? { search: target.search }
+        : {}),
+      ...((target.kind === 'app' || target.kind === 'web') && target.hash
+        ? { hash: target.hash }
+        : {}),
+    },
+    instance,
+  );
 }
 
 /** What to do with a link, given the instance in use. */

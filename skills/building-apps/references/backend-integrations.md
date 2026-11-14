@@ -304,12 +304,14 @@ await notify({
 `notify` POSTs to `HATCH_NOTIFICATIONS_URL`, signed with
 `HATCH_SIGNING_SECRET`; both are injected only when the capability and backend
 are enabled. Title is required (≤200 characters); body ≤4000; `url` must be
-absolute http(s); `autoOpenUrl: true` (requires `url`) makes tapping the
+absolute http(s) or a Hatch deep link such as `hatch://app/<slug>#/orders/42`
+(the instance web path after `hatch://`), which phones open natively and the
+web opens on the instance; `autoOpenUrl: true` (requires `url`) makes tapping the
 notification on a phone open `url` directly instead of the notification in the
 Hatch app, so set it only when the link is the whole point of the
-notification. A `url` on this Hatch instance, such as
-`<origin>/app/<slug>#/orders/42`, opens that page natively in the phone app,
-both from the notification and on tap; `data` is a JSON object ≤32 KiB; the request body is capped at
+notification. Prefer a deep link for Hatch pages: the backend does not need
+the instance origin, and phones open the page natively both from the
+notification and on tap; `data` is a JSON object ≤32 KiB; the request body is capped at
 64 KiB. A repeated `dedupeKey` returns the first notification with
 `deduplicated: true`. Errors throw `NotificationError` with the HTTP status.
 Pushing returns once the notification is stored; delivery happens afterwards

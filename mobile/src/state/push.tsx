@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
 import { Linking } from 'react-native';
-import { resolveLink } from '../core/deep-link';
+import { notificationUrlAction } from '../core/deep-link';
 import { pushTap, verifiedTapUrl, type PushTap } from '../core/push';
 import { linkInbox } from './link-inbox';
 import {
@@ -38,27 +38,33 @@ function openNotification(target: PushTap) {
 }
 
 /**
- * Opens a verified tap URL. A Hatch page opens in the app, on the instance
- * that sent the push unless the link names another one (which then asks
- * before switching); anything else leaves for the system. Returns false when
- * nothing could open it.
+ * Opens a verified tap URL. A Hatch page (the instance's own address or a
+ * `hatch:` deep link) opens in the app, on the instance that sent the push
+ * unless the link names another one, which then asks before switching;
+ * anything else leaves for the system. Returns false when nothing could open
+ * it.
  */
 async function openTapUrl(target: PushTap, url: string) {
-  const link = resolveLink(url, target.origin, { allowDevelopmentLoopback });
-  if (link && link.target.kind !== 'web') {
-    const instance = link.instance ?? target.origin;
-    linkInbox.put({
-      link: { instance, target: link.target },
-      trusted: instance === target.origin,
-      from: 'system',
-    });
-    return true;
-  }
-  try {
-    await Linking.openURL(url);
-    return true;
-  } catch {
-    return false;
+  const action = notificationUrlAction(url, target.origin, {
+    allowDevelopmentLoopback,
+  });
+  switch (action.open) {
+    case 'page':
+      linkInbox.put({
+        link: action.link,
+        trusted: action.link.instance === target.origin,
+        from: 'system',
+      });
+      return true;
+    case 'outside':
+      try {
+        await Linking.openURL(action.url);
+        return true;
+      } catch {
+        return false;
+      }
+    case 'none':
+      return false;
   }
 }
 

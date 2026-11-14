@@ -5,7 +5,7 @@ import {
   type DeepLink,
 } from './deep-link';
 import { HANDOFF_CONSUME_PATH } from './security';
-import { decodeUrlAscii } from './url-text';
+import { decodeUrlAscii } from '@hatch/platform-api';
 
 /** What an authenticated web surface does with a navigation request. */
 export type SurfaceDecision =

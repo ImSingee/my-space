@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useIsFocused, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { Alert, RefreshControl, StyleSheet, View } from 'react-native';
-import { isDeepLink, resolveLink } from '../../src/core';
+import { notificationUrlAction } from '../../src/core';
 import { openSurfaceLink } from '../../src/state/deep-links';
 import { allowDevelopmentLoopback, useSession } from '../../src/state/session';
 import { usePullToRefresh } from '../../src/state/use-pull-to-refresh';
@@ -77,14 +77,19 @@ export default function NotificationScreen() {
             label="Open link"
             fullWidth
             onPress={() => {
-              // Hatch pages open here; anything else in the browser.
-              const link = resolveLink(data.url!, origin, {
+              // Hatch pages, by address or deep link, open here; anything
+              // else in the browser.
+              const action = notificationUrlAction(data.url!, origin!, {
                 allowDevelopmentLoopback,
               });
-              if (link && (link.target.kind !== 'web' || isDeepLink(data.url!)))
-                openSurfaceLink(link);
+              if (action.open === 'page') openSurfaceLink(action.link);
+              else if (action.open === 'none')
+                Alert.alert(
+                  'Couldn’t open link',
+                  'This version of Hatch can’t open this page. Update the app and try again.',
+                );
               else
-                void WebBrowser.openBrowserAsync(data.url!).catch(
+                void WebBrowser.openBrowserAsync(action.url).catch(
                   (error: unknown) =>
                     Alert.alert('Couldn’t open link', errorText(error)),
                 );

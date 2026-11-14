@@ -4,6 +4,7 @@ import {
   deliveryPlan,
   instanceLink,
   isDevClientLink,
+  notificationUrlAction,
   parseDeepLink,
   resolveLink,
   type LinkTarget,
@@ -160,6 +161,60 @@ describe('deep links', () => {
     expect(resolveLink(`${origin}/apps`, origin)?.target.kind).toBe('tab');
   });
 
+  it('opens notification URLs for Hatch pages in the app', () => {
+    const other = 'https://other.example';
+    expect(
+      notificationUrlAction('hatch://app/sales#/orders/7', origin),
+    ).toEqual({
+      open: 'page',
+      link: {
+        instance: origin,
+        target: { kind: 'app', slug: 'sales', hash: '/orders/7' },
+      },
+    });
+    expect(
+      notificationUrlAction(`hatch://agent/s1?instance=other.example`, origin),
+    ).toEqual({
+      open: 'page',
+      link: { instance: other, target: { kind: 'conversation', id: 's1' } },
+    });
+    expect(notificationUrlAction(`${origin}/workflow/nightly`, origin)).toEqual(
+      {
+        open: 'page',
+        link: {
+          instance: origin,
+          target: { kind: 'workflow', slug: 'nightly' },
+        },
+      },
+    );
+    // A Hatch page without a phone screen still opens from the app.
+    expect(
+      notificationUrlAction('hatch://settings/providers?tab=keys', origin),
+    ).toEqual({
+      open: 'page',
+      link: {
+        instance: origin,
+        target: {
+          kind: 'web',
+          path: '/settings/providers',
+          search: '?tab=keys',
+        },
+      },
+    });
+    for (const url of [
+      `${origin}/settings/providers`,
+      'https://status.example.com/db-1',
+      'mailto:ops@example.com',
+    ])
+      expect(notificationUrlAction(url, origin)).toEqual({
+        open: 'outside',
+        url,
+      });
+    // A deep link never leaves for the system, not even unreadable ones.
+    for (const url of ['hatch://more/unknown', 'hatch://api/rpc'])
+      expect(notificationUrlAction(url, origin)).toEqual({ open: 'none' });
+  });
+
   it('writes links that read back as the same page', () => {
     const pages: LinkTarget[] = [
       { kind: 'start' },
@@ -172,6 +227,7 @@ describe('deep links', () => {
       { kind: 'notification', id: 'n1' },
       { kind: 'phone', page: 'instance' },
       { kind: 'web', path: '/settings/providers', hash: 'keys' },
+      { kind: 'web', path: '/settings/users', search: '?q=ada' },
     ];
     for (const page of pages) {
       expect(parseDeepLink(deepLinkFor(page))).toEqual({
