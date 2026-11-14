@@ -673,12 +673,21 @@ function ConversationBody({
                 setAtBottom(false);
               }}
               onScrollEndDrag={(event) => {
-                const { contentOffset, layoutMeasurement, contentSize } =
-                  event.nativeEvent;
+                const {
+                  contentOffset,
+                  layoutMeasurement,
+                  contentSize,
+                  velocity,
+                } = event.nativeEvent;
+                // A flick glides on: following resumes only where the glide
+                // stops (onMomentumScrollEnd). Without one, this is the end.
+                const gliding = Boolean(velocity?.y);
+                if (!gliding) dragged.current = false;
                 keepPlace(
                   contentOffset.y,
-                  contentOffset.y + layoutMeasurement.height >=
-                    contentSize.height - 100,
+                  !gliding &&
+                    contentOffset.y + layoutMeasurement.height >=
+                      contentSize.height - 100,
                 );
               }}
               onMomentumScrollEnd={(event) => {
