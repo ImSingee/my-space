@@ -70,6 +70,8 @@ message NotificationSummary {
   // unrouted | pending | delivered | partial | failed
   string status = 12;
   NotificationDeliveryCounts deliveries = 13;
+  // Tapping the phone push opens url instead of the notification.
+  bool auto_open_url = 14;
 }
 
 message NotificationDelivery {

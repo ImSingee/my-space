@@ -1,9 +1,13 @@
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Alert } from 'react-native';
-import { canonicalizeInstanceUrl } from '../core';
-import { pushRegistrar, pushSupported } from './push-registrar';
+import { Alert, Linking } from 'react-native';
+import { pushTap, verifiedTapUrl, type PushTap } from '../core/push';
+import {
+  nativePushPlatform,
+  pushRegistrar,
+  pushSupported,
+} from './push-registrar';
 import { allowDevelopmentLoopback, useSession, vault } from './session';
 
 // Show Hatch notifications as banners while the app is open too.
@@ -16,32 +20,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-type PushTarget = { origin: string; notificationId: string };
-
-/** Tap payload written by the Notification Service Extension after decrypting. */
-export function pushTarget(
-  response: Notifications.NotificationResponse | null,
-): PushTarget | null {
-  const data = response?.notification.request.content.data as
-    | Record<string, unknown>
-    | null
-    | undefined;
-  const origin = data?.hatchOrigin;
-  const notificationId = data?.hatchNotificationId;
-  if (typeof origin !== 'string' || typeof notificationId !== 'string')
-    return null;
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(notificationId)) return null;
-  try {
-    return {
-      origin: canonicalizeInstanceUrl(origin, { allowDevelopmentLoopback }),
-      notificationId,
-    };
-  } catch {
-    return null;
-  }
-}
-
-let pending: PushTarget | null = null;
+let pending: PushTap | null = null;
 
 /** Open a notification on the root stack, above any sheet left open. */
 function openNotification(id: string) {
@@ -85,9 +64,7 @@ export function usePushLifecycle() {
   useEffect(() => {
     // Wait for the saved instance to be restored before routing a cold-start tap.
     if (!pushSupported || !ready) return;
-    const open = async (response: Notifications.NotificationResponse) => {
-      const target = pushTarget(response);
-      if (!target) return;
+    const openInApp = async (target: PushTap) => {
       if (target.origin === current.current.origin) {
         openNotification(target.notificationId);
         return;
@@ -103,6 +80,26 @@ export function usePushLifecycle() {
       await current.current.connect(target.origin).catch(() => {
         pending = null;
       });
+    };
+    const open = async (response: Notifications.NotificationResponse) => {
+      const target = pushTap(response.notification.request.content.data, {
+        allowDevelopmentLoopback,
+      });
+      if (!target) return;
+      // The sender asked for the link instead of the notification. Only the
+      // URL leaves the app, so this needs no session on that instance; if it
+      // is not verified or nothing can open it, the notification opens and
+      // still shows its link.
+      const url = await verifiedTapUrl(target, nativePushPlatform);
+      if (url) {
+        try {
+          await Linking.openURL(url);
+          return;
+        } catch {
+          // Fall through to the notification.
+        }
+      }
+      await openInApp(target);
     };
     const last = Notifications.getLastNotificationResponse();
     if (last) {

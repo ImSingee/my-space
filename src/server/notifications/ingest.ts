@@ -162,6 +162,7 @@ export async function ingestNotification(args: {
         title: push.title,
         body: push.body,
         url: push.url,
+        autoOpenUrl: push.autoOpenUrl,
         data: push.data,
         dedupeKey: push.dedupeKey,
         occurredAt: push.occurredAt ? new Date(push.occurredAt) : now,

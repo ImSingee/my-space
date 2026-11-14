@@ -242,7 +242,13 @@ const specs: Record<string, Spec> = {
           `Source: ${field(summary, 'sourceName')} (${field(summary, 'sourceType')}) · Kind: ${field(summary, 'kindName')} [${field(summary, 'kind')}]`,
           `Occurred: ${field(summary, 'occurredAt')}`,
           ...(field(summary, 'body') ? ['', field(summary, 'body')] : []),
-          ...(field(summary, 'url') ? [`URL: ${field(summary, 'url')}`] : []),
+          ...(field(summary, 'url')
+            ? [
+                `URL: ${field(summary, 'url')}${
+                  summary?.autoOpenUrl === true ? ' (opens on phone tap)' : ''
+                }`,
+              ]
+            : []),
           '',
           'Deliveries:',
           table(deliveries),
