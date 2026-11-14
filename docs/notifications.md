@@ -63,7 +63,9 @@ Responses: `202 { id, deduplicated }`, `400` invalid body, `413` too large,
   Disabled channels answer 403.
 - **Channel, as a user**: `SendNotification` (`hatch notification send
   <channel-id> --kind … --title …`) pushes the same body as that Channel
-  without its token, authenticated by a user session or API key. It shares
+  without its token, authenticated by a user session or API key. An unset
+  `auto_open_url` takes the same default as `autoOpenUrl`; the CLI sends
+  `false` only for `--no-auto-open-url`. It shares
   the kind check, dedupe scope and routing with token pushes
   (`ingestChannelPush`), answers `CONFLICT` for a disabled channel and
   `BAD_REQUEST` for an invalid body or undeclared kind, and returns the

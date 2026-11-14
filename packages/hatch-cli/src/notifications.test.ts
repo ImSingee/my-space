@@ -203,7 +203,6 @@ describe('notification send', () => {
         'Build 42 failed',
         '--url',
         'https://ci.example/42',
-        '--auto-open-url',
         '--data',
         '{"build":42}',
         '--dedupe-key',
@@ -216,16 +215,36 @@ describe('notification send', () => {
       title: 'master is red',
       body: 'Build 42 failed',
       url: 'https://ci.example/42',
-      autoOpenUrl: true,
       dataJson: '{"build":42}',
       dedupeKey: 'build-42',
     });
+    // Unset lets the platform default to opening the URL on phone tap.
+    expect(received.sendNotification?.autoOpenUrl).toBeUndefined();
     expect(result.json).toMatchObject({
       notificationId: 'notification-1',
       deduplicated: false,
       deliveryCount: 0,
     });
     expect(result.text).toMatch(/nothing was delivered/);
+  });
+
+  it('sends an explicit false to keep the notification page', async () => {
+    const { transport, received } = recordingTransport();
+    await executeNotificationCall(
+      transport,
+      parse(
+        'send',
+        'channel-1',
+        '--kind',
+        'a',
+        '--title',
+        'Hi',
+        '--url',
+        'https://example.com',
+        '--no-auto-open-url',
+      ),
+    );
+    expect(received.sendNotification?.autoOpenUrl).toBe(false);
   });
 
   it('rejects incomplete or malformed input before calling the platform', () => {
@@ -247,17 +266,6 @@ describe('notification send', () => {
         '[]',
       ),
     ).toThrow(/JSON object/);
-    expect(() =>
-      parse(
-        'send',
-        'channel-1',
-        '--kind',
-        'a',
-        '--title',
-        'Hi',
-        '--auto-open-url',
-      ),
-    ).toThrow(/requires --url/);
     expect(() => parse('send', '--kind', 'a', '--title', 'Hi')).toThrow(
       /<channel-id>/,
     );

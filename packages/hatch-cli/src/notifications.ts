@@ -272,7 +272,7 @@ const specs: Record<string, Spec> = {
       title: { type: 'string' },
       body: { type: 'string' },
       url: { type: 'string' },
-      'auto-open-url': { type: 'boolean' },
+      'no-auto-open-url': { type: 'boolean' },
       data: { type: 'string' },
       'dedupe-key': { type: 'string' },
       'occurred-at': { type: 'string' },
@@ -281,8 +281,6 @@ const specs: Record<string, Spec> = {
       const kind = str(values, 'kind');
       const title = str(values, 'title');
       if (!kind || !title?.trim()) invalid('Supply --kind and --title.');
-      if (values['auto-open-url'] && !str(values, 'url'))
-        invalid('--auto-open-url requires --url.');
       if (!KIND_RE.test(kind))
         invalid(
           `Invalid kind "${kind}": use 1-64 lowercase letters, digits, ".", "_" or "-".`,
@@ -310,7 +308,8 @@ const specs: Record<string, Spec> = {
           title,
           body: str(values, 'body'),
           url: str(values, 'url'),
-          autoOpenUrl: values['auto-open-url'] === true ? true : undefined,
+          // Unset lets the platform open --url on phone tap by default.
+          autoOpenUrl: values['no-auto-open-url'] ? false : undefined,
           dataJson: data,
           dedupeKey: str(values, 'dedupe-key'),
           occurredAt: str(values, 'occurred-at'),

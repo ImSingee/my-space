@@ -1514,6 +1514,29 @@ describe('notification center authority', () => {
       body: { ...alert, dataJson: JSON.stringify(quotes) },
     });
     expect(largeData.status).toBe(200);
+    // auto_open_url presence survives the RPC: unset follows url, false keeps
+    // the notification page.
+    const autoOpen = async (extra: Record<string, unknown>) => {
+      const response = await call('NotificationService/SendNotification', {
+        headers: apiKey,
+        body: { ...alert, url: 'https://status.example.com/1', ...extra },
+      });
+      expect(response.status).toBe(200);
+      const { notificationId } = (await response.json()) as {
+        notificationId: string;
+      };
+      const detail = await call('NotificationService/GetNotification', {
+        headers: apiKey,
+        body: { id: notificationId },
+      });
+      return (
+        (await detail.json()) as {
+          notification: { summary: { autoOpenUrl?: boolean } };
+        }
+      ).notification.summary.autoOpenUrl;
+    };
+    expect(await autoOpen({})).toBe(true);
+    expect(await autoOpen({ autoOpenUrl: false })).toBeFalsy();
     const undeclared = await call('NotificationService/SendNotification', {
       headers: apiKey,
       body: { ...alert, kind: 'other' },

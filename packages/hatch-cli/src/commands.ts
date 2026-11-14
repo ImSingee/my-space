@@ -176,9 +176,9 @@ const definitions: readonly CliCommandDefinition[] = [
   {
     path: ['notification', 'send'],
     usage:
-      'notification send <channel-id> --kind <kind> --title <title> [--body <text>] [--url <url> [--auto-open-url]] [--data <json-object>] [--dedupe-key <key>] [--occurred-at <iso-8601>]',
+      'notification send <channel-id> --kind <kind> --title <title> [--body <text>] [--url <url> [--no-auto-open-url]] [--data <json-object>] [--dedupe-key <key>] [--occurred-at <iso-8601>]',
     description:
-      'Push a notification as a Channel; routes decide where it is delivered.',
+      'Push a notification as a Channel; routes decide where it is delivered. Tapping it on a phone opens --url unless --no-auto-open-url is set.',
   },
   {
     path: ['notification', 'retry'],

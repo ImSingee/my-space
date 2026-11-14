@@ -508,7 +508,9 @@ export type SendNotificationRequest =
     occurredAt?: string | undefined;
 
     /**
-     * Tapping the phone push opens url instead of the notification; requires url.
+     * Tapping the phone push opens url instead of the notification. Unset
+     * defaults to whether url is set; false keeps the notification page; true
+     * requires url.
      *
      * @generated from field: optional bool auto_open_url = 9;
      */
