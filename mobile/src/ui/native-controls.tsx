@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Button, IconButton } from './button';
 import { Glyph } from './glyph';
 import type {
@@ -35,7 +35,6 @@ function OptionSheet({
   disabled?: boolean;
   lead?: { label: string; onPress: () => void; disabled?: boolean };
 }) {
-  const insets = useSafeAreaInsets();
   return (
     <Modal
       visible={open}
@@ -44,7 +43,8 @@ function OptionSheet({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+      {/* A modal lays out in its own window: its insets are measured there. */}
+      <SafeAreaProvider>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close"
@@ -55,76 +55,84 @@ function OptionSheet({
             backgroundColor: 'rgba(17, 26, 20, 0.32)',
           }}
         />
-        <View
-          style={{
-            maxHeight: '80%',
-            marginHorizontal: 8,
-            marginBottom: insets.bottom + 8,
-            padding: 8,
-            borderRadius: radii.sheet,
-            backgroundColor: c.card,
-          }}
+        <SafeAreaView
+          edges={['left', 'right', 'bottom']}
+          pointerEvents="box-none"
+          style={{ flex: 1, justifyContent: 'flex-end' }}
         >
-          {lead ? (
-            <Button
-              variant="secondary"
-              glyph="refresh"
-              label={lead.label}
-              fullWidth
-              disabled={lead.disabled}
-              onPress={() => {
-                onClose();
-                lead.onPress();
-              }}
-            />
-          ) : null}
-          <Text
-            accessibilityRole="header"
-            style={[type.meta, { paddingHorizontal: 12, paddingVertical: 10 }]}
+          <View
+            style={{
+              maxHeight: '80%',
+              margin: 8,
+              padding: 8,
+              borderRadius: radii.sheet,
+              backgroundColor: c.card,
+            }}
           >
-            {label}
-          </Text>
-          <ScrollView>
-            {options.map((option) => {
-              const selected = option.value === value;
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: selected, disabled }}
-                  disabled={disabled}
-                  onPress={() => {
-                    onClose();
-                    if (!disabled && !selected) onChange(option.value);
-                  }}
-                  style={({ pressed }) => ({
-                    minHeight: 48,
-                    paddingHorizontal: 12,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 12,
-                    borderRadius: 14,
-                    backgroundColor: pressed ? c.limeSoft : 'transparent',
-                  })}
-                >
-                  <Text style={[type.body, { flex: 1 }]}>{option.label}</Text>
-                  {selected ? (
-                    <Glyph name="check" size={16} color={c.moss} />
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <View style={{ paddingTop: 8 }}>
-            <Button
-              label="Cancel"
-              variant="quiet"
-              fullWidth
-              onPress={onClose}
-            />
+            {lead ? (
+              <Button
+                variant="secondary"
+                glyph="refresh"
+                label={lead.label}
+                fullWidth
+                disabled={lead.disabled}
+                onPress={() => {
+                  onClose();
+                  lead.onPress();
+                }}
+              />
+            ) : null}
+            <Text
+              accessibilityRole="header"
+              style={[
+                type.meta,
+                { paddingHorizontal: 12, paddingVertical: 10 },
+              ]}
+            >
+              {label}
+            </Text>
+            <ScrollView>
+              {options.map((option) => {
+                const selected = option.value === value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: selected, disabled }}
+                    disabled={disabled}
+                    onPress={() => {
+                      onClose();
+                      if (!disabled && !selected) onChange(option.value);
+                    }}
+                    style={({ pressed }) => ({
+                      minHeight: 48,
+                      paddingHorizontal: 12,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      borderRadius: 14,
+                      backgroundColor: pressed ? c.limeSoft : 'transparent',
+                    })}
+                  >
+                    <Text style={[type.body, { flex: 1 }]}>{option.label}</Text>
+                    {selected ? (
+                      <Glyph name="check" size={16} color={c.moss} />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={{ paddingTop: 8 }}>
+              <Button
+                label="Cancel"
+                variant="quiet"
+                fullWidth
+                onPress={onClose}
+              />
+            </View>
           </View>
-        </View>
-      </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -141,10 +149,13 @@ export function Choice({
   // Becoming unavailable while open closes the sheet; nothing can be chosen.
   if (open && disabled) setOpen(false);
   return (
-    <>
+    // Takes what its row leaves; a compact chip keeps one line and cuts it
+    // off, so the row's other actions always stay on screen.
+    <View style={{ flexGrow: 1, flexShrink: 1, alignItems: 'flex-start' }}>
       <Button
         variant="secondary"
         size={compact ? 'small' : 'regular'}
+        singleLine={compact}
         label={(() => {
           const chosen = options.find((option) => option.value === value);
           return chosen?.short ?? chosen?.label ?? label;
@@ -160,7 +171,7 @@ export function Choice({
         onChange={onChange}
         onClose={() => setOpen(false)}
       />
-    </>
+    </View>
   );
 }
 

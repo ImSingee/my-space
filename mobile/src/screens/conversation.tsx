@@ -18,6 +18,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -107,10 +108,7 @@ function ConversationBody({
     useChatDraft(id);
   const [problem, setProblem] = useConversationProblem(origin, id);
   const [optimisticRun, setOptimisticRun] = useState<string | null>(null);
-  const [submittedAnswer, setSubmittedAnswer] = useState<{
-    runId: string;
-    askId: string;
-  } | null>(null);
+  const [submittedAnswer, setSubmittedAnswer] = useSubmittedAnswer(origin, id);
   // Where the reader is belongs to the conversation: a fold or unfold that
   // moves it to another screen reopens the same place, and follows new
   // messages only if the reader was already at the end.
@@ -130,6 +128,10 @@ function ConversationBody({
     reading.initial.atBottom ? null : Number.POSITIVE_INFINITY,
   );
   const cells = useRef(new Map<number, { y: number; height: number }>());
+  // The footer (held replies, the live reply) reads as the message after the
+  // last saved one: that is where the live reply lands once it is saved.
+  const messageCount = useRef(0);
+  const footer = useRef({ height: 0, contentHeight: 0 });
   // Whether the scroll now ending began with the reader's finger. UIKit also
   // ends programmatic scrolls with a momentum event; a restore while text
   // reflows lands mid-way and must not be taken for the reader's place.
@@ -157,6 +159,8 @@ function ConversationBody({
     const { index, fraction } = anchor.current;
     const cell = cells.current.get(index);
     if (!cell) {
+      // The footer is placed once it and the content are measured.
+      if (index >= messageCount.current) return;
       list.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
       return;
     }
@@ -175,6 +179,16 @@ function ConversationBody({
     },
     [apply],
   );
+  const recordFooter = () => {
+    const { height, contentHeight } = footer.current;
+    if (!height || !contentHeight) return;
+    recordCell(messageCount.current, {
+      x: 0,
+      y: contentHeight - transcriptPaddingBottom - height,
+      width: 0,
+      height,
+    });
+  };
   const keepPlace = (offset: number, bottom: boolean) => {
     anchor.current = readingAt(cells.current, offset, bottom);
     reading.save(anchor.current);
@@ -193,6 +207,10 @@ function ConversationBody({
   // One run request at a time per conversation, across every screen showing it.
   const runKey = [origin, 'conversation-run', id];
   const requesting = useIsMutating({ mutationKey: runKey }) > 0;
+  // Likewise one answer at a time: a fold mid-answer must not offer the
+  // same question again on the next screen.
+  const answerKey = [origin, 'conversation-answer', id];
+  const answering = useIsMutating({ mutationKey: answerKey }) > 0;
   const session = useQuery({
     queryKey: [origin, 'session', id],
     queryFn: ({ signal }) => api!.session(id, signal),
@@ -214,6 +232,10 @@ function ConversationBody({
     enabled: Boolean(api),
   });
   const detail = session.data;
+  const savedMessages = detail?.messages.length ?? 0;
+  useLayoutEffect(() => {
+    messageCount.current = savedMessages;
+  }, [savedMessages]);
   const refetchSession = session.refetch;
   const selectedModel =
     model ??
@@ -369,6 +391,7 @@ function ConversationBody({
     },
   });
   const answer = useMutation({
+    mutationKey: answerKey,
     mutationFn: (submission: {
       runId: string;
       askId: string;
@@ -629,7 +652,7 @@ function ConversationBody({
               contentContainerStyle={{
                 paddingHorizontal: 16,
                 paddingTop: 12,
-                paddingBottom: 24,
+                paddingBottom: transcriptPaddingBottom,
                 gap: 18,
               }}
               keyboardDismissMode="interactive"
@@ -645,6 +668,9 @@ function ConversationBody({
               onScrollBeginDrag={() => {
                 dragged.current = true;
                 settle.current = null;
+                // The reader takes over: new text no longer pulls the
+                // transcript down until they let go at the end again.
+                setAtBottom(false);
               }}
               onScrollEndDrag={(event) => {
                 const { contentOffset, layoutMeasurement, contentSize } =
@@ -677,7 +703,9 @@ function ConversationBody({
                 // out the row and restored the place exactly.
                 setTimeout(apply, 50);
               }}
-              onContentSizeChange={() => {
+              onContentSizeChange={(_, contentHeight) => {
+                footer.current.contentHeight = contentHeight;
+                recordFooter();
                 if (settle.current !== null) {
                   if (
                     anchor.current.atBottom ||
@@ -752,7 +780,13 @@ function ConversationBody({
                 ) : undefined
               }
               ListFooterComponent={
-                <View style={{ gap: 16 }}>
+                <View
+                  style={{ gap: 16 }}
+                  onLayout={(event) => {
+                    footer.current.height = event.nativeEvent.layout.height;
+                    recordFooter();
+                  }}
+                >
                   {heldShown.rest.map(heldReply)}
                   {streamRunId ? (
                     <LiveTranscript state={stream.state} status={status} />
@@ -769,10 +803,14 @@ function ConversationBody({
                         key={ask.askId}
                         conversation={id}
                         ask={ask}
-                        busy={answer.isPending}
-                        onAnswer={(answers) =>
-                          answer.mutate({ runId, askId: ask.askId, answers })
-                        }
+                        busy={answering}
+                        onAnswer={(answers) => {
+                          if (
+                            queryClient.isMutating({ mutationKey: answerKey })
+                          )
+                            return;
+                          answer.mutate({ runId, askId: ask.askId, answers });
+                        }}
                       />
                     )
                   ) : null}
@@ -1032,16 +1070,18 @@ function ConversationBody({
               />
             ) : config.data ? (
               <Text
-                style={type.meta}
+                style={[type.meta, { flex: 1 }]}
                 numberOfLines={1}
                 accessibilityHint="Configure a provider in Hatch on the web"
               >
                 No model
               </Text>
+            ) : (
+              <View style={{ flex: 1 }} />
+            )}
+            {files.length ? (
+              <Text style={type.meta}>{`${files.length}/6`}</Text>
             ) : null}
-            <Text style={[type.meta, { flex: 1 }]} numberOfLines={1}>
-              {files.length ? `${files.length}/6` : ''}
-            </Text>
             {runId ? (
               <Button
                 variant="danger"
@@ -1077,6 +1117,33 @@ function ConversationBody({
       </KeyboardAvoidingView>
     </View>
   );
+}
+
+type SubmittedAnswer = { runId: string; askId: string } | null;
+
+/**
+ * The question last answered in this conversation, shared by every screen
+ * showing it: a fold after the answer reached the server keeps the question
+ * closed until the run reports it answered.
+ */
+function useSubmittedAnswer(origin: string | null, id: string) {
+  const client = useQueryClient();
+  const { data = null } = useQuery<SubmittedAnswer>({
+    queryKey: [origin, 'conversation-answered', id],
+    queryFn: skipToken,
+    initialData: null,
+    gcTime: Infinity,
+    staleTime: Infinity,
+  });
+  const set = useCallback(
+    (answered: SubmittedAnswer) =>
+      client.setQueryData<SubmittedAnswer>(
+        [origin, 'conversation-answered', id],
+        answered,
+      ),
+    [client, origin, id],
+  );
+  return [data, set] as const;
 }
 
 /**
@@ -1130,6 +1197,9 @@ function PendingAskCard({
 /** How long layout passes after a resize or handoff may still move text. */
 const SETTLE_MS = 1200;
 
+/** Space below the transcript's footer. */
+const transcriptPaddingBottom = 24;
+
 type ReadingAnchor = { atBottom: boolean; index: number; fraction: number };
 const atEnd: ReadingAnchor = { atBottom: true, index: 0, fraction: 0 };
 
@@ -1140,6 +1210,7 @@ function readingAt(
   atBottom: boolean,
 ): ReadingAnchor {
   let next: { index: number; y: number } | null = null;
+  let last: { index: number; y: number } | null = null;
   for (const [index, cell] of cells) {
     if (top >= cell.y && top < cell.y + cell.height)
       return {
@@ -1149,8 +1220,11 @@ function readingAt(
       };
     if (cell.y >= top && (!next || cell.y < next.y))
       next = { index, y: cell.y };
+    if (cell.y < top && (!last || cell.y > last.y)) last = { index, y: cell.y };
   }
-  return { atBottom, index: next?.index ?? 0, fraction: 0 };
+  // Between rows, the next one; past every row, the end of the last.
+  if (next) return { atBottom, index: next.index, fraction: 0 };
+  return { atBottom, index: last?.index ?? 0, fraction: last ? 1 : 0 };
 }
 
 const RecordCell = createContext<

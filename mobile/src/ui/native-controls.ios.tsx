@@ -35,9 +35,6 @@ import type {
   RefreshMenuProps,
 } from './native-controls.types';
 
-// The widest a compact chip's label grows before it is cut off.
-const compactLabelWidth = 160;
-
 // System menus keep native selection, VoiceOver and dismissal behavior; the
 // trigger is drawn as a Field Guide chip.
 export function Choice({
@@ -54,25 +51,22 @@ export function Choice({
   // Menu labels report their ideal width; cap them to the width RN assigns.
   const [width, setWidth] = useState<number>();
   return (
-    // A full chip takes the width RN gives it and wraps its label instead of
-    // overflowing at large Dynamic Type sizes. A compact chip sizes itself:
-    // one line, cut off at a fixed width, so it can share a row.
+    // RN owns the width: the chip takes what its row leaves and hugs its
+    // label inside it. A full chip wraps its label at large Dynamic Type
+    // sizes; a compact one keeps one line and cuts it off, so the row's
+    // other actions always stay on screen.
     <Host
       colorScheme="light"
       seedColor={c.moss}
-      matchContents={compact ? true : { vertical: true }}
+      matchContents={{ vertical: true }}
       ignoreSafeArea="all"
       style={{
         minHeight: 44,
-        flexGrow: compact ? 0 : 1,
-        flexShrink: compact ? 0 : 1,
+        flexGrow: 1,
+        flexShrink: 1,
         opacity: unavailable ? 0.5 : 1,
       }}
-      onLayout={
-        compact
-          ? undefined
-          : (event) => setWidth(event.nativeEvent.layout.width)
-      }
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
       <Menu
         label={
@@ -83,10 +77,7 @@ export function Choice({
               frame({ minHeight: 44 }),
               background(c.paper, shapes.capsule()),
               contentShape(shapes.capsule()),
-              frame({
-                maxWidth: compact ? undefined : width,
-                alignment: 'leading',
-              }),
+              frame({ maxWidth: width, alignment: 'leading' }),
               accessibilityElement('combine'),
               accessibilityLabel(`${label}: ${current ?? 'none'}`),
             ]}
@@ -107,7 +98,6 @@ export function Choice({
                 lineLimit(compact ? 1 : 3),
                 multilineTextAlignment('leading'),
                 fixedSize({ horizontal: false, vertical: true }),
-                ...(compact ? [frame({ maxWidth: compactLabelWidth })] : []),
                 layoutPriority(1),
               ]}
             >
