@@ -1,24 +1,32 @@
 import {
   Fragment,
   useCallback,
-  useEffect,
-  useRef,
   useState,
+  type PropsWithChildren,
   type ReactNode,
 } from 'react';
 import {
   I18nManager,
-  useWindowDimensions,
   View,
-  type ViewInstance,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
-import { columnHalves, foldSplit, tilesPerRow, type Split } from './fold-split';
+import { FoldProbe } from './fold-probe';
+import type { FoldRect } from './fold-probe.types';
+import {
+  columnHalves,
+  crossingFold,
+  foldSplit,
+  tilesPerRow,
+  type Split,
+} from './fold-split';
 
 /**
- * Measures a container and splits it into two columns around the fold (see
- * `foldSplit`). Sizes come from the container, never the screen: the same
- * page runs on the outer and inner displays, beside another app, and under a
- * vertical bar, and any of those can change while it is open.
+ * Measures a container and splits it into two columns around the display's
+ * fold (see `foldSplit`). Sizes come from the container, never the screen:
+ * the same page runs on the outer and inner displays, beside another app, and
+ * under a vertical bar, and any of those can change while it is open.
  */
 export function useFoldSplit({
   minColumn,
@@ -27,31 +35,42 @@ export function useFoldSplit({
   minColumn: number;
   gap: number;
 }) {
-  const ref = useRef<ViewInstance>(null);
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const [frame, setFrame] = useState<{ x: number; width: number } | null>(null);
-  const measure = useCallback(() => {
-    ref.current?.measureInWindow((x, _y, width) =>
-      setFrame((previous) =>
-        previous && previous.x === x && previous.width === width
-          ? previous
-          : { x, width },
-      ),
-    );
-  }, []);
-  // A resize can move the container without changing its own layout.
-  useEffect(measure, [measure, windowWidth, windowHeight]);
-  const split: Split | null = frame
-    ? foldSplit({
-        width: frame.width,
-        x: frame.x,
-        windowWidth,
-        gap,
-        minColumn,
-        rtl: I18nManager.isRTL,
-      })
-    : null;
-  return { ref, onLayout: measure, width: frame?.width ?? 0, split };
+  const [width, setWidth] = useState(0);
+  const [folds, setFolds] = useState<FoldRect[]>([]);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width),
+    [],
+  );
+  const fold = crossingFold(folds, width);
+  const split: Split | null = foldSplit({
+    width,
+    fold,
+    gap,
+    minColumn,
+    rtl: I18nManager.isRTL,
+  });
+  return { onLayout, onFolds: setFolds, width, split, folded: Boolean(fold) };
+}
+
+/** A container that measures itself and the fold across it. */
+export function FoldContainer({
+  onLayout,
+  onFolds,
+  style,
+  children,
+}: PropsWithChildren<{
+  onLayout: (event: LayoutChangeEvent) => void;
+  onFolds: (folds: FoldRect[]) => void;
+  style?: StyleProp<ViewStyle>;
+}>) {
+  return (
+    <View onLayout={onLayout} style={style}>
+      {children}
+      {/* Last: native tabs look for a page's scroll view along first children.
+          It is transparent and never takes touches. */}
+      <FoldProbe onFolds={onFolds} />
+    </View>
+  );
 }
 
 /**
@@ -70,13 +89,17 @@ export function Reflow<T>({
   minColumn?: number;
   gap?: number;
 }) {
-  const { ref, onLayout, split } = useFoldSplit({ minColumn, gap });
+  const { onLayout, onFolds, split } = useFoldSplit({ minColumn, gap });
   const [first, second] = columnHalves(items);
   return (
-    <View
-      ref={ref}
+    <FoldContainer
       onLayout={onLayout}
-      style={{ flexDirection: 'row', alignItems: 'flex-start', gap }}
+      onFolds={onFolds}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: split?.gutter ?? gap,
+      }}
     >
       {split && second.length ? (
         <>
@@ -86,7 +109,7 @@ export function Reflow<T>({
       ) : (
         <View style={{ flex: 1 }}>{render([...items])}</View>
       )}
-    </View>
+    </FoldContainer>
   );
 }
 
@@ -105,14 +128,18 @@ export function Columns({
   minColumn?: number;
   gap?: number;
 }) {
-  const { ref, onLayout, split } = useFoldSplit({ minColumn, gap });
+  const { onLayout, onFolds, split } = useFoldSplit({ minColumn, gap });
   return (
-    <View
-      ref={ref}
+    <FoldContainer
       onLayout={onLayout}
+      onFolds={onFolds}
       style={
         split
-          ? { flexDirection: 'row', alignItems: 'flex-start', gap }
+          ? {
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: split.gutter,
+            }
           : undefined
       }
     >
@@ -122,14 +149,14 @@ export function Columns({
       <View style={split ? { width: split.trailing } : undefined}>
         {trailing}
       </View>
-    </View>
+    </FoldContainer>
   );
 }
 
 /**
- * Tiles in rows. On a display wide enough for two columns each half of a row
- * gets its own tiles, so a row always has an even count and the fold falls
- * between tiles rather than through one.
+ * Tiles in rows, starting at the leading edge. Where the display folds across
+ * the grid each side of the fold gets its own tiles, mirrored around it, so a
+ * row has an even count and the fold falls between tiles, not through one.
  */
 export function TileGrid<T>({
   items,
@@ -143,21 +170,22 @@ export function TileGrid<T>({
   keyOf: (item: T) => string;
   render: (item: T, width: number) => ReactNode;
   minTile: number;
-  /** Caps a compact row, for example at large text sizes. */
+  /** Caps a row, for example at large text sizes. */
   maxPerRow?: number;
   gap?: number;
 }) {
-  const { ref, onLayout, width, split } = useFoldSplit({
+  const { onLayout, onFolds, width, split, folded } = useFoldSplit({
     minColumn: minTile,
     gap,
   });
   // The row cap applies to the whole row: a row capped below two tiles is
   // never split, so one tile keeps the full width.
   const cap = maxPerRow ?? Infinity;
-  const halves = split && cap >= 2 ? [split.leading, split.trailing] : [width];
-  // Both halves use the narrower one's width, mirrored around the fold: the
-  // tiles stay one size and the gutter stays centered on the fold, while the
-  // wider side (the one without a vertical bar) takes the slack as margin.
+  const halved = folded && split && cap >= 2 ? split : null;
+  const halves = halved ? [halved.leading, halved.trailing] : [width];
+  // Around a fold both halves use the narrower one's width: the tiles stay
+  // one size and the gutter stays on the fold, while the wider side (the one
+  // without a vertical bar) takes the slack as margin.
   const inner = Math.min(...halves);
   const perHalf = Math.max(
     1,
@@ -169,12 +197,12 @@ export function TileGrid<T>({
   for (let index = 0; index < items.length; index += perRow)
     rows.push(items.slice(index, index + perRow));
   return (
-    <View ref={ref} onLayout={onLayout} style={{ gap }}>
+    <FoldContainer onLayout={onLayout} onFolds={onFolds} style={{ gap }}>
       {width
         ? rows.map((row) => (
             <View
               key={row.map(keyOf).join()}
-              style={{ flexDirection: 'row', gap }}
+              style={{ flexDirection: 'row', gap: halved?.gutter ?? gap }}
             >
               {halves.map((half, side) => {
                 const part = row.slice(side * perHalf, (side + 1) * perHalf);
@@ -184,7 +212,7 @@ export function TileGrid<T>({
                     style={{
                       width: half,
                       flexDirection: 'row',
-                      // The leading half's tiles end at the fold's gutter.
+                      // Before a fold, the leading tiles end at its gutter.
                       paddingStart: side ? 0 : half - inner,
                       gap,
                     }}
@@ -200,6 +228,6 @@ export function TileGrid<T>({
             </View>
           ))
         : null}
-    </View>
+    </FoldContainer>
   );
 }

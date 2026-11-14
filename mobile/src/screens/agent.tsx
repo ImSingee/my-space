@@ -18,9 +18,9 @@ import {
 import { useConversationListRefresh } from '../state/use-conversation-list-refresh';
 import { useLifetimeSignal } from '../state/use-lifetime-signal';
 import { usePullToRefresh } from '../state/use-pull-to-refresh';
-import { useFoldSplit } from '../ui/columns';
+import { FoldContainer, useFoldSplit } from '../ui/columns';
 import { Glyph } from '../ui/glyph';
-import { Busy, EmptyState, Notice, Tag, errorText } from '../ui/primitives';
+import { Busy, EmptyState, Notice, errorText } from '../ui/primitives';
 import { sectionsOf, stamp } from '../ui/session-dates';
 import {
   Masthead,
@@ -39,7 +39,7 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
   const signal = useLifetimeSignal();
   // With room for both, the open conversation sits beside the list, its
   // edge on the fold; otherwise it is pushed over the list.
-  const { ref, onLayout, split } = useFoldSplit(conversationSplit);
+  const { onLayout, onFolds, split } = useFoldSplit(conversationSplit);
   const [selected, select] = useAgentSelection();
   const onOwnScreen = useConversationScreens();
   const open = (id: string, push = !split) => {
@@ -103,9 +103,9 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
   const list = sessions.data ?? [];
   return (
     <PageRoot nested={nested}>
-      <View
-        ref={ref}
+      <FoldContainer
         onLayout={onLayout}
+        onFolds={onFolds}
         style={{ flex: 1, flexDirection: 'row' }}
       >
         <View style={split ? { width: split.leading } : { flex: 1 }}>
@@ -221,25 +221,10 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
                 >
                   {stamp(item.updatedAt)}
                 </Text>
-                <View style={{ flex: 1, gap: 6 }}>
+                <View style={{ flex: 1 }}>
                   <Text style={type.heading} numberOfLines={2}>
                     {item.title || 'New conversation'}
                   </Text>
-                  <View
-                    style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}
-                  >
-                    <Tag
-                      tone="quiet"
-                      label={`${item.messageCount} message${item.messageCount === 1 ? '' : 's'}`}
-                    />
-                    {item.appIds.length ? (
-                      <Tag
-                        tone="outline"
-                        glyph="apps"
-                        label={`${item.appIds.length} app${item.appIds.length === 1 ? '' : 's'}`}
-                      />
-                    ) : null}
-                  </View>
                 </View>
                 <View style={{ paddingTop: 5 }}>
                   <Glyph name="chevron" size={12} color={c.inkFaint} />
@@ -250,9 +235,7 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
         </View>
         {split ? (
           <>
-            <View
-              style={{ width: conversationSplit.gap, alignItems: 'center' }}
-            >
+            <View style={{ width: split.gutter, alignItems: 'center' }}>
               <View
                 style={{
                   flex: 1,
@@ -277,7 +260,7 @@ export function AgentScreen({ nested = false }: { nested?: boolean }) {
             </View>
           </>
         ) : null}
-      </View>
+      </FoldContainer>
     </PageRoot>
   );
 }

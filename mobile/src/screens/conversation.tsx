@@ -908,67 +908,6 @@ function ConversationBody({
                 />
               </View>
             ) : null}
-            <View
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-            >
-              <Choice
-                label="Model"
-                glyph="model"
-                value={
-                  selectedModel
-                    ? `${selectedModel.providerId}:${selectedModel.modelId}`
-                    : ''
-                }
-                options={
-                  choices.length
-                    ? choices.map((item) => ({
-                        label: `${item.providerName} · ${item.name}`,
-                        value: `${item.providerId}:${item.modelId}`,
-                      }))
-                    : [
-                        {
-                          label: 'Configure a provider in Hatch web',
-                          value: '',
-                        },
-                      ]
-                }
-                disabled={Boolean(runId) || busy}
-                onChange={(value) => {
-                  const item = choices.find(
-                    (option) =>
-                      `${option.providerId}:${option.modelId}` === value,
-                  );
-                  if (item)
-                    setModel({
-                      providerId: item.providerId,
-                      modelId: item.modelId,
-                    });
-                }}
-              />
-              {runId ? (
-                <Button
-                  variant="danger"
-                  size="small"
-                  glyph="stop"
-                  label={cancel.isPending ? 'Stopping…' : 'Stop'}
-                  busy={cancel.isPending}
-                  onPress={() =>
-                    Alert.alert(
-                      'Stop this run?',
-                      'Work already completed is kept.',
-                      [
-                        { text: 'Keep running', style: 'cancel' },
-                        {
-                          text: 'Stop',
-                          style: 'destructive',
-                          onPress: () => cancel.mutate(runId),
-                        },
-                      ],
-                    )
-                  }
-                />
-              ) : null}
-            </View>
             {config.error ? (
               <Notice
                 tone="danger"
@@ -1047,9 +986,70 @@ function ConversationBody({
               disabled={busy || files.length >= 6}
               onChoose={(kind) => void choose(kind)}
             />
+            {choices.length ? (
+              <Choice
+                compact
+                label="Model"
+                glyph="model"
+                value={
+                  selectedModel
+                    ? `${selectedModel.providerId}:${selectedModel.modelId}`
+                    : ''
+                }
+                // The chip names the model; the menu also names its provider.
+                options={choices.map((item) => ({
+                  label: `${item.providerName} · ${item.name}`,
+                  short: item.name,
+                  value: `${item.providerId}:${item.modelId}`,
+                }))}
+                disabled={Boolean(runId) || busy}
+                onChange={(value) => {
+                  const item = choices.find(
+                    (option) =>
+                      `${option.providerId}:${option.modelId}` === value,
+                  );
+                  if (item)
+                    setModel({
+                      providerId: item.providerId,
+                      modelId: item.modelId,
+                    });
+                }}
+              />
+            ) : config.data ? (
+              <Text
+                style={type.meta}
+                numberOfLines={1}
+                accessibilityHint="Configure a provider in Hatch on the web"
+              >
+                No model
+              </Text>
+            ) : null}
             <Text style={[type.meta, { flex: 1 }]} numberOfLines={1}>
-              {files.length ? `${files.length} of 6 attached` : ''}
+              {files.length ? `${files.length}/6` : ''}
             </Text>
+            {runId ? (
+              <Button
+                variant="danger"
+                size="small"
+                glyph="stop"
+                label={cancel.isPending ? 'Stopping…' : 'Stop'}
+                busy={cancel.isPending}
+                onPress={() =>
+                  Alert.alert(
+                    'Stop this run?',
+                    'Work already completed is kept.',
+                    [
+                      { text: 'Keep running', style: 'cancel' },
+                      {
+                        text: 'Stop',
+                        style: 'destructive',
+                        onPress: () => cancel.mutate(runId),
+                      },
+                    ],
+                  )
+                }
+              />
+            ) : null}
             <IconButton
               label={send.isPending ? 'Sending…' : 'Send'}
               glyph="send"

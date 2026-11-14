@@ -5,12 +5,11 @@ import { RefreshControl, useWindowDimensions, View } from 'react-native';
 import { Reflow, TileGrid } from '../ui/columns';
 import { useSession } from '../state/session';
 import { usePullToRefresh } from '../state/use-pull-to-refresh';
-import { Busy, EmptyState, Notice, Tag, errorText } from '../ui/primitives';
+import { Busy, EmptyState, Notice, errorText } from '../ui/primitives';
 import { NativeField } from '../ui/native-field';
 import { GlyphTile, Group, IndexRow, ListRow, PinTile } from '../ui/rows';
 import { ScopeTabs } from '../ui/scope-tabs';
 import { ScrollScreen, SectionLabel } from '../ui/screen';
-import { StatusTag } from '../ui/status';
 import { palette as c } from '../ui/theme';
 import type { AppSummary } from '../core';
 
@@ -82,9 +81,6 @@ export function ResourcesScreen({
     kind === 'apps'
       ? allPins.length + allPinnedWorkflows.length
       : allPinnedWorkflows.length;
-  const pinsByApp = new Map<string, number>();
-  for (const pin of allPins)
-    pinsByApp.set(pin.appId, (pinsByApp.get(pin.appId) ?? 0) + 1);
   // Both Apps scopes show the pinned count, which includes workflows.
   const failure =
     resources.error ??
@@ -272,26 +268,6 @@ export function ResourcesScreen({
                       title={item.name}
                       detail={item.description || undefined}
                       onPress={() => open(item, kind)}
-                      tags={
-                        <>
-                          <StatusTag status={item.status} />
-                          {kind === 'apps' && pinsByApp.get(item.id) ? (
-                            <Tag
-                              tone="outline"
-                              glyph="pin"
-                              label={
-                                pinsByApp.get(item.id) === 1
-                                  ? 'Pinned'
-                                  : `${pinsByApp.get(item.id)} pins`
-                              }
-                            />
-                          ) : null}
-                          {kind === 'workflows' &&
-                          pinnedWorkflowIds.includes(item.id) ? (
-                            <Tag tone="outline" glyph="pin" label="Pinned" />
-                          ) : null}
-                        </>
-                      }
                     />
                   ))}
                 </Group>

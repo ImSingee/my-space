@@ -1,21 +1,21 @@
 /**
- * Column geometry that keeps the gutter on iPhone Duo's fold.
+ * Column geometry for foldable displays.
  *
- * The inner display folds at its horizontal center. When the app fills that
- * display, the window's center is the fold, but a page's content is rarely
- * centered on it: a vertical bar or other safe area sits along one edge only.
- * Splitting the content area in half would put the gutter beside the fold and
- * the fold through one column, so the split follows the window center, and a
- * container the center crosses stays one column when either side lacks room.
- * A container that does not span the center splits into two even columns.
+ * UIKit reports where a display folds across a view (a division reserved
+ * region). When a fold crosses a container, two columns keep their gutter on
+ * it, so the fold never runs through a column; a container too narrow on
+ * either side of the fold stays one column. Without a fold (the outer
+ * display, a phone, an older system) two columns split the container evenly.
  */
+
+/** A vertical fold across the container, in the container's coordinates. */
+export type Fold = { x: number; width: number };
+
 export type SplitInput = {
   /** Container width. */
   width: number;
-  /** Container's left edge in window coordinates. */
-  x: number;
-  /** Window (scene) width. */
-  windowWidth: number;
+  /** The fold crossing the container, if any. */
+  fold: Fold | null;
   /** Space between the two columns. */
   gap: number;
   /** Narrowest acceptable column. */
@@ -24,31 +24,52 @@ export type SplitInput = {
   rtl?: boolean;
 };
 
-/** Leading and trailing column widths, or `null` when one column fits best. */
-export type Split = { leading: number; trailing: number };
+/**
+ * Leading and trailing column widths and the space between them, or `null`
+ * when one column fits best. Over a fold the gutter covers the fold, so it
+ * can be wider than the requested gap.
+ */
+export type Split = { leading: number; gutter: number; trailing: number };
 
 export function foldSplit({
   width,
-  x,
-  windowWidth,
+  fold,
   gap,
   minColumn,
   rtl = false,
 }: SplitInput): Split | null {
-  if (!(width > 0) || width < minColumn * 2 + gap) return null;
-  const center = windowWidth / 2 - x;
-  let left = center - gap / 2;
-  let right = width - center - gap / 2;
-  if (left < minColumn || right < minColumn) {
-    // A container the fold crosses keeps one column rather than put the fold
-    // through a column; one beside the fold splits evenly.
-    if (center > 0 && center < width) return null;
-    left = (width - gap) / 2;
-    right = left;
+  if (!(width > 0)) return null;
+  if (!fold) {
+    if (width < minColumn * 2 + gap) return null;
+    const half = (width - gap) / 2;
+    return { leading: half, gutter: gap, trailing: half };
   }
+  // The gutter covers the fold itself and is never narrower than `gap`.
+  const gutter = Math.max(gap, fold.width);
+  const center = fold.x + fold.width / 2;
+  const left = center - gutter / 2;
+  const right = width - center - gutter / 2;
+  if (left < minColumn || right < minColumn) return null;
   return rtl
-    ? { leading: right, trailing: left }
-    : { leading: left, trailing: right };
+    ? { leading: right, gutter, trailing: left }
+    : { leading: left, gutter, trailing: right };
+}
+
+/**
+ * The fold that matters to a container's columns: a vertical division whose
+ * centre lies inside the container. A horizontal fold (the display held the
+ * other way) does not cross columns.
+ */
+export function crossingFold(
+  folds: readonly { x: number; y: number; width: number; height: number }[],
+  width: number,
+): Fold | null {
+  for (const fold of folds) {
+    const center = fold.x + fold.width / 2;
+    if (fold.height > fold.width && center > 0 && center < width)
+      return { x: fold.x, width: fold.width };
+  }
+  return null;
 }
 
 /** How many tiles of at least `minTile` fit side by side in `width`. */
