@@ -47,6 +47,10 @@ export const notificationPushSchema = z
       .refine((value) => value === null || isHttpUrl(value), {
         message: 'url must be an absolute http(s) URL',
       }),
+    autoOpenUrl: z
+      .boolean()
+      .nullish()
+      .transform((value) => value === true),
     data: z
       .record(z.string(), z.json())
       .nullish()
@@ -71,7 +75,16 @@ export const notificationPushSchema = z
         message: 'occurredAt must be an ISO-8601 timestamp',
       }),
   })
-  .strict();
+  .strict()
+  .superRefine((push, ctx) => {
+    if (push.autoOpenUrl && !push.url) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'autoOpenUrl requires url',
+        path: ['autoOpenUrl'],
+      });
+    }
+  });
 
 export type NotificationPush = z.output<typeof notificationPushSchema>;
 
@@ -122,6 +135,7 @@ export type NotificationRecord = {
   title: string;
   body: string | null;
   url: string | null;
+  autoOpenUrl: boolean;
   data: JsonObject | null;
   dedupeKey: string | null;
   occurredAt: Date;
@@ -141,6 +155,8 @@ export type NotificationEnvelope = {
     title: string;
     body: string | null;
     url: string | null;
+    /** Phone pushes open `url` on tap instead of the notification. */
+    autoOpenUrl: boolean;
     data: JsonObject | null;
     dedupeKey: string | null;
     occurredAt: string;
@@ -173,6 +189,7 @@ export function buildEnvelope(args: {
       title: notification.title,
       body: notification.body,
       url: notification.url,
+      autoOpenUrl: notification.autoOpenUrl,
       data: notification.data,
       dedupeKey: notification.dedupeKey,
       occurredAt: notification.occurredAt.toISOString(),

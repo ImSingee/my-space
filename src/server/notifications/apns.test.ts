@@ -120,7 +120,14 @@ async function registerDevice() {
 
 let channelId = '';
 
-async function deliver(title: string, body: string | null) {
+async function deliver(
+  title: string,
+  body: string | null,
+  link: { url: string | null; autoOpenUrl: boolean } = {
+    url: null,
+    autoOpenUrl: false,
+  },
+) {
   const { id } = await ingestNotification({
     source: { type: 'channel', channelId, name: 'Monitoring' },
     kind: { kind: 'alert', name: 'Alert' },
@@ -128,7 +135,7 @@ async function deliver(title: string, body: string | null) {
       kind: 'alert',
       title,
       body,
-      url: null,
+      ...link,
       data: null,
       dedupeKey: null,
       occurredAt: null,
@@ -214,6 +221,45 @@ describe('APNs delivery', () => {
       APNS_MAX_PAYLOAD_BYTES,
     );
     expect(decrypt(request.body).content.b.endsWith('…')).toBe(true);
+  });
+
+  it('tells the phone to open the URL on tap only when asked', async () => {
+    await registerDevice();
+    const url = 'https://tracking.example.com/123';
+    await deliver('Shipped', null, { url, autoOpenUrl: true });
+    await deliver('Shipped', null, { url, autoOpenUrl: false });
+    const [opens, shows] = seen.map((request) => decrypt(request.body).content);
+    expect(opens).toMatchObject({ u: url, ao: true });
+    expect(shows.u).toBe(url);
+    expect(shows).not.toHaveProperty('ao');
+  });
+
+  it('keeps a URL that opens on tap over the full title', async () => {
+    await registerDevice();
+    const url = `https://tracking.example.com/${'x'.repeat(2000)}`;
+    const title = 'é'.repeat(600);
+    await deliver(title, null, { url, autoOpenUrl: true });
+    await deliver(title, null, { url, autoOpenUrl: false });
+    const [opens, shows] = seen.map((request) => {
+      expect(Buffer.byteLength(request.body)).toBeLessThanOrEqual(
+        APNS_MAX_PAYLOAD_BYTES,
+      );
+      return decrypt(request.body).content;
+    });
+    expect(opens).toMatchObject({ u: url, ao: true });
+    expect(opens.t.endsWith('…')).toBe(true);
+    expect(shows).toMatchObject({ u: null, t: title });
+  });
+
+  it('drops opening on tap together with a URL that cannot fit', async () => {
+    await registerDevice();
+    await deliver('Shipped', null, {
+      url: `https://tracking.example.com/${'x'.repeat(3500)}`,
+      autoOpenUrl: true,
+    });
+    const { content } = decrypt(seen[0].body);
+    expect(content).toMatchObject({ u: null, t: 'Shipped' });
+    expect(content).not.toHaveProperty('ao');
   });
 
   it('disables a device APNs no longer recognizes', async () => {
@@ -327,6 +373,7 @@ describe('device refresh', () => {
         title: 'Hello',
         body: null,
         url: null,
+        autoOpenUrl: false,
         data: null,
         dedupeKey: null,
         occurredAt: null,

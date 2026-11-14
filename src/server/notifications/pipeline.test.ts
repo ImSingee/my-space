@@ -99,6 +99,7 @@ function push(kind = 'order.shipped', extra: Record<string, unknown> = {}) {
     title: 'Order #1 shipped',
     body: null,
     url: null,
+    autoOpenUrl: false,
     data: null,
     dedupeKey: null,
     occurredAt: null,
@@ -499,6 +500,58 @@ describe('ingress authentication', () => {
     const rotated = await service.rotateChannelToken(channel.id);
     expect((await send(token)).status).toBe(401);
     expect((await send(rotated)).status).toBe(202);
+  });
+
+  it('opens a link on tap only together with that link', async () => {
+    const { channel, token } = await service.createChannel({
+      name: 'Monitoring',
+      kinds: [{ kind: 'alert', name: 'Alert' }],
+    });
+    const { destination } = await service.createWebhook({
+      name: 'Hook',
+      url: webhookUrl,
+    });
+    await service.createRoute({
+      sourceType: 'any',
+      targetType: 'destination',
+      targetId: destination.id,
+    });
+    const send = (body: Record<string, unknown>) =>
+      handleChannelPush(
+        new Request(
+          `https://hatch.example.test${new URL(channel.pushUrl).pathname}`,
+          {
+            method: 'POST',
+            headers: { 'x-hatch-secret': token },
+            body: JSON.stringify({
+              kind: 'alert',
+              title: 'Disk full',
+              ...body,
+            }),
+          },
+        ),
+        channel.id,
+      );
+
+    const missing = await send({ autoOpenUrl: true });
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain('autoOpenUrl requires url');
+    expect((await send({ autoOpenUrl: true, url: '' })).status).toBe(400);
+
+    const url = 'https://status.example.com/db-1';
+    const accepted = await send({ url, autoOpenUrl: true });
+    expect(accepted.status).toBe(202);
+    const { id } = (await accepted.json()) as { id: string };
+    expect((await service.getNotification(id)).autoOpenUrl).toBe(true);
+    await runAllDue();
+    expect(JSON.parse(received.at(-1)!.body)).toMatchObject({
+      notification: { id, url, autoOpenUrl: true },
+    });
+
+    const plain = await send({ url, autoOpenUrl: null });
+    expect(plain.status).toBe(202);
+    const plainId = ((await plain.json()) as { id: string }).id;
+    expect((await service.getNotification(plainId)).autoOpenUrl).toBe(false);
   });
 });
 

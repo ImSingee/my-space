@@ -890,6 +890,8 @@ export const notifications = snakeCase.table(
     title: text().notNull(),
     body: text(),
     url: text(),
+    /** Tapping the phone push opens `url` instead of the notification. */
+    autoOpenUrl: boolean().notNull().default(false),
     data: jsonb().$type<JsonObject>(),
     dedupeKey: text(),
     occurredAt: timestamp('occurred_at').notNull(),

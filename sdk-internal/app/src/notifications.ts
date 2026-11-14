@@ -20,6 +20,11 @@ export type NotificationInput = {
   body?: string;
   /** Absolute http(s) URL opened from the notification. */
   url?: string;
+  /**
+   * Tapping the notification on a phone opens `url` directly instead of the
+   * notification's page in the Hatch app. Requires `url`.
+   */
+  autoOpenUrl?: boolean;
   /** Extra structured data delivered to webhook and App destinations. */
   data?: { [key: string]: NotificationJson };
   /** Repeated pushes with the same key are stored once. */
@@ -96,6 +101,8 @@ export type HatchNotificationEnvelope = {
     title: string;
     body: string | null;
     url: string | null;
+    /** Phone notifications open `url` on tap instead of the notification. */
+    autoOpenUrl: boolean;
     data: { [key: string]: NotificationJson } | null;
     dedupeKey: string | null;
     occurredAt: string;

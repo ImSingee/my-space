@@ -1,8 +1,8 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "c92efaa4-da6d-4444-a013-7671cc57d776",
-  "prevIds": ["0105f18e-1fb6-4138-bbaf-eb3980b731b4"],
+  "id": "e412948f-9e9d-4fd8-b531-409d6a31c815",
+  "prevIds": ["aca4cf9b-7a38-4be7-8d64-536bbcb7825f"],
   "ddl": [
     {
       "values": ["desktop", "tablet", "mobile"],
@@ -3049,6 +3049,19 @@
       "generated": null,
       "identity": null,
       "name": "url",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "notifications"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "auto_open_url",
       "entityType": "columns",
       "schema": "public",
       "table": "notifications"
